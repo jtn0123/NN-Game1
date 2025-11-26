@@ -528,7 +528,7 @@ class NeuralNetVisualizer:
             screen.blit(text, text_rect)
             
             # Neuron count below
-            count_text = self.font_small.render(f"({info['actual_neurons']})", True, (90, 90, 110))
+            count_text = self.font_small.render(f"({layer_pos['actual_neurons']})", True, (90, 90, 110))
             count_rect = count_text.get_rect(centerx=int(layer_pos['x']), top=int(label_y) + 2)
             screen.blit(count_text, count_rect)
     

@@ -330,4 +330,3 @@ def create_web_templates():
 if __name__ == "__main__":
     print("Web Dashboard Server")
     print("Import and use with training loop")
-
