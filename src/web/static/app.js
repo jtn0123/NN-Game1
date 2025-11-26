@@ -20,6 +20,9 @@ let socket = null;
 let currentLogFilter = 'all';
 let consoleLogs = [];
 const MAX_CONSOLE_LOGS = 500;
+let currentPerformanceMode = 'normal';
+let trainingStartTime = 0;
+let targetEpisodes = 2000;
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -311,6 +314,30 @@ function updateDashboard(data) {
     document.getElementById('info-target').textContent = state.target_updates.toLocaleString();
     document.getElementById('info-actions').textContent = 
         `${state.exploration_actions.toLocaleString()} / ${state.exploitation_actions.toLocaleString()}`;
+    
+    // Update steps/sec (new performance metric)
+    const stepsPerSec = state.steps_per_second || 0;
+    document.getElementById('info-steps-sec').textContent = stepsPerSec.toLocaleString(undefined, {maximumFractionDigits: 0});
+    
+    // Update ETA
+    updateETA(state);
+    
+    // Update system status badges
+    updateSystemStatus(state);
+    
+    // Update performance mode buttons
+    if (state.performance_mode) {
+        updatePerformanceModeUI(state.performance_mode);
+    }
+    
+    // Update learn_every in settings if changed from server
+    if (state.learn_every) {
+        document.getElementById('setting-learn-every').value = state.learn_every;
+        updateLearnEveryLabel(state.learn_every);
+    }
+    if (state.gradient_steps) {
+        document.getElementById('setting-grad-steps').value = state.gradient_steps;
+    }
     
     // Update status badge
     const statusBadge = document.getElementById('info-status');
@@ -657,45 +684,7 @@ function toggleSettings() {
     icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
 }
 
-/**
- * Load config from server
- */
-function loadConfig() {
-    fetch('/api/config')
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('setting-lr').value = data.learning_rate;
-            document.getElementById('setting-epsilon').value = data.epsilon_start;
-            document.getElementById('setting-decay').value = data.epsilon_decay;
-            document.getElementById('setting-gamma').value = data.gamma;
-            document.getElementById('setting-batch').value = data.batch_size;
-        })
-        .catch(err => console.error('Config load error:', err));
-}
-
-/**
- * Apply settings changes
- */
-function applySettings() {
-    const config = {
-        learning_rate: parseFloat(document.getElementById('setting-lr').value),
-        epsilon: parseFloat(document.getElementById('setting-epsilon').value),
-        epsilon_decay: parseFloat(document.getElementById('setting-decay').value),
-        gamma: parseFloat(document.getElementById('setting-gamma').value),
-        batch_size: parseInt(document.getElementById('setting-batch').value)
-    };
-
-    socket.emit('control', { action: 'config_change', config: config });
-    addConsoleLog('Settings updated', 'action', null, config);
-
-    // Visual feedback
-    const btn = document.querySelector('.apply-btn');
-    const originalText = btn.textContent;
-    btn.textContent = '✓ Applied!';
-    setTimeout(() => {
-        btn.textContent = originalText;
-    }, 1500);
-}
+// loadConfig and applySettings moved to end of file with enhancements
 
 // ============================================================
 // MODEL LOADING
@@ -809,5 +798,197 @@ document.addEventListener('keydown', (e) => {
         case 'r':
             resetEpisode();
             break;
+        case '1':
+            setPerformanceMode('normal');
+            break;
+        case '2':
+            setPerformanceMode('fast');
+            break;
+        case '3':
+            setPerformanceMode('turbo');
+            break;
     }
 });
+
+// ============================================================
+// PERFORMANCE MODE FUNCTIONS
+// ============================================================
+
+/**
+ * Set performance mode preset
+ */
+function setPerformanceMode(mode) {
+    currentPerformanceMode = mode;
+    socket.emit('control', { action: 'performance_mode', mode: mode });
+    updatePerformanceModeUI(mode);
+    
+    // Log the change
+    const modeNames = {
+        'normal': 'Normal (learn every step)',
+        'fast': 'Fast (learn every 4 steps)',
+        'turbo': 'Turbo (learn every 4 + batch 256)'
+    };
+    addConsoleLog(`Performance mode: ${modeNames[mode]}`, 'action');
+}
+
+/**
+ * Update performance mode button states
+ */
+function updatePerformanceModeUI(mode) {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`mode-${mode}`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+}
+
+// ============================================================
+// SYSTEM STATUS FUNCTIONS
+// ============================================================
+
+/**
+ * Update system status badges (device, compile)
+ */
+function updateSystemStatus(state) {
+    // Update device badge
+    const deviceBadge = document.getElementById('device-badge');
+    if (deviceBadge && state.device) {
+        const device = state.device.toLowerCase();
+        deviceBadge.classList.remove('mps', 'cuda', 'cpu');
+        
+        if (device.includes('mps')) {
+            deviceBadge.textContent = '🍎 MPS';
+            deviceBadge.classList.add('mps');
+        } else if (device.includes('cuda')) {
+            deviceBadge.textContent = '🎮 CUDA';
+            deviceBadge.classList.add('cuda');
+        } else {
+            deviceBadge.textContent = '🖥️ CPU';
+        }
+    }
+    
+    // Update compile badge
+    const compileBadge = document.getElementById('compile-badge');
+    if (compileBadge) {
+        if (state.torch_compiled) {
+            compileBadge.textContent = '⚡ Compiled';
+            compileBadge.classList.add('active');
+        } else {
+            compileBadge.textContent = '📦 Eager';
+            compileBadge.classList.remove('active');
+        }
+    }
+}
+
+// ============================================================
+// ETA CALCULATION
+// ============================================================
+
+/**
+ * Update estimated time remaining
+ */
+function updateETA(state) {
+    const etaElement = document.getElementById('info-eta');
+    if (!etaElement) return;
+    
+    const currentEpisode = state.episode || 0;
+    const targetEps = state.target_episodes || 2000;
+    const epsPerSec = state.episodes_per_second || 0;
+    
+    if (currentEpisode >= targetEps) {
+        etaElement.textContent = 'Complete!';
+        return;
+    }
+    
+    if (epsPerSec <= 0) {
+        etaElement.textContent = 'Calculating...';
+        return;
+    }
+    
+    const remainingEps = targetEps - currentEpisode;
+    const remainingSeconds = remainingEps / epsPerSec;
+    
+    if (remainingSeconds < 60) {
+        etaElement.textContent = `${Math.ceil(remainingSeconds)}s`;
+    } else if (remainingSeconds < 3600) {
+        const mins = Math.floor(remainingSeconds / 60);
+        const secs = Math.ceil(remainingSeconds % 60);
+        etaElement.textContent = `${mins}m ${secs}s`;
+    } else {
+        const hours = Math.floor(remainingSeconds / 3600);
+        const mins = Math.ceil((remainingSeconds % 3600) / 60);
+        etaElement.textContent = `${hours}h ${mins}m`;
+    }
+}
+
+// ============================================================
+// SETTINGS ENHANCEMENTS
+// ============================================================
+
+/**
+ * Update learn every label
+ */
+function updateLearnEveryLabel(value) {
+    const label = document.getElementById('learn-every-value');
+    if (label) {
+        label.textContent = value === '1' || value === 1 ? '1 step' : `${value} steps`;
+    }
+}
+
+/**
+ * Apply settings changes (enhanced)
+ */
+function applySettings() {
+    const config = {
+        learning_rate: parseFloat(document.getElementById('setting-lr').value),
+        epsilon: parseFloat(document.getElementById('setting-epsilon').value),
+        epsilon_decay: parseFloat(document.getElementById('setting-decay').value),
+        gamma: parseFloat(document.getElementById('setting-gamma').value),
+        batch_size: parseInt(document.getElementById('setting-batch').value),
+        learn_every: parseInt(document.getElementById('setting-learn-every').value),
+        gradient_steps: parseInt(document.getElementById('setting-grad-steps').value)
+    };
+
+    socket.emit('control', { action: 'config_change', config: config });
+    addConsoleLog('Settings updated', 'action', null, config);
+
+    // Visual feedback
+    const btn = document.querySelector('.apply-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '✓ Applied!';
+    setTimeout(() => {
+        btn.textContent = originalText;
+    }, 1500);
+}
+
+/**
+ * Load config from server (enhanced)
+ */
+function loadConfig() {
+    fetch('/api/config')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('setting-lr').value = data.learning_rate;
+            document.getElementById('setting-epsilon').value = data.epsilon_start;
+            document.getElementById('setting-decay').value = data.epsilon_decay;
+            document.getElementById('setting-gamma').value = data.gamma;
+            document.getElementById('setting-batch').value = data.batch_size;
+            
+            // Performance settings
+            if (data.learn_every) {
+                document.getElementById('setting-learn-every').value = data.learn_every;
+                updateLearnEveryLabel(data.learn_every);
+            }
+            if (data.gradient_steps) {
+                document.getElementById('setting-grad-steps').value = data.gradient_steps;
+            }
+            
+            // Update system status from config
+            if (data.device) {
+                updateSystemStatus({ device: data.device, torch_compiled: false });
+            }
+        })
+        .catch(err => console.error('Config load error:', err));
+}

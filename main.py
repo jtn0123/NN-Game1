@@ -201,7 +201,11 @@ class GameApp:
             self.web_dashboard.on_reset_callback = self._reset_episode
             self.web_dashboard.on_load_model_callback = self._load_model
             self.web_dashboard.on_config_change_callback = self._apply_config
+            self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
             self.web_dashboard.start()
+            
+            # Send system info to dashboard
+            self._send_system_info()
             
             # Log startup info
             self._log_startup_info()
@@ -291,8 +295,56 @@ class GameApp:
             self.config.BATCH_SIZE = config_data['batch_size']
             changes.append(f"Batch: {config_data['batch_size']}")
         
+        if 'learn_every' in config_data:
+            self.config.LEARN_EVERY = config_data['learn_every']
+            changes.append(f"LearnEvery: {config_data['learn_every']}")
+        
+        if 'gradient_steps' in config_data:
+            self.config.GRADIENT_STEPS = config_data['gradient_steps']
+            changes.append(f"GradSteps: {config_data['gradient_steps']}")
+        
         if self.web_dashboard and changes:
             self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)
+    
+    def _send_system_info(self) -> None:
+        """Send system information to web dashboard."""
+        if not self.web_dashboard:
+            return
+        
+        # Check if torch.compile was used
+        torch_compiled = getattr(self.agent, '_compiled', False)
+        device_str = str(self.config.DEVICE)
+        
+        self.web_dashboard.publisher.set_system_info(
+            device=device_str,
+            torch_compiled=torch_compiled,
+            target_episodes=self.config.MAX_EPISODES
+        )
+    
+    def _set_performance_mode(self, mode: str) -> None:
+        """Set performance mode from web dashboard."""
+        if mode == 'normal':
+            self.config.LEARN_EVERY = 1
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 1
+        elif mode == 'fast':
+            self.config.LEARN_EVERY = 4
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 1
+        elif mode == 'turbo':
+            self.config.LEARN_EVERY = 4
+            self.config.BATCH_SIZE = 256
+            self.config.GRADIENT_STEPS = 1
+        
+        if self.web_dashboard:
+            self.web_dashboard.publisher.set_performance_mode(mode)
+            self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
+            self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
+            self.web_dashboard.log(
+                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE})",
+                "action"
+            )
+        print(f"⚡ Performance mode: {mode.upper()}")
     
     def _update_layout(self, new_width: int, new_height: int) -> None:
         """Update component positions based on new window size."""
@@ -581,6 +633,10 @@ class GameApp:
                                 bricks_broken=episode_bricks_broken,
                                 episode_length=episode_steps
                             )
+                            # Update performance settings in dashboard state
+                            self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
+                            self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
+                            self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
                             
                             # Log episode completion
                             self._log_episode_complete(

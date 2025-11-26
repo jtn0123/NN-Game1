@@ -89,7 +89,7 @@ class TrainingState:
     is_running: bool = False
     game_speed: float = 1.0
     learning_rate: float = 0.0001
-    batch_size: int = 64
+    batch_size: int = 128
     memory_size: int = 0
     memory_capacity: int = 100000
     episodes_per_second: float = 0.0
@@ -99,6 +99,18 @@ class TrainingState:
     avg_q_value: float = 0.0
     bricks_broken_total: int = 0
     total_reward: float = 0.0
+    # Performance optimization settings
+    learn_every: int = 1
+    gradient_steps: int = 1
+    steps_per_second: float = 0.0
+    # System info
+    device: str = "cpu"
+    torch_compiled: bool = False
+    # Training time tracking
+    training_start_time: float = 0.0
+    target_episodes: int = 2000
+    # Performance mode: 'normal', 'fast', 'turbo'
+    performance_mode: str = "normal"
 
 
 @dataclass 
@@ -108,9 +120,12 @@ class TrainingConfig:
     epsilon: float = 1.0
     epsilon_decay: float = 0.995
     epsilon_min: float = 0.01
-    batch_size: int = 64
+    batch_size: int = 128
     gamma: float = 0.99
     target_update_freq: int = 1000
+    # Performance settings
+    learn_every: int = 1
+    gradient_steps: int = 1
 
 
 class MetricsPublisher:
@@ -147,6 +162,11 @@ class MetricsPublisher:
         # Timing for episodes/second calculation
         self._episode_times: Deque[float] = deque(maxlen=10)
         self._last_episode_time: float = time.time()
+        
+        # Steps/second tracking
+        self._step_times: Deque[float] = deque(maxlen=100)
+        self._last_step_count: int = 0
+        self._last_step_time: float = time.time()
     
     def update(
         self,
@@ -194,6 +214,16 @@ class MetricsPublisher:
         if self._episode_times:
             avg_time = sum(self._episode_times) / len(self._episode_times)
             self.state.episodes_per_second = 1.0 / avg_time if avg_time > 0 else 0.0
+        
+        # Calculate steps per second
+        step_delta = total_steps - self._last_step_count
+        time_delta = current_time - self._last_step_time
+        if time_delta > 0 and step_delta > 0:
+            current_steps_per_sec = step_delta / time_delta
+            self._step_times.append(current_steps_per_sec)
+            self.state.steps_per_second = sum(self._step_times) / len(self._step_times)
+        self._last_step_count = total_steps
+        self._last_step_time = current_time
         
         # Calculate win rate
         if len(self.scores) > 0:
@@ -300,6 +330,21 @@ class MetricsPublisher:
             self.state.learning_rate = config['learning_rate']
         if 'batch_size' in config:
             self.state.batch_size = config['batch_size']
+        if 'learn_every' in config:
+            self.state.learn_every = config['learn_every']
+        if 'gradient_steps' in config:
+            self.state.gradient_steps = config['gradient_steps']
+    
+    def set_performance_mode(self, mode: str) -> None:
+        """Set performance mode preset."""
+        self.state.performance_mode = mode
+    
+    def set_system_info(self, device: str, torch_compiled: bool, target_episodes: int) -> None:
+        """Set system information."""
+        self.state.device = device
+        self.state.torch_compiled = torch_compiled
+        self.state.target_episodes = target_episodes
+        self.state.training_start_time = time.time()
 
 
 class WebDashboard:
@@ -365,6 +410,7 @@ class WebDashboard:
         self.on_reset_callback: Optional[Callable[[], None]] = None
         self.on_load_model_callback: Optional[Callable[[str], None]] = None
         self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
     
     def _register_routes(self) -> None:
         """Register Flask routes."""
@@ -390,6 +436,10 @@ class WebDashboard:
                 'memory_size': self.config.MEMORY_SIZE,
                 'target_update': self.config.TARGET_UPDATE,
                 'grad_clip': self.config.GRAD_CLIP,
+                # Performance settings
+                'learn_every': self.config.LEARN_EVERY,
+                'gradient_steps': self.config.GRADIENT_STEPS,
+                'device': str(self.config.DEVICE),
             })
         
         @self.app.route('/api/screenshot')
@@ -460,6 +510,11 @@ class WebDashboard:
                 if self.on_config_change_callback:
                     self.on_config_change_callback(config_data)
                 self.publisher.update_config(config_data)
+            elif action == 'performance_mode':
+                mode = data.get('mode', 'normal')
+                if self.on_performance_mode_callback:
+                    self.on_performance_mode_callback(mode)
+                self.publisher.set_performance_mode(mode)
         
         @self.socketio.on('clear_logs')
         def handle_clear_logs():

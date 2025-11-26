@@ -20,6 +20,10 @@
                 <span class="subtitle">Breakout Training Dashboard</span>
             </div>
             <div class="header-right">
+                <div class="system-status">
+                    <span class="system-badge device" id="device-badge" data-tooltip="Compute device being used for neural network operations">🖥️ CPU</span>
+                    <span class="system-badge compile" id="compile-badge" data-tooltip="torch.compile() status - when enabled, provides ~20-50% speedup">📦 Eager</span>
+                </div>
                 <div class="status-indicator" id="status-indicator">
                     <span class="status-dot"></span>
                     <span class="status-text">Connecting...</span>
@@ -149,9 +153,17 @@
                             <span class="info-label">Total Steps</span>
                             <span class="info-value" id="info-steps">0</span>
                         </div>
-                        <div class="info-row" data-tooltip="Episodes completed per second. Higher speeds = faster training. Affected by game speed multiplier.">
+                        <div class="info-row" data-tooltip="Episodes completed per second. Higher speeds = faster training.">
                             <span class="info-label">Ep/s</span>
                             <span class="info-value" id="info-eps">0.0</span>
+                        </div>
+                        <div class="info-row highlight-metric" data-tooltip="Training steps per second - the key performance metric. Higher = faster learning. Affected by learn_every setting and batch size.">
+                            <span class="info-label">⚡ Steps/s</span>
+                            <span class="info-value" id="info-steps-sec">0</span>
+                        </div>
+                        <div class="info-row" data-tooltip="Estimated time remaining based on current training speed and target episodes.">
+                            <span class="info-label">⏱️ ETA</span>
+                            <span class="info-value" id="info-eta">--:--</span>
                         </div>
                         <div class="info-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
                             <span class="info-label">Memory</span>
@@ -195,6 +207,23 @@
                     <div class="card-header">
                         <h3>🎛️ Controls</h3>
                     </div>
+                    
+                    <!-- Performance Mode Presets -->
+                    <div class="performance-modes" data-tooltip="Performance presets control how often the AI learns. Faster modes skip some learning steps for higher throughput.">
+                        <label class="mode-label">⚡ Performance Mode</label>
+                        <div class="mode-buttons">
+                            <button class="mode-btn active" id="mode-normal" onclick="setPerformanceMode('normal')" data-tooltip="Learn every step. Best for watching learning in detail. ~200-300 steps/sec">
+                                Normal
+                            </button>
+                            <button class="mode-btn" id="mode-fast" onclick="setPerformanceMode('fast')" data-tooltip="Learn every 4 steps. ~4x faster training with minimal learning impact. ~800-1200 steps/sec">
+                                Fast
+                            </button>
+                            <button class="mode-btn turbo" id="mode-turbo" onclick="setPerformanceMode('turbo')" data-tooltip="Learn every 4 steps + larger batches. Maximum training speed. ~1000-2000 steps/sec">
+                                🚀 Turbo
+                            </button>
+                        </div>
+                    </div>
+                    
                     <div class="controls-grid">
                         <button class="control-btn pause" id="pause-btn" onclick="togglePause()" data-tooltip="Pause or resume training. Keyboard: P" data-tooltip-position="bottom">
                             ⏸️ Pause
@@ -255,10 +284,27 @@
                             <label for="setting-gamma">Gamma</label>
                             <input type="number" id="setting-gamma" value="0.99" step="0.01" min="0" max="1">
                         </div>
-                        <div class="setting-row" data-tooltip="Number of experiences sampled from memory per training step. Larger batches = more stable but slower learning.">
+                        <div class="setting-row" data-tooltip="Number of experiences sampled from memory per training step. Larger batches = more stable but slower learning. M4 Mac benefits from 128-256.">
                             <label for="setting-batch">Batch Size</label>
-                            <input type="number" id="setting-batch" value="64" step="8" min="8">
+                            <input type="number" id="setting-batch" value="128" step="32" min="32">
                         </div>
+                        
+                        <div class="settings-divider">
+                            <span>⚡ Performance</span>
+                        </div>
+                        
+                        <div class="setting-row" data-tooltip="Learn every N steps. 1=every step (detailed), 4=every 4th step (~4x faster). Higher values increase throughput but may slow convergence.">
+                            <label for="setting-learn-every">Learn Every</label>
+                            <div class="range-input">
+                                <input type="range" id="setting-learn-every" value="1" min="1" max="16" step="1" oninput="updateLearnEveryLabel(this.value)">
+                                <span id="learn-every-value">1 step</span>
+                            </div>
+                        </div>
+                        <div class="setting-row" data-tooltip="Number of gradient updates per learning call. Useful to compensate when learn_every > 1.">
+                            <label for="setting-grad-steps">Gradient Steps</label>
+                            <input type="number" id="setting-grad-steps" value="1" step="1" min="1" max="8">
+                        </div>
+                        
                         <button class="apply-btn" onclick="applySettings()">Apply Changes</button>
                     </div>
                 </div>
