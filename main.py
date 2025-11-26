@@ -32,6 +32,7 @@ Press:
     - S: Save current model
     - R: Reset episode
     - +/-: Adjust game speed
+    - F: Toggle fullscreen
 """
 
 import pygame
@@ -107,8 +108,15 @@ class GameApp:
         self.window_width = self.game_width + self.viz_width + 20
         self.window_height = self.game_height + self.dashboard_height + 20
         
-        # Create window
-        self.screen = pygame.display.set_mode((self.window_width, self.window_height))
+        # Minimum window dimensions
+        self.min_window_width = 900
+        self.min_window_height = 600
+        
+        # Create resizable window
+        self.screen = pygame.display.set_mode(
+            (self.window_width, self.window_height),
+            pygame.RESIZABLE
+        )
         self.clock = pygame.time.Clock()
         
         # Create game
@@ -174,6 +182,47 @@ class GameApp:
             self.web_dashboard.publisher.set_paused(self.paused)
         print("⏸️  Paused" if self.paused else "▶️  Resumed")
     
+    def _update_layout(self, new_width: int, new_height: int) -> None:
+        """Update component positions based on new window size."""
+        # Enforce minimum window size
+        new_width = max(new_width, self.min_window_width)
+        new_height = max(new_height, self.min_window_height)
+        
+        self.window_width = new_width
+        self.window_height = new_height
+        
+        # Calculate new layout dimensions
+        # Dashboard height stays proportional but has min/max
+        self.dashboard_height = max(150, min(250, int(new_height * 0.22)))
+        
+        # Available height for game and viz
+        available_height = new_height - self.dashboard_height - 20
+        
+        # Viz width scales with window but has min/max
+        self.viz_width = max(280, min(400, int(new_width * 0.25)))
+        
+        # Game display area (we'll scale the game to fit)
+        self.game_width = new_width - self.viz_width - 20
+        self.game_height = available_height
+        
+        # Note: Game physics dimensions stay fixed (SCREEN_WIDTH/HEIGHT in config)
+        # The game rendering is scaled to fit the display area
+        
+        # Update neural network visualizer position and size
+        self.nn_visualizer.x = self.game_width + 10
+        self.nn_visualizer.y = 10
+        self.nn_visualizer.width = self.viz_width
+        self.nn_visualizer.height = available_height - 10
+        # Clear cached positions so they get recalculated
+        self.nn_visualizer._cached_positions = None
+        self.nn_visualizer._cached_layer_info = None
+        
+        # Update dashboard position and size
+        self.dashboard.x = 10
+        self.dashboard.y = available_height + 10
+        self.dashboard.width = new_width - 20
+        self.dashboard.height = self.dashboard_height
+    
     def _set_speed(self, speed: float):
         """Set game speed (for web dashboard control)."""
         self.game_speed = max(0.25, min(4.0, speed))
@@ -220,6 +269,7 @@ class GameApp:
         self.agent.epsilon = 0  # No exploration
         state = self.game.reset()
         episode_reward = 0.0
+        info: dict = {'score': 0, 'bricks_remaining': 50}  # Default info for paused state
         
         while self.running:
             self._handle_events()
@@ -262,6 +312,7 @@ class GameApp:
         print(f"   - P: Pause/Resume")
         print(f"   - S: Save model")
         print(f"   - +/-: Speed up/down")
+        print(f"   - F: Toggle fullscreen")
         print(f"   - Q/ESC: Quit")
         print("=" * 60 + "\n")
         
@@ -430,6 +481,16 @@ class GameApp:
             if event.type == pygame.QUIT:
                 self.running = False
             
+            elif event.type == pygame.VIDEORESIZE:
+                # Handle window resize
+                new_width = max(event.w, self.min_window_width)
+                new_height = max(event.h, self.min_window_height)
+                self.screen = pygame.display.set_mode(
+                    (new_width, new_height),
+                    pygame.RESIZABLE
+                )
+                self._update_layout(new_width, new_height)
+            
             elif event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_ESCAPE, pygame.K_q):
                     self.running = False
@@ -452,6 +513,22 @@ class GameApp:
                 elif event.key == pygame.K_MINUS:
                     self.game_speed = max(0.25, self.game_speed - 0.25)
                     print(f"⏪ Speed: {self.game_speed}x")
+                
+                elif event.key == pygame.K_f:
+                    # Toggle fullscreen
+                    if self.screen.get_flags() & pygame.FULLSCREEN:
+                        self.screen = pygame.display.set_mode(
+                            (self.window_width, self.window_height),
+                            pygame.RESIZABLE
+                        )
+                    else:
+                        self.screen = pygame.display.set_mode(
+                            (0, 0),
+                            pygame.FULLSCREEN | pygame.RESIZABLE
+                        )
+                        # Update layout to new screen size
+                        display_info = pygame.display.Info()
+                        self._update_layout(display_info.current_w, display_info.current_h)
     
     def _render_frame(self, state: np.ndarray, action: int, info: dict) -> None:
         """Render one frame of the visualization."""

@@ -386,30 +386,78 @@ class Dashboard:
             points.append((int(x), int(y)))
         
         if dashed:
-            # Draw dashed line
-            for i in range(0, len(points) - 1, 2):
-                if i + 1 < len(points):
-                    pygame.draw.line(screen, color, points[i], points[i + 1], thickness)
+            # Draw improved dashed line with better visibility
+            dash_length = 6
+            gap_length = 4
+            for i in range(len(points) - 1):
+                start = points[i]
+                end = points[i + 1]
+                
+                # Calculate line length and direction
+                dx = end[0] - start[0]
+                dy = end[1] - start[1]
+                length = max(1, (dx * dx + dy * dy) ** 0.5)
+                
+                # Normalize direction
+                ux = dx / length
+                uy = dy / length
+                
+                # Draw dashes along the line
+                pos = 0
+                drawing = True
+                while pos < length:
+                    if drawing:
+                        dash_end = min(pos + dash_length, length)
+                        x1 = int(start[0] + ux * pos)
+                        y1 = int(start[1] + uy * pos)
+                        x2 = int(start[0] + ux * dash_end)
+                        y2 = int(start[1] + uy * dash_end)
+                        pygame.draw.line(screen, color, (x1, y1), (x2, y2), thickness + 1)
+                        pos = dash_end + gap_length
+                    else:
+                        pos += gap_length
+                    drawing = not drawing
         else:
             if len(points) >= 2:
                 pygame.draw.lines(screen, color, False, points, thickness)
     
     def _draw_chart_legend(self, screen: pygame.Surface, rect: pygame.Rect) -> None:
-        """Draw chart legend."""
-        legend_y = rect.bottom - 12
+        """Draw chart legend with improved visibility."""
+        legend_y = rect.bottom - 14
         legend_x = rect.left + 10
         
-        items = [
-            ("Score", self.score_color),
-            ("Avg", self.avg_color),
-            ("ε", self.epsilon_color),
+        # Background for legend
+        legend_items = [
+            ("Score", self.score_color, False),
+            ("Avg", self.avg_color, False),
+            ("Epsilon", self.epsilon_color, True),  # True = dashed line
         ]
         
-        for label, color in items:
-            pygame.draw.line(screen, color, (legend_x, legend_y), (legend_x + 15, legend_y), 2)
+        # Calculate total legend width for background
+        total_width = len(legend_items) * 75 + 10
+        legend_bg = pygame.Rect(legend_x - 5, legend_y - 8, total_width, 18)
+        pygame.draw.rect(screen, (15, 18, 28, 180), legend_bg, border_radius=4)
+        pygame.draw.rect(screen, (40, 45, 60), legend_bg, 1, border_radius=4)
+        
+        for label, color, is_dashed in legend_items:
+            line_y = legend_y
+            
+            if is_dashed:
+                # Draw dashed line for epsilon
+                for dx in range(0, 18, 5):
+                    pygame.draw.line(screen, color, 
+                                   (legend_x + dx, line_y), 
+                                   (legend_x + dx + 3, line_y), 2)
+            else:
+                # Solid line
+                pygame.draw.line(screen, color, 
+                               (legend_x, line_y), 
+                               (legend_x + 18, line_y), 3)
+            
+            # Label text with better contrast
             text = self.font_tiny.render(label, True, color)
-            screen.blit(text, (legend_x + 20, legend_y - 5))
-            legend_x += 60
+            screen.blit(text, (legend_x + 22, legend_y - 6))
+            legend_x += 75
     
     def _draw_y_axis(self, screen: pygame.Surface, rect: pygame.Rect, max_val: float) -> None:
         """Draw Y-axis labels."""
@@ -463,25 +511,51 @@ class Dashboard:
                 screen.blit(trend_text, (x + 145, cy + 3))
     
     def _draw_epsilon_gauge(self, screen: pygame.Surface, x: int, y: int) -> None:
-        """Draw a mini epsilon gauge."""
-        # Gauge background
-        gauge_width = 80
-        gauge_height = 8
+        """Draw a mini epsilon gauge with better visibility."""
+        # Gauge dimensions
+        gauge_width = 100
+        gauge_height = 12
         
-        pygame.draw.rect(screen, (30, 35, 50), (x, y, gauge_width, gauge_height), border_radius=4)
+        # Ensure gauge fits within panel (adjust x if needed)
+        max_x = self.x + self.width - gauge_width - 15
+        x = min(x, max_x)
         
-        # Fill based on epsilon
-        fill_width = int(gauge_width * self.current_epsilon)
+        # Background with subtle gradient effect
+        bg_rect = pygame.Rect(x, y, gauge_width, gauge_height)
+        pygame.draw.rect(screen, (25, 30, 45), bg_rect, border_radius=6)
+        
+        # Fill based on epsilon (exploration rate)
+        fill_width = max(2, int(gauge_width * self.current_epsilon))
         if fill_width > 0:
-            fill_color = self.epsilon_color
-            pygame.draw.rect(screen, fill_color, (x, y, fill_width, gauge_height), border_radius=4)
+            # Gradient fill effect - brighter on left
+            fill_rect = pygame.Rect(x, y, fill_width, gauge_height)
+            pygame.draw.rect(screen, self.epsilon_color, fill_rect, border_radius=6)
+            
+            # Add highlight strip at top
+            highlight_rect = pygame.Rect(x + 2, y + 2, max(0, fill_width - 4), 3)
+            highlight_color = (min(255, self.epsilon_color[0] + 40), 
+                             min(255, self.epsilon_color[1] + 40), 
+                             min(255, self.epsilon_color[2] + 40))
+            if highlight_rect.width > 0:
+                pygame.draw.rect(screen, highlight_color, highlight_rect, border_radius=2)
         
-        # Border
-        pygame.draw.rect(screen, (60, 70, 90), (x, y, gauge_width, gauge_height), 1, border_radius=4)
+        # Border with glow effect when epsilon is high
+        border_color = (70, 85, 110)
+        if self.current_epsilon > 0.5:
+            pulse = 0.7 + 0.3 * math.sin(self.pulse_phase * 2)
+            border_color = (int(70 + 30 * pulse), int(100 + 50 * pulse), int(140 + 50 * pulse))
+        pygame.draw.rect(screen, border_color, bg_rect, 1, border_radius=6)
         
-        # Label
-        label = self.font_tiny.render("Exploration", True, (100, 105, 120))
-        screen.blit(label, (x, y - 12))
+        # Label above the gauge
+        label = self.font_small.render("Exploration", True, self.epsilon_color)
+        label_rect = label.get_rect(centerx=x + gauge_width // 2, bottom=y - 4)
+        screen.blit(label, label_rect)
+        
+        # Percentage text inside/beside gauge
+        pct_text = f"{self.current_epsilon * 100:.0f}%"
+        pct_render = self.font_tiny.render(pct_text, True, (200, 210, 230))
+        pct_rect = pct_render.get_rect(right=x + gauge_width - 4, centery=y + gauge_height // 2)
+        screen.blit(pct_render, pct_rect)
     
     def render_mini(self, screen: pygame.Surface, x: int, y: int) -> None:
         """Render a minimal stats display."""

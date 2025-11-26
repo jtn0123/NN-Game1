@@ -18,6 +18,7 @@ understand what the network is "thinking" in real-time.
 """
 
 import pygame
+import pygame.gfxdraw
 import numpy as np
 from typing import Optional, List, Tuple, Dict, Any, Union
 from collections import deque
@@ -337,9 +338,12 @@ class NeuralNetVisualizer:
                 from_sample: List[int]
                 to_sample: List[int]
                 if len(from_indices) * len(to_indices) > max_connections:
+                    # Save random state, use fixed seed for consistent sampling, then restore
+                    rng_state = np.random.get_state()
                     np.random.seed(42)  # Consistent sampling
                     from_sample = list(np.random.choice(from_indices, size=min(6, len(from_indices)), replace=False))
                     to_sample = list(np.random.choice(to_indices, size=min(10, len(to_indices)), replace=False))
+                    np.random.set_state(rng_state)  # Restore random state
                 else:
                     from_sample = from_indices
                     to_sample = to_indices
@@ -371,11 +375,11 @@ class NeuralNetVisualizer:
                             from_pos = from_layer['positions'][fi]
                             to_pos = to_layer['positions'][ti]
                             
-                            # Draw with slight transparency effect
-                            pygame.draw.line(
+                            # Draw with anti-aliasing for smoother connections
+                            self._draw_aa_line(
                                 screen, color,
-                                (int(from_pos[0]), int(from_pos[1])),
-                                (int(to_pos[0]), int(to_pos[1])),
+                                (from_pos[0], from_pos[1]),
+                                (to_pos[0], to_pos[1]),
                                 thickness
                             )
     
@@ -422,20 +426,20 @@ class NeuralNetVisualizer:
                         self.pulses.append(pulse)
     
     def _draw_pulses(self, screen: pygame.Surface) -> None:
-        """Draw data flow pulses."""
+        """Draw data flow pulses with anti-aliasing."""
         for pulse in self.pulses:
             pos = pulse.position
             # Fade based on progress
             alpha = 1.0 - abs(pulse.progress - 0.5) * 2
             size = int(3 + 2 * alpha)
             
-            color = tuple(int(c * alpha) for c in pulse.color)
+            color = (int(pulse.color[0] * alpha), int(pulse.color[1] * alpha), int(pulse.color[2] * alpha))
             
-            # Draw glow
-            pygame.draw.circle(screen, color, pos, size + 2)
-            # Draw core
-            bright_color = tuple(min(255, int(c * 1.5)) for c in pulse.color)
-            pygame.draw.circle(screen, bright_color, pos, size)
+            # Draw glow with anti-aliasing
+            self._draw_aa_circle(screen, color, pos, size + 2)
+            # Draw core with anti-aliasing
+            bright_color = (min(255, int(pulse.color[0] * 1.5)), min(255, int(pulse.color[1] * 1.5)), min(255, int(pulse.color[2] * 1.5)))
+            self._draw_aa_circle(screen, bright_color, pos, size)
     
     def _draw_neurons(
         self,
@@ -482,24 +486,24 @@ class NeuralNetVisualizer:
                     pulse = 1 + 0.2 * math.sin(self.pulse_phase + j * 0.5)
                     radius = int(radius * pulse)
                 
-                # Draw outer glow for active neurons
+                # Draw outer glow for active neurons (with anti-aliasing)
                 if abs(act_val) > 0.4:
                     glow_radius = radius + 4
                     glow_alpha = abs(act_val) * 0.6
-                    glow_color = tuple(int(c * glow_alpha) for c in color)
-                    pygame.draw.circle(screen, glow_color, (int(pos[0]), int(pos[1])), glow_radius)
+                    glow_color = (int(color[0] * glow_alpha), int(color[1] * glow_alpha), int(color[2] * glow_alpha))
+                    self._draw_aa_circle(screen, glow_color, (int(pos[0]), int(pos[1])), glow_radius)
                 
-                # Draw neuron body
-                pygame.draw.circle(screen, color, (int(pos[0]), int(pos[1])), radius)
+                # Draw neuron body with anti-aliasing
+                self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
                 
-                # Draw highlight (3D effect)
+                # Draw highlight (3D effect) with anti-aliasing
                 highlight_pos = (int(pos[0] - radius * 0.3), int(pos[1] - radius * 0.3))
                 highlight_radius = max(1, radius // 3)
-                highlight_color = tuple(min(255, c + 50) for c in color)
-                pygame.draw.circle(screen, highlight_color, highlight_pos, highlight_radius)
+                highlight_color = (min(255, color[0] + 50), min(255, color[1] + 50), min(255, color[2] + 50))
+                self._draw_aa_circle(screen, highlight_color, highlight_pos, highlight_radius)
                 
-                # Draw border
-                pygame.draw.circle(screen, (80, 90, 110), (int(pos[0]), int(pos[1])), radius, 1)
+                # Draw anti-aliased border
+                self._draw_aa_circle(screen, (80, 90, 110), (int(pos[0]), int(pos[1])), radius, border=1)
             
             # Draw ellipsis for hidden neurons
             if layer_pos['neurons'] < info['neurons']:
@@ -620,6 +624,49 @@ class NeuralNetVisualizer:
         g = int(color1[1] + (color2[1] - color1[1]) * t)
         b = int(color1[2] + (color2[2] - color1[2]) * t)
         return (r, g, b)
+    
+    def _draw_aa_circle(
+        self,
+        screen: pygame.Surface,
+        color: Tuple[int, int, int],
+        pos: Tuple[int, int],
+        radius: int,
+        border: int = 0
+    ) -> None:
+        """Draw an anti-aliased circle using pygame.gfxdraw."""
+        x, y = int(pos[0]), int(pos[1])
+        r = max(1, int(radius))
+        
+        if border == 0:
+            # Filled circle with anti-aliased edges
+            pygame.gfxdraw.aacircle(screen, x, y, r, color)
+            pygame.gfxdraw.filled_circle(screen, x, y, r, color)
+        else:
+            # Just the outline (anti-aliased)
+            pygame.gfxdraw.aacircle(screen, x, y, r, color)
+    
+    def _draw_aa_line(
+        self,
+        screen: pygame.Surface,
+        color: Tuple[int, int, int],
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        thickness: int = 1
+    ) -> None:
+        """Draw an anti-aliased line with optional thickness."""
+        x1, y1 = int(start[0]), int(start[1])
+        x2, y2 = int(end[0]), int(end[1])
+        
+        if thickness <= 1:
+            pygame.gfxdraw.line(screen, x1, y1, x2, y2, color)
+        else:
+            # For thicker lines, draw multiple AA lines or use polygon
+            pygame.draw.aaline(screen, color, (x1, y1), (x2, y2))
+            # Add slight offset lines for thickness effect
+            if thickness >= 2:
+                for offset in range(1, thickness):
+                    pygame.draw.aaline(screen, color, (x1, y1 + offset), (x2, y2 + offset))
+                    pygame.draw.aaline(screen, color, (x1, y1 - offset), (x2, y2 - offset))
 
 
 # Testing
