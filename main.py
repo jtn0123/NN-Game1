@@ -156,7 +156,7 @@ class GameApp:
         # Web dashboard (if enabled)
         self.web_dashboard = None
         if hasattr(args, 'web') and args.web and WEB_AVAILABLE:
-            self.web_dashboard = WebDashboard(config, port=5000)
+            self.web_dashboard = WebDashboard(config, port=args.port)
             self.web_dashboard.on_pause_callback = self._toggle_pause
             self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")
             self.web_dashboard.on_speed_callback = self._set_speed
