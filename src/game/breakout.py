@@ -179,7 +179,7 @@ class Breakout(BaseGame):
         # Visual effects
         self.particles = ParticleSystem(max_particles=500)
         self.ball_trail = TrailRenderer(length=12)
-        self.background_surface = None  # Cached gradient background
+        self.background_surface: Optional[pygame.Surface] = None  # Cached gradient background
         self._create_background()
         
         # Initialize the game

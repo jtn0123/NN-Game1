@@ -12,7 +12,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import torch
 
 
@@ -235,7 +235,7 @@ class Config:
     LOG_DIR: str = 'logs'
     
     # Random seed for reproducibility (None for random)
-    SEED: int = None
+    SEED: Optional[int] = None
     
     def __post_init__(self):
         """Validation and derived calculations."""

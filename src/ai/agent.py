@@ -284,8 +284,7 @@ class Agent:
         """Get average of last n losses."""
         if not self.losses:
             return 0.0
-        mean_value: float = float(np.mean(self.losses[-n:]))  # type: ignore[assignment]
-        return mean_value
+        return float(np.mean(self.losses[-n:]))
 
 
 # Testing

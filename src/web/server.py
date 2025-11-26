@@ -22,7 +22,7 @@ Usage:
 import threading
 import time
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Deque, Callable
 from dataclasses import dataclass, asdict
 from collections import deque
 import base64
@@ -70,13 +70,13 @@ class MetricsPublisher:
         self.state = TrainingState()
         
         # Metric history
-        self.scores = deque(maxlen=history_length)
-        self.losses = deque(maxlen=history_length)
-        self.epsilons = deque(maxlen=history_length)
-        self.rewards = deque(maxlen=history_length)
+        self.scores: Deque[int] = deque(maxlen=history_length)
+        self.losses: Deque[float] = deque(maxlen=history_length)
+        self.epsilons: Deque[float] = deque(maxlen=history_length)
+        self.rewards: Deque[float] = deque(maxlen=history_length)
         
         # Callbacks
-        self._on_update_callbacks = []
+        self._on_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         
         # Screenshot storage
         self._screenshot_data: Optional[str] = None

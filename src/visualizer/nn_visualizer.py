@@ -19,7 +19,7 @@ understand what the network is "thinking" in real-time.
 
 import pygame
 import numpy as np
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Any, Union
 from collections import deque
 import math
 import time
@@ -143,8 +143,8 @@ class NeuralNetVisualizer:
         self.history_length = 30
         
         # Cached layer positions
-        self._cached_positions = None
-        self._cached_layer_info = None
+        self._cached_positions: Optional[List[Dict[str, Any]]] = None
+        self._cached_layer_info: Optional[str] = None
     
     def render(
         self,
@@ -172,7 +172,11 @@ class NeuralNetVisualizer:
         if self._cached_layer_info != str(layer_info):
             self._cached_positions = self._calculate_layer_positions(layer_info)
             self._cached_layer_info = str(layer_info)
+        
+        # Ensure layer_positions is not None
         layer_positions = self._cached_positions
+        if layer_positions is None:
+            return
         
         # Interpolate activations for smooth animation
         smoothed_activations = self._smooth_activations(activations)
@@ -330,10 +334,12 @@ class NeuralNetVisualizer:
                 to_indices = list(range(len(to_layer['positions'])))
                 
                 max_connections = 60
+                from_sample: List[int]
+                to_sample: List[int]
                 if len(from_indices) * len(to_indices) > max_connections:
                     np.random.seed(42)  # Consistent sampling
-                    from_sample = np.random.choice(from_indices, size=min(6, len(from_indices)), replace=False)
-                    to_sample = np.random.choice(to_indices, size=min(10, len(to_indices)), replace=False)
+                    from_sample = list(np.random.choice(from_indices, size=min(6, len(from_indices)), replace=False))
+                    to_sample = list(np.random.choice(to_indices, size=min(10, len(to_indices)), replace=False))
                 else:
                     from_sample = from_indices
                     to_sample = to_indices
@@ -610,10 +616,10 @@ class NeuralNetVisualizer:
         t = max(0, min(1, t))
         # Apply ease-out for smoother transitions
         t = 1 - (1 - t) ** 2
-        return tuple(
-            int(c1 + (c2 - c1) * t)
-            for c1, c2 in zip(color1, color2)
-        )
+        r = int(color1[0] + (color2[0] - color1[0]) * t)
+        g = int(color1[1] + (color2[1] - color1[1]) * t)
+        b = int(color1[2] + (color2[2] - color1[2]) * t)
+        return (r, g, b)
 
 
 # Testing

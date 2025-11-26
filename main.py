@@ -34,13 +34,13 @@ Press:
     - +/-: Adjust game speed
 """
 
-import pygame  # type: ignore
+import pygame
 import numpy as np
 import argparse
 import sys
 import os
 import time
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Type
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,12 +53,15 @@ from src.visualizer.nn_visualizer import NeuralNetVisualizer
 from src.visualizer.dashboard import Dashboard
 
 # Optional web dashboard
+WEB_AVAILABLE: bool
+WebDashboard: Optional[Type[Any]]
 try:
-    from src.web import WebDashboard
+    from src.web import WebDashboard as _WebDashboard
+    WebDashboard = _WebDashboard
     WEB_AVAILABLE = True
 except ImportError:
     WEB_AVAILABLE = False
-    WebDashboard = None  # type: ignore[misc,assignment]
+    WebDashboard = None
 
 
 class GameApp:
@@ -159,9 +162,9 @@ class GameApp:
         self.web_dashboard: Optional[Any] = None
         if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
-            self.web_dashboard.on_pause_callback = self._toggle_pause  # type: ignore[assignment]
-            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")  # type: ignore[assignment]
-            self.web_dashboard.on_speed_callback = self._set_speed  # type: ignore[assignment]
+            self.web_dashboard.on_pause_callback = self._toggle_pause
+            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")
+            self.web_dashboard.on_speed_callback = self._set_speed
             self.web_dashboard.start()
     
     def _toggle_pause(self):
