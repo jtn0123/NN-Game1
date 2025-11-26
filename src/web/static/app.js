@@ -335,21 +335,12 @@ function updateDashboard(data) {
     const timeSinceLastChange = Date.now() - lastSpeedChangeTime;
     if (timeSinceLastChange > SPEED_UPDATE_DEBOUNCE) {
         // Only sync from server if user hasn't touched it recently
-        const sliderValue = parseFloat(speedSlider.value);
-        const serverValue = state.game_speed;
-        // Use tolerance for float comparison
-        if (Math.abs(sliderValue - serverValue) > 0.5) {
+        const sliderValue = parseInt(speedSlider.value);
+        const serverValue = Math.round(state.game_speed);
+        // Use tolerance for comparison
+        if (Math.abs(sliderValue - serverValue) > 2) {
             speedSlider.value = serverValue;
-            // Format display nicely
-            let displayText;
-            if (serverValue >= 10 || Number.isInteger(serverValue)) {
-                displayText = serverValue.toFixed(0) + 'x';
-            } else if (serverValue >= 1) {
-                displayText = serverValue.toFixed(1) + 'x';
-            } else {
-                displayText = serverValue.toFixed(2) + 'x';
-            }
-            document.getElementById('speed-value').textContent = displayText;
+            document.getElementById('speed-value').textContent = serverValue + 'x';
         }
     }
 
@@ -575,38 +566,32 @@ function resetEpisode() {
 }
 
 /**
- * Update game speed with snapping to nice values
+ * Update game speed with snapping to preset values
  */
 function updateSpeed(value) {
-    let speed = parseFloat(value);
+    let speed = Math.round(parseFloat(value));
     
     // Mark that user is actively changing speed (prevents server from overwriting)
     lastSpeedChangeTime = Date.now();
     
-    // Snap to common values when close (scaled threshold for higher values)
-    const snapValues = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 200, 250, 500, 750, 1000];
+    // Snap to preset values: 1, 5, 10, 25, 50, 100, 250, 500, 1000
+    const snapValues = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
     
+    // Find closest snap value with proportional threshold
     for (const snap of snapValues) {
-        // Use proportional threshold (larger for bigger numbers)
-        const snapThreshold = snap < 10 ? 0.5 : snap * 0.05;
-        if (Math.abs(speed - snap) < snapThreshold && Math.abs(speed - snap) > 0.01) {
+        const snapThreshold = Math.max(2, snap * 0.15); // 15% threshold, min 2
+        if (Math.abs(speed - snap) <= snapThreshold) {
             speed = snap;
             document.getElementById('speed-slider').value = snap;
             break;
         }
     }
     
-    // Format display nicely
-    let displayText;
-    if (speed >= 10 || Number.isInteger(speed)) {
-        displayText = speed.toFixed(0) + 'x';
-    } else if (speed >= 1) {
-        displayText = speed.toFixed(1) + 'x';
-    } else {
-        displayText = speed.toFixed(2) + 'x';
-    }
+    // Ensure minimum of 1
+    speed = Math.max(1, speed);
     
-    document.getElementById('speed-value').textContent = displayText;
+    // Display as integer
+    document.getElementById('speed-value').textContent = speed + 'x';
     socket.emit('control', { action: 'speed', value: speed });
 }
 

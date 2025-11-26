@@ -327,12 +327,34 @@ class GameApp:
         self.dashboard.width = new_width - 20
         self.dashboard.height = self.dashboard_height
     
+    # Speed presets for clean stepping
+    SPEED_PRESETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000]
+    
     def _set_speed(self, speed: float) -> None:
         """Set game speed (for web dashboard control)."""
-        self.game_speed = max(0.25, min(1000.0, speed))
+        self.game_speed = max(1.0, min(1000.0, speed))
         if self.web_dashboard:
-            self.web_dashboard.log(f"⏩ Speed set to {self.game_speed}x", "action")
-        print(f"⏩ Speed: {self.game_speed}x")
+            self.web_dashboard.publisher.set_speed(self.game_speed)
+            self.web_dashboard.log(f"⏩ Speed set to {int(self.game_speed)}x", "action")
+        print(f"⏩ Speed: {int(self.game_speed)}x")
+    
+    def _speed_up(self) -> None:
+        """Increase speed to next preset."""
+        for preset in self.SPEED_PRESETS:
+            if preset > self.game_speed:
+                self._set_speed(preset)
+                return
+        # Already at max
+        self._set_speed(self.SPEED_PRESETS[-1])
+    
+    def _speed_down(self) -> None:
+        """Decrease speed to previous preset."""
+        for preset in reversed(self.SPEED_PRESETS):
+            if preset < self.game_speed:
+                self._set_speed(preset)
+                return
+        # Already at min
+        self._set_speed(self.SPEED_PRESETS[0])
     
     def run_human_mode(self) -> None:
         """Run in human play mode for testing the game."""
@@ -633,6 +655,14 @@ class GameApp:
                     if len(step_time_samples) > 100:
                         step_time_samples.pop(0)
                     avg_step_time = sum(step_time_samples) / len(step_time_samples)
+                    
+                    # Log performance occasionally (every ~2 seconds)
+                    if self.steps % 120 == 0 and self.web_dashboard:
+                        actual_fps = 1.0 / (time.time() - frame_start) if (time.time() - frame_start) > 0 else 0
+                        self.web_dashboard.log(
+                            f"Speed: {int(self.game_speed)}x → {steps_this_frame} steps/frame, {actual_fps:.0f} FPS, {avg_step_time*1000:.1f}ms/step",
+                            "debug"
+                        )
             
             # Render the current state
             if not self.args.headless:
@@ -819,10 +849,10 @@ class GameApp:
                     self._reset_episode()
                 
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
-                    self._set_speed(self.game_speed + 0.5)
+                    self._speed_up()
                 
                 elif event.key == pygame.K_MINUS:
-                    self._set_speed(self.game_speed - 0.25)
+                    self._speed_down()
                 
                 elif event.key == pygame.K_f:
                     # Toggle fullscreen

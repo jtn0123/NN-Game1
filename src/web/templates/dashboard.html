@@ -211,21 +211,21 @@
                     </div>
                     
                     <!-- Speed Control -->
-                    <div class="speed-control" data-tooltip="Training speed multiplier. Auto-targets your display's refresh rate for smooth visuals. Crank it up on fast hardware!" data-tooltip-position="left">
+                    <div class="speed-control" data-tooltip="Training speed multiplier. Higher = more training steps per frame. Auto-targets your display's refresh rate." data-tooltip-position="left">
                         <label class="speed-label">
                             <span>⏩ Speed</span>
                             <span id="speed-value">1x</span>
                         </label>
                         <input type="range" 
                                id="speed-slider" 
-                               min="0.25" 
+                               min="1" 
                                max="1000" 
                                step="1" 
                                value="1"
                                oninput="updateSpeed(this.value)">
                         <div class="speed-marks">
-                            <span>0.25x</span>
-                            <span>250x</span>
+                            <span>1x</span>
+                            <span>100x</span>
                             <span>500x</span>
                             <span>1000x</span>
                         </div>
