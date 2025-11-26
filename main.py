@@ -429,17 +429,47 @@ class GameApp:
         episode_bricks_broken = 0
         info: dict = {}
         
+        # Adaptive training: maximize training speed while keeping visuals smooth
+        # We measure actual step time and dynamically adjust steps per frame
+        avg_step_time = 0.002  # Initial estimate: 2ms per step
+        step_time_samples: list[float] = []
+        
         while self.running and self.episode < self.config.MAX_EPISODES:
+            frame_start = time.time()
             self._handle_events()
             
             if not self.paused:
-                # Calculate how many training steps to run per render frame
-                # At speed 1x, run 1 step per frame
-                # At speed 10x, run 10 steps per frame
-                # At speed 100x, run 100 steps per frame
-                steps_per_frame = max(1, int(self.game_speed))
+                # Calculate steps per frame based on speed and target FPS
+                # Speed 1x = real-time (1 step per frame at 60 FPS)
+                # Speed 10x = 10 steps per frame  
+                # Speed 100x = 100 steps per frame
+                # Speed 200x = 200 steps per frame (max training, ~30 FPS minimum)
                 
-                for _ in range(steps_per_frame):
+                # Target visual FPS decreases as speed increases, but floor at 30 FPS
+                if self.game_speed <= 1.0:
+                    target_fps = 60 * self.game_speed
+                    steps_per_frame = 1
+                else:
+                    # Higher speeds = more steps per frame
+                    # Calculate steps to hit target based on measured step time
+                    target_fps = max(30, 60 / (1 + np.log2(self.game_speed)))  # Logarithmic decay
+                    frame_time_budget = 1.0 / target_fps
+                    
+                    # How many steps can we fit in our frame time budget?
+                    if avg_step_time > 0:
+                        max_steps_for_fps = int(frame_time_budget / avg_step_time)
+                    else:
+                        max_steps_for_fps = int(self.game_speed)
+                    
+                    # Scale by game_speed but cap at what maintains target FPS
+                    steps_per_frame = max(1, min(int(self.game_speed), max_steps_for_fps))
+                
+                steps_this_frame = 0
+                training_start = time.time()
+                
+                # Run the calculated number of training steps
+                while steps_this_frame < steps_per_frame:
+                    
                     if self.paused or not self.running:
                         break
                     
@@ -482,6 +512,7 @@ class GameApp:
                     episode_reward += reward
                     episode_steps += 1
                     self.steps += 1
+                    steps_this_frame += 1
                     
                     if done:
                         # Episode complete
@@ -570,12 +601,26 @@ class GameApp:
                         # Check if we should stop training
                         if self.episode >= self.config.MAX_EPISODES:
                             break
+                
+                # Update average step time for dynamic adjustment
+                if steps_this_frame > 0:
+                    frame_training_time = time.time() - training_start
+                    measured_step_time = frame_training_time / steps_this_frame
+                    step_time_samples.append(measured_step_time)
+                    # Keep rolling average of last 100 samples
+                    if len(step_time_samples) > 100:
+                        step_time_samples.pop(0)
+                    avg_step_time = sum(step_time_samples) / len(step_time_samples)
             
-            # Render (at fixed 60 FPS for smooth visuals)
+            # Render the current state
             if not self.args.headless:
                 render_action = self.selected_action if self.selected_action is not None else 1
                 self._render_frame(state, render_action, info if info else {})
-                self.clock.tick(60)  # Fixed 60 FPS for rendering
+                
+                # At speed 1x or lower, cap to target FPS
+                # At higher speeds, render as fast as possible (no throttling)
+                if self.game_speed <= 1.0:
+                    self.clock.tick(int(60 * self.game_speed))
         
         # Training complete
         self._save_model("breakout_final.pth")
