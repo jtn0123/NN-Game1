@@ -158,6 +158,13 @@ class GameApp:
         self.running = True
         self.game_speed = 1.0  # Speed multiplier
         
+        # Extended training metrics
+        self.exploration_actions = 0
+        self.exploitation_actions = 0
+        self.episode_start_time = time.time()
+        self.target_updates = 0
+        self.last_target_update_step = 0
+        
         # Current state
         self.state = self.game.reset()
         self.selected_action: Optional[int] = None
@@ -173,14 +180,101 @@ class GameApp:
             self.web_dashboard.on_pause_callback = self._toggle_pause
             self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")
             self.web_dashboard.on_speed_callback = self._set_speed
+            self.web_dashboard.on_reset_callback = self._reset_episode
+            self.web_dashboard.on_load_model_callback = self._load_model
+            self.web_dashboard.on_config_change_callback = self._apply_config
             self.web_dashboard.start()
+            
+            # Log startup info
+            self._log_startup_info()
     
-    def _toggle_pause(self):
+    def _log_startup_info(self) -> None:
+        """Log startup configuration to web dashboard."""
+        if not self.web_dashboard:
+            return
+        
+        self.web_dashboard.log("🚀 Training session started", "success")
+        self.web_dashboard.log(f"Device: {self.config.DEVICE}", "info")
+        self.web_dashboard.log(f"State size: {self.game.state_size}, Action size: {self.game.action_size}", "info")
+        self.web_dashboard.log(f"Network: {self.config.HIDDEN_LAYERS}", "info", {
+            'hidden_layers': self.config.HIDDEN_LAYERS,
+            'activation': self.config.ACTIVATION
+        })
+        self.web_dashboard.log(f"Learning rate: {self.config.LEARNING_RATE}", "info", {
+            'lr': self.config.LEARNING_RATE,
+            'gamma': self.config.GAMMA,
+            'batch_size': self.config.BATCH_SIZE
+        })
+        self.web_dashboard.log(f"Epsilon: {self.config.EPSILON_START} → {self.config.EPSILON_END}", "info", {
+            'start': self.config.EPSILON_START,
+            'end': self.config.EPSILON_END,
+            'decay': self.config.EPSILON_DECAY
+        })
+        self.web_dashboard.log(f"Target episodes: {self.config.MAX_EPISODES}", "info")
+        self.web_dashboard.log("Ready to train! Use controls to manage training.", "info")
+    
+    def _toggle_pause(self) -> None:
         """Toggle pause state (for web dashboard control)."""
         self.paused = not self.paused
         if self.web_dashboard:
             self.web_dashboard.publisher.set_paused(self.paused)
+            status = "⏸️ Training paused" if self.paused else "▶️ Training resumed"
+            self.web_dashboard.log(status, "action")
         print("⏸️  Paused" if self.paused else "▶️  Resumed")
+    
+    def _reset_episode(self) -> None:
+        """Reset the current episode."""
+        self.state = self.game.reset()
+        self.total_reward = 0.0
+        if self.web_dashboard:
+            self.web_dashboard.log("🔄 Episode reset", "action")
+        print("🔄 Episode reset")
+    
+    def _load_model(self, filepath: str) -> None:
+        """Load a model from file."""
+        try:
+            self.agent.load(filepath)
+            if self.web_dashboard:
+                self.web_dashboard.log(f"📂 Loaded model: {os.path.basename(filepath)}", "success", {
+                    'path': filepath,
+                    'epsilon': self.agent.epsilon,
+                    'steps': self.agent.steps
+                })
+        except Exception as e:
+            if self.web_dashboard:
+                self.web_dashboard.log(f"❌ Failed to load model: {str(e)}", "error")
+    
+    def _apply_config(self, config_data: dict) -> None:
+        """Apply configuration changes from web dashboard."""
+        changes = []
+        
+        if 'learning_rate' in config_data:
+            old_lr = self.config.LEARNING_RATE
+            self.config.LEARNING_RATE = config_data['learning_rate']
+            # Update optimizer learning rate
+            for param_group in self.agent.optimizer.param_groups:
+                param_group['lr'] = config_data['learning_rate']
+            changes.append(f"LR: {old_lr} → {config_data['learning_rate']}")
+        
+        if 'epsilon' in config_data:
+            old_eps = self.agent.epsilon
+            self.agent.epsilon = config_data['epsilon']
+            changes.append(f"Epsilon: {old_eps:.4f} → {config_data['epsilon']:.4f}")
+        
+        if 'epsilon_decay' in config_data:
+            self.config.EPSILON_DECAY = config_data['epsilon_decay']
+            changes.append(f"Decay: {config_data['epsilon_decay']}")
+        
+        if 'gamma' in config_data:
+            self.config.GAMMA = config_data['gamma']
+            changes.append(f"Gamma: {config_data['gamma']}")
+        
+        if 'batch_size' in config_data:
+            self.config.BATCH_SIZE = config_data['batch_size']
+            changes.append(f"Batch: {config_data['batch_size']}")
+        
+        if self.web_dashboard and changes:
+            self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)
     
     def _update_layout(self, new_width: int, new_height: int) -> None:
         """Update component positions based on new window size."""
@@ -223,9 +317,11 @@ class GameApp:
         self.dashboard.width = new_width - 20
         self.dashboard.height = self.dashboard_height
     
-    def _set_speed(self, speed: float):
+    def _set_speed(self, speed: float) -> None:
         """Set game speed (for web dashboard control)."""
         self.game_speed = max(0.25, min(4.0, speed))
+        if self.web_dashboard:
+            self.web_dashboard.log(f"⏩ Speed set to {self.game_speed}x", "action")
         print(f"⏩ Speed: {self.game_speed}x")
     
     def run_human_mode(self) -> None:
@@ -320,6 +416,8 @@ class GameApp:
         episode_reward = 0.0
         episode_steps = 0
         episode_start_time = time.time()
+        episode_bricks_broken = 0
+        info: dict = {}
         
         while self.running and self.episode < self.config.MAX_EPISODES:
             self._handle_events()
@@ -329,14 +427,35 @@ class GameApp:
                 action = self.agent.select_action(state, training=True)
                 self.selected_action = action
                 
+                # Track exploration vs exploitation
+                if np.random.random() < self.agent.epsilon:
+                    self.exploration_actions += 1
+                else:
+                    self.exploitation_actions += 1
+                
                 # Execute action
                 next_state, reward, done, info = self.game.step(action)
+                
+                # Track bricks broken this episode
+                if reward > 0.5:  # Brick hit reward
+                    episode_bricks_broken += 1
                 
                 # Store experience
                 self.agent.remember(state, action, reward, next_state, done)
                 
                 # Learn
                 loss = self.agent.learn()
+                
+                # Track target network updates
+                if self.agent.steps % self.config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
+                    self.target_updates += 1
+                    self.last_target_update_step = self.agent.steps
+                    if self.web_dashboard:
+                        self.web_dashboard.log(
+                            f"🎯 Target network updated (#{self.target_updates})", 
+                            "metric",
+                            {'step': self.agent.steps, 'update_number': self.target_updates}
+                        )
                 
                 # Update state
                 state = next_state
@@ -349,7 +468,12 @@ class GameApp:
                     episode_duration = time.time() - episode_start_time
                     
                     # Decay epsilon
+                    old_epsilon = self.agent.epsilon
                     self.agent.decay_epsilon()
+                    
+                    # Calculate average Q-value for current state
+                    q_values = self.agent.get_q_values(state)
+                    avg_q_value = float(np.mean(q_values))
                     
                     # Update dashboard
                     self.dashboard.update(
@@ -371,10 +495,23 @@ class GameApp:
                             loss=self.agent.get_average_loss(100),
                             total_steps=self.steps,
                             won=info.get('won', False),
-                            reward=episode_reward
+                            reward=episode_reward,
+                            memory_size=len(self.agent.memory),
+                            avg_q_value=avg_q_value,
+                            exploration_actions=self.exploration_actions,
+                            exploitation_actions=self.exploitation_actions,
+                            target_updates=self.target_updates,
+                            bricks_broken=episode_bricks_broken,
+                            episode_length=episode_steps
+                        )
+                        
+                        # Log episode completion
+                        self._log_episode_complete(
+                            info, episode_reward, episode_steps, episode_duration,
+                            episode_bricks_broken, avg_q_value, old_epsilon
                         )
                     
-                    # Log
+                    # Terminal log
                     if self.episode % self.config.LOG_EVERY == 0:
                         avg_score = np.mean(list(self.dashboard.scores)[-100:]) if self.dashboard.scores else 0
                         print(f"Episode {self.episode:5d} | "
@@ -387,30 +524,110 @@ class GameApp:
                     # Save checkpoint
                     if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
                         self._save_model(f"breakout_ep{self.episode}.pth")
+                        if self.web_dashboard:
+                            self.web_dashboard.log(
+                                f"💾 Checkpoint saved: breakout_ep{self.episode}.pth",
+                                "success"
+                            )
                     
                     if info['score'] > self.dashboard.best_score:
                         self._save_model("breakout_best.pth", quiet=True)
+                        if self.web_dashboard:
+                            self.web_dashboard.log(
+                                f"🏆 New best score: {info['score']}! Model saved.",
+                                "success",
+                                {'score': info['score'], 'episode': self.episode}
+                            )
                     
                     # Reset for next episode
                     self.episode += 1
                     episode_reward = 0.0
                     episode_steps = 0
+                    episode_bricks_broken = 0
                     episode_start_time = time.time()
                     state = self.game.reset()
             
             # Render (at controlled framerate)
             if not self.args.headless:
                 render_action = self.selected_action if self.selected_action is not None else 1
-                self._render_frame(state, render_action, info if 'info' in dir() else {})
+                self._render_frame(state, render_action, info if info else {})
                 self.clock.tick(int(self.render_fps * self.game_speed))
         
         # Training complete
         self._save_model("breakout_final.pth")
+        if self.web_dashboard:
+            self.web_dashboard.log("🎉 Training complete!", "success", {
+                'total_episodes': self.episode,
+                'best_score': self.dashboard.best_score,
+                'total_steps': self.steps
+            })
+        
         print("\n✅ Training complete!")
         print(f"   Total episodes: {self.episode}")
         print(f"   Best score: {self.dashboard.best_score}")
         
         pygame.quit()
+    
+    def _log_episode_complete(
+        self,
+        info: dict,
+        episode_reward: float,
+        episode_steps: int,
+        episode_duration: float,
+        bricks_broken: int,
+        avg_q_value: float,
+        old_epsilon: float
+    ) -> None:
+        """Log detailed episode completion to web dashboard."""
+        if not self.web_dashboard:
+            return
+        
+        # Determine episode outcome
+        won = info.get('won', False)
+        score = info['score']
+        
+        # Log episode metrics
+        level = "success" if won else "metric"
+        outcome = "🏆 WIN!" if won else ""
+        
+        self.web_dashboard.log(
+            f"Episode {self.episode} complete {outcome}",
+            level,
+            {
+                'episode': self.episode,
+                'score': score,
+                'reward': round(episode_reward, 2),
+                'steps': episode_steps,
+                'duration': round(episode_duration, 2),
+                'bricks': bricks_broken,
+                'won': won
+            }
+        )
+        
+        # Log detailed metrics every few episodes
+        if self.episode % 5 == 0:
+            loss = self.agent.get_average_loss(100)
+            explore_ratio = self.exploration_actions / max(1, self.exploration_actions + self.exploitation_actions)
+            
+            self.web_dashboard.log(
+                f"Training metrics: Loss={loss:.4f}, Q={avg_q_value:.2f}, Explore={explore_ratio:.1%}",
+                "metric",
+                {
+                    'loss': round(loss, 6),
+                    'avg_q_value': round(avg_q_value, 4),
+                    'explore_ratio': round(explore_ratio, 4),
+                    'memory_size': len(self.agent.memory),
+                    'total_steps': self.steps
+                }
+            )
+        
+        # Log epsilon decay
+        if abs(old_epsilon - self.agent.epsilon) > 0.001:
+            self.web_dashboard.log(
+                f"Epsilon decayed: {old_epsilon:.4f} → {self.agent.epsilon:.4f}",
+                "debug",
+                {'old': old_epsilon, 'new': self.agent.epsilon}
+            )
     
     def run_headless_training(self) -> None:
         """Run training without visualization (faster)."""
@@ -497,23 +714,21 @@ class GameApp:
                     self.running = False
                 
                 elif event.key == pygame.K_p:
-                    self.paused = not self.paused
-                    print("⏸️  Paused" if self.paused else "▶️  Resumed")
+                    self._toggle_pause()
                 
                 elif event.key == pygame.K_s:
                     self._save_model("breakout_manual_save.pth")
+                    if self.web_dashboard:
+                        self.web_dashboard.log("💾 Manual save: breakout_manual_save.pth", "success")
                 
                 elif event.key == pygame.K_r:
-                    self.state = self.game.reset()
-                    print("🔄 Episode reset")
+                    self._reset_episode()
                 
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
-                    self.game_speed = min(4.0, self.game_speed + 0.5)
-                    print(f"⏩ Speed: {self.game_speed}x")
+                    self._set_speed(self.game_speed + 0.5)
                 
                 elif event.key == pygame.K_MINUS:
-                    self.game_speed = max(0.25, self.game_speed - 0.25)
-                    print(f"⏪ Speed: {self.game_speed}x")
+                    self._set_speed(self.game_speed - 0.25)
                 
                 elif event.key == pygame.K_f:
                     # Toggle fullscreen
@@ -560,9 +775,11 @@ class GameApp:
             text = font.render("PAUSED", True, (255, 200, 50))
             text_rect = text.get_rect(center=(self.game_width // 2, self.game_height // 2))
             
-            # Background
+            # Background with semi-transparent fill using SRCALPHA surface
             bg_rect = text_rect.inflate(40, 20)
-            pygame.draw.rect(self.screen, (0, 0, 0, 200), bg_rect, border_radius=10)
+            bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(bg_surface, (0, 0, 0, 200), bg_surface.get_rect(), border_radius=10)
+            self.screen.blit(bg_surface, bg_rect.topleft)
             pygame.draw.rect(self.screen, (255, 200, 50), bg_rect, 3, border_radius=10)
             
             self.screen.blit(text, text_rect)
@@ -682,6 +899,8 @@ def main():
     except KeyboardInterrupt:
         print("\n\n⛔ Training interrupted by user")
         app._save_model("breakout_interrupted.pth")
+        if app.web_dashboard:
+            app.web_dashboard.log("⛔ Training interrupted by user", "warning")
     finally:
         pygame.quit()
 

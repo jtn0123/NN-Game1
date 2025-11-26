@@ -1,21 +1,34 @@
 /**
  * Neural Network AI - Training Dashboard
  * Real-time visualization with Chart.js and SocketIO
+ * 
+ * Features:
+ * - Live training metrics charts
+ * - Console log with filtering
+ * - Full training controls
+ * - Model management
  */
 
 // Charts
 let scoreChart = null;
 let lossChart = null;
+let qvalueChart = null;
 
 // State
 let isPaused = false;
 let socket = null;
+let currentLogFilter = 'all';
+let consoleLogs = [];
+const MAX_CONSOLE_LOGS = 500;
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
     connectSocket();
     startScreenshotPolling();
+    updateFooterTime();
+    setInterval(updateFooterTime, 1000);
+    loadConfig();
 });
 
 /**
@@ -116,6 +129,26 @@ function initCharts() {
             }
         }
     });
+
+    // Q-Value Chart
+    const qvalueCtx = document.getElementById('qvalueChart').getContext('2d');
+    qvalueChart = new Chart(qvalueCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Q-Value',
+                data: [],
+                borderColor: '#64b5f6',
+                backgroundColor: 'rgba(100, 181, 246, 0.1)',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 0,
+                borderWidth: 2
+            }]
+        },
+        options: chartOptions
+    });
 }
 
 /**
@@ -127,15 +160,29 @@ function connectSocket() {
     socket.on('connect', () => {
         console.log('Connected to server');
         updateConnectionStatus(true);
+        addConsoleLog('Connected to training server', 'success');
     });
 
     socket.on('disconnect', () => {
         console.log('Disconnected from server');
         updateConnectionStatus(false);
+        addConsoleLog('Disconnected from server', 'error');
     });
 
     socket.on('state_update', (data) => {
         updateDashboard(data);
+    });
+
+    socket.on('console_log', (log) => {
+        addConsoleLog(log.message, log.level, log.timestamp, log.data);
+    });
+
+    socket.on('console_logs', (data) => {
+        // Initial batch of logs on connect
+        data.logs.forEach(log => {
+            addConsoleLog(log.message, log.level, log.timestamp, log.data, false);
+        });
+        renderConsoleLogs();
     });
 }
 
@@ -174,17 +221,40 @@ function updateDashboard(data) {
     document.getElementById('epsilon-value').textContent = state.epsilon.toFixed(3);
     document.getElementById('epsilon-fill').style.width = (state.epsilon * 100) + '%';
 
-    // Update info
+    // Update extended info
     document.getElementById('info-loss').textContent = state.loss.toFixed(4);
     document.getElementById('info-steps').textContent = state.total_steps.toLocaleString();
+    document.getElementById('info-eps').textContent = state.episodes_per_second.toFixed(2);
+    document.getElementById('info-memory').textContent = 
+        `${(state.memory_size / 1000).toFixed(0)}k / ${(state.memory_capacity / 1000).toFixed(0)}k`;
+    document.getElementById('info-qvalue').textContent = state.avg_q_value.toFixed(2);
+    document.getElementById('info-target').textContent = state.target_updates.toLocaleString();
+    document.getElementById('info-actions').textContent = 
+        `${state.exploration_actions.toLocaleString()} / ${state.exploitation_actions.toLocaleString()}`;
     
+    // Update status badge
     const statusBadge = document.getElementById('info-status');
     if (state.is_paused) {
         statusBadge.textContent = 'Paused';
-        statusBadge.classList.add('paused');
-    } else {
+        statusBadge.className = 'info-value status-badge paused';
+    } else if (state.is_running) {
         statusBadge.textContent = 'Training';
-        statusBadge.classList.remove('paused');
+        statusBadge.className = 'info-value status-badge training';
+    } else {
+        statusBadge.textContent = 'Idle';
+        statusBadge.className = 'info-value status-badge idle';
+    }
+
+    // Update pause button
+    const pauseBtn = document.getElementById('pause-btn');
+    isPaused = state.is_paused;
+    pauseBtn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+
+    // Update speed slider if changed externally
+    const speedSlider = document.getElementById('speed-slider');
+    if (parseFloat(speedSlider.value) !== state.game_speed) {
+        speedSlider.value = state.game_speed;
+        document.getElementById('speed-value').textContent = state.game_speed.toFixed(2) + 'x';
     }
 
     // Update charts
@@ -198,6 +268,7 @@ function updateCharts(history) {
     const maxPoints = 200;
     const scores = history.scores.slice(-maxPoints);
     const losses = history.losses.slice(-maxPoints);
+    const qvalues = history.q_values ? history.q_values.slice(-maxPoints) : [];
     
     // Calculate running average
     const avgScores = calculateRunningAverage(scores, 20);
@@ -217,6 +288,13 @@ function updateCharts(history) {
     lossChart.data.labels = labels;
     lossChart.data.datasets[0].data = validLosses;
     lossChart.update('none');
+
+    // Update Q-value chart
+    if (qvalues.length > 0) {
+        qvalueChart.data.labels = labels;
+        qvalueChart.data.datasets[0].data = qvalues;
+        qvalueChart.update('none');
+    }
 }
 
 /**
@@ -233,15 +311,109 @@ function calculateRunningAverage(data, window) {
     return result;
 }
 
+// ============================================================
+// CONSOLE LOG FUNCTIONS
+// ============================================================
+
+/**
+ * Add a log entry to the console
+ */
+function addConsoleLog(message, level = 'info', timestamp = null, data = null, render = true) {
+    const time = timestamp || new Date().toLocaleTimeString('en-US', { hour12: false });
+    
+    consoleLogs.push({
+        time: time,
+        level: level,
+        message: message,
+        data: data
+    });
+
+    // Keep console size limited
+    if (consoleLogs.length > MAX_CONSOLE_LOGS) {
+        consoleLogs = consoleLogs.slice(-MAX_CONSOLE_LOGS);
+    }
+
+    if (render) {
+        renderConsoleLogs();
+    }
+}
+
+/**
+ * Render console logs based on current filter
+ */
+function renderConsoleLogs() {
+    const container = document.getElementById('console-output');
+    
+    let filteredLogs = consoleLogs;
+    if (currentLogFilter !== 'all') {
+        filteredLogs = consoleLogs.filter(log => log.level === currentLogFilter);
+    }
+
+    // Keep only last 100 visible logs for performance
+    const visibleLogs = filteredLogs.slice(-100);
+
+    container.innerHTML = visibleLogs.map(log => {
+        let dataStr = '';
+        if (log.data) {
+            dataStr = `<span class="log-data">${JSON.stringify(log.data)}</span>`;
+        }
+        return `
+            <div class="console-line ${log.level}">
+                <span class="log-time">${log.time}</span>
+                <span class="log-level">${log.level.toUpperCase()}</span>
+                <span class="log-message">${escapeHtml(log.message)}</span>
+                ${dataStr}
+            </div>
+        `;
+    }).join('');
+
+    // Auto-scroll to bottom
+    const consoleContainer = document.getElementById('console-container');
+    consoleContainer.scrollTop = consoleContainer.scrollHeight;
+}
+
+/**
+ * Set log filter
+ */
+function setLogFilter(filter) {
+    currentLogFilter = filter;
+    
+    // Update button states
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filter);
+    });
+
+    renderConsoleLogs();
+}
+
+/**
+ * Clear console logs
+ */
+function clearLogs() {
+    consoleLogs = [];
+    socket.emit('clear_logs');
+    renderConsoleLogs();
+    addConsoleLog('Console cleared', 'info');
+}
+
+/**
+ * Escape HTML entities
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ============================================================
+// CONTROL FUNCTIONS
+// ============================================================
+
 /**
  * Toggle pause state
  */
 function togglePause() {
-    isPaused = !isPaused;
     socket.emit('control', { action: 'pause' });
-    
-    const btn = document.getElementById('pause-btn');
-    btn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
 }
 
 /**
@@ -254,9 +426,28 @@ function saveModel() {
     const btn = document.querySelector('.control-btn.save');
     const originalText = btn.textContent;
     btn.textContent = '✓ Saving...';
+    btn.classList.add('saving');
     setTimeout(() => {
         btn.textContent = originalText;
+        btn.classList.remove('saving');
     }, 1500);
+}
+
+/**
+ * Reset current episode
+ */
+function resetEpisode() {
+    socket.emit('control', { action: 'reset' });
+    addConsoleLog('Episode reset requested', 'action');
+}
+
+/**
+ * Update game speed
+ */
+function updateSpeed(value) {
+    const speed = parseFloat(value);
+    document.getElementById('speed-value').textContent = speed.toFixed(2) + 'x';
+    socket.emit('control', { action: 'speed', value: speed });
 }
 
 /**
@@ -281,8 +472,141 @@ function refreshScreenshot() {
  * Start polling for screenshots
  */
 function startScreenshotPolling() {
-    // Refresh screenshot every 2 seconds
     setInterval(refreshScreenshot, 2000);
+}
+
+// ============================================================
+// SETTINGS FUNCTIONS
+// ============================================================
+
+/**
+ * Toggle settings panel
+ */
+function toggleSettings() {
+    const card = document.getElementById('settings-card');
+    const icon = document.getElementById('settings-icon');
+    
+    card.classList.toggle('collapsed');
+    icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
+}
+
+/**
+ * Load config from server
+ */
+function loadConfig() {
+    fetch('/api/config')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('setting-lr').value = data.learning_rate;
+            document.getElementById('setting-epsilon').value = data.epsilon_start;
+            document.getElementById('setting-decay').value = data.epsilon_decay;
+            document.getElementById('setting-gamma').value = data.gamma;
+            document.getElementById('setting-batch').value = data.batch_size;
+        })
+        .catch(err => console.error('Config load error:', err));
+}
+
+/**
+ * Apply settings changes
+ */
+function applySettings() {
+    const config = {
+        learning_rate: parseFloat(document.getElementById('setting-lr').value),
+        epsilon: parseFloat(document.getElementById('setting-epsilon').value),
+        epsilon_decay: parseFloat(document.getElementById('setting-decay').value),
+        gamma: parseFloat(document.getElementById('setting-gamma').value),
+        batch_size: parseInt(document.getElementById('setting-batch').value)
+    };
+
+    socket.emit('control', { action: 'config_change', config: config });
+    addConsoleLog('Settings updated', 'action', null, config);
+
+    // Visual feedback
+    const btn = document.querySelector('.apply-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '✓ Applied!';
+    setTimeout(() => {
+        btn.textContent = originalText;
+    }, 1500);
+}
+
+// ============================================================
+// MODEL LOADING
+// ============================================================
+
+/**
+ * Show load model modal
+ */
+function showLoadModal() {
+    const modal = document.getElementById('load-modal');
+    modal.classList.add('visible');
+    
+    // Fetch available models
+    fetch('/api/models')
+        .then(response => response.json())
+        .then(data => {
+            const list = document.getElementById('model-list');
+            
+            if (data.models.length === 0) {
+                list.innerHTML = '<div class="no-models">No saved models found</div>';
+                return;
+            }
+
+            list.innerHTML = data.models.map(model => {
+                const date = new Date(model.modified * 1000).toLocaleString();
+                const size = (model.size / 1024).toFixed(1) + ' KB';
+                return `
+                    <div class="model-item" onclick="loadModel('${model.path}')">
+                        <div class="model-name">📁 ${model.name}</div>
+                        <div class="model-info">
+                            <span>${size}</span>
+                            <span>${date}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        })
+        .catch(err => {
+            document.getElementById('model-list').innerHTML = 
+                '<div class="error">Failed to load models</div>';
+        });
+}
+
+/**
+ * Hide load model modal
+ */
+function hideLoadModal() {
+    const modal = document.getElementById('load-modal');
+    modal.classList.remove('visible');
+}
+
+/**
+ * Load a specific model
+ */
+function loadModel(path) {
+    socket.emit('control', { action: 'load_model', path: path });
+    hideLoadModal();
+    addConsoleLog(`Loading model: ${path.split('/').pop()}`, 'action');
+}
+
+// Close modal on outside click
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('load-modal');
+    if (e.target === modal) {
+        hideLoadModal();
+    }
+});
+
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+/**
+ * Update footer time
+ */
+function updateFooterTime() {
+    const now = new Date();
+    document.getElementById('footer-time').textContent = now.toLocaleTimeString();
 }
 
 /**
@@ -300,3 +624,23 @@ function fetchInitialData() {
 // Fetch initial data after connection
 setTimeout(fetchInitialData, 500);
 
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    // Don't trigger if typing in input
+    if (e.target.tagName === 'INPUT') return;
+    
+    switch(e.key.toLowerCase()) {
+        case 'p':
+            togglePause();
+            break;
+        case 's':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                saveModel();
+            }
+            break;
+        case 'r':
+            resetEpisode();
+            break;
+    }
+});

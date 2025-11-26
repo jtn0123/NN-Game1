@@ -7,6 +7,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
@@ -26,7 +29,7 @@
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Left Column: Charts -->
+            <!-- Left Column: Charts + Console -->
             <div class="charts-column">
                 <!-- Score Chart -->
                 <div class="chart-card">
@@ -42,18 +45,57 @@
                     </div>
                 </div>
 
-                <!-- Loss Chart -->
-                <div class="chart-card">
-                    <div class="card-header">
-                        <h2>📉 Loss Over Time</h2>
+                <!-- Dual Chart Row -->
+                <div class="chart-row">
+                    <!-- Loss Chart -->
+                    <div class="chart-card half">
+                        <div class="card-header">
+                            <h2>📉 Loss</h2>
+                        </div>
+                        <div class="chart-container small">
+                            <canvas id="lossChart"></canvas>
+                        </div>
                     </div>
-                    <div class="chart-container small">
-                        <canvas id="lossChart"></canvas>
+
+                    <!-- Q-Value Chart -->
+                    <div class="chart-card half">
+                        <div class="card-header">
+                            <h2>📈 Avg Q-Value</h2>
+                        </div>
+                        <div class="chart-container small">
+                            <canvas id="qvalueChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Console Log -->
+                <div class="console-card">
+                    <div class="card-header">
+                        <h2>📋 Console Log</h2>
+                        <div class="console-controls">
+                            <div class="filter-buttons">
+                                <button class="filter-btn active" data-filter="all" onclick="setLogFilter('all')">All</button>
+                                <button class="filter-btn" data-filter="info" onclick="setLogFilter('info')">Info</button>
+                                <button class="filter-btn" data-filter="metric" onclick="setLogFilter('metric')">Metrics</button>
+                                <button class="filter-btn" data-filter="action" onclick="setLogFilter('action')">Actions</button>
+                                <button class="filter-btn" data-filter="warning" onclick="setLogFilter('warning')">Warnings</button>
+                            </div>
+                            <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
+                        </div>
+                    </div>
+                    <div class="console-container" id="console-container">
+                        <div class="console-output" id="console-output">
+                            <div class="console-line info">
+                                <span class="log-time">--:--:--</span>
+                                <span class="log-level">INFO</span>
+                                <span class="log-message">Waiting for connection...</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Right Column: Stats & Game -->
+            <!-- Right Column: Stats & Controls -->
             <div class="stats-column">
                 <!-- Metrics Grid -->
                 <div class="metrics-grid">
@@ -92,10 +134,10 @@
                     </div>
                 </div>
 
-                <!-- Training Info -->
+                <!-- Extended Training Info -->
                 <div class="info-card">
                     <div class="card-header">
-                        <h3>⚙️ Training Info</h3>
+                        <h3>⚙️ Training Stats</h3>
                     </div>
                     <div class="info-grid">
                         <div class="info-row">
@@ -105,6 +147,26 @@
                         <div class="info-row">
                             <span class="info-label">Total Steps</span>
                             <span class="info-value" id="info-steps">0</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Ep/s</span>
+                            <span class="info-value" id="info-eps">0.0</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Memory</span>
+                            <span class="info-value" id="info-memory">0 / 100k</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Avg Q-Value</span>
+                            <span class="info-value" id="info-qvalue">0.00</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Target Updates</span>
+                            <span class="info-value" id="info-target">0</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Explore/Exploit</span>
+                            <span class="info-value" id="info-actions">0 / 0</span>
                         </div>
                         <div class="info-row">
                             <span class="info-label">Status</span>
@@ -127,7 +189,7 @@
                     </div>
                 </div>
 
-                <!-- Controls -->
+                <!-- Main Controls -->
                 <div class="controls-card">
                     <div class="card-header">
                         <h3>🎛️ Controls</h3>
@@ -139,6 +201,64 @@
                         <button class="control-btn save" onclick="saveModel()">
                             💾 Save
                         </button>
+                        <button class="control-btn reset" onclick="resetEpisode()">
+                            🔄 Reset
+                        </button>
+                        <button class="control-btn load" onclick="showLoadModal()">
+                            📂 Load
+                        </button>
+                    </div>
+                    
+                    <!-- Speed Control -->
+                    <div class="speed-control">
+                        <label class="speed-label">
+                            <span>⏩ Speed</span>
+                            <span id="speed-value">1.0x</span>
+                        </label>
+                        <input type="range" 
+                               id="speed-slider" 
+                               min="0.25" 
+                               max="4" 
+                               step="0.25" 
+                               value="1"
+                               oninput="updateSpeed(this.value)">
+                        <div class="speed-marks">
+                            <span>0.25x</span>
+                            <span>1x</span>
+                            <span>2x</span>
+                            <span>4x</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Panel -->
+                <div class="settings-card collapsed" id="settings-card">
+                    <div class="card-header clickable" onclick="toggleSettings()">
+                        <h3>⚙️ Settings</h3>
+                        <span class="collapse-icon" id="settings-icon">▼</span>
+                    </div>
+                    <div class="settings-content" id="settings-content">
+                        <div class="setting-row">
+                            <label for="setting-lr">Learning Rate</label>
+                            <input type="number" id="setting-lr" value="0.0001" step="0.00001" min="0">
+                        </div>
+                        <div class="setting-row">
+                            <label for="setting-epsilon">Epsilon</label>
+                            <input type="number" id="setting-epsilon" value="1.0" step="0.01" min="0" max="1">
+                        </div>
+                        <div class="setting-row">
+                            <label for="setting-decay">Epsilon Decay</label>
+                            <input type="number" id="setting-decay" value="0.995" step="0.001" min="0" max="1">
+                        </div>
+                        <div class="setting-row">
+                            <label for="setting-gamma">Gamma</label>
+                            <input type="number" id="setting-gamma" value="0.99" step="0.01" min="0" max="1">
+                        </div>
+                        <div class="setting-row">
+                            <label for="setting-batch">Batch Size</label>
+                            <input type="number" id="setting-batch" value="64" step="8" min="8">
+                        </div>
+                        <button class="apply-btn" onclick="applySettings()">Apply Changes</button>
                     </div>
                 </div>
             </div>
@@ -149,10 +269,26 @@
             <span>Neural Network Game AI</span>
             <span class="separator">|</span>
             <span>Double DQN + Prioritized Replay</span>
+            <span class="separator">|</span>
+            <span id="footer-time"></span>
         </footer>
+    </div>
+
+    <!-- Load Model Modal -->
+    <div class="modal" id="load-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📂 Load Model</h3>
+                <button class="close-btn" onclick="hideLoadModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="model-list" id="model-list">
+                    <div class="loading">Loading models...</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
-
