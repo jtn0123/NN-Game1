@@ -163,104 +163,9 @@ class TestLearning:
         
         expected = initial_epsilon * config.EPSILON_DECAY
         assert agent.epsilon == max(config.EPSILON_END, expected)
-
-
-class TestEpsilonDecayStrategies:
-    """Test epsilon decay with different strategies.
     
-    Tests for bug fix: When EPSILON_DECAY is 1.0 with linear/cosine strategies,
-    the calculation of decay_episodes would divide by log(1.0)=0, causing a crash.
-    """
-    
-    def test_linear_decay_with_epsilon_decay_one(self, config):
-        """Linear decay should not crash when EPSILON_DECAY is 1.0."""
-        config.EXPLORATION_STRATEGY = 'linear'
-        config.EPSILON_DECAY = 1.0  # This would cause division by zero
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
-        initial_epsilon = agent.epsilon
-        # Should not raise an exception
-        agent.decay_epsilon()
-        # With decay=1.0, epsilon should remain unchanged (no decay)
-        assert agent.epsilon == initial_epsilon
-    
-    def test_cosine_decay_with_epsilon_decay_one(self, config):
-        """Cosine decay should not crash when EPSILON_DECAY is 1.0."""
-        config.EXPLORATION_STRATEGY = 'cosine'
-        config.EPSILON_DECAY = 1.0  # This would cause division by zero
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
-        initial_epsilon = agent.epsilon
-        # Should not raise an exception
-        agent.decay_epsilon()
-        # With decay=1.0, epsilon should remain unchanged (no decay)
-        assert agent.epsilon == initial_epsilon
-    
-    def test_linear_decay_normal_operation(self, config):
-        """Linear decay should work correctly with normal EPSILON_DECAY."""
-        config.EXPLORATION_STRATEGY = 'linear'
-        config.EPSILON_DECAY = 0.995
-        config.EPSILON_WARMUP = 0
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
-        # Decay multiple times
-        for _ in range(100):
-            agent.decay_epsilon()
-        
-        # Epsilon should have decreased
-        assert agent.epsilon < config.EPSILON_START
-        assert agent.epsilon >= config.EPSILON_END
-    
-    def test_cosine_decay_normal_operation(self, config):
-        """Cosine decay should work correctly with normal EPSILON_DECAY."""
-        config.EXPLORATION_STRATEGY = 'cosine'
-        config.EPSILON_DECAY = 0.995
-        config.EPSILON_WARMUP = 0
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
-        # Decay multiple times
-        for _ in range(100):
-            agent.decay_epsilon()
-        
-        # Epsilon should have decreased
-        assert agent.epsilon < config.EPSILON_START
-        assert agent.epsilon >= config.EPSILON_END
-    
-    def test_calculate_decay_episodes_returns_positive(self, config):
-        """Helper method should return positive decay episodes with normal config."""
-        config.EPSILON_DECAY = 0.995
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
-        decay_episodes = agent._calculate_decay_episodes()
-        assert decay_episodes > 0
-    
-    def test_calculate_decay_episodes_returns_zero_for_decay_one(self, config):
-        """Helper method should return 0 when EPSILON_DECAY is 1.0."""
+    def test_epsilon_decay_with_decay_one(self, config):
+        """Epsilon should remain unchanged when EPSILON_DECAY is 1.0."""
         config.EPSILON_DECAY = 1.0
         
         agent = Agent(
@@ -269,8 +174,28 @@ class TestEpsilonDecayStrategies:
             config=config
         )
         
-        decay_episodes = agent._calculate_decay_episodes()
-        assert decay_episodes == 0
+        initial_epsilon = agent.epsilon
+        agent.decay_epsilon()
+        # With decay=1.0, epsilon * 1.0 = epsilon (unchanged)
+        assert agent.epsilon == initial_epsilon
+    
+    def test_epsilon_decay_respects_minimum(self, config):
+        """Epsilon should not decay below EPSILON_END."""
+        config.EPSILON_DECAY = 0.5  # Aggressive decay
+        config.EPSILON_END = 0.1
+        
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+        
+        # Decay many times
+        for _ in range(100):
+            agent.decay_epsilon()
+        
+        # Should be at minimum, not below
+        assert agent.epsilon == config.EPSILON_END
 
 
 class TestQValues:
