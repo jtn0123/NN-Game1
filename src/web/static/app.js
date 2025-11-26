@@ -397,6 +397,43 @@ function clearLogs() {
 }
 
 /**
+ * Copy all console logs to clipboard
+ */
+function copyLogsToClipboard() {
+    let text = '';
+
+    // Get filtered logs
+    let logsToExport = consoleLogs;
+    if (currentLogFilter !== 'all') {
+        logsToExport = consoleLogs.filter(log => log.level === currentLogFilter);
+    }
+
+    // Format logs as text
+    text = logsToExport.map(log => {
+        let line = `[${log.time}] ${log.level.toUpperCase().padEnd(8)} ${log.message}`;
+        if (log.data) {
+            line += ` ${JSON.stringify(log.data)}`;
+        }
+        return line;
+    }).join('\n');
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(text).then(() => {
+        // Visual feedback
+        const btn = document.querySelector('.copy-btn');
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy logs:', err);
+    });
+}
+
+/**
  * Escape HTML entities
  */
 function escapeHtml(text) {
@@ -457,15 +494,37 @@ function refreshScreenshot() {
     fetch('/api/screenshot')
         .then(response => response.json())
         .then(data => {
-            if (data.image) {
+            if (data.image && data.image.length > 0) {
                 const img = document.getElementById('game-preview');
                 const placeholder = document.getElementById('preview-placeholder');
-                img.src = 'data:image/png;base64,' + data.image;
-                img.classList.add('visible');
-                placeholder.style.display = 'none';
+
+                // Create a new image to verify it loads properly
+                const tempImg = new Image();
+                tempImg.onload = () => {
+                    // Image loaded successfully
+                    img.src = 'data:image/png;base64,' + data.image;
+                    img.classList.add('visible');
+                    placeholder.classList.add('hidden');
+                };
+                tempImg.onerror = () => {
+                    console.error('Failed to load screenshot image');
+                    placeholder.classList.remove('hidden');
+                    img.classList.remove('visible');
+                };
+                tempImg.src = 'data:image/png;base64,' + data.image;
+            } else {
+                // No image data
+                const placeholder = document.getElementById('preview-placeholder');
+                const img = document.getElementById('game-preview');
+                placeholder.classList.remove('hidden');
+                img.classList.remove('visible');
             }
         })
-        .catch(err => console.error('Screenshot error:', err));
+        .catch(err => {
+            console.error('Screenshot fetch error:', err);
+            const placeholder = document.getElementById('preview-placeholder');
+            placeholder.classList.remove('hidden');
+        });
 }
 
 /**
