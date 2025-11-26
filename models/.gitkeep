@@ -1,0 +1,6 @@
+# This directory stores trained model checkpoints
+# Models are saved during training:
+#   - breakout_best.pth   : Best scoring model
+#   - breakout_final.pth  : Final model after training
+#   - breakout_epN.pth    : Periodic checkpoints
+

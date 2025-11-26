@@ -1,0 +1,507 @@
+"""
+Breakout Game Implementation
+============================
+
+A complete Atari Breakout clone designed for AI training.
+
+Key Features:
+- Clean state representation for neural network input
+- Configurable rewards for reinforcement learning
+- Efficient physics (no external physics library needed)
+- Beautiful rendering with Pygame
+
+Game Rules:
+- Player controls a paddle at the bottom
+- Ball bounces around, breaking bricks
+- Goal: Break all bricks without letting ball fall
+- 3 lives per game
+"""
+
+import numpy as np
+import pygame
+from typing import Tuple, List, Optional
+import math
+
+from .base_game import BaseGame
+import sys
+sys.path.append('..')
+from config import Config
+
+
+class Brick:
+    """Represents a single brick in the game."""
+    
+    def __init__(self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.color = color
+        self.alive = True
+    
+    def draw(self, screen: pygame.Surface) -> None:
+        """Draw the brick if it's still alive."""
+        if self.alive:
+            # Main brick
+            pygame.draw.rect(screen, self.color, self.rect)
+            # Highlight (3D effect)
+            highlight = pygame.Rect(self.rect.x, self.rect.y, self.rect.width, 3)
+            darker = tuple(max(0, c - 40) for c in self.color)
+            lighter = tuple(min(255, c + 40) for c in self.color)
+            pygame.draw.rect(screen, lighter, highlight)
+            # Shadow
+            shadow = pygame.Rect(self.rect.x, self.rect.bottom - 3, self.rect.width, 3)
+            pygame.draw.rect(screen, darker, shadow)
+
+
+class Ball:
+    """The bouncing ball."""
+    
+    def __init__(self, x: float, y: float, radius: int, speed: float):
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.speed = speed
+        # Initial direction: upward with random horizontal component
+        angle = np.random.uniform(-np.pi/3, np.pi/3) - np.pi/2
+        self.dx = speed * np.cos(angle)
+        self.dy = speed * np.sin(angle)
+    
+    @property
+    def rect(self) -> pygame.Rect:
+        """Get bounding rectangle for collision detection."""
+        return pygame.Rect(
+            self.x - self.radius,
+            self.y - self.radius,
+            self.radius * 2,
+            self.radius * 2
+        )
+    
+    def move(self) -> None:
+        """Update ball position."""
+        self.x += self.dx
+        self.y += self.dy
+    
+    def draw(self, screen: pygame.Surface, color: Tuple[int, int, int]) -> None:
+        """Draw the ball with a glow effect."""
+        # Glow
+        glow_radius = self.radius + 4
+        glow_color = tuple(min(255, c + 50) for c in color)
+        pygame.draw.circle(screen, glow_color, (int(self.x), int(self.y)), glow_radius)
+        # Main ball
+        pygame.draw.circle(screen, color, (int(self.x), int(self.y)), self.radius)
+        # Highlight
+        highlight_pos = (int(self.x - self.radius//3), int(self.y - self.radius//3))
+        pygame.draw.circle(screen, (255, 255, 255), highlight_pos, self.radius//3)
+
+
+class Paddle:
+    """Player-controlled paddle at the bottom."""
+    
+    def __init__(self, x: int, y: int, width: int, height: int, speed: int):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.speed = speed
+    
+    @property
+    def rect(self) -> pygame.Rect:
+        """Get paddle rectangle."""
+        return pygame.Rect(self.x, self.y, self.width, self.height)
+    
+    def move(self, direction: int, screen_width: int) -> None:
+        """
+        Move paddle horizontally.
+        
+        Args:
+            direction: -1 for left, 0 for stay, 1 for right
+            screen_width: Width of the game screen
+        """
+        self.x += direction * self.speed
+        # Keep paddle on screen
+        self.x = max(0, min(self.x, screen_width - self.width))
+    
+    def draw(self, screen: pygame.Surface, color: Tuple[int, int, int]) -> None:
+        """Draw the paddle with rounded corners and gradient effect."""
+        rect = self.rect
+        # Main paddle (rounded)
+        pygame.draw.rect(screen, color, rect, border_radius=5)
+        # Top highlight
+        highlight = pygame.Rect(rect.x + 5, rect.y + 2, rect.width - 10, 3)
+        lighter = tuple(min(255, c + 60) for c in color)
+        pygame.draw.rect(screen, lighter, highlight, border_radius=2)
+
+
+class Breakout(BaseGame):
+    """
+    Atari Breakout game implementation.
+    
+    State representation (normalized to [0, 1]):
+        - ball_x: Ball X position (0 = left, 1 = right)
+        - ball_y: Ball Y position (0 = top, 1 = bottom)
+        - ball_dx: Ball X velocity (normalized)
+        - ball_dy: Ball Y velocity (normalized)
+        - paddle_x: Paddle X position (0 = left, 1 = right)
+        - bricks: Flattened array of brick states (1 = exists, 0 = broken)
+    
+    Actions:
+        0 = Move LEFT
+        1 = STAY (no movement)
+        2 = Move RIGHT
+    """
+    
+    def __init__(self, config: Optional[Config] = None):
+        """
+        Initialize the Breakout game.
+        
+        Args:
+            config: Configuration object (uses default if None)
+        """
+        self.config = config or Config()
+        
+        # Screen dimensions
+        self.width = self.config.SCREEN_WIDTH
+        self.height = self.config.SCREEN_HEIGHT
+        
+        # Game objects (initialized in reset())
+        self.paddle: Optional[Paddle] = None
+        self.ball: Optional[Ball] = None
+        self.bricks: List[Brick] = []
+        
+        # Game state
+        self.score = 0
+        self.lives = self.config.LIVES
+        self.game_over = False
+        self.won = False
+        
+        # For state representation
+        self._num_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
+        
+        # Initialize the game
+        self.reset()
+    
+    @property
+    def state_size(self) -> int:
+        """State vector dimension."""
+        # ball(4) + paddle(1) + bricks(rows * cols)
+        return 5 + self._num_bricks
+    
+    @property
+    def action_size(self) -> int:
+        """Number of possible actions."""
+        return 3  # LEFT, STAY, RIGHT
+    
+    def reset(self) -> np.ndarray:
+        """
+        Reset the game to initial state.
+        
+        Returns:
+            Initial state vector
+        """
+        # Reset game state
+        self.score = 0
+        self.lives = self.config.LIVES
+        self.game_over = False
+        self.won = False
+        
+        # Create paddle at center-bottom
+        paddle_x = (self.width - self.config.PADDLE_WIDTH) // 2
+        paddle_y = self.height - 50
+        self.paddle = Paddle(
+            paddle_x, paddle_y,
+            self.config.PADDLE_WIDTH,
+            self.config.PADDLE_HEIGHT,
+            self.config.PADDLE_SPEED
+        )
+        
+        # Create ball above paddle
+        self._reset_ball()
+        
+        # Create bricks
+        self._create_bricks()
+        
+        return self.get_state()
+    
+    def _reset_ball(self) -> None:
+        """Reset ball position and velocity."""
+        ball_x = self.width // 2
+        ball_y = self.height - 100
+        self.ball = Ball(
+            ball_x, ball_y,
+            self.config.BALL_RADIUS,
+            self.config.BALL_SPEED
+        )
+    
+    def _create_bricks(self) -> None:
+        """Create the grid of bricks."""
+        self.bricks = []
+        colors = self.config.COLOR_BRICK_COLORS
+        
+        for row in range(self.config.BRICK_ROWS):
+            color = colors[row % len(colors)]
+            for col in range(self.config.BRICK_COLS):
+                x = self.config.BRICK_OFFSET_LEFT + col * (self.config.BRICK_WIDTH + self.config.BRICK_PADDING)
+                y = self.config.BRICK_OFFSET_TOP + row * (self.config.BRICK_HEIGHT + self.config.BRICK_PADDING)
+                brick = Brick(x, y, self.config.BRICK_WIDTH, self.config.BRICK_HEIGHT, color)
+                self.bricks.append(brick)
+    
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, dict]:
+        """
+        Execute one game step.
+        
+        Args:
+            action: 0 = LEFT, 1 = STAY, 2 = RIGHT
+            
+        Returns:
+            (next_state, reward, done, info)
+        """
+        if self.game_over or self.won:
+            return self.get_state(), 0.0, True, self._get_info()
+        
+        reward = self.config.REWARD_STEP
+        
+        # Move paddle based on action
+        direction = action - 1  # Convert 0,1,2 to -1,0,1
+        self.paddle.move(direction, self.width)
+        
+        # Move ball
+        self.ball.move()
+        
+        # Handle collisions
+        reward += self._handle_collisions()
+        
+        # Check win condition
+        if all(not brick.alive for brick in self.bricks):
+            self.won = True
+            self.game_over = True
+            reward += self.config.REWARD_WIN
+        
+        return self.get_state(), reward, self.game_over, self._get_info()
+    
+    def _handle_collisions(self) -> float:
+        """
+        Handle all collision detection and response.
+        
+        Returns:
+            Reward from collisions
+        """
+        reward = 0.0
+        
+        # Wall collisions
+        # Left wall
+        if self.ball.x - self.ball.radius <= 0:
+            self.ball.x = self.ball.radius
+            self.ball.dx = abs(self.ball.dx)
+        
+        # Right wall
+        if self.ball.x + self.ball.radius >= self.width:
+            self.ball.x = self.width - self.ball.radius
+            self.ball.dx = -abs(self.ball.dx)
+        
+        # Top wall
+        if self.ball.y - self.ball.radius <= 0:
+            self.ball.y = self.ball.radius
+            self.ball.dy = abs(self.ball.dy)
+        
+        # Bottom (lose life)
+        if self.ball.y + self.ball.radius >= self.height:
+            self.lives -= 1
+            reward += self.config.REWARD_GAME_OVER
+            
+            if self.lives <= 0:
+                self.game_over = True
+            else:
+                self._reset_ball()
+        
+        # Paddle collision
+        if self.ball.rect.colliderect(self.paddle.rect) and self.ball.dy > 0:
+            reward += self.config.REWARD_PADDLE_HIT
+            
+            # Calculate bounce angle based on where ball hits paddle
+            # Hitting edges = sharper angle, center = straight up
+            paddle_center = self.paddle.x + self.paddle.width / 2
+            ball_paddle_offset = (self.ball.x - paddle_center) / (self.paddle.width / 2)
+            
+            # New angle: -150° to -30° (upward arc)
+            angle = -np.pi/2 + ball_paddle_offset * np.pi/3
+            
+            speed = np.sqrt(self.ball.dx**2 + self.ball.dy**2)
+            self.ball.dx = speed * np.cos(angle)
+            self.ball.dy = speed * np.sin(angle)
+            
+            # Make sure ball is above paddle (prevent sticking)
+            self.ball.y = self.paddle.y - self.ball.radius - 1
+        
+        # Brick collisions
+        for brick in self.bricks:
+            if brick.alive and self.ball.rect.colliderect(brick.rect):
+                brick.alive = False
+                self.score += 10
+                reward += self.config.REWARD_BRICK_HIT
+                
+                # Determine collision side for proper bounce
+                # Calculate overlap on each side
+                ball_rect = self.ball.rect
+                brick_rect = brick.rect
+                
+                # Check which side was hit
+                overlap_left = ball_rect.right - brick_rect.left
+                overlap_right = brick_rect.right - ball_rect.left
+                overlap_top = ball_rect.bottom - brick_rect.top
+                overlap_bottom = brick_rect.bottom - ball_rect.top
+                
+                min_overlap = min(overlap_left, overlap_right, overlap_top, overlap_bottom)
+                
+                if min_overlap == overlap_left or min_overlap == overlap_right:
+                    self.ball.dx = -self.ball.dx
+                else:
+                    self.ball.dy = -self.ball.dy
+                
+                break  # Only one brick collision per frame
+        
+        return reward
+    
+    def get_state(self) -> np.ndarray:
+        """
+        Get the current game state as a normalized vector.
+        
+        Returns:
+            State vector with values in [0, 1] range (mostly)
+        """
+        # Normalize positions to [0, 1]
+        ball_x = self.ball.x / self.width
+        ball_y = self.ball.y / self.height
+        
+        # Normalize velocities (approximate range: -speed to +speed)
+        max_speed = self.config.BALL_SPEED * 1.5
+        ball_dx = (self.ball.dx / max_speed + 1) / 2  # Map [-1, 1] to [0, 1]
+        ball_dy = (self.ball.dy / max_speed + 1) / 2
+        
+        # Paddle position
+        paddle_x = self.paddle.x / (self.width - self.paddle.width)
+        
+        # Brick states (1 if alive, 0 if broken)
+        brick_states = np.array([1.0 if b.alive else 0.0 for b in self.bricks])
+        
+        # Combine into single vector
+        state = np.concatenate([
+            np.array([ball_x, ball_y, ball_dx, ball_dy, paddle_x]),
+            brick_states
+        ])
+        
+        return state.astype(np.float32)
+    
+    def _get_info(self) -> dict:
+        """Get additional game information."""
+        return {
+            'score': self.score,
+            'lives': self.lives,
+            'bricks_remaining': sum(1 for b in self.bricks if b.alive),
+            'won': self.won
+        }
+    
+    def render(self, screen: pygame.Surface) -> None:
+        """
+        Render the game to a pygame screen.
+        
+        Args:
+            screen: Pygame surface to draw on
+        """
+        # Background
+        screen.fill(self.config.COLOR_BACKGROUND)
+        
+        # Draw a subtle grid pattern
+        for x in range(0, self.width, 40):
+            pygame.draw.line(screen, (25, 25, 45), (x, 0), (x, self.height), 1)
+        for y in range(0, self.height, 40):
+            pygame.draw.line(screen, (25, 25, 45), (0, y), (self.width, y), 1)
+        
+        # Draw bricks
+        for brick in self.bricks:
+            brick.draw(screen)
+        
+        # Draw paddle
+        self.paddle.draw(screen, self.config.COLOR_PADDLE)
+        
+        # Draw ball
+        self.ball.draw(screen, self.config.COLOR_BALL)
+        
+        # Draw HUD (score and lives)
+        self._draw_hud(screen)
+    
+    def _draw_hud(self, screen: pygame.Surface) -> None:
+        """Draw heads-up display (score, lives)."""
+        font = pygame.font.Font(None, 36)
+        
+        # Score (top left)
+        score_text = font.render(f"Score: {self.score}", True, self.config.COLOR_TEXT)
+        screen.blit(score_text, (10, 10))
+        
+        # Lives (top right)
+        lives_text = font.render(f"Lives: {self.lives}", True, self.config.COLOR_TEXT)
+        screen.blit(lives_text, (self.width - 100, 10))
+        
+        # Game over or win message
+        if self.game_over:
+            big_font = pygame.font.Font(None, 72)
+            if self.won:
+                msg = "YOU WIN!"
+                color = (46, 204, 113)
+            else:
+                msg = "GAME OVER"
+                color = (231, 76, 60)
+            
+            text = big_font.render(msg, True, color)
+            text_rect = text.get_rect(center=(self.width // 2, self.height // 2))
+            
+            # Draw background box
+            box_rect = text_rect.inflate(40, 20)
+            pygame.draw.rect(screen, (0, 0, 0, 180), box_rect)
+            pygame.draw.rect(screen, color, box_rect, 3)
+            
+            screen.blit(text, text_rect)
+    
+    def close(self) -> None:
+        """Clean up resources."""
+        pass
+    
+    def seed(self, seed: int) -> None:
+        """Set random seed for reproducibility."""
+        np.random.seed(seed)
+
+
+# Test the game
+if __name__ == "__main__":
+    pygame.init()
+    config = Config()
+    screen = pygame.display.set_mode((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
+    pygame.display.set_caption("Breakout - Test")
+    clock = pygame.time.Clock()
+    
+    game = Breakout(config)
+    
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+        
+        # Get keyboard input
+        keys = pygame.key.get_pressed()
+        action = 1  # STAY
+        if keys[pygame.K_LEFT]:
+            action = 0  # LEFT
+        elif keys[pygame.K_RIGHT]:
+            action = 2  # RIGHT
+        
+        # Step game
+        state, reward, done, info = game.step(action)
+        
+        if done:
+            game.reset()
+        
+        # Render
+        game.render(screen)
+        pygame.display.flip()
+        clock.tick(config.FPS)
+    
+    pygame.quit()
+
