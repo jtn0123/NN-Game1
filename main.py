@@ -34,12 +34,13 @@ Press:
     - +/-: Adjust game speed
 """
 
-import pygame
+import pygame  # type: ignore
 import numpy as np
 import argparse
 import sys
 import os
 import time
+from typing import Optional, Callable, Any
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +58,7 @@ try:
     WEB_AVAILABLE = True
 except ImportError:
     WEB_AVAILABLE = False
+    WebDashboard = None  # type: ignore[misc,assignment]
 
 
 class GameApp:
@@ -147,19 +149,19 @@ class GameApp:
         
         # Current state
         self.state = self.game.reset()
-        self.selected_action = None
+        self.selected_action: Optional[int] = None
         
         # FPS for rendering
         self.render_fps = 60
         self.train_fps = 0  # Unlimited for headless
         
         # Web dashboard (if enabled)
-        self.web_dashboard = None
-        if hasattr(args, 'web') and args.web and WEB_AVAILABLE:
+        self.web_dashboard: Optional[Any] = None
+        if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
-            self.web_dashboard.on_pause_callback = self._toggle_pause
-            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")
-            self.web_dashboard.on_speed_callback = self._set_speed
+            self.web_dashboard.on_pause_callback = self._toggle_pause  # type: ignore[assignment]
+            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")  # type: ignore[assignment]
+            self.web_dashboard.on_speed_callback = self._set_speed  # type: ignore[assignment]
             self.web_dashboard.start()
     
     def _toggle_pause(self):
@@ -214,7 +216,7 @@ class GameApp:
         
         self.agent.epsilon = 0  # No exploration
         state = self.game.reset()
-        episode_reward = 0
+        episode_reward = 0.0
         
         while self.running:
             self._handle_events()
@@ -225,12 +227,12 @@ class GameApp:
                 
                 # Step game
                 state, reward, done, info = self.game.step(action)
-                episode_reward += reward
+                episode_reward += float(reward)
                 
                 if done:
                     print(f"   Episode complete! Score: {info['score']}, Reward: {episode_reward:.1f}")
                     state = self.game.reset()
-                    episode_reward = 0
+                    episode_reward = 0.0
                     self.episode += 1
                     self.dashboard.update(
                         self.episode, info['score'], 0, 0,
@@ -240,7 +242,7 @@ class GameApp:
                 self.selected_action = action
             
             # Render
-            self._render_frame(state, self.selected_action, {'score': info.get('score', 0)})
+            self._render_frame(state, self.selected_action if self.selected_action is not None else 1, {'score': info.get('score', 0)})
             self.clock.tick(int(self.config.FPS * self.game_speed))
         
         pygame.quit()
@@ -319,7 +321,7 @@ class GameApp:
                     
                     # Log
                     if self.episode % self.config.LOG_EVERY == 0:
-                        avg_score = np.mean(self.dashboard.scores[-100:]) if self.dashboard.scores else 0
+                        avg_score = np.mean(list(self.dashboard.scores)[-100:]) if self.dashboard.scores else 0
                         print(f"Episode {self.episode:5d} | "
                               f"Score: {info['score']:4d} | "
                               f"Avg: {avg_score:6.1f} | "
@@ -343,7 +345,8 @@ class GameApp:
             
             # Render (at controlled framerate)
             if not self.args.headless:
-                self._render_frame(state, self.selected_action, info if 'info' in dir() else {})
+                render_action = self.selected_action if self.selected_action is not None else 1
+                self._render_frame(state, render_action, info if 'info' in dir() else {})
                 self.clock.tick(int(self.render_fps * self.game_speed))
         
         # Training complete
