@@ -146,6 +146,11 @@ class NeuralNetVisualizer:
         # Cached layer positions
         self._cached_positions: Optional[List[Dict[str, Any]]] = None
         self._cached_layer_info: Optional[str] = None
+        
+        # Layout constants - adjusted to prevent overlaps
+        self.header_height = 55  # Space for title and live indicator
+        self.qvalue_height = 85  # Space for Q-values at bottom
+        self.layer_label_height = 30  # Space for layer labels
     
     def render(
         self,
@@ -259,44 +264,55 @@ class NeuralNetVisualizer:
     
     def _draw_title(self, screen: pygame.Surface, agent) -> None:
         """Draw the visualization title with training info."""
-        # Main title
+        # Main title - centered
         title = "Neural Network"
         text = self.font_title.render(title, True, (100, 180, 255))
         text_rect = text.get_rect(centerx=self.x + self.width // 2, top=self.y + 8)
         screen.blit(text, text_rect)
         
-        # Animated subtitle
+        # Second row: LIVE indicator on left, Step count on right
+        row2_y = self.y + 32
+        
+        # Animated LIVE indicator (left side of second row)
         pulse = 0.7 + 0.3 * math.sin(self.pulse_phase * 0.5)
         sub_color = (int(100 * pulse), int(200 * pulse), int(150 * pulse))
         subtitle = "● LIVE"
         sub_text = self.font_small.render(subtitle, True, sub_color)
-        sub_rect = sub_text.get_rect(centerx=self.x + self.width // 2, top=self.y + 36)
-        screen.blit(sub_text, sub_rect)
+        screen.blit(sub_text, (self.x + 10, row2_y))
         
-        # Training step counter
+        # Training step counter (right side of second row)
         step_text = self.font_small.render(f"Step: {agent.steps:,}", True, (120, 120, 140))
-        screen.blit(step_text, (self.x + 10, self.y + 8))
+        step_rect = step_text.get_rect(right=self.x + self.width - 10, top=row2_y)
+        screen.blit(step_text, step_rect)
     
     def _calculate_layer_positions(self, layer_info: List[Dict]) -> List[Dict]:
         """Calculate the position of each layer and its neurons."""
         num_layers = len(layer_info)
-        layer_spacing = (self.width - 80) / max(num_layers - 1, 1)
+        
+        # Available space after accounting for margins and header/footer
+        horizontal_margin = 30
+        available_width = self.width - (horizontal_margin * 2)
+        layer_spacing = available_width / max(num_layers - 1, 1)
+        
+        # Vertical space for neurons (between header and Q-values)
+        network_top = self.y + self.header_height + self.layer_label_height
+        network_bottom = self.y + self.height - self.qvalue_height - 10
+        available_height = network_bottom - network_top
         
         positions = []
         
         for i, info in enumerate(layer_info):
-            layer_x = self.x + 40 + i * layer_spacing
+            layer_x = self.x + horizontal_margin + i * layer_spacing
             num_neurons = min(info['neurons'], self.max_neurons)
             
-            # Calculate vertical positions
-            available_height = self.height - 200
+            # Calculate vertical positions with proper bounds
             neuron_spacing = min(
                 self.config.VIS_NEURON_SPACING,
-                available_height / max(num_neurons, 1)
+                available_height / max(num_neurons + 1, 1)
             )
             
             total_height = num_neurons * neuron_spacing
-            start_y = self.y + 70 + (available_height - total_height) / 2
+            start_y = network_top + (available_height - total_height) / 2
             
             neuron_positions = []
             for j in range(num_neurons):
@@ -518,6 +534,9 @@ class NeuralNetVisualizer:
     def _draw_layer_labels(self, screen: pygame.Surface, layer_positions: List[Dict], 
                            layer_info: List[Dict]) -> None:
         """Draw layer labels with neuron counts."""
+        # Labels go in the header area, below the title
+        label_y = self.y + self.header_height
+        
         for layer_pos, info in zip(layer_positions, layer_info):
             # Layer name
             name = info['name']
@@ -531,15 +550,14 @@ class NeuralNetVisualizer:
                 name = f"H{name.split()[-1]}" if 'Hidden' in name else name
                 color = (150, 200, 150)
             
-            # Draw label above layer
-            label_y = layer_pos['positions'][0][1] - 25 if layer_pos['positions'] else self.y + 60
+            # Draw label
             text = self.font_small.render(name, True, color)
-            text_rect = text.get_rect(centerx=int(layer_pos['x']), bottom=int(label_y))
+            text_rect = text.get_rect(centerx=int(layer_pos['x']), top=label_y)
             screen.blit(text, text_rect)
             
             # Neuron count below
             count_text = self.font_small.render(f"({layer_pos['actual_neurons']})", True, (90, 90, 110))
-            count_rect = count_text.get_rect(centerx=int(layer_pos['x']), top=int(label_y) + 2)
+            count_rect = count_text.get_rect(centerx=int(layer_pos['x']), top=label_y + 14)
             screen.blit(count_text, count_rect)
     
     def _draw_q_values(
@@ -549,8 +567,9 @@ class NeuralNetVisualizer:
         selected_action: Optional[int] = None
     ) -> None:
         """Draw enhanced Q-values visualization."""
-        qv_y = self.y + self.height - 90
-        qv_height = 80
+        # Q-values panel at the bottom
+        qv_y = self.y + self.height - self.qvalue_height
+        qv_height = self.qvalue_height - 5
         
         # Background panel
         qv_rect = pygame.Rect(self.x + 8, qv_y, self.width - 16, qv_height)
@@ -565,8 +584,10 @@ class NeuralNetVisualizer:
         q_min, q_max = q_values.min(), q_values.max()
         q_range = q_max - q_min + 1e-6
         
-        bar_width = (self.width - 50) / len(q_values)
-        bar_max_height = 40
+        # Calculate bar layout
+        content_width = self.width - 50
+        bar_width = content_width / len(q_values)
+        bar_max_height = 35
         best_action = np.argmax(q_values)
         
         for i, (q_val, label, icon) in enumerate(zip(q_values, self.action_labels, self.action_icons)):
@@ -584,7 +605,7 @@ class NeuralNetVisualizer:
                 color = (int(50 * pulse), int(220 * pulse), int(120 * pulse))
                 border_color = (100, 255, 160)
                 # Glow effect
-                glow_rect = pygame.Rect(int(bar_x) - 2, int(qv_y + 55 - bar_height) - 2,
+                glow_rect = pygame.Rect(int(bar_x) - 2, int(qv_y + 50 - bar_height) - 2,
                                        int(bar_width - 8) + 4, bar_height + 4)
                 pygame.draw.rect(screen, (30, 100, 60), glow_rect, border_radius=4)
             else:
@@ -592,7 +613,7 @@ class NeuralNetVisualizer:
                 border_color = (80, 85, 100)
             
             # Draw bar
-            bar_rect = pygame.Rect(int(bar_x), int(qv_y + 55 - bar_height),
+            bar_rect = pygame.Rect(int(bar_x), int(qv_y + 50 - bar_height),
                                   int(bar_width - 10), bar_height)
             pygame.draw.rect(screen, color, bar_rect, border_radius=4)
             pygame.draw.rect(screen, border_color, bar_rect, 1, border_radius=4)
@@ -600,14 +621,14 @@ class NeuralNetVisualizer:
             # Draw icon and label
             icon_color = (220, 220, 240) if is_selected else (120, 120, 140)
             icon_text = self.font_medium.render(icon, True, icon_color)
-            icon_rect = icon_text.get_rect(centerx=int(bar_x + bar_width / 2 - 5), top=int(qv_y + 60))
+            icon_rect = icon_text.get_rect(centerx=int(bar_x + bar_width / 2 - 5), top=int(qv_y + 55))
             screen.blit(icon_text, icon_rect)
             
             # Q-value number
             q_str = f"{q_val:.2f}"
             q_text = self.font_small.render(q_str, True, (100, 100, 120))
             q_rect = q_text.get_rect(centerx=int(bar_x + bar_width / 2 - 5), 
-                                     bottom=int(qv_y + 55 - bar_height - 2))
+                                     bottom=int(qv_y + 50 - bar_height - 2))
             screen.blit(q_text, q_rect)
     
     def _interpolate_color(

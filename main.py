@@ -288,19 +288,25 @@ class GameApp:
         self.window_width = new_width
         self.window_height = new_height
         
-        # Calculate new layout dimensions
-        # Dashboard height stays proportional but has min/max
-        self.dashboard_height = max(150, min(250, int(new_height * 0.22)))
+        # The game has a FIXED render size (config.SCREEN_WIDTH x config.SCREEN_HEIGHT)
+        # We position other elements around it
+        game_render_width = self.config.SCREEN_WIDTH   # 800
+        game_render_height = self.config.SCREEN_HEIGHT  # 600
         
-        # Available height for game and viz
-        available_height = new_height - self.dashboard_height - 20
+        # Calculate available space for visualizer (to the right of game)
+        # and dashboard (below game)
+        available_viz_width = new_width - game_render_width - 30  # 30 for margins
+        available_dashboard_height = new_height - game_render_height - 30
         
-        # Viz width scales with window but has min/max
-        self.viz_width = max(280, min(400, int(new_width * 0.25)))
+        # Viz width: use available space but cap it
+        self.viz_width = max(280, min(450, available_viz_width))
         
-        # Game display area (we'll scale the game to fit)
-        self.game_width = new_width - self.viz_width - 20
-        self.game_height = available_height
+        # Dashboard height: use available space but cap it  
+        self.dashboard_height = max(150, min(300, available_dashboard_height))
+        
+        # Game display area stays fixed
+        self.game_width = game_render_width
+        self.game_height = game_render_height
         
         # Note: Game physics dimensions stay fixed (SCREEN_WIDTH/HEIGHT in config)
         # The game rendering is scaled to fit the display area

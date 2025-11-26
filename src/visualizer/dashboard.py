@@ -235,8 +235,9 @@ class Dashboard:
         # Draw title bar
         self._draw_title_bar(screen)
         
-        # Calculate layout
-        chart_width = self.width - 200
+        # Calculate layout - cards panel width based on available space
+        cards_panel_width = 175
+        chart_width = self.width - cards_panel_width - 30  # 30 for margins
         chart_height = self.height - 50
         chart_x = self.x + 10
         chart_y = self.y + 40
@@ -245,12 +246,9 @@ class Dashboard:
         chart_rect = pygame.Rect(chart_x, chart_y, chart_width, chart_height)
         self._draw_chart(screen, chart_rect)
         
-        # Draw metric cards on the right
+        # Draw metric cards on the right (with epsilon gauge integrated)
         cards_x = self.x + chart_width + 20
-        self._draw_metric_cards(screen, cards_x, chart_y)
-        
-        # Draw mini epsilon gauge
-        self._draw_epsilon_gauge(screen, cards_x + 80, self.y + self.height - 35)
+        self._draw_metric_cards(screen, cards_x, chart_y, cards_panel_width)
     
     def _draw_background(self, screen: pygame.Surface) -> None:
         """Draw dashboard background with subtle gradient."""
@@ -280,9 +278,10 @@ class Dashboard:
         status_text = self.font_small.render("● TRAINING", True, status_color)
         screen.blit(status_text, (self.x + 200, self.y + 12))
         
-        # FPS/Speed indicator
-        speed_text = self.font_tiny.render(f"Episodes: {self.current_episode}", True, (120, 120, 140))
-        screen.blit(speed_text, (self.x + self.width - 100, self.y + 12))
+        # Episode counter on the right
+        episode_text = self.font_tiny.render(f"Episodes: {self.current_episode}", True, (120, 120, 140))
+        episode_rect = episode_text.get_rect(right=self.x + self.width - 15, top=self.y + 12)
+        screen.blit(episode_text, episode_rect)
     
     def _draw_chart(self, screen: pygame.Surface, rect: pygame.Rect) -> None:
         """Draw the main scrolling chart."""
@@ -467,10 +466,11 @@ class Dashboard:
             text = self.font_tiny.render(str(val), True, (80, 85, 100))
             screen.blit(text, (rect.left + 3, y - 5))
     
-    def _draw_metric_cards(self, screen: pygame.Surface, x: int, y: int) -> None:
-        """Draw metric cards on the right side."""
+    def _draw_metric_cards(self, screen: pygame.Surface, x: int, y: int, panel_width: int) -> None:
+        """Draw metric cards on the right side with integrated epsilon gauge."""
         card_height = 22
         card_spacing = 24
+        card_width = panel_width - 10
         
         metrics = [
             ('episode', f"{int(self.cards['episode'].value)}", ""),
@@ -486,7 +486,7 @@ class Dashboard:
             cy = y + i * card_spacing
             
             # Card background
-            card_rect = pygame.Rect(x, cy, 165, card_height)
+            card_rect = pygame.Rect(x, cy, card_width, card_height)
             pygame.draw.rect(screen, (22, 25, 38), card_rect, border_radius=4)
             pygame.draw.rect(screen, (45, 50, 65), card_rect, 1, border_radius=4)
             
@@ -498,9 +498,10 @@ class Dashboard:
             label_text = self.font_tiny.render(card.label, True, (130, 135, 150))
             screen.blit(label_text, (x + 8, cy + 4))
             
-            # Value
+            # Value - position based on card width
+            value_x = x + min(70, card_width * 0.4)
             value_text = self.font_small.render(value, True, card.color)
-            screen.blit(value_text, (x + 70, cy + 3))
+            screen.blit(value_text, (value_x, cy + 3))
             
             # Trend indicator
             if indicator:
@@ -508,31 +509,39 @@ class Dashboard:
                 if indicator == "★":
                     trend_color = self.avg_color
                 trend_text = self.font_small.render(indicator, True, trend_color)
-                screen.blit(trend_text, (x + 145, cy + 3))
+                trend_rect = trend_text.get_rect(right=x + card_width - 5, top=cy + 3)
+                screen.blit(trend_text, trend_rect)
+        
+        # Draw epsilon gauge below the cards
+        gauge_y = y + len(metrics) * card_spacing + 5
+        self._draw_epsilon_gauge(screen, x, gauge_y, card_width)
     
-    def _draw_epsilon_gauge(self, screen: pygame.Surface, x: int, y: int) -> None:
+    def _draw_epsilon_gauge(self, screen: pygame.Surface, x: int, y: int, gauge_width: int) -> None:
         """Draw a mini epsilon gauge with better visibility."""
-        # Gauge dimensions
-        gauge_width = 100
+        # Gauge dimensions - fit within the cards panel
         gauge_height = 12
         
-        # Ensure gauge fits within panel (adjust x if needed)
-        max_x = self.x + self.width - gauge_width - 15
-        x = min(x, max_x)
+        # Label above the gauge
+        label = self.font_small.render("Exploration", True, self.epsilon_color)
+        label_rect = label.get_rect(centerx=x + gauge_width // 2, bottom=y)
+        screen.blit(label, label_rect)
+        
+        # Gauge below label
+        gauge_y = y + 4
         
         # Background with subtle gradient effect
-        bg_rect = pygame.Rect(x, y, gauge_width, gauge_height)
+        bg_rect = pygame.Rect(x, gauge_y, gauge_width, gauge_height)
         pygame.draw.rect(screen, (25, 30, 45), bg_rect, border_radius=6)
         
         # Fill based on epsilon (exploration rate)
         fill_width = max(2, int(gauge_width * self.current_epsilon))
         if fill_width > 0:
             # Gradient fill effect - brighter on left
-            fill_rect = pygame.Rect(x, y, fill_width, gauge_height)
+            fill_rect = pygame.Rect(x, gauge_y, fill_width, gauge_height)
             pygame.draw.rect(screen, self.epsilon_color, fill_rect, border_radius=6)
             
             # Add highlight strip at top
-            highlight_rect = pygame.Rect(x + 2, y + 2, max(0, fill_width - 4), 3)
+            highlight_rect = pygame.Rect(x + 2, gauge_y + 2, max(0, fill_width - 4), 3)
             highlight_color = (min(255, self.epsilon_color[0] + 40), 
                              min(255, self.epsilon_color[1] + 40), 
                              min(255, self.epsilon_color[2] + 40))
@@ -546,15 +555,10 @@ class Dashboard:
             border_color = (int(70 + 30 * pulse), int(100 + 50 * pulse), int(140 + 50 * pulse))
         pygame.draw.rect(screen, border_color, bg_rect, 1, border_radius=6)
         
-        # Label above the gauge
-        label = self.font_small.render("Exploration", True, self.epsilon_color)
-        label_rect = label.get_rect(centerx=x + gauge_width // 2, bottom=y - 4)
-        screen.blit(label, label_rect)
-        
         # Percentage text inside/beside gauge
         pct_text = f"{self.current_epsilon * 100:.0f}%"
         pct_render = self.font_tiny.render(pct_text, True, (200, 210, 230))
-        pct_rect = pct_render.get_rect(right=x + gauge_width - 4, centery=y + gauge_height // 2)
+        pct_rect = pct_render.get_rect(right=x + gauge_width - 4, centery=gauge_y + gauge_height // 2)
         screen.blit(pct_render, pct_rect)
     
     def render_mini(self, screen: pygame.Surface, x: int, y: int) -> None:
