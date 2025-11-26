@@ -41,9 +41,39 @@ function initCharts() {
         animation: {
             duration: 300
         },
+        interaction: {
+            mode: 'index',
+            intersect: false
+        },
         plugins: {
             legend: {
                 display: false
+            },
+            tooltip: {
+                enabled: true,
+                backgroundColor: 'rgba(18, 20, 28, 0.95)',
+                titleColor: '#e4e6f0',
+                bodyColor: '#e4e6f0',
+                borderColor: '#64b5f6',
+                borderWidth: 1,
+                padding: 12,
+                cornerRadius: 8,
+                titleFont: {
+                    family: "'Plus Jakarta Sans', sans-serif",
+                    size: 13,
+                    weight: '600'
+                },
+                bodyFont: {
+                    family: "'JetBrains Mono', monospace",
+                    size: 12
+                },
+                displayColors: true,
+                boxPadding: 4,
+                callbacks: {
+                    title: function(context) {
+                        return 'Episode ' + context[0].label;
+                    }
+                }
             }
         },
         scales: {
@@ -83,15 +113,23 @@ function initCharts() {
                     fill: true,
                     tension: 0.4,
                     pointRadius: 0,
+                    pointHoverRadius: 6,
+                    pointHoverBackgroundColor: '#4caf50',
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
                     borderWidth: 2
                 },
                 {
-                    label: 'Average',
+                    label: 'Avg (20ep)',
                     data: [],
                     borderColor: '#ffc107',
                     backgroundColor: 'transparent',
                     tension: 0.4,
                     pointRadius: 0,
+                    pointHoverRadius: 6,
+                    pointHoverBackgroundColor: '#ffc107',
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
                     borderWidth: 3,
                     borderDash: [5, 5]
                 }
@@ -114,11 +152,29 @@ function initCharts() {
                 fill: true,
                 tension: 0.4,
                 pointRadius: 0,
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#ef5350',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2,
                 borderWidth: 2
             }]
         },
         options: {
             ...chartOptions,
+            plugins: {
+                ...chartOptions.plugins,
+                tooltip: {
+                    ...chartOptions.plugins.tooltip,
+                    callbacks: {
+                        title: function(context) {
+                            return 'Episode ' + context[0].label;
+                        },
+                        label: function(context) {
+                            return 'Loss: ' + context.parsed.y.toFixed(6);
+                        }
+                    }
+                }
+            },
             scales: {
                 ...chartOptions.scales,
                 y: {
@@ -137,17 +193,37 @@ function initCharts() {
         data: {
             labels: [],
             datasets: [{
-                label: 'Q-Value',
+                label: 'Avg Q-Value',
                 data: [],
                 borderColor: '#64b5f6',
                 backgroundColor: 'rgba(100, 181, 246, 0.1)',
                 fill: true,
                 tension: 0.4,
                 pointRadius: 0,
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#64b5f6',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2,
                 borderWidth: 2
             }]
         },
-        options: chartOptions
+        options: {
+            ...chartOptions,
+            plugins: {
+                ...chartOptions.plugins,
+                tooltip: {
+                    ...chartOptions.plugins.tooltip,
+                    callbacks: {
+                        title: function(context) {
+                            return 'Episode ' + context[0].label;
+                        },
+                        label: function(context) {
+                            return 'Q-Value: ' + context.parsed.y.toFixed(4);
+                        }
+                    }
+                }
+            }
+        }
     });
 }
 
@@ -254,7 +330,16 @@ function updateDashboard(data) {
     const speedSlider = document.getElementById('speed-slider');
     if (parseFloat(speedSlider.value) !== state.game_speed) {
         speedSlider.value = state.game_speed;
-        document.getElementById('speed-value').textContent = state.game_speed.toFixed(2) + 'x';
+        // Format display nicely
+        let displayText;
+        if (state.game_speed >= 10 || Number.isInteger(state.game_speed)) {
+            displayText = state.game_speed.toFixed(0) + 'x';
+        } else if (state.game_speed >= 1) {
+            displayText = state.game_speed.toFixed(1) + 'x';
+        } else {
+            displayText = state.game_speed.toFixed(2) + 'x';
+        }
+        document.getElementById('speed-value').textContent = displayText;
     }
 
     // Update charts
@@ -479,11 +564,34 @@ function resetEpisode() {
 }
 
 /**
- * Update game speed
+ * Update game speed with snapping to nice values
  */
 function updateSpeed(value) {
-    const speed = parseFloat(value);
-    document.getElementById('speed-value').textContent = speed.toFixed(2) + 'x';
+    let speed = parseFloat(value);
+    
+    // Snap to common values when close
+    const snapValues = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 150, 200];
+    const snapThreshold = 1.5; // snap if within this range
+    
+    for (const snap of snapValues) {
+        if (Math.abs(speed - snap) < snapThreshold && Math.abs(speed - snap) > 0.01) {
+            speed = snap;
+            document.getElementById('speed-slider').value = snap;
+            break;
+        }
+    }
+    
+    // Format display nicely
+    let displayText;
+    if (speed >= 10 || Number.isInteger(speed)) {
+        displayText = speed.toFixed(0) + 'x';
+    } else if (speed >= 1) {
+        displayText = speed.toFixed(1) + 'x';
+    } else {
+        displayText = speed.toFixed(2) + 'x';
+    }
+    
+    document.getElementById('speed-value').textContent = displayText;
     socket.emit('control', { action: 'speed', value: speed });
 }
 
