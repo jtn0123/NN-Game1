@@ -90,6 +90,18 @@ class Agent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()  # Target network is never trained directly
         
+        # Apply torch.compile() for potential speedup (PyTorch 2.0+)
+        self._compiled = False
+        if self.config.USE_TORCH_COMPILE and hasattr(torch, 'compile'):
+            try:
+                compile_mode = getattr(self.config, 'TORCH_COMPILE_MODE', 'reduce-overhead')
+                self.policy_net = torch.compile(self.policy_net, mode=compile_mode)
+                self.target_net = torch.compile(self.target_net, mode=compile_mode)
+                self._compiled = True
+                print(f"✓ torch.compile() enabled (mode={compile_mode})")
+            except Exception as e:
+                print(f"⚠ torch.compile() failed, using eager mode: {e}")
+        
         # Optimizer
         self.optimizer = optim.Adam(
             self.policy_net.parameters(),
@@ -124,7 +136,8 @@ class Agent:
             return random.randrange(self.action_size)
         
         # Exploitation: best Q-value action
-        with torch.no_grad():
+        # Use inference_mode() for better performance than no_grad()
+        with torch.inference_mode():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             q_values = self.policy_net(state_tensor)
             return q_values.argmax(dim=1).item()
@@ -139,7 +152,7 @@ class Agent:
         Returns:
             Array of Q-values for each action
         """
-        with torch.no_grad():
+        with torch.inference_mode():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             q_values = self.policy_net(state_tensor)
             return q_values.cpu().numpy()[0]

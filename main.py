@@ -12,6 +12,12 @@ Usage:
     # Train without visualization (faster)
     python main.py --headless
     
+    # TURBO MODE: Maximum speed training (~4x faster)
+    python main.py --headless --turbo --episodes 5000
+    
+    # Custom performance tuning
+    python main.py --headless --learn-every 4 --batch-size 256
+    
     # Play with a trained model
     python main.py --play --model models/breakout_best.pth
     
@@ -20,6 +26,13 @@ Usage:
     
     # Custom training parameters
     python main.py --episodes 5000 --lr 0.0001
+
+Performance Options:
+    --headless        Skip pygame entirely for max throughput
+    --turbo           Preset: learn-every=4, batch=256, torch.compile
+    --learn-every N   Learn every N steps (default: 1, try 4 for ~4x speedup)
+    --batch-size N    Training batch size (default: 128, try 256 for M4)
+    --torch-compile   Enable torch.compile() for ~20-50% extra speedup
 
 The visualization shows:
     - Left side: The game (Breakout)
@@ -433,9 +446,12 @@ class GameApp:
         print("\n" + "=" * 60)
         print("🧠 Starting AI Training with Live Visualization")
         print("=" * 60)
-        print(f"   Episodes: {self.config.MAX_EPISODES}")
-        print(f"   Learning Rate: {self.config.LEARNING_RATE}")
-        print(f"   Device: {self.config.DEVICE}")
+        print(f"   Episodes:       {self.config.MAX_EPISODES}")
+        print(f"   Learning Rate:  {self.config.LEARNING_RATE}")
+        print(f"   Device:         {self.config.DEVICE}")
+        print(f"   Batch Size:     {self.config.BATCH_SIZE}")
+        print(f"   Learn Every:    {self.config.LEARN_EVERY} steps")
+        print(f"   Gradient Steps: {self.config.GRADIENT_STEPS}")
         print(f"\n   Controls:")
         print(f"   - P: Pause/Resume")
         print(f"   - S: Save model")
@@ -501,8 +517,10 @@ class GameApp:
                     # Store experience
                     self.agent.remember(state, action, reward, next_state, done)
                     
-                    # Learn
-                    loss = self.agent.learn()
+                    # Learn every N steps (configurable for performance)
+                    if self.steps % self.config.LEARN_EVERY == 0:
+                        for _ in range(self.config.GRADIENT_STEPS):
+                            loss = self.agent.learn()
                     
                     # Track target network updates
                     if self.agent.steps % self.config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
@@ -716,20 +734,26 @@ class GameApp:
             )
     
     def run_headless_training(self) -> None:
-        """Run training without visualization (faster)."""
+        """Run training without visualization (faster). Use HeadlessTrainer for max speed."""
         print("\n" + "=" * 60)
         print("🚀 Starting Headless Training (No Visualization)")
         print("=" * 60)
-        print(f"   Episodes: {self.config.MAX_EPISODES}")
-        print(f"   Device: {self.config.DEVICE}")
+        print(f"   Episodes:       {self.config.MAX_EPISODES}")
+        print(f"   Device:         {self.config.DEVICE}")
+        print(f"   Batch Size:     {self.config.BATCH_SIZE}")
+        print(f"   Learn Every:    {self.config.LEARN_EVERY} steps")
+        print(f"   Gradient Steps: {self.config.GRADIENT_STEPS}")
         print("=" * 60 + "\n")
         
         state = self.game.reset()
         episode_reward = 0.0
         episode_steps = 0
+        total_steps = 0
         
-        scores = []
+        scores: list[int] = []
         start_time = time.time()
+        last_report_time = start_time
+        steps_since_report = 0
         
         for episode in range(self.config.MAX_EPISODES):
             done = False
@@ -742,25 +766,38 @@ class GameApp:
                 next_state, reward, done, info = self.game.step(action)
                 
                 self.agent.remember(state, action, reward, next_state, done)
-                self.agent.learn()
+                
+                # Learn every N steps (configurable for performance)
+                if total_steps % self.config.LEARN_EVERY == 0:
+                    for _ in range(self.config.GRADIENT_STEPS):
+                        self.agent.learn()
                 
                 state = next_state
                 episode_reward += reward
                 episode_steps += 1
+                total_steps += 1
+                steps_since_report += 1
             
             self.agent.decay_epsilon()
             scores.append(info['score'])
             
-            # Log progress
-            if episode % self.config.LOG_EVERY == 0:
+            # Time-based progress reporting
+            current_time = time.time()
+            elapsed_since_report = current_time - last_report_time
+            
+            if elapsed_since_report >= self.config.REPORT_INTERVAL_SECONDS or episode % self.config.LOG_EVERY == 0:
+                elapsed_total = current_time - start_time
+                steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 avg_score = np.mean(scores[-100:]) if scores else 0
-                elapsed = time.time() - start_time
-                eps_per_sec = episode / elapsed if elapsed > 0 else 0
+                
                 print(f"Episode {episode:5d} | "
                       f"Score: {info['score']:4d} | "
                       f"Avg: {avg_score:6.1f} | "
                       f"ε: {self.agent.epsilon:.3f} | "
-                      f"Speed: {eps_per_sec:.1f} ep/s")
+                      f"⚡ {steps_per_sec:,.0f} steps/s")
+                
+                last_report_time = current_time
+                steps_since_report = 0
             
             # Save checkpoints
             if episode % self.config.SAVE_EVERY == 0 and episode > 0:
@@ -774,9 +811,11 @@ class GameApp:
         total_time = time.time() - start_time
         print("\n" + "=" * 60)
         print("✅ Training Complete!")
-        print(f"   Total time: {total_time/60:.1f} minutes")
+        print(f"   Total time:      {total_time/60:.1f} minutes")
+        print(f"   Total steps:     {total_steps:,}")
+        print(f"   Avg steps/sec:   {total_steps/total_time:,.0f}")
         print(f"   Final avg score: {np.mean(scores[-100:]):.1f}")
-        print(f"   Best score: {max(scores)}")
+        print(f"   Best score:      {max(scores)}")
         print("=" * 60)
     
     def _handle_events(self) -> None:
@@ -890,6 +929,176 @@ class GameApp:
             print(f"💾 Model saved: {filename}")
 
 
+class HeadlessTrainer:
+    """
+    Lightweight headless trainer that skips pygame entirely.
+    
+    This provides maximum training throughput by:
+        - No pygame initialization
+        - No visualization overhead
+        - Optimized training loop with configurable learning frequency
+        - Progress reporting via terminal
+    
+    Usage:
+        python main.py --headless --turbo --episodes 5000
+    """
+    
+    def __init__(self, config: Config, args: argparse.Namespace):
+        """
+        Initialize headless trainer.
+        
+        Args:
+            config: Configuration object
+            args: Command line arguments
+        """
+        self.config = config
+        self.args = args
+        
+        # Apply CLI overrides to config
+        if args.lr:
+            config.LEARNING_RATE = args.lr
+        if args.episodes:
+            config.MAX_EPISODES = args.episodes
+        if args.learn_every:
+            config.LEARN_EVERY = args.learn_every
+        if args.gradient_steps:
+            config.GRADIENT_STEPS = args.gradient_steps
+        if args.batch_size:
+            config.BATCH_SIZE = args.batch_size
+        if args.torch_compile:
+            config.USE_TORCH_COMPILE = True
+        
+        # Apply turbo preset (overrides individual settings)
+        if args.turbo:
+            config.LEARN_EVERY = 4
+            config.BATCH_SIZE = 256
+            config.USE_TORCH_COMPILE = True
+            print("🚀 Turbo mode: learn_every=4, batch=256, torch.compile=True")
+        
+        # Create game (no pygame needed - game logic is pure Python)
+        self.game = Breakout(config)
+        
+        # Create AI agent
+        self.agent = Agent(
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=config
+        )
+        
+        # Load model if specified
+        if args.model and os.path.exists(args.model):
+            self.agent.load(args.model)
+        
+        # Create model directory
+        os.makedirs(config.MODEL_DIR, exist_ok=True)
+    
+    def train(self) -> None:
+        """Run headless training loop with optimized throughput."""
+        config = self.config
+        
+        print("\n" + "=" * 70)
+        print("🚀 HEADLESS TRAINING - Maximum Performance Mode")
+        print("=" * 70)
+        print(f"   Episodes:        {config.MAX_EPISODES}")
+        print(f"   Device:          {config.DEVICE}")
+        print(f"   Batch size:      {config.BATCH_SIZE}")
+        print(f"   Learn every:     {config.LEARN_EVERY} steps")
+        print(f"   Gradient steps:  {config.GRADIENT_STEPS}")
+        print(f"   torch.compile:   {config.USE_TORCH_COMPILE}")
+        print("=" * 70 + "\n")
+        
+        # Training state
+        scores: list[int] = []
+        total_steps = 0
+        start_time = time.time()
+        last_report_time = start_time
+        steps_since_report = 0
+        best_score = 0
+        
+        for episode in range(config.MAX_EPISODES):
+            state = self.game.reset()
+            episode_reward = 0.0
+            episode_steps = 0
+            done = False
+            
+            while not done:
+                # Select action
+                action = self.agent.select_action(state, training=True)
+                
+                # Execute action
+                next_state, reward, done, info = self.game.step(action)
+                
+                # Store experience
+                self.agent.remember(state, action, reward, next_state, done)
+                
+                # Learn every N steps
+                if total_steps % config.LEARN_EVERY == 0:
+                    for _ in range(config.GRADIENT_STEPS):
+                        self.agent.learn()
+                
+                # Update state
+                state = next_state
+                episode_reward += reward
+                episode_steps += 1
+                total_steps += 1
+                steps_since_report += 1
+            
+            # Episode complete
+            self.agent.decay_epsilon()
+            scores.append(info['score'])
+            
+            # Time-based progress reporting
+            current_time = time.time()
+            elapsed_since_report = current_time - last_report_time
+            
+            if elapsed_since_report >= config.REPORT_INTERVAL_SECONDS or episode % config.LOG_EVERY == 0:
+                elapsed_total = current_time - start_time
+                steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
+                eps_per_hour = episode / elapsed_total * 3600 if elapsed_total > 0 else 0
+                avg_score = np.mean(scores[-100:]) if scores else 0
+                
+                print(f"Ep {episode:5d} | "
+                      f"Score: {info['score']:4d} | "
+                      f"Avg: {avg_score:6.1f} | "
+                      f"ε: {self.agent.epsilon:.3f} | "
+                      f"⚡ {steps_per_sec:,.0f} steps/s | "
+                      f"📊 {eps_per_hour:,.0f} ep/hr")
+                
+                last_report_time = current_time
+                steps_since_report = 0
+            
+            # Save checkpoints
+            if info['score'] > best_score:
+                best_score = info['score']
+                self._save_model("breakout_best.pth", quiet=True)
+            
+            if episode % config.SAVE_EVERY == 0 and episode > 0:
+                self._save_model(f"breakout_ep{episode}.pth")
+        
+        # Final save
+        self._save_model("breakout_final.pth")
+        
+        # Summary
+        total_time = time.time() - start_time
+        print("\n" + "=" * 70)
+        print("✅ TRAINING COMPLETE!")
+        print("=" * 70)
+        print(f"   Total episodes:   {config.MAX_EPISODES}")
+        print(f"   Total steps:      {total_steps:,}")
+        print(f"   Total time:       {total_time/60:.1f} minutes")
+        print(f"   Avg steps/sec:    {total_steps/total_time:,.0f}")
+        print(f"   Best score:       {best_score}")
+        print(f"   Final avg score:  {np.mean(scores[-100:]):.1f}")
+        print("=" * 70)
+    
+    def _save_model(self, filename: str, quiet: bool = False) -> None:
+        """Save the current model."""
+        filepath = os.path.join(self.config.MODEL_DIR, filename)
+        self.agent.save(filepath)
+        if not quiet:
+            print(f"💾 Model saved: {filename}")
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -898,7 +1107,9 @@ def parse_args():
         epilog="""
 Examples:
     python main.py                           # Train with visualization
-    python main.py --headless                # Train without visualization (faster)
+    python main.py --headless                # Headless training (no pygame)
+    python main.py --headless --turbo        # TURBO: ~4x faster training
+    python main.py --headless --learn-every 4 --batch-size 256  # Custom tuning
     python main.py --play --model best.pth   # Watch trained agent play
     python main.py --human                   # Play the game yourself
     python main.py --episodes 5000 --lr 0.001  # Custom parameters
@@ -950,6 +1161,28 @@ Examples:
         help='Port for web dashboard (default: 5000)'
     )
     
+    # Performance tuning
+    parser.add_argument(
+        '--learn-every', type=int, default=None,
+        help='Learn every N steps (default: 1, try 4 for ~4x speedup)'
+    )
+    parser.add_argument(
+        '--gradient-steps', type=int, default=None,
+        help='Number of gradient updates per learning call (default: 1)'
+    )
+    parser.add_argument(
+        '--batch-size', type=int, default=None,
+        help='Training batch size (default: 128, try 256 for M4)'
+    )
+    parser.add_argument(
+        '--turbo', action='store_true',
+        help='Turbo mode preset: --learn-every 4 --batch-size 256 --torch-compile'
+    )
+    parser.add_argument(
+        '--torch-compile', action='store_true',
+        help='Enable torch.compile() for ~20-50%% speedup (PyTorch 2.0+)'
+    )
+    
     # Other options
     parser.add_argument(
         '--seed', type=int, default=None,
@@ -973,7 +1206,34 @@ def main():
         torch.manual_seed(args.seed)
         config.SEED = args.seed
     
-    # Create application
+    # Handle headless mode separately (no pygame)
+    if args.headless:
+        trainer = HeadlessTrainer(config, args)
+        try:
+            trainer.train()
+        except KeyboardInterrupt:
+            print("\n\n⛔ Training interrupted by user")
+            trainer._save_model("breakout_interrupted.pth")
+        return
+    
+    # Apply CLI overrides to config for visualized mode
+    if args.learn_every:
+        config.LEARN_EVERY = args.learn_every
+    if args.gradient_steps:
+        config.GRADIENT_STEPS = args.gradient_steps
+    if args.batch_size:
+        config.BATCH_SIZE = args.batch_size
+    if args.torch_compile:
+        config.USE_TORCH_COMPILE = True
+    
+    # Apply turbo preset
+    if args.turbo:
+        config.LEARN_EVERY = 4
+        config.BATCH_SIZE = 256
+        config.USE_TORCH_COMPILE = True
+        print("🚀 Turbo mode: learn_every=4, batch=256, torch.compile=True")
+    
+    # Create application (with pygame)
     app = GameApp(config, args)
     
     # Run appropriate mode
@@ -982,8 +1242,6 @@ def main():
             app.run_human_mode()
         elif args.play:
             app.run_play_mode()
-        elif args.headless:
-            app.run_headless_training()
         else:
             app.run_training()
     except KeyboardInterrupt:

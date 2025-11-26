@@ -102,8 +102,9 @@ class Config:
     GAMMA: float = 0.99
     
     # Batch size - Number of experiences to sample per training step
-    # Larger = more stable gradients but slower
-    BATCH_SIZE: int = 64
+    # Larger = more stable gradients but slower per step (better GPU utilization)
+    # M4/MPS benefits from larger batches (128-256)
+    BATCH_SIZE: int = 128
     
     # Replay buffer capacity
     # Larger = more diverse experiences but more memory
@@ -127,6 +128,26 @@ class Config:
     
     # Gradient clipping to prevent exploding gradients
     GRAD_CLIP: float = 1.0
+    
+    # =========================================================================
+    # PERFORMANCE OPTIMIZATION
+    # =========================================================================
+    
+    # Learn every N steps (1 = every step, 4 = every 4th step for ~4x speedup)
+    # Higher values reduce backward passes but may slow learning convergence
+    LEARN_EVERY: int = 1
+    
+    # Number of gradient updates per learning call
+    # Useful when LEARN_EVERY > 1 to compensate with more updates
+    GRADIENT_STEPS: int = 1
+    
+    # Use torch.compile() for potential 20-50% speedup (PyTorch 2.0+)
+    # May have initial compilation overhead but faster afterwards
+    USE_TORCH_COMPILE: bool = False  # Set True for production training
+    
+    # Compile mode: 'default', 'reduce-overhead', 'max-autotune'
+    # 'reduce-overhead' is best for small models, 'max-autotune' for large
+    TORCH_COMPILE_MODE: str = 'reduce-overhead'
     
     # =========================================================================
     # EXPLORATION SETTINGS (Epsilon-Greedy)
@@ -229,6 +250,9 @@ class Config:
     
     # Print stats every N episodes
     LOG_EVERY: int = 10
+    
+    # Report interval for headless mode (seconds between progress reports)
+    REPORT_INTERVAL_SECONDS: float = 5.0
     
     # =========================================================================
     # SYSTEM SETTINGS
