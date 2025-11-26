@@ -25,7 +25,7 @@ References:
 
 import numpy as np
 from collections import deque
-from typing import Tuple, List
+from typing import Tuple, List, Deque
 import random
 
 
@@ -58,7 +58,7 @@ class ReplayBuffer:
             capacity: Maximum number of experiences to store
         """
         self.capacity = capacity
-        self.buffer = deque(maxlen=capacity)
+        self.buffer: Deque[Tuple[np.ndarray, int, float, np.ndarray, bool]] = deque(maxlen=capacity)
     
     def push(
         self,
@@ -157,7 +157,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.beta_end = beta_end
         self.beta_decay = beta_decay
         
-        self.priorities = deque(maxlen=capacity)
+        self.priorities: Deque[float] = deque(maxlen=capacity)
         self.max_priority = 1.0
     
     def push(

@@ -179,16 +179,16 @@ class Agent:
             return None
         
         # Sample batch
-        states, actions, rewards, next_states, dones = self.memory.sample(
+        states_np, actions_np, rewards_np, next_states_np, dones_np = self.memory.sample(
             self.config.BATCH_SIZE
         )
         
         # Convert to tensors
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.LongTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        states = torch.FloatTensor(states_np).to(self.device)
+        actions = torch.LongTensor(actions_np).to(self.device)
+        rewards = torch.FloatTensor(rewards_np).to(self.device)
+        next_states = torch.FloatTensor(next_states_np).to(self.device)
+        dones = torch.FloatTensor(dones_np).to(self.device)
         
         # Compute current Q-values
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
@@ -284,7 +284,8 @@ class Agent:
         """Get average of last n losses."""
         if not self.losses:
             return 0.0
-        return np.mean(self.losses[-n:])
+        mean_value: float = float(np.mean(self.losses[-n:]))  # type: ignore[assignment]
+        return mean_value
 
 
 # Testing

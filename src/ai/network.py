@@ -24,7 +24,7 @@ Key Features:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Optional, Callable, Dict
+from typing import List, Optional, Callable, Dict, Any, cast
 import numpy as np
 
 import sys
@@ -109,15 +109,16 @@ class DQN(nn.Module):
                 nn.init.xavier_uniform_(layer.weight)
                 nn.init.constant_(layer.bias, 0.0)
     
-    def _get_activation_fn(self) -> Callable:
+    def _get_activation_fn(self) -> Callable[..., Any]:
         """Get the activation function based on config."""
-        activation_map = {
+        activation_map: Dict[str, Callable[..., Any]] = {
             'relu': F.relu,
             'leaky_relu': F.leaky_relu,
             'tanh': torch.tanh,
             'elu': F.elu,
         }
-        return activation_map.get(self.config.ACTIVATION, F.relu)
+        result = activation_map.get(self.config.ACTIVATION, F.relu)
+        return cast(Callable[..., Any], result)
     
     def _register_hooks(self) -> None:
         """Register forward hooks to capture activations."""

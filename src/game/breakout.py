@@ -275,6 +275,9 @@ class Breakout(BaseGame):
         if self.game_over or self.won:
             return self.get_state(), 0.0, True, self._get_info()
         
+        assert self.paddle is not None, "Paddle must be initialized"
+        assert self.ball is not None, "Ball must be initialized"
+        
         reward = self.config.REWARD_STEP
         
         # Move paddle based on action
@@ -315,6 +318,9 @@ class Breakout(BaseGame):
         Returns:
             Reward from collisions
         """
+        assert self.paddle is not None, "Paddle must be initialized"
+        assert self.ball is not None, "Ball must be initialized"
+        
         reward = 0.0
         
         # Wall collisions
@@ -416,6 +422,9 @@ class Breakout(BaseGame):
         Returns:
             State vector with values in [0, 1] range (mostly)
         """
+        assert self.paddle is not None, "Paddle must be initialized"
+        assert self.ball is not None, "Ball must be initialized"
+        
         # Normalize positions to [0, 1]
         ball_x = self.ball.x / self.width
         ball_y = self.ball.y / self.height
@@ -455,6 +464,9 @@ class Breakout(BaseGame):
         Args:
             screen: Pygame surface to draw on
         """
+        assert self.paddle is not None, "Paddle must be initialized"
+        assert self.ball is not None, "Ball must be initialized"
+        
         # Get screen shake offset
         shake_x, shake_y = self.particles.get_shake_offset()
         
