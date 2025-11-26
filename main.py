@@ -358,7 +358,8 @@ class GameApp:
                         self.agent.epsilon,
                         self.agent.get_average_loss(100),
                         bricks_broken=50-info.get('bricks_remaining', 50),
-                        won=info.get('won', False)
+                        won=info.get('won', False),
+                        reward=episode_reward
                     )
                     
                     # Update web dashboard if enabled
