@@ -43,7 +43,9 @@ class TestBreakoutInitialization:
     def test_initial_state_shape(self, game, config):
         """State should have correct shape."""
         state = game.get_state()
-        expected_size = 5 + config.BRICK_ROWS * config.BRICK_COLS
+        # 8 features: ball(x,y,dx,dy), paddle(x), tracking(relative_x, predicted_landing, distance_to_target)
+        # plus brick states
+        expected_size = config.STATE_SIZE
         assert state.shape == (expected_size,)
     
     def test_initial_lives(self, game, config):
@@ -74,11 +76,15 @@ class TestBreakoutStateRepresentation:
         assert -0.5 <= state[2] <= 1.5  # ball_dx
         assert -0.5 <= state[3] <= 1.5  # ball_dy
         assert 0 <= state[4] <= 1  # paddle_x
+        # New tracking features (indices 5, 6, 7)
+        assert 0 <= state[5] <= 1  # relative_x
+        assert 0 <= state[6] <= 1  # predicted_landing
+        assert 0 <= state[7] <= 1  # distance_to_target
     
     def test_brick_states_binary(self, game, config):
         """Brick states should be binary (0 or 1)."""
         state = game.get_state()
-        brick_states = state[5:]  # After ball and paddle info
+        brick_states = state[8:]  # After ball, paddle, and tracking info (8 features)
         assert all(b in [0.0, 1.0] for b in brick_states)
     
     def test_state_dtype(self, game):

@@ -176,6 +176,9 @@ class Breakout(BaseGame):
         # For state representation
         self._num_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
         
+        # For reward shaping (tracking ball)
+        self._prev_distance_to_target: float = 0.0
+        
         # Visual effects
         self.particles = ParticleSystem(max_particles=500)
         self.ball_trail = TrailRenderer(length=12)
@@ -188,8 +191,9 @@ class Breakout(BaseGame):
     @property
     def state_size(self) -> int:
         """State vector dimension."""
-        # ball(4) + paddle(1) + bricks(rows * cols)
-        return 5 + self._num_bricks
+        # ball(4) + paddle(1) + tracking(3) + bricks(rows * cols)
+        # tracking = relative_x, predicted_landing, distance_to_target
+        return 8 + self._num_bricks
     
     @property
     def action_size(self) -> int:
@@ -280,6 +284,11 @@ class Breakout(BaseGame):
         
         reward = self.config.REWARD_STEP
         
+        # Calculate distance to predicted landing BEFORE moving
+        paddle_center = self.paddle.x + self.paddle.width / 2
+        predicted_x = self._predict_landing_x()
+        prev_distance = abs(predicted_x - paddle_center)
+        
         # Move paddle based on action
         direction = action - 1  # Convert 0,1,2 to -1,0,1
         self.paddle.move(direction, self.width)
@@ -299,6 +308,19 @@ class Breakout(BaseGame):
         
         # Handle collisions
         reward += self._handle_collisions()
+        
+        # Dense reward shaping: reward for moving toward predicted landing
+        # Only apply when ball is moving toward paddle (dy > 0)
+        if self.ball.dy > 0 and not self.game_over:
+            new_paddle_center = self.paddle.x + self.paddle.width / 2
+            new_predicted_x = self._predict_landing_x()
+            curr_distance = abs(new_predicted_x - new_paddle_center)
+            
+            # Reward for reducing distance to target
+            if curr_distance < prev_distance:
+                reward += self.config.REWARD_TRACKING_GOOD
+            elif curr_distance > prev_distance:
+                reward += self.config.REWARD_TRACKING_BAD
         
         # Update particle system
         self.particles.update()
@@ -415,12 +437,55 @@ class Breakout(BaseGame):
         
         return reward
     
+    def _predict_landing_x(self) -> float:
+        """
+        Predict where the ball will land at paddle level.
+        Uses simple physics with wall bounce simulation.
+        
+        Returns:
+            Predicted x position (in pixels) where ball will reach paddle level
+        """
+        assert self.ball is not None, "Ball must be initialized"
+        assert self.paddle is not None, "Paddle must be initialized"
+        
+        # If ball is moving up, return current x (no immediate landing)
+        if self.ball.dy <= 0:
+            return self.ball.x
+        
+        # Calculate time to reach paddle level
+        target_y = self.paddle.y - self.ball.radius
+        if self.ball.y >= target_y:
+            return self.ball.x  # Already at or past paddle level
+        
+        time_to_paddle = (target_y - self.ball.y) / self.ball.dy
+        
+        # Predict x position accounting for wall bounces
+        predicted_x = self.ball.x + self.ball.dx * time_to_paddle
+        
+        # Simulate wall bounces (handle multiple bounces)
+        while predicted_x < 0 or predicted_x > self.width:
+            if predicted_x < 0:
+                predicted_x = -predicted_x
+            elif predicted_x > self.width:
+                predicted_x = 2 * self.width - predicted_x
+        
+        return predicted_x
+    
     def get_state(self) -> np.ndarray:
         """
         Get the current game state as a normalized vector.
         
         Returns:
             State vector with values in [0, 1] range (mostly)
+            
+        State components:
+            - ball_x, ball_y: Ball position (normalized)
+            - ball_dx, ball_dy: Ball velocity (normalized)
+            - paddle_x: Paddle position (normalized)
+            - relative_x: Ball x relative to paddle center (normalized, centered at 0.5)
+            - predicted_landing: Where ball will land at paddle level (normalized)
+            - distance_to_target: Distance from paddle to predicted landing (normalized)
+            - brick_states: Binary array of brick alive/broken states
         """
         assert self.paddle is not None, "Paddle must be initialized"
         assert self.ball is not None, "Ball must be initialized"
@@ -437,12 +502,30 @@ class Breakout(BaseGame):
         # Paddle position
         paddle_x = self.paddle.x / (self.width - self.paddle.width)
         
+        # NEW: Paddle center for relative calculations
+        paddle_center = self.paddle.x + self.paddle.width / 2
+        
+        # NEW: Relative position (ball x relative to paddle center)
+        # Normalized so 0.5 means ball is directly above paddle
+        relative_x = (self.ball.x - paddle_center) / self.width + 0.5
+        relative_x = np.clip(relative_x, 0.0, 1.0)
+        
+        # NEW: Predicted landing position
+        predicted_x = self._predict_landing_x()
+        predicted_landing = predicted_x / self.width
+        
+        # NEW: Distance from paddle center to predicted landing
+        # Normalized: 0.5 means paddle is at landing spot, 0 or 1 means far away
+        distance_to_target = (predicted_x - paddle_center) / self.width + 0.5
+        distance_to_target = np.clip(distance_to_target, 0.0, 1.0)
+        
         # Brick states (1 if alive, 0 if broken)
         brick_states = np.array([1.0 if b.alive else 0.0 for b in self.bricks])
         
         # Combine into single vector
         state = np.concatenate([
-            np.array([ball_x, ball_y, ball_dx, ball_dy, paddle_x]),
+            np.array([ball_x, ball_y, ball_dx, ball_dy, paddle_x,
+                      relative_x, predicted_landing, distance_to_target]),
             brick_states
         ])
         

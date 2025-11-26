@@ -166,7 +166,11 @@ class Agent:
     
     def learn(self) -> Optional[float]:
         """
-        Perform one training step.
+        Perform one training step using Double DQN.
+        
+        Double DQN reduces Q-value overestimation by:
+        1. Using policy network to SELECT the best action
+        2. Using target network to EVALUATE that action's Q-value
         
         Returns:
             Loss value if training occurred, None otherwise
@@ -193,13 +197,20 @@ class Agent:
         # Compute current Q-values
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
         
-        # Compute target Q-values
+        # Compute target Q-values using DOUBLE DQN
         with torch.no_grad():
-            next_q = self.target_net(next_states).max(dim=1)[0]
+            # Step 1: Use POLICY network to select best actions for next states
+            best_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
+            
+            # Step 2: Use TARGET network to evaluate those actions
+            next_q = self.target_net(next_states).gather(1, best_actions).squeeze(1)
+            
+            # Compute TD target
             target_q = rewards + (1 - dones) * self.config.GAMMA * next_q
         
-        # Compute loss (Mean Squared Error)
-        loss = nn.MSELoss()(current_q, target_q)
+        # Compute loss using Huber Loss (SmoothL1) instead of MSE
+        # Huber loss is less sensitive to outliers and prevents exploding gradients
+        loss = nn.SmoothL1Loss()(current_q, target_q)
         
         # Optimize
         self.optimizer.zero_grad()
@@ -216,7 +227,11 @@ class Agent:
         
         # Update step counter and target network
         self.steps += 1
-        if self.steps % self.config.TARGET_UPDATE == 0:
+        
+        # Use soft or hard target updates based on config
+        if self.config.USE_SOFT_UPDATE:
+            self._soft_update_target_network()
+        elif self.steps % self.config.TARGET_UPDATE == 0:
             self.update_target_network()
         
         # Store loss for metrics
@@ -226,8 +241,25 @@ class Agent:
         return loss_value
     
     def update_target_network(self) -> None:
-        """Copy policy network weights to target network."""
+        """Hard update: Copy policy network weights to target network."""
         self.target_net.load_state_dict(self.policy_net.state_dict())
+    
+    def _soft_update_target_network(self) -> None:
+        """
+        Soft update: Gradually blend policy network weights into target network.
+        
+        target = TAU * policy + (1 - TAU) * target
+        
+        This provides smoother, more stable learning than periodic hard updates.
+        """
+        tau = self.config.TARGET_TAU
+        for target_param, policy_param in zip(
+            self.target_net.parameters(),
+            self.policy_net.parameters()
+        ):
+            target_param.data.copy_(
+                tau * policy_param.data + (1.0 - tau) * target_param.data
+            )
     
     def decay_epsilon(self) -> None:
         """Decay exploration rate."""

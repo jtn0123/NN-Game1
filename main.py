@@ -173,6 +173,9 @@ class GameApp:
         self.render_fps = 60
         self.train_fps = 0  # Unlimited for headless
         
+        # Frame counter for screenshot timing (independent of training steps)
+        self.frame_count = 0
+        
         # Web dashboard (if enabled)
         self.web_dashboard: Optional[Any] = None
         if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
@@ -765,8 +768,9 @@ class GameApp:
         # Render dashboard
         self.dashboard.render(self.screen)
         
-        # Capture screenshot for web dashboard (every 5 frames for responsive updates)
-        if self.web_dashboard and self.steps % 5 == 0:
+        # Capture screenshot for web dashboard (every 10 frames for responsive updates)
+        self.frame_count += 1
+        if self.web_dashboard and self.frame_count % 10 == 0:
             self.web_dashboard.capture_screenshot(self.screen)
         
         # Render pause indicator

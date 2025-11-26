@@ -10,6 +10,7 @@ pygame>=2.5.0             # Game development and visualization
 
 # Visualization & Metrics
 matplotlib>=3.7.0         # Plotting training curves
+Pillow>=10.0.0            # Image processing for screenshots
 
 # Web Dashboard
 flask>=3.0.0              # Web framework

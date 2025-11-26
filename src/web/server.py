@@ -228,11 +228,26 @@ class MetricsPublisher:
         """Store a screenshot from pygame surface."""
         try:
             import pygame
-            buffer = io.BytesIO()
-            buffer.name = 'screenshot.png'
-            pygame.image.save(surface, buffer)
-            buffer.seek(0)
-            self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
+            # Convert pygame surface to raw string data
+            raw_str = pygame.image.tostring(surface, 'RGB')
+            width, height = surface.get_size()
+            
+            # Use PIL to convert to PNG
+            try:
+                from PIL import Image
+                img = Image.frombytes('RGB', (width, height), raw_str)
+                buffer = io.BytesIO()
+                img.save(buffer, format='PNG')
+                buffer.seek(0)
+                self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
+            except ImportError:
+                # Fallback: try direct pygame save to BytesIO
+                buffer = io.BytesIO()
+                # Create a temp surface copy for saving
+                temp_surface = surface.copy()
+                pygame.image.save(temp_surface, buffer, 'screenshot.png')
+                buffer.seek(0)
+                self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
         except Exception as e:
             print(f"Screenshot error: {e}")
     

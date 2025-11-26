@@ -73,8 +73,9 @@ class Config:
         """Calculate input layer size based on game state representation."""
         ball_info = 4        # x, y, dx, dy
         paddle_info = 1      # x position
+        tracking_info = 3    # relative_x, predicted_landing, distance_to_target
         brick_info = self.BRICK_ROWS * self.BRICK_COLS  # binary brick states
-        return ball_info + paddle_info + brick_info
+        return ball_info + paddle_info + tracking_info + brick_info
     
     # Action space
     ACTION_SIZE: int = 3      # LEFT, STAY, RIGHT
@@ -111,9 +112,18 @@ class Config:
     # Minimum experiences before training starts
     MEMORY_MIN: int = 1000
     
-    # Target network update frequency (in steps)
+    # Target network update frequency (in steps) - used for hard updates
     # How often to sync target network with policy network
     TARGET_UPDATE: int = 1000
+    
+    # Soft target update coefficient (TAU)
+    # If > 0, uses soft updates instead of hard updates
+    # target = TAU * policy + (1 - TAU) * target
+    # Typical values: 0.001 to 0.01
+    TARGET_TAU: float = 0.005
+    
+    # Use soft updates instead of hard updates
+    USE_SOFT_UPDATE: bool = True
     
     # Gradient clipping to prevent exploding gradients
     GRAD_CLIP: float = 1.0
@@ -164,6 +174,10 @@ class Config:
     REWARD_WIN: float = 50.0            # Clearing all bricks
     REWARD_PADDLE_HIT: float = 0.1      # Ball hitting paddle (encourages survival)
     REWARD_STEP: float = 0.0            # Small reward each step (can set negative for urgency)
+    
+    # Dense reward shaping for ball tracking
+    REWARD_TRACKING_GOOD: float = 0.01  # Reward for moving toward predicted ball landing
+    REWARD_TRACKING_BAD: float = -0.01  # Penalty for moving away from predicted landing
     
     # =========================================================================
     # VISUALIZATION SETTINGS

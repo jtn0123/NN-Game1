@@ -265,6 +265,42 @@ class TestTargetNetwork:
             agent.target_net.parameters()
         ):
             assert torch.allclose(p_param, t_param)
+    
+    def test_soft_update_target_network(self, config):
+        """Soft update should blend policy into target network."""
+        # Enable soft updates
+        config.USE_SOFT_UPDATE = True
+        config.TARGET_TAU = 0.1  # Use larger tau for easier testing
+        
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+        
+        # Store original target weights
+        original_target_weights = [
+            param.clone() for param in agent.target_net.parameters()
+        ]
+        
+        # Modify policy network significantly
+        with torch.no_grad():
+            for param in agent.policy_net.parameters():
+                param.add_(10.0)
+        
+        # Soft update
+        agent._soft_update_target_network()
+        
+        # Check that target has changed but is not equal to policy
+        for i, (t_param, p_param, orig_param) in enumerate(zip(
+            agent.target_net.parameters(),
+            agent.policy_net.parameters(),
+            original_target_weights
+        )):
+            # Target should have moved toward policy
+            assert not torch.allclose(t_param, orig_param), f"Target param {i} didn't change"
+            # But shouldn't be equal to policy (soft update)
+            assert not torch.allclose(t_param, p_param), f"Target param {i} equals policy (should be blended)"
 
 
 if __name__ == "__main__":
