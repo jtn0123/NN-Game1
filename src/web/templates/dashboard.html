@@ -34,10 +34,10 @@
                 <!-- Score Chart -->
                 <div class="chart-card">
                     <div class="card-header">
-                        <h2>📊 Training Progress</h2>
+                        <h2 data-tooltip="Shows score per episode over time. Green line = individual episode scores. Yellow dashed = 20-episode moving average. Upward trend indicates learning progress." data-tooltip-position="right">📊 Training Progress</h2>
                         <div class="chart-legend">
-                            <span class="legend-item score">● Score</span>
-                            <span class="legend-item avg">● Average</span>
+                            <span class="legend-item score" data-tooltip="Raw score for each episode">● Score</span>
+                            <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes - better shows overall trend">● Average</span>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -50,7 +50,7 @@
                     <!-- Loss Chart -->
                     <div class="chart-card half">
                         <div class="card-header">
-                            <h2>📉 Loss</h2>
+                            <h2 data-tooltip="Measures prediction error (log scale). Spikes are normal during exploration. Generally should trend downward as the AI improves its value estimates." data-tooltip-position="right">📉 Loss</h2>
                         </div>
                         <div class="chart-container small">
                             <canvas id="lossChart"></canvas>
@@ -60,7 +60,7 @@
                     <!-- Q-Value Chart -->
                     <div class="chart-card half">
                         <div class="card-header">
-                            <h2>📈 Avg Q-Value</h2>
+                            <h2 data-tooltip="Average expected future reward. Rising Q-values mean the AI is learning to recognize valuable game states. Stable or slowly increasing = healthy learning." data-tooltip-position="left">📈 Avg Q-Value</h2>
                         </div>
                         <div class="chart-container small">
                             <canvas id="qvalueChart"></canvas>
@@ -100,26 +100,26 @@
             <div class="stats-column">
                 <!-- Metrics Grid -->
                 <div class="metrics-grid">
-                    <div class="metric-card">
+                    <div class="metric-card" data-tooltip="One complete game from start to finish. Each episode ends when all bricks are cleared (win) or the ball is lost (lose)." data-tooltip-position="bottom">
                         <div class="metric-label">Episode</div>
                         <div class="metric-value" id="metric-episode">0</div>
                     </div>
-                    <div class="metric-card highlight">
+                    <div class="metric-card highlight" data-tooltip="Points earned in the current episode. The AI gets +10 points for each brick destroyed." data-tooltip-position="bottom">
                         <div class="metric-label">Current Score</div>
                         <div class="metric-value" id="metric-score">0</div>
                     </div>
-                    <div class="metric-card best">
+                    <div class="metric-card best" data-tooltip="The highest score achieved in any single episode. This shows the AI's peak performance so far." data-tooltip-position="bottom">
                         <div class="metric-label">Best Score</div>
                         <div class="metric-value" id="metric-best">0</div>
                     </div>
-                    <div class="metric-card">
+                    <div class="metric-card" data-tooltip="Percentage of recent episodes where the AI cleared all bricks. Higher = better. Calculated over a rolling window." data-tooltip-position="bottom">
                         <div class="metric-label">Win Rate</div>
                         <div class="metric-value" id="metric-winrate">0%</div>
                     </div>
                 </div>
 
                 <!-- Epsilon Gauge -->
-                <div class="gauge-card">
+                <div class="gauge-card" data-tooltip="Epsilon (ε) controls random exploration. At ε=1.0, the AI takes 100% random actions to discover new strategies. As training progresses, ε decays toward 0, making the AI rely more on learned knowledge (exploitation). This balance helps avoid getting stuck in suboptimal patterns.">
                     <div class="card-header">
                         <h3>🎲 Exploration (ε)</h3>
                         <span class="gauge-value" id="epsilon-value">1.000</span>
@@ -129,8 +129,8 @@
                             <div class="gauge-fill" id="epsilon-fill"></div>
                         </div>
                         <div class="gauge-labels">
-                            <span>Exploit</span>
-                            <span>Explore</span>
+                            <span data-tooltip="Using learned knowledge to pick the best known action" data-tooltip-position="bottom">Exploit</span>
+                            <span data-tooltip="Trying random actions to discover new strategies" data-tooltip-position="bottom">Explore</span>
                         </div>
                     </div>
                 </div>
@@ -141,31 +141,31 @@
                         <h3>⚙️ Training Stats</h3>
                     </div>
                     <div class="info-grid">
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="How wrong the AI's predictions were. Lower = better. The neural network learns by minimizing this error between predicted and actual rewards.">
                             <span class="info-label">Loss</span>
                             <span class="info-value" id="info-loss">0.0000</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="Total individual actions taken across all episodes. Each paddle movement or 'stay' decision is one step.">
                             <span class="info-label">Total Steps</span>
                             <span class="info-value" id="info-steps">0</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="Episodes completed per second. Higher speeds = faster training. Affected by game speed multiplier.">
                             <span class="info-label">Ep/s</span>
                             <span class="info-value" id="info-eps">0.0</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
                             <span class="info-label">Memory</span>
                             <span class="info-value" id="info-memory">0 / 100k</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="Average predicted future reward. Higher Q-values mean the AI expects better outcomes. Should increase during successful training as the AI learns which states lead to high scores.">
                             <span class="info-label">Avg Q-Value</span>
                             <span class="info-value" id="info-qvalue">0.00</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="How many times the 'target network' was synchronized with the main network. The target network provides stable learning targets and updates periodically to prevent oscillation.">
                             <span class="info-label">Target Updates</span>
                             <span class="info-value" id="info-target">0</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row" data-tooltip="Count of random actions (explore) vs. learned actions (exploit). Early training has more exploration; later training shifts toward exploitation.">
                             <span class="info-label">Explore/Exploit</span>
                             <span class="info-value" id="info-actions">0 / 0</span>
                         </div>
@@ -196,22 +196,22 @@
                         <h3>🎛️ Controls</h3>
                     </div>
                     <div class="controls-grid">
-                        <button class="control-btn pause" id="pause-btn" onclick="togglePause()">
+                        <button class="control-btn pause" id="pause-btn" onclick="togglePause()" data-tooltip="Pause or resume training. Keyboard: P" data-tooltip-position="bottom">
                             ⏸️ Pause
                         </button>
-                        <button class="control-btn save" onclick="saveModel()">
+                        <button class="control-btn save" onclick="saveModel()" data-tooltip="Save current neural network weights to file. Keyboard: Ctrl+S" data-tooltip-position="bottom">
                             💾 Save
                         </button>
-                        <button class="control-btn reset" onclick="resetEpisode()">
+                        <button class="control-btn reset" onclick="resetEpisode()" data-tooltip="End current episode and start fresh. Useful if AI gets stuck. Keyboard: R" data-tooltip-position="bottom">
                             🔄 Reset
                         </button>
-                        <button class="control-btn load" onclick="showLoadModal()">
+                        <button class="control-btn load" onclick="showLoadModal()" data-tooltip="Load a previously saved model to continue training or evaluate performance." data-tooltip-position="bottom">
                             📂 Load
                         </button>
                     </div>
                     
                     <!-- Speed Control -->
-                    <div class="speed-control">
+                    <div class="speed-control" data-tooltip="Game simulation speed. Higher = faster training but more CPU usage. Use 8x-16x for rapid training, 0.5x-1x to watch AI behavior clearly." data-tooltip-position="left">
                         <label class="speed-label">
                             <span>⏩ Speed</span>
                             <span id="speed-value">1.0x</span>
@@ -219,15 +219,15 @@
                         <input type="range" 
                                id="speed-slider" 
                                min="0.25" 
-                               max="4" 
+                               max="16" 
                                step="0.25" 
                                value="1"
                                oninput="updateSpeed(this.value)">
                         <div class="speed-marks">
                             <span>0.25x</span>
-                            <span>1x</span>
-                            <span>2x</span>
                             <span>4x</span>
+                            <span>8x</span>
+                            <span>16x</span>
                         </div>
                     </div>
                 </div>
@@ -239,23 +239,23 @@
                         <span class="collapse-icon" id="settings-icon">▼</span>
                     </div>
                     <div class="settings-content" id="settings-content">
-                        <div class="setting-row">
+                        <div class="setting-row" data-tooltip="How fast the network learns. Too high = unstable, overshooting. Too low = very slow learning. Default 0.0001 is a safe starting point.">
                             <label for="setting-lr">Learning Rate</label>
                             <input type="number" id="setting-lr" value="0.0001" step="0.00001" min="0">
                         </div>
-                        <div class="setting-row">
+                        <div class="setting-row" data-tooltip="Current exploration rate. Set to 1.0 to restart exploration, or lower to make AI rely more on learned behavior.">
                             <label for="setting-epsilon">Epsilon</label>
                             <input type="number" id="setting-epsilon" value="1.0" step="0.01" min="0" max="1">
                         </div>
-                        <div class="setting-row">
+                        <div class="setting-row" data-tooltip="Multiplier applied to epsilon after each episode. 0.995 means epsilon reduces by 0.5% each episode. Lower = faster decay to exploitation.">
                             <label for="setting-decay">Epsilon Decay</label>
                             <input type="number" id="setting-decay" value="0.995" step="0.001" min="0" max="1">
                         </div>
-                        <div class="setting-row">
+                        <div class="setting-row" data-tooltip="Discount factor for future rewards. 0.99 means future rewards are 99% as valuable as immediate rewards. Higher = more long-term planning.">
                             <label for="setting-gamma">Gamma</label>
                             <input type="number" id="setting-gamma" value="0.99" step="0.01" min="0" max="1">
                         </div>
-                        <div class="setting-row">
+                        <div class="setting-row" data-tooltip="Number of experiences sampled from memory per training step. Larger batches = more stable but slower learning.">
                             <label for="setting-batch">Batch Size</label>
                             <input type="number" id="setting-batch" value="64" step="8" min="8">
                         </div>
@@ -267,9 +267,9 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <span>Neural Network Game AI</span>
+            <span data-tooltip="A neural network learns to play Breakout by trial and error, improving its strategy over thousands of games.">Neural Network Game AI</span>
             <span class="separator">|</span>
-            <span>Double DQN + Prioritized Replay</span>
+            <span data-tooltip="Double DQN: Uses two networks to prevent overestimating action values. Prioritized Replay: Learns more from important experiences (surprising outcomes). These techniques make learning faster and more stable.">Double DQN + Prioritized Replay</span>
             <span class="separator">|</span>
             <span id="footer-time"></span>
         </footer>

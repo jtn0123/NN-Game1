@@ -100,17 +100,19 @@ class GameApp:
         
         # Calculate window size
         # Layout: Game (800x600) | Neural Network Viz (300) | padding
-        self.game_width = config.SCREEN_WIDTH
-        self.game_height = config.SCREEN_HEIGHT
-        self.viz_width = 300
-        self.dashboard_height = 180
+        # The game always renders at its fixed size in the top-left
+        self.game_width = config.SCREEN_WIDTH   # 800 - for reference
+        self.game_height = config.SCREEN_HEIGHT  # 600 - for reference
+        self.viz_width = 320
+        self.dashboard_height = 190
         
-        self.window_width = self.game_width + self.viz_width + 20
-        self.window_height = self.game_height + self.dashboard_height + 20
+        # Window size to fit all components
+        self.window_width = config.SCREEN_WIDTH + self.viz_width + 25
+        self.window_height = config.SCREEN_HEIGHT + self.dashboard_height + 25
         
-        # Minimum window dimensions
-        self.min_window_width = 900
-        self.min_window_height = 600
+        # Minimum window dimensions (must fit game + minimal viz/dashboard)
+        self.min_window_width = config.SCREEN_WIDTH + 300
+        self.min_window_height = config.SCREEN_HEIGHT + 160
         
         # Create resizable window
         self.screen = pygame.display.set_mode(
@@ -133,19 +135,19 @@ class GameApp:
         if args.model and os.path.exists(args.model):
             self.agent.load(args.model)
         
-        # Create visualizations
+        # Create visualizations - positioned relative to the fixed game size
         self.nn_visualizer = NeuralNetVisualizer(
             config=config,
-            x=self.game_width + 10,
+            x=config.SCREEN_WIDTH + 15,  # Right of game
             y=10,
             width=self.viz_width,
-            height=self.game_height - 10
+            height=config.SCREEN_HEIGHT - 20  # Same height as game area
         )
         
         self.dashboard = Dashboard(
             config=config,
             x=10,
-            y=self.game_height + 10,
+            y=config.SCREEN_HEIGHT + 15,  # Below game
             width=self.window_width - 20,
             height=self.dashboard_height
         )
@@ -308,21 +310,20 @@ class GameApp:
         self.game_width = game_render_width
         self.game_height = game_render_height
         
-        # Note: Game physics dimensions stay fixed (SCREEN_WIDTH/HEIGHT in config)
-        # The game rendering is scaled to fit the display area
-        
         # Update neural network visualizer position and size
-        self.nn_visualizer.x = self.game_width + 10
+        # Position it to the right of the game with some margin
+        self.nn_visualizer.x = game_render_width + 15
         self.nn_visualizer.y = 10
         self.nn_visualizer.width = self.viz_width
-        self.nn_visualizer.height = available_height - 10
+        self.nn_visualizer.height = game_render_height - 20  # Same height as game
         # Clear cached positions so they get recalculated
         self.nn_visualizer._cached_positions = None
         self.nn_visualizer._cached_layer_info = None
         
         # Update dashboard position and size
+        # Position it below the game spanning the full width
         self.dashboard.x = 10
-        self.dashboard.y = available_height + 10
+        self.dashboard.y = game_render_height + 15
         self.dashboard.width = new_width - 20
         self.dashboard.height = self.dashboard_height
     
@@ -779,11 +780,14 @@ class GameApp:
         if self.web_dashboard and self.frame_count % 10 == 0:
             self.web_dashboard.capture_screenshot(self.screen)
         
-        # Render pause indicator
+        # Render pause indicator (centered on the game area)
         if self.paused:
+            game_center_x = self.config.SCREEN_WIDTH // 2
+            game_center_y = self.config.SCREEN_HEIGHT // 2
+            
             font = pygame.font.Font(None, 72)
             text = font.render("PAUSED", True, (255, 200, 50))
-            text_rect = text.get_rect(center=(self.game_width // 2, self.game_height // 2))
+            text_rect = text.get_rect(center=(game_center_x, game_center_y))
             
             # Background with semi-transparent fill using SRCALPHA surface
             bg_rect = text_rect.inflate(40, 20)
@@ -794,11 +798,11 @@ class GameApp:
             
             self.screen.blit(text, text_rect)
         
-        # Render speed indicator if not normal
+        # Render speed indicator if not normal (top right of game area)
         if self.game_speed != 1.0:
             font = pygame.font.Font(None, 24)
             speed_text = font.render(f"Speed: {self.game_speed}x", True, (150, 150, 150))
-            self.screen.blit(speed_text, (self.game_width - 100, 10))
+            self.screen.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
         
         pygame.display.flip()
     

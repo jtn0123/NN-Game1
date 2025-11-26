@@ -1013,3 +1013,148 @@ body {
 .chart-card, .metric-card, .controls-card, .info-card, .console-card {
     animation: fadeIn 0.3s ease-out;
 }
+
+/* ============================================================
+   TOOLTIP SYSTEM
+   ============================================================ */
+
+/* Tooltip container */
+[data-tooltip] {
+    position: relative;
+    cursor: help;
+}
+
+/* Tooltip bubble */
+[data-tooltip]::before {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-primary);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    font-weight: 400;
+    font-family: var(--font-main);
+    line-height: 1.5;
+    white-space: normal;
+    width: max-content;
+    max-width: 280px;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+}
+
+/* Tooltip arrow */
+[data-tooltip]::after {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 8px solid transparent;
+    border-top-color: var(--accent-primary);
+    z-index: 1001;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+    pointer-events: none;
+}
+
+/* Show tooltip on hover */
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Right-aligned tooltip (for left column items) */
+[data-tooltip-position="right"]::before {
+    left: auto;
+    right: 0;
+    transform: translateX(0);
+}
+
+[data-tooltip-position="right"]::after {
+    left: auto;
+    right: 16px;
+    transform: translateX(0);
+}
+
+/* Left-aligned tooltip */
+[data-tooltip-position="left"]::before {
+    left: 0;
+    transform: translateX(0);
+}
+
+[data-tooltip-position="left"]::after {
+    left: 16px;
+    transform: translateX(0);
+}
+
+/* Bottom tooltip */
+[data-tooltip-position="bottom"]::before {
+    bottom: auto;
+    top: calc(100% + 10px);
+}
+
+[data-tooltip-position="bottom"]::after {
+    bottom: auto;
+    top: calc(100% + 2px);
+    border-top-color: transparent;
+    border-bottom-color: var(--accent-primary);
+}
+
+/* Tooltip help indicator */
+.has-tooltip {
+    border-bottom: 1px dashed var(--text-muted);
+}
+
+/* Info row with tooltip styling */
+.info-row[data-tooltip] {
+    cursor: help;
+    transition: background 0.2s;
+    padding: 6px 4px;
+    margin: 0 -4px;
+    border-radius: 4px;
+}
+
+.info-row[data-tooltip]:hover {
+    background: rgba(100, 181, 246, 0.05);
+}
+
+/* Metric card tooltip */
+.metric-card[data-tooltip] {
+    cursor: help;
+}
+
+/* Settings row tooltip */
+.setting-row[data-tooltip] {
+    cursor: help;
+    padding: 8px 4px;
+    margin: 0 -4px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.setting-row[data-tooltip]:hover {
+    background: rgba(100, 181, 246, 0.05);
+}
+
+/* Gauge card tooltip */
+.gauge-card[data-tooltip]::before {
+    left: auto;
+    right: 0;
+    transform: translateX(0);
+}
+
+.gauge-card[data-tooltip]::after {
+    left: auto;
+    right: 30px;
+}
