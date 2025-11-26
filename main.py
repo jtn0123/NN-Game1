@@ -329,7 +329,7 @@ class GameApp:
     
     def _set_speed(self, speed: float) -> None:
         """Set game speed (for web dashboard control)."""
-        self.game_speed = max(0.25, min(4.0, speed))
+        self.game_speed = max(0.25, min(200.0, speed))
         if self.web_dashboard:
             self.web_dashboard.log(f"⏩ Speed set to {self.game_speed}x", "action")
         print(f"⏩ Speed: {self.game_speed}x")
@@ -433,135 +433,149 @@ class GameApp:
             self._handle_events()
             
             if not self.paused:
-                # Agent selects action
-                action = self.agent.select_action(state, training=True)
-                self.selected_action = action
+                # Calculate how many training steps to run per render frame
+                # At speed 1x, run 1 step per frame
+                # At speed 10x, run 10 steps per frame
+                # At speed 100x, run 100 steps per frame
+                steps_per_frame = max(1, int(self.game_speed))
                 
-                # Track exploration vs exploitation
-                if np.random.random() < self.agent.epsilon:
-                    self.exploration_actions += 1
-                else:
-                    self.exploitation_actions += 1
-                
-                # Execute action
-                next_state, reward, done, info = self.game.step(action)
-                
-                # Track bricks broken this episode
-                if reward > 0.5:  # Brick hit reward
-                    episode_bricks_broken += 1
-                
-                # Store experience
-                self.agent.remember(state, action, reward, next_state, done)
-                
-                # Learn
-                loss = self.agent.learn()
-                
-                # Track target network updates
-                if self.agent.steps % self.config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
-                    self.target_updates += 1
-                    self.last_target_update_step = self.agent.steps
-                    if self.web_dashboard:
-                        self.web_dashboard.log(
-                            f"🎯 Target network updated (#{self.target_updates})", 
-                            "metric",
-                            {'step': self.agent.steps, 'update_number': self.target_updates}
-                        )
-                
-                # Update state
-                state = next_state
-                episode_reward += reward
-                episode_steps += 1
-                self.steps += 1
-                
-                if done:
-                    # Episode complete
-                    episode_duration = time.time() - episode_start_time
+                for _ in range(steps_per_frame):
+                    if self.paused or not self.running:
+                        break
                     
-                    # Decay epsilon
-                    old_epsilon = self.agent.epsilon
-                    self.agent.decay_epsilon()
+                    # Agent selects action
+                    action = self.agent.select_action(state, training=True)
+                    self.selected_action = action
                     
-                    # Calculate average Q-value for current state
-                    q_values = self.agent.get_q_values(state)
-                    avg_q_value = float(np.mean(q_values))
+                    # Track exploration vs exploitation
+                    if np.random.random() < self.agent.epsilon:
+                        self.exploration_actions += 1
+                    else:
+                        self.exploitation_actions += 1
                     
-                    # Update dashboard
-                    self.dashboard.update(
-                        self.episode,
-                        info['score'],
-                        self.agent.epsilon,
-                        self.agent.get_average_loss(100),
-                        bricks_broken=50-info.get('bricks_remaining', 50),
-                        won=info.get('won', False),
-                        reward=episode_reward
-                    )
+                    # Execute action
+                    next_state, reward, done, info = self.game.step(action)
                     
-                    # Update web dashboard if enabled
-                    if self.web_dashboard:
-                        self.web_dashboard.emit_metrics(
-                            episode=self.episode,
-                            score=info['score'],
-                            epsilon=self.agent.epsilon,
-                            loss=self.agent.get_average_loss(100),
-                            total_steps=self.steps,
+                    # Track bricks broken this episode
+                    if reward > 0.5:  # Brick hit reward
+                        episode_bricks_broken += 1
+                    
+                    # Store experience
+                    self.agent.remember(state, action, reward, next_state, done)
+                    
+                    # Learn
+                    loss = self.agent.learn()
+                    
+                    # Track target network updates
+                    if self.agent.steps % self.config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
+                        self.target_updates += 1
+                        self.last_target_update_step = self.agent.steps
+                        if self.web_dashboard:
+                            self.web_dashboard.log(
+                                f"🎯 Target network updated (#{self.target_updates})", 
+                                "metric",
+                                {'step': self.agent.steps, 'update_number': self.target_updates}
+                            )
+                    
+                    # Update state
+                    state = next_state
+                    episode_reward += reward
+                    episode_steps += 1
+                    self.steps += 1
+                    
+                    if done:
+                        # Episode complete
+                        episode_duration = time.time() - episode_start_time
+                        
+                        # Decay epsilon
+                        old_epsilon = self.agent.epsilon
+                        self.agent.decay_epsilon()
+                        
+                        # Calculate average Q-value for current state
+                        q_values = self.agent.get_q_values(state)
+                        avg_q_value = float(np.mean(q_values))
+                        
+                        # Update dashboard
+                        self.dashboard.update(
+                            self.episode,
+                            info['score'],
+                            self.agent.epsilon,
+                            self.agent.get_average_loss(100),
+                            bricks_broken=50-info.get('bricks_remaining', 50),
                             won=info.get('won', False),
-                            reward=episode_reward,
-                            memory_size=len(self.agent.memory),
-                            avg_q_value=avg_q_value,
-                            exploration_actions=self.exploration_actions,
-                            exploitation_actions=self.exploitation_actions,
-                            target_updates=self.target_updates,
-                            bricks_broken=episode_bricks_broken,
-                            episode_length=episode_steps
+                            reward=episode_reward
                         )
                         
-                        # Log episode completion
-                        self._log_episode_complete(
-                            info, episode_reward, episode_steps, episode_duration,
-                            episode_bricks_broken, avg_q_value, old_epsilon
-                        )
-                    
-                    # Terminal log
-                    if self.episode % self.config.LOG_EVERY == 0:
-                        avg_score = np.mean(list(self.dashboard.scores)[-100:]) if self.dashboard.scores else 0
-                        print(f"Episode {self.episode:5d} | "
-                              f"Score: {info['score']:4d} | "
-                              f"Avg: {avg_score:6.1f} | "
-                              f"ε: {self.agent.epsilon:.3f} | "
-                              f"Steps: {episode_steps:5d} | "
-                              f"Time: {episode_duration:.1f}s")
-                    
-                    # Save checkpoint
-                    if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
-                        self._save_model(f"breakout_ep{self.episode}.pth")
+                        # Update web dashboard if enabled
                         if self.web_dashboard:
-                            self.web_dashboard.log(
-                                f"💾 Checkpoint saved: breakout_ep{self.episode}.pth",
-                                "success"
+                            self.web_dashboard.emit_metrics(
+                                episode=self.episode,
+                                score=info['score'],
+                                epsilon=self.agent.epsilon,
+                                loss=self.agent.get_average_loss(100),
+                                total_steps=self.steps,
+                                won=info.get('won', False),
+                                reward=episode_reward,
+                                memory_size=len(self.agent.memory),
+                                avg_q_value=avg_q_value,
+                                exploration_actions=self.exploration_actions,
+                                exploitation_actions=self.exploitation_actions,
+                                target_updates=self.target_updates,
+                                bricks_broken=episode_bricks_broken,
+                                episode_length=episode_steps
                             )
-                    
-                    if info['score'] > self.dashboard.best_score:
-                        self._save_model("breakout_best.pth", quiet=True)
-                        if self.web_dashboard:
-                            self.web_dashboard.log(
-                                f"🏆 New best score: {info['score']}! Model saved.",
-                                "success",
-                                {'score': info['score'], 'episode': self.episode}
+                            
+                            # Log episode completion
+                            self._log_episode_complete(
+                                info, episode_reward, episode_steps, episode_duration,
+                                episode_bricks_broken, avg_q_value, old_epsilon
                             )
-                    
-                    # Reset for next episode
-                    self.episode += 1
-                    episode_reward = 0.0
-                    episode_steps = 0
-                    episode_bricks_broken = 0
-                    episode_start_time = time.time()
-                    state = self.game.reset()
+                        
+                        # Terminal log
+                        if self.episode % self.config.LOG_EVERY == 0:
+                            avg_score = np.mean(list(self.dashboard.scores)[-100:]) if self.dashboard.scores else 0
+                            print(f"Episode {self.episode:5d} | "
+                                  f"Score: {info['score']:4d} | "
+                                  f"Avg: {avg_score:6.1f} | "
+                                  f"ε: {self.agent.epsilon:.3f} | "
+                                  f"Steps: {episode_steps:5d} | "
+                                  f"Time: {episode_duration:.1f}s")
+                        
+                        # Save checkpoint
+                        if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
+                            self._save_model(f"breakout_ep{self.episode}.pth")
+                            if self.web_dashboard:
+                                self.web_dashboard.log(
+                                    f"💾 Checkpoint saved: breakout_ep{self.episode}.pth",
+                                    "success"
+                                )
+                        
+                        if info['score'] > self.dashboard.best_score:
+                            self._save_model("breakout_best.pth", quiet=True)
+                            if self.web_dashboard:
+                                self.web_dashboard.log(
+                                    f"🏆 New best score: {info['score']}! Model saved.",
+                                    "success",
+                                    {'score': info['score'], 'episode': self.episode}
+                                )
+                        
+                        # Reset for next episode
+                        self.episode += 1
+                        episode_reward = 0.0
+                        episode_steps = 0
+                        episode_bricks_broken = 0
+                        episode_start_time = time.time()
+                        state = self.game.reset()
+                        
+                        # Check if we should stop training
+                        if self.episode >= self.config.MAX_EPISODES:
+                            break
             
-            # Render (at controlled framerate)
+            # Render (at fixed 60 FPS for smooth visuals)
             if not self.args.headless:
                 render_action = self.selected_action if self.selected_action is not None else 1
                 self._render_frame(state, render_action, info if info else {})
-                self.clock.tick(int(self.render_fps * self.game_speed))
+                self.clock.tick(60)  # Fixed 60 FPS for rendering
         
         # Training complete
         self._save_model("breakout_final.pth")
