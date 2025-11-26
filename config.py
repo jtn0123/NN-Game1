@@ -132,6 +132,28 @@ class Config:
     # EPSILON_DECAY = 0.995 means epsilon *= 0.995 after each episode
     EPSILON_DECAY: float = 0.995
     
+    # Exploration decay strategy: 'exponential', 'linear', 'cosine'
+    EXPLORATION_STRATEGY: str = 'exponential'
+    
+    # Warmup episodes before epsilon starts decaying
+    EPSILON_WARMUP: int = 0
+    
+    # =========================================================================
+    # PRIORITIZED EXPERIENCE REPLAY
+    # =========================================================================
+    
+    # Enable prioritized replay (samples important experiences more often)
+    USE_PRIORITIZED_REPLAY: bool = True
+    
+    # Priority exponent (0 = uniform sampling, 1 = full prioritization)
+    PER_ALPHA: float = 0.6
+    
+    # Importance sampling start (anneals to 1.0)
+    PER_BETA_START: float = 0.4
+    
+    # Beta annealing rate per sample
+    PER_BETA_DECAY: float = 0.001
+    
     # =========================================================================
     # REWARD SHAPING
     # =========================================================================

@@ -51,6 +51,13 @@ from src.ai.trainer import Trainer
 from src.visualizer.nn_visualizer import NeuralNetVisualizer
 from src.visualizer.dashboard import Dashboard
 
+# Optional web dashboard
+try:
+    from src.web import WebDashboard
+    WEB_AVAILABLE = True
+except ImportError:
+    WEB_AVAILABLE = False
+
 
 class GameApp:
     """
@@ -145,6 +152,27 @@ class GameApp:
         # FPS for rendering
         self.render_fps = 60
         self.train_fps = 0  # Unlimited for headless
+        
+        # Web dashboard (if enabled)
+        self.web_dashboard = None
+        if hasattr(args, 'web') and args.web and WEB_AVAILABLE:
+            self.web_dashboard = WebDashboard(config, port=5000)
+            self.web_dashboard.on_pause_callback = self._toggle_pause
+            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")
+            self.web_dashboard.on_speed_callback = self._set_speed
+            self.web_dashboard.start()
+    
+    def _toggle_pause(self):
+        """Toggle pause state (for web dashboard control)."""
+        self.paused = not self.paused
+        if self.web_dashboard:
+            self.web_dashboard.publisher.set_paused(self.paused)
+        print("⏸️  Paused" if self.paused else "▶️  Resumed")
+    
+    def _set_speed(self, speed: float):
+        """Set game speed (for web dashboard control)."""
+        self.game_speed = max(0.25, min(4.0, speed))
+        print(f"⏩ Speed: {self.game_speed}x")
     
     def run_human_mode(self) -> None:
         """Run in human play mode for testing the game."""
@@ -276,6 +304,18 @@ class GameApp:
                         bricks_broken=50-info.get('bricks_remaining', 50),
                         won=info.get('won', False)
                     )
+                    
+                    # Update web dashboard if enabled
+                    if self.web_dashboard:
+                        self.web_dashboard.emit_metrics(
+                            episode=self.episode,
+                            score=info['score'],
+                            epsilon=self.agent.epsilon,
+                            loss=self.agent.get_average_loss(100),
+                            total_steps=self.steps,
+                            won=info.get('won', False),
+                            reward=episode_reward
+                        )
                     
                     # Log
                     if self.episode % self.config.LOG_EVERY == 0:
@@ -426,6 +466,10 @@ class GameApp:
         # Render dashboard
         self.dashboard.render(self.screen)
         
+        # Capture screenshot for web dashboard (every 30 frames)
+        if self.web_dashboard and self.steps % 30 == 0:
+            self.web_dashboard.capture_screenshot(self.screen)
+        
         # Render pause indicator
         if self.paused:
             font = pygame.font.Font(None, 72)
@@ -503,6 +547,16 @@ Examples:
     parser.add_argument(
         '--device', type=str, choices=['cpu', 'cuda', 'mps'],
         default=None, help='Device to use for training'
+    )
+    
+    # Web dashboard
+    parser.add_argument(
+        '--web', action='store_true',
+        help='Enable web dashboard for remote monitoring (http://localhost:5000)'
+    )
+    parser.add_argument(
+        '--port', type=int, default=5000,
+        help='Port for web dashboard (default: 5000)'
     )
     
     # Other options

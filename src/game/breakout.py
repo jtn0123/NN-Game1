@@ -23,6 +23,7 @@ from typing import Tuple, List, Optional
 import math
 
 from .base_game import BaseGame
+from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
 import sys
 sys.path.append('..')
 from config import Config
@@ -175,6 +176,12 @@ class Breakout(BaseGame):
         # For state representation
         self._num_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
         
+        # Visual effects
+        self.particles = ParticleSystem(max_particles=500)
+        self.ball_trail = TrailRenderer(length=12)
+        self.background_surface = None  # Cached gradient background
+        self._create_background()
+        
         # Initialize the game
         self.reset()
     
@@ -218,7 +225,19 @@ class Breakout(BaseGame):
         # Create bricks
         self._create_bricks()
         
+        # Reset visual effects
+        self.particles.clear()
+        self.ball_trail.clear()
+        
         return self.get_state()
+    
+    def _create_background(self) -> None:
+        """Create cached gradient background surface."""
+        self.background_surface = create_gradient_surface(
+            self.width, self.height,
+            (10, 10, 30),   # Dark blue at top
+            (25, 15, 45)    # Dark purple at bottom
+        )
     
     def _reset_ball(self) -> None:
         """Reset ball position and velocity."""
@@ -265,8 +284,21 @@ class Breakout(BaseGame):
         # Move ball
         self.ball.move()
         
+        # Update ball trail
+        self.ball_trail.update(self.ball.x, self.ball.y)
+        
+        # Emit ball trail particles
+        self.particles.emit_ball_trail(
+            self.ball.x, self.ball.y,
+            self.config.COLOR_BALL,
+            (self.ball.dx, self.ball.dy)
+        )
+        
         # Handle collisions
         reward += self._handle_collisions()
+        
+        # Update particle system
+        self.particles.update()
         
         # Check win condition
         if all(not brick.alive for brick in self.bricks):
@@ -315,6 +347,14 @@ class Breakout(BaseGame):
         if self.ball.rect.colliderect(self.paddle.rect) and self.ball.dy > 0:
             reward += self.config.REWARD_PADDLE_HIT
             
+            # Emit paddle hit particles
+            self.particles.emit_paddle_hit(
+                self.ball.x,
+                self.paddle.y,
+                self.config.COLOR_PADDLE,
+                count=8
+            )
+            
             # Calculate bounce angle based on where ball hits paddle
             # Hitting edges = sharper angle, center = straight up
             paddle_center = self.paddle.x + self.paddle.width / 2
@@ -336,6 +376,16 @@ class Breakout(BaseGame):
                 brick.alive = False
                 self.score += 10
                 reward += self.config.REWARD_BRICK_HIT
+                
+                # Emit brick destruction particles!
+                brick_center_x = brick.rect.centerx
+                brick_center_y = brick.rect.centery
+                self.particles.emit_brick_break(
+                    brick_center_x,
+                    brick_center_y,
+                    brick.color,
+                    count=15
+                )
                 
                 # Determine collision side for proper bounce
                 # Calculate overlap on each side
@@ -405,24 +455,80 @@ class Breakout(BaseGame):
         Args:
             screen: Pygame surface to draw on
         """
-        # Background
-        screen.fill(self.config.COLOR_BACKGROUND)
+        # Get screen shake offset
+        shake_x, shake_y = self.particles.get_shake_offset()
         
-        # Draw a subtle grid pattern
+        # Create offset rect for shake effect
+        if shake_x != 0 or shake_y != 0:
+            # Fill edges that might be exposed during shake
+            screen.fill((5, 5, 15))
+        
+        # Draw gradient background
+        if self.background_surface:
+            screen.blit(self.background_surface, (shake_x, shake_y))
+        else:
+            screen.fill(self.config.COLOR_BACKGROUND)
+        
+        # Draw subtle animated grid pattern
+        grid_color = (30, 30, 50)
         for x in range(0, self.width, 40):
-            pygame.draw.line(screen, (25, 25, 45), (x, 0), (x, self.height), 1)
+            pygame.draw.line(screen, grid_color, (x + shake_x, shake_y), (x + shake_x, self.height + shake_y), 1)
         for y in range(0, self.height, 40):
-            pygame.draw.line(screen, (25, 25, 45), (0, y), (self.width, y), 1)
+            pygame.draw.line(screen, grid_color, (shake_x, y + shake_y), (self.width + shake_x, y + shake_y), 1)
         
-        # Draw bricks
+        # Draw bricks with offset
         for brick in self.bricks:
-            brick.draw(screen)
+            if brick.alive:
+                # Apply shake offset
+                original_x = brick.rect.x
+                original_y = brick.rect.y
+                brick.rect.x += shake_x
+                brick.rect.y += shake_y
+                brick.draw(screen)
+                brick.rect.x = original_x
+                brick.rect.y = original_y
         
-        # Draw paddle
-        self.paddle.draw(screen, self.config.COLOR_PADDLE)
+        # Draw ball trail (behind ball)
+        self.ball_trail.draw(screen, self.config.COLOR_BALL, self.ball.radius)
         
-        # Draw ball
-        self.ball.draw(screen, self.config.COLOR_BALL)
+        # Draw particles (behind ball but in front of bricks)
+        self.particles.draw(screen)
+        
+        # Draw paddle with offset
+        paddle_color = self.config.COLOR_PADDLE
+        paddle_rect = pygame.Rect(
+            self.paddle.x + shake_x,
+            self.paddle.y + shake_y,
+            self.paddle.width,
+            self.paddle.height
+        )
+        pygame.draw.rect(screen, paddle_color, paddle_rect, border_radius=5)
+        # Paddle highlight
+        highlight = pygame.Rect(paddle_rect.x + 5, paddle_rect.y + 2, paddle_rect.width - 10, 3)
+        lighter = tuple(min(255, c + 60) for c in paddle_color)
+        pygame.draw.rect(screen, lighter, highlight, border_radius=2)
+        
+        # Draw ball with offset and enhanced glow
+        ball_x = int(self.ball.x) + shake_x
+        ball_y = int(self.ball.y) + shake_y
+        ball_color = self.config.COLOR_BALL
+        
+        # Outer glow
+        glow_radius = self.ball.radius + 6
+        glow_color = tuple(max(0, c // 3) for c in ball_color)
+        pygame.draw.circle(screen, glow_color, (ball_x, ball_y), glow_radius)
+        
+        # Inner glow
+        glow_radius = self.ball.radius + 3
+        glow_color = tuple(min(255, c + 30) for c in ball_color)
+        pygame.draw.circle(screen, glow_color, (ball_x, ball_y), glow_radius)
+        
+        # Main ball
+        pygame.draw.circle(screen, ball_color, (ball_x, ball_y), self.ball.radius)
+        
+        # Ball highlight
+        highlight_pos = (ball_x - self.ball.radius // 3, ball_y - self.ball.radius // 3)
+        pygame.draw.circle(screen, (255, 255, 255), highlight_pos, self.ball.radius // 3)
         
         # Draw HUD (score and lives)
         self._draw_hud(screen)

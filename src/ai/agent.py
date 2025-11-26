@@ -33,7 +33,7 @@ import random
 import os
 
 from .network import DQN
-from .replay_buffer import ReplayBuffer
+from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
 
 import sys
 sys.path.append('../..')
@@ -96,11 +96,21 @@ class Agent:
             lr=self.config.LEARNING_RATE
         )
         
-        # Replay buffer
-        self.memory = ReplayBuffer(capacity=self.config.MEMORY_SIZE)
+        # Replay buffer (standard or prioritized based on config)
+        self.use_per = self.config.USE_PRIORITIZED_REPLAY
+        if self.use_per:
+            self.memory = PrioritizedReplayBuffer(
+                capacity=self.config.MEMORY_SIZE,
+                alpha=self.config.PER_ALPHA,
+                beta_start=self.config.PER_BETA_START,
+                beta_decay=self.config.PER_BETA_DECAY
+            )
+        else:
+            self.memory = ReplayBuffer(capacity=self.config.MEMORY_SIZE)
         
         # Exploration
         self.epsilon = self.config.EPSILON_START
+        self.episode_count = 0  # Track episodes for warmup and decay strategies
         
         # Training step counter (for target network updates)
         self.steps = 0
@@ -168,6 +178,9 @@ class Agent:
         """
         Perform one training step.
         
+        Supports both standard and prioritized experience replay.
+        When using PER, applies importance sampling weights to the loss.
+        
         Returns:
             Loss value if training occurred, None otherwise
         """
@@ -178,10 +191,18 @@ class Agent:
         if not self.memory.is_ready(self.config.BATCH_SIZE):
             return None
         
-        # Sample batch
-        states, actions, rewards, next_states, dones = self.memory.sample(
-            self.config.BATCH_SIZE
-        )
+        # Sample batch (different return format for PER vs standard)
+        if self.use_per:
+            states, actions, rewards, next_states, dones, indices, weights = self.memory.sample(
+                self.config.BATCH_SIZE
+            )
+            weights = torch.FloatTensor(weights).to(self.device)
+        else:
+            states, actions, rewards, next_states, dones = self.memory.sample(
+                self.config.BATCH_SIZE
+            )
+            weights = None
+            indices = None
         
         # Convert to tensors
         states = torch.FloatTensor(states).to(self.device)
@@ -193,13 +214,26 @@ class Agent:
         # Compute current Q-values
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
         
-        # Compute target Q-values
+        # Compute target Q-values using Double DQN
+        # Key insight: Use policy network to SELECT actions, target network to EVALUATE them
+        # This reduces overestimation of Q-values that occurs in standard DQN
         with torch.no_grad():
-            next_q = self.target_net(next_states).max(dim=1)[0]
+            # Policy network selects the best actions for next states
+            next_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
+            # Target network evaluates those actions
+            next_q = self.target_net(next_states).gather(1, next_actions).squeeze(1)
             target_q = rewards + (1 - dones) * self.config.GAMMA * next_q
         
-        # Compute loss (Mean Squared Error)
-        loss = nn.MSELoss()(current_q, target_q)
+        # Compute TD errors (for priority updates)
+        td_errors = (current_q - target_q).detach()
+        
+        # Compute loss with importance sampling weights (if using PER)
+        if self.use_per and weights is not None:
+            # Weighted MSE loss - important samples have higher weight
+            element_wise_loss = (current_q - target_q) ** 2
+            loss = (weights * element_wise_loss).mean()
+        else:
+            loss = nn.MSELoss()(current_q, target_q)
         
         # Optimize
         self.optimizer.zero_grad()
@@ -213,6 +247,10 @@ class Agent:
             )
         
         self.optimizer.step()
+        
+        # Update priorities in PER buffer
+        if self.use_per and indices is not None:
+            self.memory.update_priorities(indices, td_errors.abs().cpu().numpy())
         
         # Update step counter and target network
         self.steps += 1
@@ -230,11 +268,55 @@ class Agent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
     
     def decay_epsilon(self) -> None:
-        """Decay exploration rate."""
-        self.epsilon = max(
-            self.config.EPSILON_END,
-            self.epsilon * self.config.EPSILON_DECAY
-        )
+        """
+        Decay exploration rate based on configured strategy.
+        
+        Strategies:
+            - exponential: epsilon *= decay_rate (default, classic DQN)
+            - linear: epsilon decreases linearly over episodes
+            - cosine: smooth cosine annealing (often better for longer training)
+        """
+        self.episode_count += 1
+        
+        # Skip decay during warmup period
+        if self.episode_count < self.config.EPSILON_WARMUP:
+            return
+        
+        effective_episode = self.episode_count - self.config.EPSILON_WARMUP
+        strategy = self.config.EXPLORATION_STRATEGY
+        
+        if strategy == 'exponential':
+            # Classic exponential decay
+            self.epsilon = max(
+                self.config.EPSILON_END,
+                self.epsilon * self.config.EPSILON_DECAY
+            )
+        
+        elif strategy == 'linear':
+            # Linear decay over episodes
+            # Calculate how many episodes to decay over based on decay rate
+            decay_episodes = int(-np.log(self.config.EPSILON_END / self.config.EPSILON_START) 
+                                / np.log(self.config.EPSILON_DECAY))
+            progress = min(1.0, effective_episode / decay_episodes)
+            self.epsilon = self.config.EPSILON_START + \
+                          (self.config.EPSILON_END - self.config.EPSILON_START) * progress
+        
+        elif strategy == 'cosine':
+            # Cosine annealing - smooth transition
+            decay_episodes = int(-np.log(self.config.EPSILON_END / self.config.EPSILON_START) 
+                                / np.log(self.config.EPSILON_DECAY))
+            progress = min(1.0, effective_episode / decay_episodes)
+            # Cosine decay from start to end
+            self.epsilon = self.config.EPSILON_END + \
+                          0.5 * (self.config.EPSILON_START - self.config.EPSILON_END) * \
+                          (1 + np.cos(np.pi * progress))
+        
+        else:
+            # Fallback to exponential
+            self.epsilon = max(
+                self.config.EPSILON_END,
+                self.epsilon * self.config.EPSILON_DECAY
+            )
     
     def save(self, filepath: str) -> None:
         """

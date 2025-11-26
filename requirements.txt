@@ -11,6 +11,11 @@ pygame>=2.5.0             # Game development and visualization
 # Visualization & Metrics
 matplotlib>=3.7.0         # Plotting training curves
 
+# Web Dashboard
+flask>=3.0.0              # Web framework
+flask-socketio>=5.3.0     # WebSocket support for real-time updates
+eventlet>=0.35.0          # Async server for SocketIO
+
 # Utilities
 tqdm>=4.65.0              # Progress bars
 dataclasses-json>=0.6.0   # Easy config serialization

@@ -1,16 +1,16 @@
 """
-Training Dashboard
-==================
+Training Dashboard - Enhanced
+=============================
 
-Displays training metrics and statistics in real-time.
+Real-time visualization of training metrics with scrolling charts.
 
 Features:
-    - Episode score history (line graph)
-    - Running average score
-    - Epsilon decay visualization
-    - Loss over time
-    - Win rate display
-    - Current episode stats
+    - Live scrolling score chart with smoothed trend line
+    - Multiple metrics on one chart (score, average, epsilon)
+    - Mini metric cards with delta indicators
+    - Color-coded performance zones
+    - Loss chart with moving average
+    - Win rate gauge
 
 This provides immediate feedback on training progress and helps
 diagnose issues (e.g., learning rate too high, epsilon not decaying).
@@ -19,28 +19,61 @@ diagnose issues (e.g., learning rate too high, epsilon not decaying).
 import pygame
 import numpy as np
 from typing import Optional, List, Tuple
+from collections import deque
 import math
+import time
 
 import sys
 sys.path.append('../..')
 from config import Config
 
 
+class MetricCard:
+    """A small card displaying a single metric with trend."""
+    
+    def __init__(self, label: str, color: Tuple[int, int, int]):
+        self.label = label
+        self.color = color
+        self.value = 0.0
+        self.prev_value = 0.0
+        self.history: deque = deque(maxlen=20)
+        
+    def update(self, value: float) -> None:
+        self.prev_value = self.value
+        self.value = value
+        self.history.append(value)
+    
+    @property
+    def delta(self) -> float:
+        return self.value - self.prev_value
+    
+    @property
+    def trend(self) -> str:
+        if len(self.history) < 2:
+            return "→"
+        recent_avg = np.mean(list(self.history)[-5:])
+        older_avg = np.mean(list(self.history)[:5]) if len(self.history) >= 5 else recent_avg
+        if recent_avg > older_avg * 1.05:
+            return "↑"
+        elif recent_avg < older_avg * 0.95:
+            return "↓"
+        return "→"
+
+
 class Dashboard:
     """
-    Training metrics dashboard.
+    Enhanced training metrics dashboard with live scrolling charts.
     
-    Displays:
-        - Score over episodes (line chart)
-        - Running average score
-        - Current epsilon
-        - Average loss
-        - Win rate
-        - Bricks broken stats
+    Features:
+        - Scrolling line charts that update in real-time
+        - Multiple metrics overlaid (score, average, epsilon scaled)
+        - Mini metric cards with trend indicators
+        - Performance zone coloring
+        - Smooth animations and transitions
     
     Example:
-        >>> dashboard = Dashboard(config, x=0, y=400, width=500, height=200)
-        >>> dashboard.update(metrics)
+        >>> dashboard = Dashboard(config, x=0, y=400, width=800, height=200)
+        >>> dashboard.update(episode, score, epsilon, loss, ...)
         >>> dashboard.render(screen)
     """
     
@@ -68,27 +101,53 @@ class Dashboard:
         self.width = width
         self.height = height
         
-        # Colors
-        self.bg_color = (20, 20, 35)
-        self.grid_color = (40, 40, 60)
-        self.text_color = (200, 200, 200)
-        self.score_color = (46, 204, 113)      # Green
-        self.avg_color = (241, 196, 15)         # Yellow
-        self.epsilon_color = (52, 152, 219)     # Blue
-        self.loss_color = (231, 76, 60)         # Red
+        # Enhanced color scheme
+        self.bg_color = (12, 14, 24)
+        self.panel_color = (18, 20, 32)
+        self.grid_color = (35, 40, 55)
+        self.text_color = (200, 205, 220)
+        
+        # Metric colors
+        self.score_color = (46, 204, 113)       # Emerald green
+        self.avg_color = (241, 196, 15)          # Gold
+        self.epsilon_color = (52, 152, 219)      # Sky blue
+        self.loss_color = (231, 76, 60)          # Red
+        self.reward_color = (155, 89, 182)       # Purple
+        
+        # Performance zone colors
+        self.zone_good = (46, 204, 113, 30)
+        self.zone_ok = (241, 196, 15, 30)
+        self.zone_bad = (231, 76, 60, 30)
         
         # Fonts
         pygame.font.init()
+        self.font_tiny = pygame.font.Font(None, 16)
         self.font_small = pygame.font.Font(None, 20)
-        self.font_medium = pygame.font.Font(None, 24)
-        self.font_large = pygame.font.Font(None, 32)
+        self.font_medium = pygame.font.Font(None, 26)
+        self.font_large = pygame.font.Font(None, 34)
+        self.font_title = pygame.font.Font(None, 30)
         
-        # Data storage
-        self.scores: List[int] = []
-        self.avg_scores: List[float] = []
-        self.epsilons: List[float] = []
-        self.losses: List[float] = []
-        self.max_history = self.config.PLOT_HISTORY_LENGTH
+        # Data storage with longer history
+        self.max_history = 200
+        self.scores: deque = deque(maxlen=self.max_history)
+        self.avg_scores: deque = deque(maxlen=self.max_history)
+        self.epsilons: deque = deque(maxlen=self.max_history)
+        self.losses: deque = deque(maxlen=self.max_history)
+        self.rewards: deque = deque(maxlen=self.max_history)
+        
+        # Smoothed values for display
+        self.smoothed_score = 0.0
+        self.smoothed_loss = 0.0
+        
+        # Metric cards
+        self.cards = {
+            'episode': MetricCard("Episode", self.text_color),
+            'score': MetricCard("Score", self.score_color),
+            'best': MetricCard("Best", self.avg_color),
+            'epsilon': MetricCard("Epsilon", self.epsilon_color),
+            'loss': MetricCard("Loss", self.loss_color),
+            'winrate': MetricCard("Win%", (150, 255, 150)),
+        }
         
         # Current stats
         self.current_episode = 0
@@ -98,6 +157,12 @@ class Dashboard:
         self.best_score = 0
         self.win_rate = 0.0
         self.total_bricks = 0
+        self.wins = 0
+        self.total_games = 0
+        
+        # Animation
+        self.pulse_phase = 0.0
+        self.scroll_offset = 0
     
     def update(
         self,
@@ -106,7 +171,8 @@ class Dashboard:
         epsilon: float,
         loss: float,
         bricks_broken: int = 0,
-        won: bool = False
+        won: bool = False,
+        reward: float = 0.0
     ) -> None:
         """
         Update dashboard with new episode data.
@@ -118,6 +184,7 @@ class Dashboard:
             loss: Average loss this episode
             bricks_broken: Number of bricks broken
             won: Whether the game was won
+            reward: Total episode reward
         """
         self.current_episode = episode
         self.current_score = score
@@ -126,126 +193,176 @@ class Dashboard:
         self.best_score = max(self.best_score, score)
         self.total_bricks += bricks_broken
         
+        if won:
+            self.wins += 1
+        self.total_games += 1
+        
         # Update history
         self.scores.append(score)
         self.epsilons.append(epsilon)
-        self.losses.append(loss)
+        self.losses.append(loss if loss > 0 else 0.001)
+        self.rewards.append(reward)
         
-        # Calculate running average
-        window = min(100, len(self.scores))
-        avg = np.mean(self.scores[-window:])
-        self.avg_scores.append(avg)
+        # Calculate running average with exponential smoothing
+        if len(self.scores) > 0:
+            window = min(100, len(self.scores))
+            avg = np.mean(list(self.scores)[-window:])
+            self.avg_scores.append(avg)
+            
+            # Smooth current values
+            self.smoothed_score = self.smoothed_score * 0.8 + score * 0.2
+            self.smoothed_loss = self.smoothed_loss * 0.9 + loss * 0.1
         
         # Calculate win rate
-        if len(self.scores) > 0:
-            recent_wins = sum(1 for s in self.scores[-100:] if s >= 300)  # Approximate win threshold
-            self.win_rate = recent_wins / min(100, len(self.scores))
+        if self.total_games > 0:
+            self.win_rate = self.wins / self.total_games
         
-        # Trim history
-        if len(self.scores) > self.max_history:
-            self.scores = self.scores[-self.max_history:]
-            self.avg_scores = self.avg_scores[-self.max_history:]
-            self.epsilons = self.epsilons[-self.max_history:]
-            self.losses = self.losses[-self.max_history:]
+        # Update metric cards
+        self.cards['episode'].update(episode)
+        self.cards['score'].update(score)
+        self.cards['best'].update(self.best_score)
+        self.cards['epsilon'].update(epsilon)
+        self.cards['loss'].update(loss)
+        self.cards['winrate'].update(self.win_rate * 100)
     
     def render(self, screen: pygame.Surface) -> None:
-        """
-        Render the dashboard.
+        """Render the enhanced dashboard."""
+        self.pulse_phase = (self.pulse_phase + 0.05) % (2 * math.pi)
         
-        Args:
-            screen: Pygame surface to draw on
-        """
-        # Draw background
+        # Draw background with gradient
         self._draw_background(screen)
         
-        # Draw title
-        self._draw_title(screen)
+        # Draw title bar
+        self._draw_title_bar(screen)
         
-        # Draw score chart
-        chart_rect = pygame.Rect(
-            self.x + 10, 
-            self.y + 40, 
-            self.width - 180, 
-            self.height - 60
-        )
+        # Calculate layout
+        chart_width = self.width - 200
+        chart_height = self.height - 50
+        chart_x = self.x + 10
+        chart_y = self.y + 40
+        
+        # Draw main chart area
+        chart_rect = pygame.Rect(chart_x, chart_y, chart_width, chart_height)
         self._draw_chart(screen, chart_rect)
         
-        # Draw stats panel
-        stats_rect = pygame.Rect(
-            self.x + self.width - 160,
-            self.y + 40,
-            150,
-            self.height - 60
-        )
-        self._draw_stats(screen, stats_rect)
+        # Draw metric cards on the right
+        cards_x = self.x + chart_width + 20
+        self._draw_metric_cards(screen, cards_x, chart_y)
+        
+        # Draw mini epsilon gauge
+        self._draw_epsilon_gauge(screen, cards_x + 80, self.y + self.height - 35)
     
     def _draw_background(self, screen: pygame.Surface) -> None:
-        """Draw dashboard background."""
+        """Draw dashboard background with subtle gradient."""
         rect = pygame.Rect(self.x, self.y, self.width, self.height)
-        pygame.draw.rect(screen, self.bg_color, rect)
-        pygame.draw.rect(screen, (50, 50, 70), rect, 2)
+        
+        # Gradient background
+        for i in range(self.height):
+            progress = i / self.height
+            r = int(self.bg_color[0] + (self.panel_color[0] - self.bg_color[0]) * progress * 0.5)
+            g = int(self.bg_color[1] + (self.panel_color[1] - self.bg_color[1]) * progress * 0.5)
+            b = int(self.bg_color[2] + (self.panel_color[2] - self.bg_color[2]) * progress * 0.5)
+            pygame.draw.line(screen, (r, g, b), 
+                           (self.x, self.y + i), (self.x + self.width, self.y + i))
+        
+        # Border
+        pygame.draw.rect(screen, (45, 50, 70), rect, 2, border_radius=5)
     
-    def _draw_title(self, screen: pygame.Surface) -> None:
-        """Draw dashboard title."""
-        title = self.font_large.render("Training Progress", True, (100, 200, 255))
-        screen.blit(title, (self.x + 10, self.y + 8))
+    def _draw_title_bar(self, screen: pygame.Surface) -> None:
+        """Draw the title bar with training status."""
+        # Title
+        title = self.font_title.render("Training Progress", True, (100, 180, 255))
+        screen.blit(title, (self.x + 12, self.y + 8))
+        
+        # Status indicator (pulsing)
+        pulse = 0.6 + 0.4 * math.sin(self.pulse_phase)
+        status_color = (int(100 * pulse), int(220 * pulse), int(130 * pulse))
+        status_text = self.font_small.render("● TRAINING", True, status_color)
+        screen.blit(status_text, (self.x + 200, self.y + 12))
+        
+        # FPS/Speed indicator
+        speed_text = self.font_tiny.render(f"Episodes: {self.current_episode}", True, (120, 120, 140))
+        screen.blit(speed_text, (self.x + self.width - 100, self.y + 12))
     
     def _draw_chart(self, screen: pygame.Surface, rect: pygame.Rect) -> None:
-        """Draw the score history chart."""
+        """Draw the main scrolling chart."""
         # Background
-        pygame.draw.rect(screen, (15, 15, 25), rect)
-        pygame.draw.rect(screen, (50, 50, 70), rect, 1)
+        pygame.draw.rect(screen, (8, 10, 18), rect, border_radius=5)
+        pygame.draw.rect(screen, (40, 45, 60), rect, 1, border_radius=5)
         
         # Grid lines
-        for i in range(5):
-            y = rect.top + i * rect.height // 4
-            pygame.draw.line(
-                screen, self.grid_color,
-                (rect.left, y), (rect.right, y), 1
-            )
+        num_h_lines = 4
+        for i in range(1, num_h_lines + 1):
+            y = rect.top + (i * rect.height // (num_h_lines + 1))
+            pygame.draw.line(screen, self.grid_color, (rect.left + 5, y), (rect.right - 5, y), 1)
+        
+        num_v_lines = 6
+        for i in range(1, num_v_lines + 1):
+            x = rect.left + (i * rect.width // (num_v_lines + 1))
+            pygame.draw.line(screen, (30, 35, 45), (x, rect.top + 5), (x, rect.bottom - 20), 1)
         
         if len(self.scores) < 2:
-            # Not enough data
-            text = self.font_medium.render("Collecting data...", True, (100, 100, 100))
+            text = self.font_medium.render("Collecting data...", True, (80, 80, 100))
             text_rect = text.get_rect(center=rect.center)
             screen.blit(text, text_rect)
             return
         
-        # Normalize data
-        max_score = max(max(self.scores), 1)
+        # Get max for scaling
+        max_score = max(max(self.scores), 50)
+        
+        # Draw performance zones (subtle background)
+        self._draw_performance_zones(screen, rect, max_score)
+        
+        # Draw filled area under score line
+        self._draw_filled_area(screen, rect, list(self.scores), max_score, self.score_color)
         
         # Draw score line
-        self._draw_line_graph(
-            screen, rect, self.scores, 
-            max_score, self.score_color, alpha=180
-        )
+        self._draw_line_graph(screen, rect, list(self.scores), max_score, self.score_color, 2)
         
-        # Draw average line
-        self._draw_line_graph(
-            screen, rect, self.avg_scores,
-            max_score, self.avg_color, thickness=2
-        )
+        # Draw smoothed average line (thicker, different style)
+        if len(self.avg_scores) >= 2:
+            self._draw_line_graph(screen, rect, list(self.avg_scores), max_score, self.avg_color, 3)
+        
+        # Draw epsilon (scaled to fit)
+        if len(self.epsilons) >= 2:
+            scaled_epsilon = [e * max_score for e in self.epsilons]
+            self._draw_line_graph(screen, rect, scaled_epsilon, max_score, self.epsilon_color, 1, dashed=True)
         
         # Legend
-        legend_y = rect.bottom - 15
+        self._draw_chart_legend(screen, rect)
         
-        # Score legend
-        pygame.draw.line(
-            screen, self.score_color,
-            (rect.left + 10, legend_y),
-            (rect.left + 30, legend_y), 2
-        )
-        text = self.font_small.render("Score", True, self.score_color)
-        screen.blit(text, (rect.left + 35, legend_y - 6))
+        # Y-axis labels
+        self._draw_y_axis(screen, rect, max_score)
+    
+    def _draw_performance_zones(self, screen: pygame.Surface, rect: pygame.Rect, max_score: float) -> None:
+        """Draw subtle performance zone backgrounds."""
+        # Good zone (top 25%)
+        good_height = rect.height // 4
+        good_rect = pygame.Rect(rect.left + 2, rect.top + 2, rect.width - 4, good_height)
+        s = pygame.Surface((good_rect.width, good_rect.height), pygame.SRCALPHA)
+        s.fill((46, 204, 113, 15))
+        screen.blit(s, good_rect.topleft)
+    
+    def _draw_filled_area(self, screen: pygame.Surface, rect: pygame.Rect, 
+                          data: List[float], max_val: float, color: Tuple[int, int, int]) -> None:
+        """Draw a filled area under the line graph."""
+        if len(data) < 2:
+            return
         
-        # Average legend
-        pygame.draw.line(
-            screen, self.avg_color,
-            (rect.left + 90, legend_y),
-            (rect.left + 110, legend_y), 2
-        )
-        text = self.font_small.render("Avg (100)", True, self.avg_color)
-        screen.blit(text, (rect.left + 115, legend_y - 6))
+        points = [(rect.left, rect.bottom - 15)]
+        for i, val in enumerate(data):
+            x = rect.left + (i / max(len(data) - 1, 1)) * rect.width
+            y = rect.bottom - 15 - (val / max(max_val, 1)) * (rect.height - 25)
+            y = max(rect.top + 5, min(rect.bottom - 15, y))
+            points.append((int(x), int(y)))
+        points.append((rect.right, rect.bottom - 15))
+        
+        if len(points) >= 3:
+            # Create surface with alpha
+            s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            adjusted_points = [(p[0] - rect.left, p[1] - rect.top) for p in points]
+            pygame.draw.polygon(s, (*color, 30), adjusted_points)
+            screen.blit(s, rect.topleft)
     
     def _draw_line_graph(
         self,
@@ -255,72 +372,119 @@ class Dashboard:
         max_val: float,
         color: Tuple[int, int, int],
         thickness: int = 1,
-        alpha: int = 255
+        dashed: bool = False
     ) -> None:
-        """Draw a line graph of the data."""
+        """Draw a line graph with optional dashing."""
         if len(data) < 2:
             return
         
         points = []
         for i, val in enumerate(data):
             x = rect.left + (i / max(len(data) - 1, 1)) * rect.width
-            y = rect.bottom - (val / max(max_val, 1)) * (rect.height - 20)
-            y = max(rect.top, min(rect.bottom, y))
+            y = rect.bottom - 15 - (val / max(max_val, 1)) * (rect.height - 25)
+            y = max(rect.top + 5, min(rect.bottom - 15, y))
             points.append((int(x), int(y)))
         
-        if len(points) >= 2:
-            # Draw with alpha (create temp surface)
-            if alpha < 255:
-                for i in range(len(points) - 1):
-                    pygame.draw.line(
-                        screen, color,
-                        points[i], points[i + 1], thickness
-                    )
-            else:
+        if dashed:
+            # Draw dashed line
+            for i in range(0, len(points) - 1, 2):
+                if i + 1 < len(points):
+                    pygame.draw.line(screen, color, points[i], points[i + 1], thickness)
+        else:
+            if len(points) >= 2:
                 pygame.draw.lines(screen, color, False, points, thickness)
     
-    def _draw_stats(self, screen: pygame.Surface, rect: pygame.Rect) -> None:
-        """Draw statistics panel."""
-        # Background
-        pygame.draw.rect(screen, (25, 25, 40), rect, border_radius=5)
-        pygame.draw.rect(screen, (60, 60, 80), rect, 1, border_radius=5)
+    def _draw_chart_legend(self, screen: pygame.Surface, rect: pygame.Rect) -> None:
+        """Draw chart legend."""
+        legend_y = rect.bottom - 12
+        legend_x = rect.left + 10
         
-        stats = [
-            ("Episode", f"{self.current_episode}", self.text_color),
-            ("Score", f"{self.current_score}", self.score_color),
-            ("Best", f"{self.best_score}", self.avg_color),
-            ("Epsilon", f"{self.current_epsilon:.3f}", self.epsilon_color),
-            ("Loss", f"{self.current_loss:.4f}", self.loss_color),
-            ("Win Rate", f"{self.win_rate*100:.1f}%", (150, 255, 150)),
+        items = [
+            ("Score", self.score_color),
+            ("Avg", self.avg_color),
+            ("ε", self.epsilon_color),
         ]
         
-        y_offset = 8
-        for label, value, color in stats:
+        for label, color in items:
+            pygame.draw.line(screen, color, (legend_x, legend_y), (legend_x + 15, legend_y), 2)
+            text = self.font_tiny.render(label, True, color)
+            screen.blit(text, (legend_x + 20, legend_y - 5))
+            legend_x += 60
+    
+    def _draw_y_axis(self, screen: pygame.Surface, rect: pygame.Rect, max_val: float) -> None:
+        """Draw Y-axis labels."""
+        for i in range(5):
+            val = int(max_val * (1 - i / 4))
+            y = rect.top + 5 + (i * (rect.height - 25) // 4)
+            text = self.font_tiny.render(str(val), True, (80, 85, 100))
+            screen.blit(text, (rect.left + 3, y - 5))
+    
+    def _draw_metric_cards(self, screen: pygame.Surface, x: int, y: int) -> None:
+        """Draw metric cards on the right side."""
+        card_height = 22
+        card_spacing = 24
+        
+        metrics = [
+            ('episode', f"{int(self.cards['episode'].value)}", ""),
+            ('score', f"{int(self.current_score)}", self.cards['score'].trend),
+            ('best', f"{int(self.best_score)}", "★"),
+            ('epsilon', f"{self.current_epsilon:.3f}", self.cards['epsilon'].trend),
+            ('loss', f"{self.current_loss:.4f}", self.cards['loss'].trend),
+            ('winrate', f"{self.win_rate*100:.1f}%", self.cards['winrate'].trend),
+        ]
+        
+        for i, (key, value, indicator) in enumerate(metrics):
+            card = self.cards[key]
+            cy = y + i * card_spacing
+            
+            # Card background
+            card_rect = pygame.Rect(x, cy, 165, card_height)
+            pygame.draw.rect(screen, (22, 25, 38), card_rect, border_radius=4)
+            pygame.draw.rect(screen, (45, 50, 65), card_rect, 1, border_radius=4)
+            
+            # Color indicator bar
+            indicator_rect = pygame.Rect(x, cy, 3, card_height)
+            pygame.draw.rect(screen, card.color, indicator_rect, border_radius=2)
+            
             # Label
-            label_text = self.font_small.render(label, True, (150, 150, 150))
-            screen.blit(label_text, (rect.left + 10, rect.top + y_offset))
+            label_text = self.font_tiny.render(card.label, True, (130, 135, 150))
+            screen.blit(label_text, (x + 8, cy + 4))
             
             # Value
-            value_text = self.font_medium.render(value, True, color)
-            screen.blit(value_text, (rect.left + 80, rect.top + y_offset - 2))
+            value_text = self.font_small.render(value, True, card.color)
+            screen.blit(value_text, (x + 70, cy + 3))
             
-            y_offset += 22
+            # Trend indicator
+            if indicator:
+                trend_color = (100, 220, 130) if indicator == "↑" else (220, 100, 100) if indicator == "↓" else (150, 150, 150)
+                if indicator == "★":
+                    trend_color = self.avg_color
+                trend_text = self.font_small.render(indicator, True, trend_color)
+                screen.blit(trend_text, (x + 145, cy + 3))
     
-    def render_mini(
-        self,
-        screen: pygame.Surface,
-        x: int,
-        y: int
-    ) -> None:
-        """
-        Render a minimal stats display.
+    def _draw_epsilon_gauge(self, screen: pygame.Surface, x: int, y: int) -> None:
+        """Draw a mini epsilon gauge."""
+        # Gauge background
+        gauge_width = 80
+        gauge_height = 8
         
-        Args:
-            screen: Pygame surface
-            x: X position
-            y: Y position
-        """
-        # Compact stats display
+        pygame.draw.rect(screen, (30, 35, 50), (x, y, gauge_width, gauge_height), border_radius=4)
+        
+        # Fill based on epsilon
+        fill_width = int(gauge_width * self.current_epsilon)
+        if fill_width > 0:
+            fill_color = self.epsilon_color
+            pygame.draw.rect(screen, fill_color, (x, y, fill_width, gauge_height), border_radius=4)
+        
+        # Border
+        pygame.draw.rect(screen, (60, 70, 90), (x, y, gauge_width, gauge_height), 1, border_radius=4)
+        
+        # Label
+        label = self.font_tiny.render("Exploration", True, (100, 105, 120))
+        screen.blit(label, (x, y - 12))
+    
+    def render_mini(self, screen: pygame.Surface, x: int, y: int) -> None:
+        """Render a minimal stats display."""
         text = (
             f"Ep: {self.current_episode} | "
             f"Score: {self.current_score} | "
@@ -339,6 +503,5 @@ class Dashboard:
 
 # Testing
 if __name__ == "__main__":
-    print("Dashboard - import and use with pygame")
+    print("Dashboard - Enhanced version")
     print("See main.py for usage example")
-

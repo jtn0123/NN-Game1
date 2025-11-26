@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Network AI - Training Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>🧠 Neural Network AI</h1>
+                <span class="subtitle">Breakout Training Dashboard</span>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator" id="status-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Column: Charts -->
+            <div class="charts-column">
+                <!-- Score Chart -->
+                <div class="chart-card">
+                    <div class="card-header">
+                        <h2>📊 Training Progress</h2>
+                        <div class="chart-legend">
+                            <span class="legend-item score">● Score</span>
+                            <span class="legend-item avg">● Average</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="scoreChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Loss Chart -->
+                <div class="chart-card">
+                    <div class="card-header">
+                        <h2>📉 Loss Over Time</h2>
+                    </div>
+                    <div class="chart-container small">
+                        <canvas id="lossChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Stats & Game -->
+            <div class="stats-column">
+                <!-- Metrics Grid -->
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Episode</div>
+                        <div class="metric-value" id="metric-episode">0</div>
+                    </div>
+                    <div class="metric-card highlight">
+                        <div class="metric-label">Current Score</div>
+                        <div class="metric-value" id="metric-score">0</div>
+                    </div>
+                    <div class="metric-card best">
+                        <div class="metric-label">Best Score</div>
+                        <div class="metric-value" id="metric-best">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Win Rate</div>
+                        <div class="metric-value" id="metric-winrate">0%</div>
+                    </div>
+                </div>
+
+                <!-- Epsilon Gauge -->
+                <div class="gauge-card">
+                    <div class="card-header">
+                        <h3>🎲 Exploration (ε)</h3>
+                        <span class="gauge-value" id="epsilon-value">1.000</span>
+                    </div>
+                    <div class="gauge-container">
+                        <div class="gauge-bar">
+                            <div class="gauge-fill" id="epsilon-fill"></div>
+                        </div>
+                        <div class="gauge-labels">
+                            <span>Exploit</span>
+                            <span>Explore</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Training Info -->
+                <div class="info-card">
+                    <div class="card-header">
+                        <h3>⚙️ Training Info</h3>
+                    </div>
+                    <div class="info-grid">
+                        <div class="info-row">
+                            <span class="info-label">Loss</span>
+                            <span class="info-value" id="info-loss">0.0000</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Total Steps</span>
+                            <span class="info-value" id="info-steps">0</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Status</span>
+                            <span class="info-value status-badge" id="info-status">Training</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Game Preview -->
+                <div class="preview-card">
+                    <div class="card-header">
+                        <h3>🎮 Game Preview</h3>
+                        <button class="refresh-btn" onclick="refreshScreenshot()">↻</button>
+                    </div>
+                    <div class="preview-container">
+                        <img id="game-preview" src="" alt="Game Preview">
+                        <div class="preview-placeholder" id="preview-placeholder">
+                            No preview available
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls-card">
+                    <div class="card-header">
+                        <h3>🎛️ Controls</h3>
+                    </div>
+                    <div class="controls-grid">
+                        <button class="control-btn pause" id="pause-btn" onclick="togglePause()">
+                            ⏸️ Pause
+                        </button>
+                        <button class="control-btn save" onclick="saveModel()">
+                            💾 Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span>Neural Network Game AI</span>
+            <span class="separator">|</span>
+            <span>Double DQN + Prioritized Replay</span>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
+
