@@ -765,8 +765,8 @@ class GameApp:
         # Render dashboard
         self.dashboard.render(self.screen)
         
-        # Capture screenshot for web dashboard (every 30 frames)
-        if self.web_dashboard and self.steps % 30 == 0:
+        # Capture screenshot for web dashboard (every 5 frames for responsive updates)
+        if self.web_dashboard and self.steps % 5 == 0:
             self.web_dashboard.capture_screenshot(self.screen)
         
         # Render pause indicator
