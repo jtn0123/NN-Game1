@@ -21,6 +21,10 @@ let currentLogFilter = 'all';
 let consoleLogs = [];
 const MAX_CONSOLE_LOGS = 500;
 
+// Speed slider state - prevent server updates from fighting with user input
+let lastSpeedChangeTime = 0;
+const SPEED_UPDATE_DEBOUNCE = 2000; // Ignore server speed updates for 2s after user change
+
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
@@ -326,20 +330,27 @@ function updateDashboard(data) {
     isPaused = state.is_paused;
     pauseBtn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
 
-    // Update speed slider if changed externally
+    // Update speed slider if changed externally (but not if user recently changed it)
     const speedSlider = document.getElementById('speed-slider');
-    if (parseFloat(speedSlider.value) !== state.game_speed) {
-        speedSlider.value = state.game_speed;
-        // Format display nicely
-        let displayText;
-        if (state.game_speed >= 10 || Number.isInteger(state.game_speed)) {
-            displayText = state.game_speed.toFixed(0) + 'x';
-        } else if (state.game_speed >= 1) {
-            displayText = state.game_speed.toFixed(1) + 'x';
-        } else {
-            displayText = state.game_speed.toFixed(2) + 'x';
+    const timeSinceLastChange = Date.now() - lastSpeedChangeTime;
+    if (timeSinceLastChange > SPEED_UPDATE_DEBOUNCE) {
+        // Only sync from server if user hasn't touched it recently
+        const sliderValue = parseFloat(speedSlider.value);
+        const serverValue = state.game_speed;
+        // Use tolerance for float comparison
+        if (Math.abs(sliderValue - serverValue) > 0.5) {
+            speedSlider.value = serverValue;
+            // Format display nicely
+            let displayText;
+            if (serverValue >= 10 || Number.isInteger(serverValue)) {
+                displayText = serverValue.toFixed(0) + 'x';
+            } else if (serverValue >= 1) {
+                displayText = serverValue.toFixed(1) + 'x';
+            } else {
+                displayText = serverValue.toFixed(2) + 'x';
+            }
+            document.getElementById('speed-value').textContent = displayText;
         }
-        document.getElementById('speed-value').textContent = displayText;
     }
 
     // Update charts
@@ -569,11 +580,15 @@ function resetEpisode() {
 function updateSpeed(value) {
     let speed = parseFloat(value);
     
-    // Snap to common values when close
-    const snapValues = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 150, 200];
-    const snapThreshold = 1.5; // snap if within this range
+    // Mark that user is actively changing speed (prevents server from overwriting)
+    lastSpeedChangeTime = Date.now();
+    
+    // Snap to common values when close (scaled threshold for higher values)
+    const snapValues = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 200, 250, 500, 750, 1000];
     
     for (const snap of snapValues) {
+        // Use proportional threshold (larger for bigger numbers)
+        const snapThreshold = snap < 10 ? 0.5 : snap * 0.05;
         if (Math.abs(speed - snap) < snapThreshold && Math.abs(speed - snap) > 0.01) {
             speed = snap;
             document.getElementById('speed-slider').value = snap;
