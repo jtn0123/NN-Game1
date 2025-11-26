@@ -211,23 +211,23 @@
                     </div>
                     
                     <!-- Speed Control -->
-                    <div class="speed-control" data-tooltip="Game simulation speed. Higher = faster training. Use 50x-100x for rapid training on fast hardware, 0.5x-1x to watch AI behavior clearly." data-tooltip-position="left">
+                    <div class="speed-control" data-tooltip="Training speed multiplier. Auto-targets your display's refresh rate for smooth visuals. Crank it up on fast hardware!" data-tooltip-position="left">
                         <label class="speed-label">
                             <span>⏩ Speed</span>
-                            <span id="speed-value">1.00x</span>
+                            <span id="speed-value">1x</span>
                         </label>
                         <input type="range" 
                                id="speed-slider" 
                                min="0.25" 
-                               max="200" 
-                               step="0.25" 
+                               max="1000" 
+                               step="1" 
                                value="1"
                                oninput="updateSpeed(this.value)">
                         <div class="speed-marks">
                             <span>0.25x</span>
-                            <span>50x</span>
-                            <span>100x</span>
-                            <span>200x</span>
+                            <span>250x</span>
+                            <span>500x</span>
+                            <span>1000x</span>
                         </div>
                     </div>
                 </div>

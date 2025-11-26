@@ -329,7 +329,7 @@ class GameApp:
     
     def _set_speed(self, speed: float) -> None:
         """Set game speed (for web dashboard control)."""
-        self.game_speed = max(0.25, min(200.0, speed))
+        self.game_speed = max(0.25, min(1000.0, speed))
         if self.web_dashboard:
             self.web_dashboard.log(f"⏩ Speed set to {self.game_speed}x", "action")
         print(f"⏩ Speed: {self.game_speed}x")
@@ -430,8 +430,32 @@ class GameApp:
         info: dict = {}
         
         # Adaptive training: maximize training speed while keeping visuals smooth
+        # Detect display refresh rate for optimal visual smoothness
+        try:
+            display_info = pygame.display.Info()
+            # Try to get actual refresh rate (pygame 2.0+)
+            display_refresh = 60  # Default fallback
+            try:
+                display_refresh = pygame.display.get_desktop_refresh_rates()[0]
+            except (AttributeError, IndexError):
+                # Fallback: check common high refresh rates via mode list
+                try:
+                    modes = pygame.display.list_modes()
+                    if modes and modes != -1:
+                        # Assume high-end display if high resolution available
+                        max_res = max(modes, key=lambda m: m[0] * m[1])
+                        if max_res[0] >= 2560:  # Likely a high-end display
+                            display_refresh = 120  # Assume ProMotion or similar
+                except Exception:
+                    pass
+            print(f"   Display refresh rate: {display_refresh}Hz")
+        except Exception:
+            display_refresh = 60
+        
+        target_display_fps = display_refresh
+        
         # We measure actual step time and dynamically adjust steps per frame
-        avg_step_time = 0.002  # Initial estimate: 2ms per step
+        avg_step_time = 0.001  # Initial estimate: 1ms per step (optimistic for M4)
         step_time_samples: list[float] = []
         
         while self.running and self.episode < self.config.MAX_EPISODES:
@@ -439,29 +463,27 @@ class GameApp:
             self._handle_events()
             
             if not self.paused:
-                # Calculate steps per frame based on speed and target FPS
-                # Speed 1x = real-time (1 step per frame at 60 FPS)
-                # Speed 10x = 10 steps per frame  
-                # Speed 100x = 100 steps per frame
-                # Speed 200x = 200 steps per frame (max training, ~30 FPS minimum)
+                # Calculate steps per frame based on speed setting
+                # Speed 1x = real-time (1 step per frame at display refresh rate)
+                # Higher speeds = more steps per frame while maintaining display FPS
                 
-                # Target visual FPS decreases as speed increases, but floor at 30 FPS
                 if self.game_speed <= 1.0:
-                    target_fps = 60 * self.game_speed
+                    # At 1x or slower, just do 1 step and throttle to match speed
                     steps_per_frame = 1
                 else:
-                    # Higher speeds = more steps per frame
-                    # Calculate steps to hit target based on measured step time
-                    target_fps = max(30, 60 / (1 + np.log2(self.game_speed)))  # Logarithmic decay
-                    frame_time_budget = 1.0 / target_fps
+                    # At higher speeds, always target display refresh rate for smooth visuals
+                    # Calculate how many steps we can do per frame
+                    frame_time_budget = 1.0 / target_display_fps
                     
-                    # How many steps can we fit in our frame time budget?
+                    # How many steps can we fit while maintaining target FPS?
                     if avg_step_time > 0:
-                        max_steps_for_fps = int(frame_time_budget / avg_step_time)
+                        max_steps_for_fps = max(1, int(frame_time_budget / avg_step_time))
                     else:
                         max_steps_for_fps = int(self.game_speed)
                     
-                    # Scale by game_speed but cap at what maintains target FPS
+                    # Use the speed slider to control how much of our budget to use
+                    # At low speeds, we do fewer steps (more visual updates per game-time)
+                    # At high speeds, we max out what the hardware can do
                     steps_per_frame = max(1, min(int(self.game_speed), max_steps_for_fps))
                 
                 steps_this_frame = 0
@@ -617,10 +639,13 @@ class GameApp:
                 render_action = self.selected_action if self.selected_action is not None else 1
                 self._render_frame(state, render_action, info if info else {})
                 
-                # At speed 1x or lower, cap to target FPS
-                # At higher speeds, render as fast as possible (no throttling)
+                # At speed 1x or lower, throttle to maintain real-time feel
+                # At higher speeds, target display refresh rate for smooth visuals
                 if self.game_speed <= 1.0:
-                    self.clock.tick(int(60 * self.game_speed))
+                    self.clock.tick(int(target_display_fps * self.game_speed))
+                else:
+                    # Cap at display refresh rate for smooth visuals
+                    self.clock.tick(target_display_fps)
         
         # Training complete
         self._save_model("breakout_final.pth")
