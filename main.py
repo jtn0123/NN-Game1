@@ -48,6 +48,11 @@ Press:
     - F: Toggle fullscreen
 """
 
+# Suppress pygame's pkg_resources deprecation warning (pygame issue #4557)
+# This is a known issue - pygame hasn't migrated to importlib.resources yet
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
+
 import pygame
 import numpy as np
 import argparse
