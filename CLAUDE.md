@@ -238,9 +238,72 @@ To add a new game:
 
 ## Performance Notes
 
+### Turbo Mode (`--turbo`)
+
+The `--turbo` flag applies optimized settings based on M4 Mac benchmarks:
+
+```bash
+# Headless turbo mode (fastest, ~5000 steps/sec on M4)
+python main.py --headless --turbo
+
+# Visualized turbo mode (uses same settings but with rendering overhead)
+python main.py --turbo
+```
+
+Turbo mode settings:
+- `LEARN_EVERY=8` - Learn every 8th step (vs default 4)
+- `GRADIENT_STEPS=2` - Multiple gradient updates per learning call
+- `BATCH_SIZE=128` - Optimized for CPU throughput
+- `FORCE_CPU=True` - Uses CPU instead of MPS (faster for small models!)
+- `USE_TORCH_COMPILE=False` - Disabled (no benefit for small models)
+
+### Headless vs Visualized Training
+
+| Mode | Speed | Use Case |
+|------|-------|----------|
+| `--headless --turbo` | ~5000 steps/sec | Fast bulk training |
+| `--headless` | ~2500 steps/sec | Training without visuals |
+| `--turbo` (visualized) | ~600 steps/sec | Turbo with live feedback |
+| Default (visualized) | ~300 steps/sec | Educational/debugging |
+
+**Note:** `--headless` skips particle effects, ball trails, and all rendering. The game physics remain identical.
+
+### M4 MacBook Benchmark Results
+
+```
+CPU B=128, LE=8, GS=2:  ~5,000 steps/sec, 663 grad/sec (balanced - RECOMMENDED)
+CPU B=128, LE=16, GS=4: ~2,900 steps/sec, 719 grad/sec (max learning throughput)
+MPS B=256, LE=4:        ~640 steps/sec (GPU overhead dominates)
+```
+
+**Key Finding:** For this model size (~50K parameters), CPU is 8x faster than MPS on M4 due to:
+- Small batch sizes don't utilize GPU parallelism efficiently
+- CPU-GPU memory transfer overhead dominates computation time
+- MPS setup/sync costs are significant for short operations
+
+**When to use MPS/CUDA:**
+- Much larger networks (millions of parameters)
+- Batch sizes of 1024+
+- Longer forward/backward pass times that amortize transfer costs
+
+### Manual CPU/GPU Selection
+
+```bash
+# Force CPU (recommended for this model)
+python main.py --cpu
+
+# Force MPS (Apple Silicon GPU) - only if network is large
+python main.py --device mps
+
+# Force CUDA (NVIDIA GPU)
+python main.py --device cuda
+```
+
+### Other Performance Tips
+
 - **Training without visualization** is ~2-3x faster (`--headless` flag)
 - **Prioritized Experience Replay (PER)** improves sample efficiency but adds overhead
-- **GPU acceleration** (CUDA/MPS) significantly speeds up training
+- **GPU acceleration** (CUDA/MPS) only beneficial for large models
 - **Visualization updates** every frame during training (impacts performance)
 
 ## Web Dashboard

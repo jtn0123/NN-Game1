@@ -554,7 +554,9 @@ class Breakout(BaseGame):
         # Brick states are updated incrementally in _handle_collisions()
         self._state_array[8:] = self._brick_states
         
-        return self._state_array
+        # IMPORTANT: Return a copy! Returning the reference would corrupt replay buffer
+        # since all stored states would point to the same array that gets overwritten.
+        return self._state_array.copy()
     
     def _get_info(self) -> dict:
         """Get additional game information."""

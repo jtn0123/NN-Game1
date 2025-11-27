@@ -201,11 +201,14 @@ class Agent:
         # Exploration
         self.epsilon = self.config.EPSILON_START
         
-        # Training step counter (for target network updates)
+        # Training step counter (counts total gradient updates)
         self.steps = 0
         
         # Learn step counter (for LEARN_EVERY skipping)
         self._learn_step = 0
+        
+        # Next target network update threshold (for hard updates)
+        self._next_target_update = self.config.TARGET_UPDATE
         
         # Mixed precision setup for MPS/CUDA
         self._use_mixed_precision = getattr(self.config, 'USE_MIXED_PRECISION', False)
@@ -334,16 +337,19 @@ class Agent:
             if loss is not None:
                 total_loss += loss
         
-        # Increment learning event counter once per learn() call (not per gradient step)
-        # This ensures TARGET_UPDATE counts learning events correctly with GRADIENT_STEPS > 1
-        self.steps += 1
+        # Increment steps counter by number of gradient steps performed
+        # This ensures TARGET_UPDATE frequency is correct regardless of GRADIENT_STEPS setting
+        self.steps += gradient_steps
         
-        # Target network update (once per learning event)
+        # Target network update
         if update_target:
             if self.config.USE_SOFT_UPDATE:
+                # Soft update happens every learning call (regardless of step count)
                 self._soft_update_target_network()
-            elif self.steps % self.config.TARGET_UPDATE == 0:
+            elif self.steps >= self._next_target_update:
+                # Hard update based on total gradient steps
                 self.update_target_network()
+                self._next_target_update = self.steps + self.config.TARGET_UPDATE
         
         return total_loss / gradient_steps if gradient_steps > 0 else None
     
@@ -557,6 +563,7 @@ class Agent:
             'epsilon': self.epsilon,
             'steps': self.steps,
             '_learn_step': self._learn_step,
+            '_next_target_update': self._next_target_update,
             'state_size': self.state_size,
             'action_size': self.action_size,
             'metadata': metadata.to_dict(),
@@ -686,6 +693,11 @@ class Agent:
         self.epsilon = checkpoint['epsilon']
         self.steps = checkpoint['steps']
         self._learn_step = checkpoint.get('_learn_step', 0)  # Backwards compatible
+        # Calculate next target update based on current steps (backwards compatible)
+        self._next_target_update = checkpoint.get(
+            '_next_target_update', 
+            self.steps + self.config.TARGET_UPDATE
+        )
         
         # Load metadata if available
         metadata = None

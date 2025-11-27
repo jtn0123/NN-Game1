@@ -108,9 +108,9 @@ class Config:
     GAMMA: float = 0.97
     
     # Batch size - Number of experiences to sample per training step
-    # Larger = more stable gradients but slower per step (better GPU utilization)
-    # M4/MPS benefits from larger batches (256+ for better GPU utilization)
-    BATCH_SIZE: int = 256
+    # Larger = more stable gradients but slower per step
+    # M4 CPU optimal: 128 (balances throughput and stability)
+    BATCH_SIZE: int = 128
     
     # Replay buffer capacity
     # Larger = more diverse experiences but more memory
@@ -138,26 +138,38 @@ class Config:
     # =========================================================================
     # PERFORMANCE OPTIMIZATION
     # =========================================================================
+    # 
+    # M4 MacBook Benchmark Results (headless training):
+    #   CPU B=128, LE=8, GS=2:  ~5,000 steps/sec, 663 grad/sec (balanced)
+    #   CPU B=128, LE=16, GS=4: ~2,900 steps/sec, 719 grad/sec (max learning)
+    #   MPS B=256, LE=4:        ~640 steps/sec (GPU overhead dominates)
+    # 
+    # CONCLUSION: Use CPU for small models - MPS transfer overhead is too high.
+    # =========================================================================
     
-    # Learn every N steps (1 = every step, 4 = every 4th step for ~4x speedup)
-    # Higher values reduce backward passes but may slow learning convergence
-    LEARN_EVERY: int = 4  # Skip steps for ~2x speedup on M4
+    # Learn every N steps (1 = every step, higher = faster but less frequent learning)
+    # M4 optimal: 8-16 for CPU, 4 for MPS
+    LEARN_EVERY: int = 8
     
     # Number of gradient updates per learning call
-    # Useful when LEARN_EVERY > 1 to compensate with more updates
-    GRADIENT_STEPS: int = 2  # Compensate for LEARN_EVERY with extra gradient steps
+    # Compensates for LEARN_EVERY > 1 to maintain learning throughput
+    # Rule of thumb: GRADIENT_STEPS = LEARN_EVERY / 4 (for similar grad/sec)
+    GRADIENT_STEPS: int = 2
     
-    # Use torch.compile() for potential 20-50% speedup (PyTorch 2.0+)
-    # May have initial compilation overhead but faster afterwards
-    USE_TORCH_COMPILE: bool = True  # Enabled for M4 Mac performance
+    # Use torch.compile() for potential speedup (PyTorch 2.0+)
+    # Note: Minimal benefit on CPU for small models, can cause overhead
+    USE_TORCH_COMPILE: bool = False  # Disabled - minimal benefit for this model size
     
     # Compile mode: 'default', 'reduce-overhead', 'max-autotune'
-    # 'reduce-overhead' is best for small models, 'max-autotune' for large
     TORCH_COMPILE_MODE: str = 'reduce-overhead'
     
     # Use mixed precision (float16) for faster computation on GPU/MPS
-    # Keeps optimizer state in float32 for numerical stability
-    USE_MIXED_PRECISION: bool = True
+    # Only beneficial on GPU - CPU uses float32 regardless
+    USE_MIXED_PRECISION: bool = False  # Disabled - using CPU by default
+    
+    # Force CPU device (faster than MPS for small models on M4)
+    # Set via --cpu flag or environment variable
+    FORCE_CPU: bool = False
     
     # =========================================================================
     # EXPLORATION SETTINGS (Epsilon-Greedy)
@@ -276,7 +288,10 @@ class Config:
     # Device selection
     @property
     def DEVICE(self) -> torch.device:
-        """Auto-detect CUDA/MPS/CPU."""
+        """Auto-detect CUDA/MPS/CPU, or force CPU if configured."""
+        # Force CPU mode (faster for small models on M4)
+        if self.FORCE_CPU:
+            return torch.device('cpu')
         if torch.cuda.is_available():
             return torch.device('cuda')
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():

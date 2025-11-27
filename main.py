@@ -1237,11 +1237,14 @@ class HeadlessTrainer:
             config.USE_TORCH_COMPILE = True
         
         # Apply turbo preset (overrides individual settings)
+        # Optimized for M4 CPU based on benchmarks
         if args.turbo:
-            config.LEARN_EVERY = 4
-            config.BATCH_SIZE = 256
-            config.USE_TORCH_COMPILE = True
-            print("🚀 Turbo mode: learn_every=4, batch=256, torch.compile=True")
+            config.LEARN_EVERY = 8
+            config.BATCH_SIZE = 128
+            config.GRADIENT_STEPS = 2
+            config.USE_TORCH_COMPILE = False  # No benefit for small models on CPU
+            config.FORCE_CPU = True  # CPU is faster for this model size
+            print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
         
         # Create game in headless mode (skips visual effects for max speed)
         self.game = Breakout(config, headless=True)
@@ -1480,6 +1483,10 @@ Examples:
         '--torch-compile', action='store_true',
         help='Enable torch.compile() for ~20-50%% speedup (PyTorch 2.0+)'
     )
+    parser.add_argument(
+        '--cpu', action='store_true',
+        help='Force CPU (faster than MPS for small models on M4)'
+    )
     
     # Other options
     parser.add_argument(
@@ -1602,6 +1609,11 @@ def main():
     # Load config
     config = Config()
     
+    # Force CPU if specified (faster for small models on M4)
+    if hasattr(args, 'cpu') and args.cpu:
+        config.FORCE_CPU = True
+        print("💻 CPU mode: Using CPU (faster for small models on M4)")
+    
     # Set seed if specified
     if args.seed:
         np.random.seed(args.seed)
@@ -1629,12 +1641,14 @@ def main():
     if args.torch_compile:
         config.USE_TORCH_COMPILE = True
     
-    # Apply turbo preset
+    # Apply turbo preset - optimized for M4 CPU based on benchmarks
     if args.turbo:
-        config.LEARN_EVERY = 4
-        config.BATCH_SIZE = 256
-        config.USE_TORCH_COMPILE = True
-        print("🚀 Turbo mode: learn_every=4, batch=256, torch.compile=True")
+        config.LEARN_EVERY = 8
+        config.BATCH_SIZE = 128
+        config.GRADIENT_STEPS = 2
+        config.USE_TORCH_COMPILE = False
+        config.FORCE_CPU = True
+        print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
     
     # Create application (with pygame)
     app = GameApp(config, args)
