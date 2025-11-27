@@ -61,7 +61,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
 from src.game.breakout import Breakout
-from src.ai.agent import Agent
+from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
 from src.visualizer.nn_visualizer import NeuralNetVisualizer
 from src.visualizer.dashboard import Dashboard
@@ -144,9 +144,11 @@ class GameApp:
             config=config
         )
         
-        # Load model if specified
-        if args.model and os.path.exists(args.model):
-            self.agent.load(args.model)
+        # Load model if specified (basic load - full history restored after dashboard init)
+        self._initial_model_path = args.model if args.model and os.path.exists(args.model) else None
+        if self._initial_model_path:
+            # Basic load to restore agent state, ignore history return for now
+            self.agent.load(self._initial_model_path, quiet=True)
         
         # Create visualizations - positioned relative to the fixed game size
         self.nn_visualizer = NeuralNetVisualizer(
@@ -187,6 +189,14 @@ class GameApp:
         self.recent_scores: list[int] = []
         self.best_score_ever = 0
         
+        # Full training history for save/restore (allows dashboard restoration)
+        self.training_history_scores: list[int] = []
+        self.training_history_rewards: list[float] = []
+        self.training_history_steps: list[int] = []
+        self.training_history_epsilons: list[float] = []
+        self.training_history_bricks: list[int] = []
+        self.training_history_wins: list[bool] = []
+        
         # Current state
         self.state = self.game.reset()
         self.selected_action: Optional[int] = None
@@ -217,6 +227,62 @@ class GameApp:
             
             # Log startup info
             self._log_startup_info()
+        
+        # Restore training history from initial model load (now that dashboard is ready)
+        if self._initial_model_path:
+            self._restore_training_history(self._initial_model_path)
+    
+    def _restore_training_history(self, filepath: str) -> None:
+        """Restore training history from a saved model (called after dashboard is ready)."""
+        try:
+            import torch
+            checkpoint = torch.load(filepath, map_location=self.config.DEVICE, weights_only=False)
+            
+            if 'training_history' in checkpoint:
+                history_data = checkpoint['training_history']
+                training_history = TrainingHistory.from_dict(history_data)
+                
+                if len(training_history.scores) > 0:
+                    # Restore internal tracking
+                    self.training_history_scores = training_history.scores.copy()
+                    self.training_history_rewards = training_history.rewards.copy()
+                    self.training_history_steps = training_history.steps.copy()
+                    self.training_history_epsilons = training_history.epsilons.copy()
+                    self.training_history_bricks = training_history.bricks.copy()
+                    self.training_history_wins = training_history.wins.copy()
+                    self.recent_scores = training_history.scores[-1000:].copy()
+                    
+                    # Restore dashboard with historical data
+                    for i, score in enumerate(training_history.scores):
+                        eps = training_history.epsilons[i] if i < len(training_history.epsilons) else 0.5
+                        reward = training_history.rewards[i] if i < len(training_history.rewards) else 0.0
+                        bricks = training_history.bricks[i] if i < len(training_history.bricks) else 0
+                        won = training_history.wins[i] if i < len(training_history.wins) else False
+                        loss = training_history.losses[i] if i < len(training_history.losses) else 0.0
+                        
+                        self.dashboard.update(
+                            episode=i,
+                            score=score,
+                            epsilon=eps,
+                            loss=loss,
+                            bricks_broken=bricks,
+                            won=won,
+                            reward=reward
+                        )
+                    
+                    print(f"📊 Restored {len(training_history.scores)} episodes of training history")
+            
+            # Restore episode counter and best score from metadata
+            if 'metadata' in checkpoint:
+                metadata = checkpoint['metadata']
+                self.episode = metadata.get('episode', len(self.training_history_scores))
+                self.best_score_ever = metadata.get('best_score', 0)
+            elif self.training_history_scores:
+                self.episode = len(self.training_history_scores)
+                self.best_score_ever = max(self.training_history_scores)
+                
+        except Exception as e:
+            print(f"⚠️ Could not restore training history: {e}")
     
     def _log_startup_info(self) -> None:
         """Log startup configuration to web dashboard."""
@@ -261,11 +327,56 @@ class GameApp:
         print("🔄 Episode reset")
     
     def _load_model(self, filepath: str) -> None:
-        """Load a model from file."""
+        """Load a model from file and restore training history."""
         try:
-            self.agent.load(filepath)
+            metadata, training_history = self.agent.load(filepath)
+            
+            # Restore training history if available
+            if training_history and len(training_history.scores) > 0:
+                self.training_history_scores = training_history.scores.copy()
+                self.training_history_rewards = training_history.rewards.copy()
+                self.training_history_steps = training_history.steps.copy()
+                self.training_history_epsilons = training_history.epsilons.copy()
+                self.training_history_bricks = training_history.bricks.copy()
+                self.training_history_wins = training_history.wins.copy()
+                self.recent_scores = training_history.scores[-1000:].copy()
+                
+                # Restore dashboard with historical data
+                for i, score in enumerate(training_history.scores):
+                    eps = training_history.epsilons[i] if i < len(training_history.epsilons) else 0.5
+                    reward = training_history.rewards[i] if i < len(training_history.rewards) else 0.0
+                    bricks = training_history.bricks[i] if i < len(training_history.bricks) else 0
+                    won = training_history.wins[i] if i < len(training_history.wins) else False
+                    loss = training_history.losses[i] if i < len(training_history.losses) else 0.0
+                    
+                    self.dashboard.update(
+                        episode=i,
+                        score=score,
+                        epsilon=eps,
+                        loss=loss,
+                        bricks_broken=bricks,
+                        won=won,
+                        reward=reward
+                    )
+                
+                # Restore episode counter and best score from metadata
+                if metadata:
+                    self.episode = metadata.episode
+                    self.best_score_ever = metadata.best_score
+                else:
+                    self.episode = len(training_history.scores)
+                    self.best_score_ever = max(training_history.scores) if training_history.scores else 0
+                
+                history_msg = f" ({len(training_history.scores)} episodes restored)"
+            else:
+                history_msg = " (no history)"
+                # Still restore episode counter from metadata if available
+                if metadata:
+                    self.episode = metadata.episode
+                    self.best_score_ever = metadata.best_score
+            
             if self.web_dashboard:
-                self.web_dashboard.log(f"📂 Loaded model: {os.path.basename(filepath)}", "success", {
+                self.web_dashboard.log(f"📂 Loaded model: {os.path.basename(filepath)}{history_msg}", "success", {
                     'path': filepath,
                     'epsilon': self.agent.epsilon,
                     'steps': self.agent.steps
@@ -402,32 +513,45 @@ class GameApp:
     
     # Speed presets for clean stepping
     SPEED_PRESETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000]
+    _last_logged_speed: float = 0.0  # Track last logged speed to avoid spam
     
-    def _set_speed(self, speed: float) -> None:
+    def _set_speed(self, speed: float, force_log: bool = False) -> None:
         """Set game speed (for web dashboard control)."""
-        self.game_speed = max(1.0, min(1000.0, speed))
+        new_speed = max(1.0, min(1000.0, speed))
+        old_speed = self.game_speed
+        self.game_speed = new_speed
+        
         if self.web_dashboard:
             self.web_dashboard.publisher.set_speed(self.game_speed)
-            self.web_dashboard.log(f"⏩ Speed set to {int(self.game_speed)}x", "action")
-        print(f"⏩ Speed: {int(self.game_speed)}x")
+        
+        # Only log if speed changed significantly (avoid spam when dragging slider)
+        # Log when: forced, or speed is a preset value, or changed by >10%
+        speed_changed_significantly = abs(new_speed - self._last_logged_speed) / max(1, self._last_logged_speed) > 0.1
+        is_preset = int(new_speed) in self.SPEED_PRESETS
+        
+        if force_log or (speed_changed_significantly and is_preset):
+            if self.web_dashboard:
+                self.web_dashboard.log(f"⏩ Speed set to {int(self.game_speed)}x", "action")
+            print(f"⏩ Speed: {int(self.game_speed)}x")
+            self._last_logged_speed = new_speed
     
     def _speed_up(self) -> None:
         """Increase speed to next preset."""
         for preset in self.SPEED_PRESETS:
             if preset > self.game_speed:
-                self._set_speed(preset)
+                self._set_speed(preset, force_log=True)
                 return
         # Already at max
-        self._set_speed(self.SPEED_PRESETS[-1])
+        self._set_speed(self.SPEED_PRESETS[-1], force_log=True)
     
     def _speed_down(self) -> None:
         """Decrease speed to previous preset."""
         for preset in reversed(self.SPEED_PRESETS):
             if preset < self.game_speed:
-                self._set_speed(preset)
+                self._set_speed(preset, force_log=True)
                 return
         # Already at min
-        self._set_speed(self.SPEED_PRESETS[0])
+        self._set_speed(self.SPEED_PRESETS[0], force_log=True)
     
     def run_human_mode(self) -> None:
         """Run in human play mode for testing the game."""
@@ -669,6 +793,14 @@ class GameApp:
                         self.recent_scores.append(info['score'])
                         if len(self.recent_scores) > 1000:
                             self.recent_scores = self.recent_scores[-1000:]
+                        
+                        # Track full training history for save/restore
+                        self.training_history_scores.append(info['score'])
+                        self.training_history_rewards.append(episode_reward)
+                        self.training_history_steps.append(episode_steps)
+                        self.training_history_epsilons.append(self.agent.epsilon)
+                        self.training_history_bricks.append(episode_bricks_broken)
+                        self.training_history_wins.append(info.get('won', False))
                         
                         # Save checkpoint
                         if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
@@ -1015,6 +1147,17 @@ class GameApp:
         avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
         win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, 'get_win_rate') else 0.0
         
+        # Build training history for dashboard restoration
+        training_history = TrainingHistory(
+            scores=self.training_history_scores.copy(),
+            rewards=self.training_history_rewards.copy(),
+            steps=self.training_history_steps.copy(),
+            epsilons=self.training_history_epsilons.copy(),
+            bricks=self.training_history_bricks.copy(),
+            wins=self.training_history_wins.copy(),
+            losses=list(self.agent.losses[-1000:]) if self.agent.losses else []
+        )
+        
         result = self.agent.save(
             filepath=filepath,
             save_reason=save_reason,
@@ -1023,6 +1166,7 @@ class GameApp:
             avg_score_last_100=float(avg_score),
             win_rate=win_rate,
             training_start_time=self.training_start_time,
+            training_history=training_history,
             quiet=quiet
         )
         
@@ -1114,9 +1258,9 @@ class HeadlessTrainer:
             config=config
         )
         
-        # Load model if specified
+        # Load model if specified (headless mode - just restore agent state)
         if args.model and os.path.exists(args.model):
-            self.agent.load(args.model)
+            self.agent.load(args.model)  # Returns tuple, we ignore history in headless
         
         # Create model directory
         os.makedirs(config.MODEL_DIR, exist_ok=True)

@@ -44,6 +44,50 @@ from config import Config
 
 
 @dataclass
+class TrainingHistory:
+    """
+    Training history for dashboard visualization persistence.
+    
+    Stores arrays of metrics that allow the dashboard to restore
+    charts and statistics when resuming training.
+    """
+    # Episode-level metrics (one per episode)
+    scores: List[int]
+    rewards: List[float]
+    steps: List[int]
+    epsilons: List[float]
+    bricks: List[int]
+    wins: List[bool]
+    
+    # Running averages (computed, not stored per-episode)
+    losses: List[float]  # Recent losses for averaging
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TrainingHistory':
+        # Handle backwards compatibility - older saves may not have all fields
+        return cls(
+            scores=data.get('scores', []),
+            rewards=data.get('rewards', []),
+            steps=data.get('steps', []),
+            epsilons=data.get('epsilons', []),
+            bricks=data.get('bricks', []),
+            wins=data.get('wins', []),
+            losses=data.get('losses', [])
+        )
+    
+    @classmethod
+    def empty(cls) -> 'TrainingHistory':
+        """Create empty history."""
+        return cls(
+            scores=[], rewards=[], steps=[], 
+            epsilons=[], bricks=[], wins=[], losses=[]
+        )
+
+
+@dataclass
 class SaveMetadata:
     """Rich metadata stored with each model checkpoint."""
     # Timing
@@ -308,10 +352,12 @@ class Agent:
             rewards = torch.clamp(rewards, -self.config.REWARD_CLIP, self.config.REWARD_CLIP)
         
         # Use mixed precision autocast if enabled (significant speedup on MPS/CUDA)
+        # Only forward passes use float16; loss computed in float32 for numerical stability
         if self._use_mixed_precision:
             with torch.autocast(device_type=self._autocast_device, dtype=torch.float16):
                 current_q, target_q = self._compute_q_values(states, actions, rewards, next_states, dones)
-                loss = nn.SmoothL1Loss()(current_q, target_q)
+            # Compute loss in float32 for numerical stability (outside autocast)
+            loss = nn.SmoothL1Loss()(current_q.float(), target_q.float())
         else:
             current_q, target_q = self._compute_q_values(states, actions, rewards, next_states, dones)
             loss = nn.SmoothL1Loss()(current_q, target_q)
@@ -413,6 +459,7 @@ class Agent:
         avg_score_last_100: float = 0.0,
         win_rate: float = 0.0,
         training_start_time: Optional[float] = None,
+        training_history: Optional['TrainingHistory'] = None,
         quiet: bool = False
     ) -> Optional[SaveMetadata]:
         """
@@ -426,6 +473,7 @@ class Agent:
             avg_score_last_100: Average score over last 100 episodes
             win_rate: Win rate over last 100 episodes
             training_start_time: Unix timestamp when training started (for calculating total time)
+            training_history: Training history for dashboard restoration (scores, rewards, etc.)
             quiet: If True, suppress most output
             
         Returns:
@@ -484,6 +532,10 @@ class Agent:
             'action_size': self.action_size,
             'metadata': metadata.to_dict(),
         }
+        
+        # Save training history if provided (for dashboard restoration)
+        if training_history is not None:
+            checkpoint['training_history'] = training_history.to_dict()
         
         try:
             torch.save(checkpoint, filepath)
@@ -560,7 +612,7 @@ class Agent:
         
         return adapted
     
-    def load(self, filepath: str, quiet: bool = False) -> Optional[SaveMetadata]:
+    def load(self, filepath: str, quiet: bool = False) -> Tuple[Optional[SaveMetadata], Optional['TrainingHistory']]:
         """
         Load agent state from file with detailed resume summary.
         
@@ -569,17 +621,17 @@ class Agent:
             quiet: If True, suppress output
             
         Returns:
-            SaveMetadata if available, None otherwise
+            Tuple of (SaveMetadata, TrainingHistory) - either may be None for old saves
         """
         if not os.path.exists(filepath):
             print(f"❌ Model file not found: {filepath}")
-            return None
+            return None, None
         
         try:
             checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
         except Exception as e:
             print(f"❌ Failed to load model: {e}")
-            return None
+            return None, None
         
         # Check for architecture mismatch
         saved_state_size = checkpoint.get('state_size', self.state_size)
@@ -612,6 +664,14 @@ class Agent:
                 metadata = SaveMetadata.from_dict(checkpoint['metadata'])
             except Exception:
                 pass  # Old format without full metadata
+        
+        # Load training history if available (for dashboard restoration)
+        training_history = None
+        if 'training_history' in checkpoint:
+            try:
+                training_history = TrainingHistory.from_dict(checkpoint['training_history'])
+            except Exception:
+                pass  # Old format without training history
         
         if not quiet:
             file_size = os.path.getsize(filepath)
@@ -653,9 +713,15 @@ class Agent:
                 print(f"\n   Steps: {self.steps:,} | Epsilon: {self.epsilon:.4f}")
                 print(f"   (Legacy save - no detailed metadata)")
             
+            # Report training history status
+            if training_history and len(training_history.scores) > 0:
+                print(f"   Training History: {len(training_history.scores)} episodes restored")
+            else:
+                print(f"   Training History: Not available (older save format)")
+            
             print(f"{'='*60}\n")
         
-        return metadata
+        return metadata, training_history
     
     @staticmethod
     def inspect_model(filepath: str) -> Optional[Dict[str, Any]]:
