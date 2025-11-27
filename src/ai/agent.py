@@ -159,6 +159,24 @@ class Agent:
         # Training step counter (for target network updates)
         self.steps = 0
         
+        # Learn step counter (for LEARN_EVERY skipping)
+        self._learn_step = 0
+        
+        # Mixed precision setup for MPS/CUDA
+        self._use_mixed_precision = getattr(self.config, 'USE_MIXED_PRECISION', False)
+        if self._use_mixed_precision:
+            # Determine autocast device type
+            if self.device.type == 'mps':
+                self._autocast_device = 'mps'
+            elif self.device.type == 'cuda':
+                self._autocast_device = 'cuda'
+            else:
+                self._use_mixed_precision = False  # CPU doesn't benefit much
+                self._autocast_device = 'cpu'
+            
+            if self._use_mixed_precision:
+                print(f"✓ Mixed precision enabled (device={self._autocast_device})")
+        
         # Training metrics
         self.losses: List[float] = []
     
@@ -242,41 +260,63 @@ class Agent:
         if not self.memory.is_ready(self.config.BATCH_SIZE):
             return None
         
+        # Skip learning based on LEARN_EVERY setting for performance
+        learn_every = getattr(self.config, 'LEARN_EVERY', 1)
+        self._learn_step += 1
+        if self._learn_step % learn_every != 0:
+            return None
+        
+        # Perform multiple gradient steps if configured (compensates for LEARN_EVERY)
+        gradient_steps = getattr(self.config, 'GRADIENT_STEPS', 1)
+        total_loss = 0.0
+        
+        for grad_step in range(gradient_steps):
+            loss = self._learn_step_internal(
+                update_target=(update_target and grad_step == gradient_steps - 1)
+            )
+            if loss is not None:
+                total_loss += loss
+        
+        return total_loss / gradient_steps if gradient_steps > 0 else None
+    
+    def _learn_step_internal(self, update_target: bool = True) -> Optional[float]:
+        """
+        Internal learning step with mixed precision and optimized transfers.
+        
+        Args:
+            update_target: Whether to update target network after this step.
+            
+        Returns:
+            Loss value if training occurred, None otherwise
+        """
         # Sample batch
         states_np, actions_np, rewards_np, next_states_np, dones_np = self.memory.sample(
             self.config.BATCH_SIZE
         )
         
-        # Convert to tensors
-        states = torch.FloatTensor(states_np).to(self.device)
-        actions = torch.LongTensor(actions_np).to(self.device)
-        rewards = torch.FloatTensor(rewards_np).to(self.device)
-        next_states = torch.FloatTensor(next_states_np).to(self.device)
-        dones = torch.FloatTensor(dones_np).to(self.device)
+        # Convert to tensors with non-blocking transfers for better GPU utilization
+        # non_blocking=True allows CPU-GPU transfer to overlap with computation
+        non_blocking = self.device.type in ('cuda', 'mps')
+        states = torch.FloatTensor(states_np).to(self.device, non_blocking=non_blocking)
+        actions = torch.LongTensor(actions_np).to(self.device, non_blocking=non_blocking)
+        rewards = torch.FloatTensor(rewards_np).to(self.device, non_blocking=non_blocking)
+        next_states = torch.FloatTensor(next_states_np).to(self.device, non_blocking=non_blocking)
+        dones = torch.FloatTensor(dones_np).to(self.device, non_blocking=non_blocking)
         
         # Clip rewards to prevent extreme gradients (if enabled)
         if self.config.REWARD_CLIP > 0:
             rewards = torch.clamp(rewards, -self.config.REWARD_CLIP, self.config.REWARD_CLIP)
         
-        # Compute current Q-values
-        current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        # Use mixed precision autocast if enabled (significant speedup on MPS/CUDA)
+        if self._use_mixed_precision:
+            with torch.autocast(device_type=self._autocast_device, dtype=torch.float16):
+                current_q, target_q = self._compute_q_values(states, actions, rewards, next_states, dones)
+                loss = nn.SmoothL1Loss()(current_q, target_q)
+        else:
+            current_q, target_q = self._compute_q_values(states, actions, rewards, next_states, dones)
+            loss = nn.SmoothL1Loss()(current_q, target_q)
         
-        # Compute target Q-values using DOUBLE DQN
-        with torch.no_grad():
-            # Step 1: Use POLICY network to select best actions for next states
-            best_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
-            
-            # Step 2: Use TARGET network to evaluate those actions
-            next_q = self.target_net(next_states).gather(1, best_actions).squeeze(1)
-            
-            # Compute TD target
-            target_q = rewards + (1 - dones) * self.config.GAMMA * next_q
-        
-        # Compute loss using Huber Loss (SmoothL1) instead of MSE
-        # Huber loss is less sensitive to outliers and prevents exploding gradients
-        loss = nn.SmoothL1Loss()(current_q, target_q)
-        
-        # Optimize
+        # Optimize (outside autocast for numerical stability)
         self.optimizer.zero_grad()
         loss.backward()
         
@@ -305,6 +345,36 @@ class Agent:
         self.losses.append(loss_value)
         
         return loss_value
+    
+    def _compute_q_values(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        next_states: torch.Tensor,
+        dones: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute current and target Q-values using Double DQN.
+        
+        Returns:
+            Tuple of (current_q, target_q) tensors
+        """
+        # Compute current Q-values
+        current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        
+        # Compute target Q-values using DOUBLE DQN
+        with torch.no_grad():
+            # Step 1: Use POLICY network to select best actions for next states
+            best_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
+            
+            # Step 2: Use TARGET network to evaluate those actions
+            next_q = self.target_net(next_states).gather(1, best_actions).squeeze(1)
+            
+            # Compute TD target
+            target_q = rewards + (1 - dones) * self.config.GAMMA * next_q
+        
+        return current_q, target_q
     
     def update_target_network(self) -> None:
         """Hard update: Copy policy network weights to target network."""
@@ -394,9 +464,19 @@ class Agent:
             use_dueling=self.config.USE_DUELING
         )
         
+        # Get state dicts, stripping _orig_mod. prefix if model is compiled
+        # This ensures saved models are portable regardless of torch.compile status
+        policy_state = self.policy_net.state_dict()
+        target_state = self.target_net.state_dict()
+        
+        if self._compiled:
+            # Strip _orig_mod. prefix for portability
+            policy_state = {k.replace('_orig_mod.', ''): v for k, v in policy_state.items()}
+            target_state = {k.replace('_orig_mod.', ''): v for k, v in target_state.items()}
+        
         checkpoint = {
-            'policy_net_state_dict': self.policy_net.state_dict(),
-            'target_net_state_dict': self.target_net.state_dict(),
+            'policy_net_state_dict': policy_state,
+            'target_net_state_dict': target_state,
             'optimizer_state_dict': self.optimizer.state_dict(),
             'epsilon': self.epsilon,
             'steps': self.steps,
@@ -443,6 +523,43 @@ class Agent:
             print(f"❌ Save FAILED: {e}")
             return None
     
+    def _adapt_state_dict_for_compile(self, state_dict: Dict[str, Any], target_module) -> Dict[str, Any]:
+        """
+        Adapt state dict keys between compiled and non-compiled models.
+        
+        torch.compile() wraps the model and prefixes keys with '_orig_mod.'
+        This method handles loading models regardless of compile status.
+        
+        Args:
+            state_dict: The state dict to adapt
+            target_module: The module to load into (may be compiled or not)
+            
+        Returns:
+            Adapted state dict with correct key prefixes
+        """
+        # Check if saved state dict has _orig_mod prefix
+        saved_has_prefix = any(k.startswith('_orig_mod.') for k in state_dict.keys())
+        
+        # Check if target module expects _orig_mod prefix (is compiled)
+        target_expects_prefix = self._compiled
+        
+        if saved_has_prefix == target_expects_prefix:
+            # No adaptation needed
+            return state_dict
+        
+        adapted = {}
+        if saved_has_prefix and not target_expects_prefix:
+            # Remove _orig_mod. prefix
+            for k, v in state_dict.items():
+                new_key = k.replace('_orig_mod.', '') if k.startswith('_orig_mod.') else k
+                adapted[new_key] = v
+        elif not saved_has_prefix and target_expects_prefix:
+            # Add _orig_mod. prefix
+            for k, v in state_dict.items():
+                adapted[f'_orig_mod.{k}'] = v
+        
+        return adapted
+    
     def load(self, filepath: str, quiet: bool = False) -> Optional[SaveMetadata]:
         """
         Load agent state from file with detailed resume summary.
@@ -473,9 +590,17 @@ class Agent:
         if saved_action_size != self.action_size:
             print(f"⚠️ Warning: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})")
         
+        # Adapt state dicts for torch.compile() compatibility
+        policy_state = self._adapt_state_dict_for_compile(
+            checkpoint['policy_net_state_dict'], self.policy_net
+        )
+        target_state = self._adapt_state_dict_for_compile(
+            checkpoint['target_net_state_dict'], self.target_net
+        )
+        
         # Load network weights
-        self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
-        self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
+        self.policy_net.load_state_dict(policy_state)
+        self.target_net.load_state_dict(target_state)
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.epsilon = checkpoint['epsilon']
         self.steps = checkpoint['steps']

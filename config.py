@@ -109,8 +109,8 @@ class Config:
     
     # Batch size - Number of experiences to sample per training step
     # Larger = more stable gradients but slower per step (better GPU utilization)
-    # M4/MPS benefits from larger batches (128-256)
-    BATCH_SIZE: int = 128
+    # M4/MPS benefits from larger batches (256+ for better GPU utilization)
+    BATCH_SIZE: int = 256
     
     # Replay buffer capacity
     # Larger = more diverse experiences but more memory
@@ -141,19 +141,23 @@ class Config:
     
     # Learn every N steps (1 = every step, 4 = every 4th step for ~4x speedup)
     # Higher values reduce backward passes but may slow learning convergence
-    LEARN_EVERY: int = 1
+    LEARN_EVERY: int = 4  # Skip steps for ~2x speedup on M4
     
     # Number of gradient updates per learning call
     # Useful when LEARN_EVERY > 1 to compensate with more updates
-    GRADIENT_STEPS: int = 1
+    GRADIENT_STEPS: int = 2  # Compensate for LEARN_EVERY with extra gradient steps
     
     # Use torch.compile() for potential 20-50% speedup (PyTorch 2.0+)
     # May have initial compilation overhead but faster afterwards
-    USE_TORCH_COMPILE: bool = False  # Set True for production training
+    USE_TORCH_COMPILE: bool = True  # Enabled for M4 Mac performance
     
     # Compile mode: 'default', 'reduce-overhead', 'max-autotune'
     # 'reduce-overhead' is best for small models, 'max-autotune' for large
     TORCH_COMPILE_MODE: str = 'reduce-overhead'
+    
+    # Use mixed precision (float16) for faster computation on GPU/MPS
+    # Keeps optimizer state in float32 for numerical stability
+    USE_MIXED_PRECISION: bool = True
     
     # =========================================================================
     # EXPLORATION SETTINGS (Epsilon-Greedy)

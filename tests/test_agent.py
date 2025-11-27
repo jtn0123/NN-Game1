@@ -152,7 +152,14 @@ class TestLearning:
         for _ in range(config.MEMORY_MIN + 50):
             agent.remember(state, np.random.randint(0, 3), 1.0, state, False)
         
-        loss = agent.learn()
+        # Call learn() enough times to account for LEARN_EVERY setting
+        learn_every = getattr(config, 'LEARN_EVERY', 1)
+        loss = None
+        for _ in range(learn_every):
+            loss = agent.learn()
+            if loss is not None:
+                break
+        
         assert loss is not None
         assert isinstance(loss, float)
     

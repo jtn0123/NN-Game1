@@ -31,7 +31,7 @@ import random
 
 class ReplayBuffer:
     """
-    Fixed-size buffer to store experience tuples.
+    Fixed-size buffer to store experience tuples with optimized sampling.
     
     Experience tuple: (state, action, reward, next_state, done)
         - state: Current game state (np.ndarray)
@@ -40,9 +40,10 @@ class ReplayBuffer:
         - next_state: Resulting state (np.ndarray)
         - done: Whether episode ended (bool)
     
-    Attributes:
-        capacity: Maximum number of experiences to store
-        buffer: Internal storage (deque for O(1) operations)
+    Optimizations:
+        - Pre-allocated numpy arrays for batch sampling (avoids repeated allocations)
+        - List-based storage for O(1) random access
+        - Circular buffer implementation for efficient memory management
         
     Example:
         >>> buffer = ReplayBuffer(capacity=10000)
@@ -50,15 +51,28 @@ class ReplayBuffer:
         >>> batch = buffer.sample(batch_size=64)
     """
     
-    def __init__(self, capacity: int):
+    def __init__(self, capacity: int, state_size: int = 0):
         """
         Initialize the replay buffer.
         
         Args:
             capacity: Maximum number of experiences to store
+            state_size: Size of state vector (for pre-allocation, auto-detected if 0)
         """
         self.capacity = capacity
-        self.buffer: Deque[Tuple[np.ndarray, int, float, np.ndarray, bool]] = deque(maxlen=capacity)
+        self._state_size = state_size
+        
+        # Use list for O(1) random access (deque has O(n) random access)
+        self.buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]] = []
+        self._position = 0  # Current write position for circular buffer
+        
+        # Pre-allocated batch arrays (lazily initialized on first sample)
+        self._batch_states: np.ndarray = np.array([])
+        self._batch_actions: np.ndarray = np.array([])
+        self._batch_rewards: np.ndarray = np.array([])
+        self._batch_next_states: np.ndarray = np.array([])
+        self._batch_dones: np.ndarray = np.array([])
+        self._last_batch_size = 0
     
     def push(
         self,
@@ -71,7 +85,7 @@ class ReplayBuffer:
         """
         Add an experience to the buffer.
         
-        When buffer is full, oldest experience is automatically removed.
+        When buffer is full, oldest experience is overwritten (circular buffer).
         
         Args:
             state: Current state
@@ -81,11 +95,32 @@ class ReplayBuffer:
             done: Whether episode ended
         """
         experience = (state, action, reward, next_state, done)
-        self.buffer.append(experience)
+        
+        # Auto-detect state size on first push
+        if self._state_size == 0:
+            self._state_size = len(state)
+        
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(experience)
+        else:
+            # Circular buffer: overwrite oldest
+            self.buffer[self._position] = experience
+        
+        self._position = (self._position + 1) % self.capacity
+    
+    def _ensure_batch_arrays(self, batch_size: int) -> None:
+        """Pre-allocate or resize batch arrays if needed."""
+        if batch_size != self._last_batch_size or len(self._batch_states) == 0:
+            self._batch_states = np.empty((batch_size, self._state_size), dtype=np.float32)
+            self._batch_actions = np.empty(batch_size, dtype=np.int64)
+            self._batch_rewards = np.empty(batch_size, dtype=np.float32)
+            self._batch_next_states = np.empty((batch_size, self._state_size), dtype=np.float32)
+            self._batch_dones = np.empty(batch_size, dtype=np.float32)
+            self._last_batch_size = batch_size
     
     def sample(self, batch_size: int) -> Tuple[np.ndarray, ...]:
         """
-        Sample a random batch of experiences.
+        Sample a random batch of experiences with optimized memory access.
         
         Args:
             batch_size: Number of experiences to sample
@@ -93,17 +128,61 @@ class ReplayBuffer:
         Returns:
             Tuple of numpy arrays: (states, actions, rewards, next_states, dones)
         """
-        # Sample random experiences
-        batch = random.sample(self.buffer, batch_size)
+        # Generate random indices using numpy (faster than random.sample for large buffers)
+        indices = np.random.randint(0, len(self.buffer), size=batch_size)
         
-        # Separate into arrays
-        states = np.array([exp[0] for exp in batch], dtype=np.float32)
-        actions = np.array([exp[1] for exp in batch], dtype=np.int64)
-        rewards = np.array([exp[2] for exp in batch], dtype=np.float32)
-        next_states = np.array([exp[3] for exp in batch], dtype=np.float32)
-        dones = np.array([exp[4] for exp in batch], dtype=np.float32)
+        # Ensure pre-allocated arrays are ready
+        self._ensure_batch_arrays(batch_size)
         
-        return states, actions, rewards, next_states, dones
+        # Fill pre-allocated arrays directly (avoids creating intermediate lists)
+        for i, idx in enumerate(indices):
+            exp = self.buffer[idx]
+            self._batch_states[i] = exp[0]
+            self._batch_actions[i] = exp[1]
+            self._batch_rewards[i] = exp[2]
+            self._batch_next_states[i] = exp[3]
+            self._batch_dones[i] = float(exp[4])
+        
+        # Return copies to prevent modification of pre-allocated arrays
+        # (The copy is still faster than creating new arrays from scratch)
+        return (
+            self._batch_states.copy(),
+            self._batch_actions.copy(),
+            self._batch_rewards.copy(),
+            self._batch_next_states.copy(),
+            self._batch_dones.copy()
+        )
+    
+    def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, ...]:
+        """
+        Sample without copying (faster but arrays may be overwritten on next sample).
+        
+        Use this only if you'll consume the batch immediately before the next sample.
+        
+        Args:
+            batch_size: Number of experiences to sample
+            
+        Returns:
+            Tuple of numpy arrays (views, not copies)
+        """
+        indices = np.random.randint(0, len(self.buffer), size=batch_size)
+        self._ensure_batch_arrays(batch_size)
+        
+        for i, idx in enumerate(indices):
+            exp = self.buffer[idx]
+            self._batch_states[i] = exp[0]
+            self._batch_actions[i] = exp[1]
+            self._batch_rewards[i] = exp[2]
+            self._batch_next_states[i] = exp[3]
+            self._batch_dones[i] = float(exp[4])
+        
+        return (
+            self._batch_states,
+            self._batch_actions,
+            self._batch_rewards,
+            self._batch_next_states,
+            self._batch_dones
+        )
     
     def __len__(self) -> int:
         """Return current buffer size."""
@@ -116,6 +195,7 @@ class ReplayBuffer:
     def clear(self) -> None:
         """Clear all experiences from the buffer."""
         self.buffer.clear()
+        self._position = 0
 
 
 class PrioritizedReplayBuffer(ReplayBuffer):
