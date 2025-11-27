@@ -316,20 +316,29 @@ class Agent:
         total_loss = 0.0
         
         for grad_step in range(gradient_steps):
-            loss = self._learn_step_internal(
-                update_target=(update_target and grad_step == gradient_steps - 1)
-            )
+            loss = self._learn_step_internal()
             if loss is not None:
                 total_loss += loss
         
+        # Increment learning event counter once per learn() call (not per gradient step)
+        # This ensures TARGET_UPDATE counts learning events correctly with GRADIENT_STEPS > 1
+        self.steps += 1
+        
+        # Target network update (once per learning event)
+        if update_target:
+            if self.config.USE_SOFT_UPDATE:
+                self._soft_update_target_network()
+            elif self.steps % self.config.TARGET_UPDATE == 0:
+                self.update_target_network()
+        
         return total_loss / gradient_steps if gradient_steps > 0 else None
     
-    def _learn_step_internal(self, update_target: bool = True) -> Optional[float]:
+    def _learn_step_internal(self) -> Optional[float]:
         """
         Internal learning step with mixed precision and optimized transfers.
         
-        Args:
-            update_target: Whether to update target network after this step.
+        This performs a single gradient update. The caller (learn()) is responsible
+        for incrementing the steps counter and triggering target network updates.
             
         Returns:
             Loss value if training occurred, None otherwise
@@ -375,17 +384,6 @@ class Agent:
             )
         
         self.optimizer.step()
-        
-        # Update step counter and target network
-        self.steps += 1
-        
-        # Use soft or hard target updates based on config
-        # Only update if update_target=True (handles GRADIENT_STEPS > 1 correctly)
-        if update_target:
-            if self.config.USE_SOFT_UPDATE:
-                self._soft_update_target_network()
-            elif self.steps % self.config.TARGET_UPDATE == 0:
-                self.update_target_network()
         
         # Store loss for metrics
         loss_value = loss.item()
@@ -529,6 +527,7 @@ class Agent:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'epsilon': self.epsilon,
             'steps': self.steps,
+            '_learn_step': self._learn_step,
             'state_size': self.state_size,
             'action_size': self.action_size,
             'metadata': metadata.to_dict(),
@@ -657,6 +656,7 @@ class Agent:
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.epsilon = checkpoint['epsilon']
         self.steps = checkpoint['steps']
+        self._learn_step = checkpoint.get('_learn_step', 0)  # Backwards compatible
         
         # Load metadata if available
         metadata = None
