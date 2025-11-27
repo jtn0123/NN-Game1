@@ -30,6 +30,7 @@ import torch.optim as optim
 import numpy as np
 from typing import Optional, Tuple, List, Dict, Any
 from dataclasses import dataclass, asdict
+from collections import deque
 from datetime import datetime
 import random
 import os
@@ -221,8 +222,8 @@ class Agent:
             if self._use_mixed_precision:
                 print(f"✓ Mixed precision enabled (device={self._autocast_device})")
         
-        # Training metrics
-        self.losses: List[float] = []
+        # Training metrics (bounded to prevent memory growth during long training)
+        self.losses: deque[float] = deque(maxlen=10000)
     
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """
@@ -798,7 +799,9 @@ class Agent:
         """Get average of last n losses."""
         if not self.losses:
             return 0.0
-        return float(np.mean(self.losses[-n:]))
+        # Convert deque to list for slicing (deques don't support slice syntax)
+        losses_list = list(self.losses)
+        return float(np.mean(losses_list[-n:]))
 
 
 # Testing

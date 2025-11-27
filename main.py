@@ -701,13 +701,8 @@ class GameApp:
                     # Store experience
                     self.agent.remember(state, action, reward, next_state, done)
                     
-                    # Learn every N steps (configurable for performance)
-                    if self.steps % self.config.LEARN_EVERY == 0:
-                        for grad_step in range(self.config.GRADIENT_STEPS):
-                            # Only update target network on the last gradient step
-                            # to maintain correct update frequency with GRADIENT_STEPS > 1
-                            is_last_step = (grad_step == self.config.GRADIENT_STEPS - 1)
-                            loss = self.agent.learn(update_target=is_last_step)
+                    # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
+                    loss = self.agent.learn()
                     
                     # Track target network updates
                     if self.agent.steps % self.config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
@@ -973,13 +968,8 @@ class GameApp:
                 
                 self.agent.remember(state, action, reward, next_state, done)
                 
-                # Learn every N steps (configurable for performance)
-                if total_steps % self.config.LEARN_EVERY == 0:
-                    for grad_step in range(self.config.GRADIENT_STEPS):
-                        # Only update target network on the last gradient step
-                        # to maintain correct update frequency with GRADIENT_STEPS > 1
-                        is_last_step = (grad_step == self.config.GRADIENT_STEPS - 1)
-                        self.agent.learn(update_target=is_last_step)
+                # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
+                self.agent.learn()
                 
                 state = next_state
                 episode_reward += reward
@@ -1155,7 +1145,7 @@ class GameApp:
             epsilons=self.training_history_epsilons.copy(),
             bricks=self.training_history_bricks.copy(),
             wins=self.training_history_wins.copy(),
-            losses=list(self.agent.losses[-1000:]) if self.agent.losses else []
+            losses=list(self.agent.losses)[-1000:] if self.agent.losses else []
         )
         
         result = self.agent.save(
