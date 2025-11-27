@@ -215,6 +215,237 @@ class DQN(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
+class DuelingDQN(nn.Module):
+    """
+    Dueling Deep Q-Network architecture.
+    
+    Separates the Q-value estimation into two streams:
+        - Value stream V(s): How good is this state overall?
+        - Advantage stream A(s,a): How much better is each action vs average?
+    
+    Q(s,a) = V(s) + (A(s,a) - mean(A(s,a')))
+    
+    This helps the network learn:
+        - State values independent of actions (useful when actions don't matter much)
+        - Relative action advantages (useful when action choice is critical)
+    
+    Reference:
+        Wang et al., 2016 - "Dueling Network Architectures for Deep Reinforcement Learning"
+    """
+    
+    def __init__(
+        self,
+        state_size: int,
+        action_size: int,
+        config: Optional[Config] = None,
+        hidden_layers: Optional[List[int]] = None
+    ):
+        """
+        Initialize the Dueling DQN.
+        
+        Args:
+            state_size: Dimension of state input
+            action_size: Number of possible actions (output dimension)
+            config: Configuration object
+            hidden_layers: Override config's hidden layer sizes
+        """
+        super(DuelingDQN, self).__init__()
+        
+        self.config = config or Config()
+        self.state_size = state_size
+        self.action_size = action_size
+        
+        # Use provided hidden layers or config
+        self.hidden_sizes = hidden_layers or self.config.HIDDEN_LAYERS
+        
+        # Store activations for visualization
+        self.activations: Dict[str, torch.Tensor] = {}
+        
+        # Build network layers
+        self._build_network()
+        
+        # Initialize weights
+        self._init_weights()
+        
+        # Register hooks for capturing activations
+        self._register_hooks()
+    
+    def _build_network(self) -> None:
+        """Construct the dueling network architecture."""
+        # Shared feature layers (all but the last hidden layer)
+        self.feature_layers = nn.ModuleList()
+        
+        # Build shared feature extraction layers
+        layer_sizes = [self.state_size] + self.hidden_sizes[:-1]
+        for i in range(len(layer_sizes) - 1):
+            layer = nn.Linear(layer_sizes[i], layer_sizes[i + 1])
+            self.feature_layers.append(layer)
+        
+        # Get the size of the last shared layer (or state_size if no hidden layers)
+        if len(self.hidden_sizes) > 1:
+            shared_output_size = self.hidden_sizes[-2]
+        else:
+            shared_output_size = self.state_size
+        
+        # Final hidden layer size for streams
+        stream_hidden_size = self.hidden_sizes[-1]
+        
+        # Value stream: shared -> hidden -> 1 (state value)
+        self.value_hidden = nn.Linear(shared_output_size, stream_hidden_size)
+        self.value_output = nn.Linear(stream_hidden_size, 1)
+        
+        # Advantage stream: shared -> hidden -> action_size (per-action advantage)
+        self.advantage_hidden = nn.Linear(shared_output_size, stream_hidden_size)
+        self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)
+        
+        # For compatibility with DQN interface, create a layers list
+        self.layers = nn.ModuleList(list(self.feature_layers) + [
+            self.value_hidden, self.value_output,
+            self.advantage_hidden, self.advantage_output
+        ])
+    
+    def _init_weights(self) -> None:
+        """Initialize weights using Xavier/Glorot initialization."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                nn.init.constant_(module.bias, 0.0)
+    
+    def _get_activation_fn(self) -> Callable[..., Any]:
+        """Get the activation function based on config."""
+        activation_map: Dict[str, Callable[..., Any]] = {
+            'relu': F.relu,
+            'leaky_relu': F.leaky_relu,
+            'tanh': torch.tanh,
+            'elu': F.elu,
+        }
+        result = activation_map.get(self.config.ACTIVATION, F.relu)
+        return cast(Callable[..., Any], result)
+    
+    def _register_hooks(self) -> None:
+        """Register forward hooks to capture activations."""
+        def get_activation(name):
+            def hook(module, input, output):
+                self.activations[name] = output.detach()
+            return hook
+        
+        # Register hooks on feature layers
+        for i, layer in enumerate(self.feature_layers):
+            layer.register_forward_hook(get_activation(f'layer_{i}'))
+        
+        # Register hooks on stream layers
+        self.value_hidden.register_forward_hook(get_activation('value_hidden'))
+        self.advantage_hidden.register_forward_hook(get_activation('advantage_hidden'))
+    
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the dueling network.
+        
+        Args:
+            state: Input state tensor of shape (batch_size, state_size)
+            
+        Returns:
+            Q-values tensor of shape (batch_size, action_size)
+        """
+        x = state
+        activation_fn = self._get_activation_fn()
+        
+        # Pass through shared feature layers
+        for layer in self.feature_layers:
+            x = activation_fn(layer(x))
+        
+        # Value stream
+        value = activation_fn(self.value_hidden(x))
+        value = self.value_output(value)  # Shape: (batch, 1)
+        
+        # Advantage stream
+        advantage = activation_fn(self.advantage_hidden(x))
+        advantage = self.advantage_output(advantage)  # Shape: (batch, action_size)
+        
+        # Combine streams: Q = V + (A - mean(A))
+        # Subtracting mean ensures identifiability and stability
+        q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
+        
+        return q_values
+    
+    def get_layer_info(self) -> List[Dict]:
+        """
+        Get information about each layer for visualization.
+        
+        Returns:
+            List of dicts with layer metadata
+        """
+        info = []
+        
+        # Input layer (virtual - no actual layer)
+        info.append({
+            'name': 'Input',
+            'neurons': self.state_size,
+            'type': 'input'
+        })
+        
+        # Shared feature layers
+        for i, layer in enumerate(self.feature_layers):
+            info.append({
+                'name': f'Shared {i + 1}',
+                'neurons': layer.out_features,
+                'type': 'hidden'
+            })
+        
+        # Value stream
+        info.append({
+            'name': 'Value',
+            'neurons': self.value_hidden.out_features,
+            'type': 'value_stream'
+        })
+        
+        # Advantage stream
+        info.append({
+            'name': 'Advantage',
+            'neurons': self.advantage_hidden.out_features,
+            'type': 'advantage_stream'
+        })
+        
+        # Output layer
+        info.append({
+            'name': 'Output (Q)',
+            'neurons': self.action_size,
+            'type': 'output'
+        })
+        
+        return info
+    
+    def get_weights(self) -> List[np.ndarray]:
+        """
+        Get all weight matrices as numpy arrays.
+        
+        Returns:
+            List of weight matrices (for visualization)
+        """
+        weights = []
+        for layer in self.feature_layers:
+            weights.append(layer.weight.detach().cpu().numpy())
+        weights.append(self.value_hidden.weight.detach().cpu().numpy())
+        weights.append(self.advantage_hidden.weight.detach().cpu().numpy())
+        return weights
+    
+    def get_activations(self) -> Dict[str, np.ndarray]:
+        """
+        Get the most recent activations from all layers.
+        
+        Returns:
+            Dict mapping layer names to activation arrays
+        """
+        return {
+            name: act.cpu().numpy() 
+            for name, act in self.activations.items()
+        }
+    
+    def count_parameters(self) -> int:
+        """Return total number of trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
 # Testing
 if __name__ == "__main__":
     config = Config()

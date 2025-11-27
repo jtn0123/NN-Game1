@@ -82,10 +82,15 @@ class Config:
     
     # Hidden layer architecture
     # More neurons = more capacity but slower training
-    HIDDEN_LAYERS: List[int] = field(default_factory=lambda: [256, 128])
+    # [512, 256, 128] provides more capacity for complex patterns
+    HIDDEN_LAYERS: List[int] = field(default_factory=lambda: [512, 256, 128])
     
     # Activation function: 'relu', 'leaky_relu', 'tanh'
     ACTIVATION: str = 'relu'
+    
+    # Use Dueling DQN architecture (separates value and advantage streams)
+    # This helps the network learn which states are valuable independent of actions
+    USE_DUELING: bool = True
     
     # =========================================================================
     # TRAINING HYPERPARAMETERS
@@ -99,7 +104,8 @@ class Config:
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
     # 0.90 = more short-sighted, prefers immediate rewards
-    GAMMA: float = 0.99
+    # 0.97 = balanced, prioritizes near-term rewards for more stable learning
+    GAMMA: float = 0.97
     
     # Batch size - Number of experiences to sample per training step
     # Larger = more stable gradients but slower per step (better GPU utilization)
@@ -156,8 +162,8 @@ class Config:
     # Starting exploration rate (1.0 = 100% random)
     EPSILON_START: float = 1.0
     
-    # Minimum exploration rate (0.01 = 1% random)
-    EPSILON_END: float = 0.01
+    # Minimum exploration rate (0.005 = 0.5% random for fewer late-game mistakes)
+    EPSILON_END: float = 0.005
     
     # Decay rate per episode (higher = slower decay)
     # EPSILON_DECAY = 0.995 means epsilon *= 0.995 after each episode
@@ -190,15 +196,20 @@ class Config:
     # =========================================================================
     
     # Rewards for different events
-    REWARD_BRICK_HIT: float = 1.0       # Breaking a brick
-    REWARD_GAME_OVER: float = -10.0     # Losing a life
-    REWARD_WIN: float = 50.0            # Clearing all bricks
-    REWARD_PADDLE_HIT: float = 0.1      # Ball hitting paddle (encourages survival)
+    REWARD_BRICK_HIT: float = 2.0       # Breaking a brick (doubled for more incentive)
+    REWARD_GAME_OVER: float = -5.0      # Losing a life (halved for less harsh punishment)
+    REWARD_WIN: float = 100.0           # Clearing all bricks (doubled for stronger completion incentive)
+    REWARD_PADDLE_HIT: float = 0.2      # Ball hitting paddle (doubled to encourage survival)
     REWARD_STEP: float = 0.0            # Small reward each step (can set negative for urgency)
     
     # Dense reward shaping for ball tracking
     REWARD_TRACKING_GOOD: float = 0.01  # Reward for moving toward predicted ball landing
     REWARD_TRACKING_BAD: float = -0.01  # Penalty for moving away from predicted landing
+    
+    # Reward clipping to prevent extreme gradients during training
+    # Set to 0 to disable clipping
+    # Note: Only clips negative rewards to preserve win bonus signal
+    REWARD_CLIP: float = 5.0
     
     # =========================================================================
     # VISUALIZATION SETTINGS

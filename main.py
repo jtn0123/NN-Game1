@@ -571,8 +571,11 @@ class GameApp:
                     
                     # Learn every N steps (configurable for performance)
                     if self.steps % self.config.LEARN_EVERY == 0:
-                        for _ in range(self.config.GRADIENT_STEPS):
-                            loss = self.agent.learn()
+                        for grad_step in range(self.config.GRADIENT_STEPS):
+                            # Only update target network on the last gradient step
+                            # to maintain correct update frequency with GRADIENT_STEPS > 1
+                            is_last_step = (grad_step == self.config.GRADIENT_STEPS - 1)
+                            loss = self.agent.learn(update_target=is_last_step)
                     
                     # Track target network updates
                     if self.agent.steps % self.config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
@@ -825,8 +828,11 @@ class GameApp:
                 
                 # Learn every N steps (configurable for performance)
                 if total_steps % self.config.LEARN_EVERY == 0:
-                    for _ in range(self.config.GRADIENT_STEPS):
-                        self.agent.learn()
+                    for grad_step in range(self.config.GRADIENT_STEPS):
+                        # Only update target network on the last gradient step
+                        # to maintain correct update frequency with GRADIENT_STEPS > 1
+                        is_last_step = (grad_step == self.config.GRADIENT_STEPS - 1)
+                        self.agent.learn(update_target=is_last_step)
                 
                 state = next_state
                 episode_reward += reward

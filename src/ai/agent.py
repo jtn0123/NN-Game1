@@ -32,7 +32,7 @@ from typing import Optional, Tuple, List
 import random
 import os
 
-from .network import DQN
+from .network import DQN, DuelingDQN
 from .replay_buffer import ReplayBuffer
 
 import sys
@@ -84,9 +84,10 @@ class Agent:
         self.action_size = action_size
         self.device = self.config.DEVICE
         
-        # Networks
-        self.policy_net = DQN(state_size, action_size, config).to(self.device)
-        self.target_net = DQN(state_size, action_size, config).to(self.device)
+        # Networks - use DuelingDQN if enabled in config
+        NetworkClass = DuelingDQN if self.config.USE_DUELING else DQN
+        self.policy_net = NetworkClass(state_size, action_size, config).to(self.device)
+        self.target_net = NetworkClass(state_size, action_size, config).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()  # Target network is never trained directly
         
@@ -177,13 +178,18 @@ class Agent:
         """
         self.memory.push(state, action, reward, next_state, done)
     
-    def learn(self) -> Optional[float]:
+    def learn(self, update_target: bool = True) -> Optional[float]:
         """
         Perform one training step using Double DQN.
         
         Double DQN reduces Q-value overestimation by:
         1. Using policy network to SELECT the best action
         2. Using target network to EVALUATE that action's Q-value
+        
+        Args:
+            update_target: Whether to update target network this step.
+                          Set to False for intermediate gradient steps when
+                          using GRADIENT_STEPS > 1 to maintain correct update frequency.
         
         Returns:
             Loss value if training occurred, None otherwise
@@ -206,6 +212,10 @@ class Agent:
         rewards = torch.FloatTensor(rewards_np).to(self.device)
         next_states = torch.FloatTensor(next_states_np).to(self.device)
         dones = torch.FloatTensor(dones_np).to(self.device)
+        
+        # Clip rewards to prevent extreme gradients (if enabled)
+        if self.config.REWARD_CLIP > 0:
+            rewards = torch.clamp(rewards, -self.config.REWARD_CLIP, self.config.REWARD_CLIP)
         
         # Compute current Q-values
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
@@ -242,10 +252,12 @@ class Agent:
         self.steps += 1
         
         # Use soft or hard target updates based on config
-        if self.config.USE_SOFT_UPDATE:
-            self._soft_update_target_network()
-        elif self.steps % self.config.TARGET_UPDATE == 0:
-            self.update_target_network()
+        # Only update if update_target=True (handles GRADIENT_STEPS > 1 correctly)
+        if update_target:
+            if self.config.USE_SOFT_UPDATE:
+                self._soft_update_target_network()
+            elif self.steps % self.config.TARGET_UPDATE == 0:
+                self.update_target_network()
         
         # Store loss for metrics
         loss_value = loss.item()
