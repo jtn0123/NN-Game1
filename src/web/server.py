@@ -113,6 +113,17 @@ class TrainingState:
     performance_mode: str = "normal"
 
 
+@dataclass
+class SaveStatus:
+    """Track last save information."""
+    last_save_time: float = 0.0
+    last_save_filename: str = ""
+    last_save_reason: str = ""
+    last_save_episode: int = 0
+    last_save_best_score: int = 0
+    saves_this_session: int = 0
+
+
 @dataclass 
 class TrainingConfig:
     """Configurable training parameters."""
@@ -140,6 +151,7 @@ class MetricsPublisher:
     def __init__(self, history_length: int = 500):
         self.history_length = history_length
         self.state = TrainingState()
+        self.save_status = SaveStatus()
         
         # Metric history
         self.scores: Deque[int] = deque(maxlen=history_length)
@@ -155,6 +167,7 @@ class MetricsPublisher:
         # Callbacks
         self._on_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._on_log_callbacks: List[Callable[[LogMessage], None]] = []
+        self._on_save_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         
         # Screenshot storage
         self._screenshot_data: Optional[str] = None
@@ -345,6 +358,57 @@ class MetricsPublisher:
         self.state.torch_compiled = torch_compiled
         self.state.target_episodes = target_episodes
         self.state.training_start_time = time.time()
+    
+    def record_save(
+        self,
+        filename: str,
+        reason: str,
+        episode: int,
+        best_score: int
+    ) -> None:
+        """Record a model save event."""
+        self.save_status.last_save_time = time.time()
+        self.save_status.last_save_filename = filename
+        self.save_status.last_save_reason = reason
+        self.save_status.last_save_episode = episode
+        self.save_status.last_save_best_score = best_score
+        self.save_status.saves_this_session += 1
+        
+        # Notify save callbacks
+        save_info = self.get_save_status()
+        for callback in self._on_save_callbacks:
+            callback(save_info)
+    
+    def get_save_status(self) -> Dict[str, Any]:
+        """Get current save status."""
+        time_since_save = 0.0
+        if self.save_status.last_save_time > 0:
+            time_since_save = time.time() - self.save_status.last_save_time
+        
+        return {
+            'last_save_time': self.save_status.last_save_time,
+            'last_save_filename': self.save_status.last_save_filename,
+            'last_save_reason': self.save_status.last_save_reason,
+            'last_save_episode': self.save_status.last_save_episode,
+            'last_save_best_score': self.save_status.last_save_best_score,
+            'saves_this_session': self.save_status.saves_this_session,
+            'time_since_save': time_since_save,
+            'time_since_save_str': self._format_time_ago(time_since_save)
+        }
+    
+    def _format_time_ago(self, seconds: float) -> str:
+        """Format seconds as human-readable time ago string."""
+        if seconds <= 0:
+            return "Never"
+        if seconds < 60:
+            return f"{int(seconds)}s ago"
+        if seconds < 3600:
+            return f"{int(seconds // 60)}m ago"
+        return f"{int(seconds // 3600)}h {int((seconds % 3600) // 60)}m ago"
+    
+    def on_save(self, callback) -> None:
+        """Register a callback for save events."""
+        self._on_save_callbacks.append(callback)
 
 
 class WebDashboard:
@@ -406,6 +470,7 @@ class WebDashboard:
         # Control callbacks
         self.on_pause_callback: Optional[Callable[[], None]] = None
         self.on_save_callback: Optional[Callable[[], None]] = None
+        self.on_save_as_callback: Optional[Callable[[str], None]] = None
         self.on_speed_callback: Optional[Callable[[float], None]] = None
         self.on_reset_callback: Optional[Callable[[], None]] = None
         self.on_load_model_callback: Optional[Callable[[str], None]] = None
@@ -456,22 +521,83 @@ class WebDashboard:
         
         @self.app.route('/api/models')
         def api_models():
-            """List available model files."""
+            """List available model files with metadata."""
             import os
+            import torch
+            from datetime import datetime
+            
             model_dir = self.config.MODEL_DIR
             models = []
             if os.path.exists(model_dir):
                 for f in os.listdir(model_dir):
                     if f.endswith('.pth'):
                         path = os.path.join(model_dir, f)
-                        models.append({
+                        model_info = {
                             'name': f,
                             'path': path,
                             'size': os.path.getsize(path),
-                            'modified': os.path.getmtime(path)
-                        })
+                            'modified': os.path.getmtime(path),
+                            'modified_str': datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d %H:%M'),
+                            'has_metadata': False,
+                            'metadata': None
+                        }
+                        
+                        # Try to extract metadata
+                        try:
+                            checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+                            model_info['steps'] = checkpoint.get('steps', None)
+                            model_info['epsilon'] = checkpoint.get('epsilon', None)
+                            if 'metadata' in checkpoint:
+                                model_info['has_metadata'] = True
+                                model_info['metadata'] = checkpoint['metadata']
+                        except Exception:
+                            pass
+                        
+                        models.append(model_info)
             models.sort(key=lambda x: x['modified'], reverse=True)
             return jsonify({'models': models})
+        
+        @self.app.route('/api/model-info/<path:filepath>')
+        def api_model_info(filepath):
+            """Get detailed info about a specific model."""
+            import torch
+            from datetime import datetime
+            
+            # Security: ensure path is within model directory
+            model_dir = os.path.abspath(self.config.MODEL_DIR)
+            full_path = os.path.abspath(filepath)
+            if not full_path.startswith(model_dir):
+                return jsonify({'error': 'Invalid path'}), 403
+            
+            if not os.path.exists(full_path):
+                return jsonify({'error': 'Model not found'}), 404
+            
+            try:
+                checkpoint = torch.load(full_path, map_location='cpu', weights_only=False)
+                file_stat = os.stat(full_path)
+                
+                info = {
+                    'filename': os.path.basename(full_path),
+                    'path': full_path,
+                    'size': file_stat.st_size,
+                    'size_mb': file_stat.st_size / (1024 * 1024),
+                    'modified': file_stat.st_mtime,
+                    'modified_str': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                    'steps': checkpoint.get('steps', 'unknown'),
+                    'epsilon': checkpoint.get('epsilon', 'unknown'),
+                    'state_size': checkpoint.get('state_size', 'unknown'),
+                    'action_size': checkpoint.get('action_size', 'unknown'),
+                    'has_metadata': 'metadata' in checkpoint,
+                    'metadata': checkpoint.get('metadata', None)
+                }
+                return jsonify(info)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/save-status')
+        def api_save_status():
+            """Get last save information."""
+            return jsonify(self.publisher.get_save_status())
     
     def _register_socket_events(self) -> None:
         """Register SocketIO events."""
@@ -493,6 +619,10 @@ class WebDashboard:
             elif action == 'save':
                 if self.on_save_callback:
                     self.on_save_callback()
+            elif action == 'save_as':
+                filename = data.get('filename', 'custom_save.pth')
+                if self.on_save_as_callback:
+                    self.on_save_as_callback(filename)
             elif action == 'speed':
                 speed = data.get('value', 1.0)
                 if self.on_speed_callback:
@@ -528,8 +658,12 @@ class WebDashboard:
         def broadcast_log(log_entry: LogMessage):
             self.socketio.emit('console_log', log_entry.to_dict())
         
+        def broadcast_save(save_info: Dict[str, Any]):
+            self.socketio.emit('save_event', save_info)
+        
         self.publisher.on_update(broadcast_update)
         self.publisher.on_log(broadcast_log)
+        self.publisher.on_save(broadcast_save)
     
     def start(self) -> None:
         """Start the web server in a background thread."""

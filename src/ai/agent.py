@@ -28,9 +28,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
+from dataclasses import dataclass, asdict
+from datetime import datetime
 import random
 import os
+import time
 
 from .network import DQN, DuelingDQN
 from .replay_buffer import ReplayBuffer
@@ -38,6 +41,44 @@ from .replay_buffer import ReplayBuffer
 import sys
 sys.path.append('../..')
 from config import Config
+
+
+@dataclass
+class SaveMetadata:
+    """Rich metadata stored with each model checkpoint."""
+    # Timing
+    timestamp: str
+    save_reason: str  # 'best', 'periodic', 'manual', 'final', 'interrupted'
+    total_training_time_seconds: float
+    
+    # Training progress
+    episode: int
+    total_steps: int
+    epsilon: float
+    
+    # Performance metrics
+    best_score: int
+    avg_score_last_100: float
+    avg_loss: float
+    win_rate: float
+    memory_buffer_size: int
+    
+    # Config snapshot
+    learning_rate: float
+    gamma: float
+    batch_size: int
+    hidden_layers: List[int]
+    epsilon_start: float
+    epsilon_end: float
+    epsilon_decay: float
+    use_dueling: bool
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SaveMetadata':
+        return cls(**data)
 
 
 class Agent:
@@ -293,14 +334,65 @@ class Agent:
             self.epsilon * self.config.EPSILON_DECAY
         )
     
-    def save(self, filepath: str) -> None:
+    def save(
+        self,
+        filepath: str,
+        save_reason: str = "manual",
+        episode: int = 0,
+        best_score: int = 0,
+        avg_score_last_100: float = 0.0,
+        win_rate: float = 0.0,
+        training_start_time: Optional[float] = None,
+        quiet: bool = False
+    ) -> Optional[SaveMetadata]:
         """
-        Save agent state to file.
+        Save agent state to file with rich metadata.
         
         Args:
             filepath: Path to save file
+            save_reason: Why this save is happening ('best', 'periodic', 'manual', 'final', 'interrupted')
+            episode: Current episode number
+            best_score: Best score achieved so far
+            avg_score_last_100: Average score over last 100 episodes
+            win_rate: Win rate over last 100 episodes
+            training_start_time: Unix timestamp when training started (for calculating total time)
+            quiet: If True, suppress most output
+            
+        Returns:
+            SaveMetadata object if save succeeded, None on failure
         """
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # Ensure directory exists
+        dir_path = os.path.dirname(filepath)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+        
+        # Calculate training time
+        total_time = 0.0
+        if training_start_time:
+            total_time = time.time() - training_start_time
+        
+        # Build metadata
+        metadata = SaveMetadata(
+            timestamp=datetime.now().isoformat(),
+            save_reason=save_reason,
+            total_training_time_seconds=total_time,
+            episode=episode,
+            total_steps=self.steps,
+            epsilon=self.epsilon,
+            best_score=best_score,
+            avg_score_last_100=avg_score_last_100,
+            avg_loss=self.get_average_loss(100),
+            win_rate=win_rate,
+            memory_buffer_size=len(self.memory),
+            learning_rate=self.config.LEARNING_RATE,
+            gamma=self.config.GAMMA,
+            batch_size=self.config.BATCH_SIZE,
+            hidden_layers=list(self.config.HIDDEN_LAYERS),
+            epsilon_start=self.config.EPSILON_START,
+            epsilon_end=self.config.EPSILON_END,
+            epsilon_decay=self.config.EPSILON_DECAY,
+            use_dueling=self.config.USE_DUELING
+        )
         
         checkpoint = {
             'policy_net_state_dict': self.policy_net.state_dict(),
@@ -310,28 +402,202 @@ class Agent:
             'steps': self.steps,
             'state_size': self.state_size,
             'action_size': self.action_size,
+            'metadata': metadata.to_dict(),
         }
         
-        torch.save(checkpoint, filepath)
-        print(f"💾 Agent saved to {filepath}")
+        try:
+            torch.save(checkpoint, filepath)
+            
+            # Verify the save by checking file exists and size
+            if not os.path.exists(filepath):
+                print(f"❌ Save verification FAILED: {filepath} not found after save")
+                return None
+            
+            file_size = os.path.getsize(filepath)
+            if file_size < 1000:  # Less than 1KB is suspicious
+                print(f"⚠️ Warning: Saved file seems too small ({file_size} bytes)")
+            
+            # Format output
+            if not quiet:
+                size_mb = file_size / (1024 * 1024)
+                reason_emoji = {
+                    'best': '🏆',
+                    'periodic': '📅',
+                    'manual': '💾',
+                    'final': '✅',
+                    'interrupted': '⛔'
+                }.get(save_reason, '💾')
+                
+                print(f"\n{reason_emoji} Model Saved: {os.path.basename(filepath)}")
+                print(f"   Episode: {episode:,} | Steps: {self.steps:,} | ε: {self.epsilon:.4f}")
+                print(f"   Best Score: {best_score} | Avg(100): {avg_score_last_100:.1f} | Win Rate: {win_rate*100:.1f}%")
+                print(f"   Size: {size_mb:.2f} MB | Reason: {save_reason}")
+                if total_time > 0:
+                    hours = int(total_time // 3600)
+                    minutes = int((total_time % 3600) // 60)
+                    print(f"   Training Time: {hours}h {minutes}m")
+            
+            return metadata
+            
+        except Exception as e:
+            print(f"❌ Save FAILED: {e}")
+            return None
     
-    def load(self, filepath: str) -> None:
+    def load(self, filepath: str, quiet: bool = False) -> Optional[SaveMetadata]:
         """
-        Load agent state from file.
+        Load agent state from file with detailed resume summary.
         
         Args:
             filepath: Path to checkpoint file
+            quiet: If True, suppress output
+            
+        Returns:
+            SaveMetadata if available, None otherwise
         """
-        checkpoint = torch.load(filepath, map_location=self.device)
+        if not os.path.exists(filepath):
+            print(f"❌ Model file not found: {filepath}")
+            return None
         
+        try:
+            checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
+        except Exception as e:
+            print(f"❌ Failed to load model: {e}")
+            return None
+        
+        # Check for architecture mismatch
+        saved_state_size = checkpoint.get('state_size', self.state_size)
+        saved_action_size = checkpoint.get('action_size', self.action_size)
+        
+        if saved_state_size != self.state_size:
+            print(f"⚠️ Warning: State size mismatch (saved: {saved_state_size}, current: {self.state_size})")
+        if saved_action_size != self.action_size:
+            print(f"⚠️ Warning: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})")
+        
+        # Load network weights
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.epsilon = checkpoint['epsilon']
         self.steps = checkpoint['steps']
         
-        print(f"📂 Agent loaded from {filepath}")
-        print(f"   Steps: {self.steps}, Epsilon: {self.epsilon:.4f}")
+        # Load metadata if available
+        metadata = None
+        if 'metadata' in checkpoint:
+            try:
+                metadata = SaveMetadata.from_dict(checkpoint['metadata'])
+            except Exception:
+                pass  # Old format without full metadata
+        
+        if not quiet:
+            file_size = os.path.getsize(filepath)
+            size_mb = file_size / (1024 * 1024)
+            
+            print(f"\n{'='*60}")
+            print(f"📂 Resuming Training")
+            print(f"{'='*60}")
+            print(f"   Model: {os.path.basename(filepath)} ({size_mb:.2f} MB)")
+            
+            if metadata:
+                # Parse timestamp for human-readable format
+                try:
+                    save_time = datetime.fromisoformat(metadata.timestamp)
+                    time_ago = datetime.now() - save_time
+                    if time_ago.days > 0:
+                        time_str = f"{time_ago.days}d ago"
+                    elif time_ago.seconds > 3600:
+                        time_str = f"{time_ago.seconds // 3600}h ago"
+                    else:
+                        time_str = f"{time_ago.seconds // 60}m ago"
+                    print(f"   Saved: {save_time.strftime('%b %d, %Y %I:%M %p')} ({time_str})")
+                except Exception:
+                    print(f"   Saved: {metadata.timestamp}")
+                
+                print(f"\n   Episode: {metadata.episode:,} | Steps: {metadata.total_steps:,} | ε: {metadata.epsilon:.4f}")
+                print(f"   Best Score: {metadata.best_score} | Avg(100): {metadata.avg_score_last_100:.1f}")
+                print(f"   Win Rate: {metadata.win_rate*100:.1f}% | Avg Loss: {metadata.avg_loss:.4f}")
+                
+                if metadata.total_training_time_seconds > 0:
+                    hours = int(metadata.total_training_time_seconds // 3600)
+                    minutes = int((metadata.total_training_time_seconds % 3600) // 60)
+                    print(f"   Previous Training Time: {hours}h {minutes}m")
+                
+                print(f"\n   Config: LR={metadata.learning_rate}, γ={metadata.gamma}, Batch={metadata.batch_size}")
+                print(f"   Architecture: {metadata.hidden_layers}")
+            else:
+                # Old format - show basic info
+                print(f"\n   Steps: {self.steps:,} | Epsilon: {self.epsilon:.4f}")
+                print(f"   (Legacy save - no detailed metadata)")
+            
+            print(f"{'='*60}\n")
+        
+        return metadata
+    
+    @staticmethod
+    def inspect_model(filepath: str) -> Optional[Dict[str, Any]]:
+        """
+        Inspect a model file without loading it into an agent.
+        
+        Args:
+            filepath: Path to checkpoint file
+            
+        Returns:
+            Dictionary with model info, or None on error
+        """
+        if not os.path.exists(filepath):
+            print(f"❌ File not found: {filepath}")
+            return None
+        
+        try:
+            checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
+        except Exception as e:
+            print(f"❌ Failed to read model: {e}")
+            return None
+        
+        file_size = os.path.getsize(filepath)
+        file_mtime = os.path.getmtime(filepath)
+        
+        info = {
+            'filepath': filepath,
+            'filename': os.path.basename(filepath),
+            'file_size_bytes': file_size,
+            'file_size_mb': file_size / (1024 * 1024),
+            'file_modified': datetime.fromtimestamp(file_mtime).isoformat(),
+            'steps': checkpoint.get('steps', 'unknown'),
+            'epsilon': checkpoint.get('epsilon', 'unknown'),
+            'state_size': checkpoint.get('state_size', 'unknown'),
+            'action_size': checkpoint.get('action_size', 'unknown'),
+            'has_metadata': 'metadata' in checkpoint,
+            'metadata': checkpoint.get('metadata', None)
+        }
+        
+        return info
+    
+    @staticmethod
+    def list_models(model_dir: str = 'models') -> List[Dict[str, Any]]:
+        """
+        List all model files in a directory with their metadata.
+        
+        Args:
+            model_dir: Directory to scan for .pth files
+            
+        Returns:
+            List of model info dictionaries, sorted by modified time (newest first)
+        """
+        models = []
+        
+        if not os.path.exists(model_dir):
+            return models
+        
+        for filename in os.listdir(model_dir):
+            if filename.endswith('.pth'):
+                filepath = os.path.join(model_dir, filename)
+                info = Agent.inspect_model(filepath)
+                if info:
+                    models.append(info)
+        
+        # Sort by file modified time, newest first
+        models.sort(key=lambda x: x['file_modified'], reverse=True)
+        return models
     
     def get_network_activations(self) -> dict:
         """Get current network activations for visualization."""

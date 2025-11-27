@@ -180,6 +180,13 @@ class GameApp:
         self.target_updates = 0
         self.last_target_update_step = 0
         
+        # Training start time for total training time tracking
+        self.training_start_time = time.time()
+        
+        # Track recent scores for save metadata
+        self.recent_scores: list[int] = []
+        self.best_score_ever = 0
+        
         # Current state
         self.state = self.game.reset()
         self.selected_action: Optional[int] = None
@@ -196,7 +203,8 @@ class GameApp:
         if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
             self.web_dashboard.on_pause_callback = self._toggle_pause
-            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth")
+            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth", save_reason="manual")
+            self.web_dashboard.on_save_as_callback = self._save_model_as
             self.web_dashboard.on_speed_callback = self._set_speed
             self.web_dashboard.on_reset_callback = self._reset_episode
             self.web_dashboard.on_load_model_callback = self._load_model
@@ -657,22 +665,29 @@ class GameApp:
                                   f"Steps: {episode_steps:5d} | "
                                   f"Time: {episode_duration:.1f}s")
                         
+                        # Track scores for metadata
+                        self.recent_scores.append(info['score'])
+                        if len(self.recent_scores) > 1000:
+                            self.recent_scores = self.recent_scores[-1000:]
+                        
                         # Save checkpoint
                         if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
-                            self._save_model(f"breakout_ep{self.episode}.pth")
+                            self._save_model(f"breakout_ep{self.episode}.pth", save_reason="periodic")
                             if self.web_dashboard:
                                 self.web_dashboard.log(
                                     f"💾 Checkpoint saved: breakout_ep{self.episode}.pth",
                                     "success"
                                 )
                         
-                        if info['score'] > self.dashboard.best_score:
-                            self._save_model("breakout_best.pth", quiet=True)
+                        if info['score'] > self.best_score_ever:
+                            self.best_score_ever = info['score']
+                            self._save_model("breakout_best.pth", save_reason="best", quiet=True)
                             if self.web_dashboard:
+                                avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
                                 self.web_dashboard.log(
                                     f"🏆 New best score: {info['score']}! Model saved.",
                                     "success",
-                                    {'score': info['score'], 'episode': self.episode}
+                                    {'score': info['score'], 'episode': self.episode, 'avg_100': round(avg_score, 1)}
                                 )
                         
                         # Reset for next episode
@@ -717,17 +732,17 @@ class GameApp:
                     self.clock.tick(60)
         
         # Training complete
-        self._save_model("breakout_final.pth")
+        self._save_model("breakout_final.pth", save_reason="final")
         if self.web_dashboard:
             self.web_dashboard.log("🎉 Training complete!", "success", {
                 'total_episodes': self.episode,
-                'best_score': self.dashboard.best_score,
+                'best_score': self.best_score_ever,
                 'total_steps': self.steps
             })
         
         print("\n✅ Training complete!")
         print(f"   Total episodes: {self.episode}")
-        print(f"   Best score: {self.dashboard.best_score}")
+        print(f"   Best score: {self.best_score_ever}")
         
         pygame.quit()
     
@@ -904,7 +919,7 @@ class GameApp:
                     self._toggle_pause()
                 
                 elif event.key == pygame.K_s:
-                    self._save_model("breakout_manual_save.pth")
+                    self._save_model("breakout_manual_save.pth", save_reason="manual")
                     if self.web_dashboard:
                         self.web_dashboard.log("💾 Manual save: breakout_manual_save.pth", "success")
                 
@@ -983,12 +998,53 @@ class GameApp:
         
         pygame.display.flip()
     
-    def _save_model(self, filename: str, quiet: bool = False) -> None:
-        """Save the current model."""
+    def _save_model(
+        self,
+        filename: str,
+        save_reason: str = "manual",
+        quiet: bool = False
+    ) -> None:
+        """Save the current model with rich metadata."""
         filepath = os.path.join(self.config.MODEL_DIR, filename)
-        self.agent.save(filepath)
-        if not quiet:
-            print(f"💾 Model saved: {filename}")
+        
+        # Calculate metrics for metadata
+        avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
+        win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, 'get_win_rate') else 0.0
+        
+        self.agent.save(
+            filepath=filepath,
+            save_reason=save_reason,
+            episode=self.episode,
+            best_score=self.best_score_ever,
+            avg_score_last_100=float(avg_score),
+            win_rate=win_rate,
+            training_start_time=self.training_start_time,
+            quiet=quiet
+        )
+        
+        # Record save to web dashboard
+        if self.web_dashboard:
+            self.web_dashboard.publisher.record_save(
+                filename=filename,
+                reason=save_reason,
+                episode=self.episode,
+                best_score=self.best_score_ever
+            )
+    
+    def _save_model_as(self, filename: str) -> None:
+        """Save model with a custom filename (from web dashboard)."""
+        # Ensure .pth extension
+        if not filename.endswith('.pth'):
+            filename = filename + '.pth'
+        
+        # Sanitize filename
+        filename = "".join(c for c in filename if c.isalnum() or c in '._-').strip()
+        if not filename:
+            filename = "custom_save.pth"
+        
+        self._save_model(filename, save_reason="manual")
+        if self.web_dashboard:
+            self.web_dashboard.log(f"💾 Saved as: {filename}", "success")
 
 
 class HeadlessTrainer:
@@ -1070,14 +1126,16 @@ class HeadlessTrainer:
         print("=" * 70 + "\n")
         
         # Training state
-        scores: list[int] = []
-        total_steps = 0
-        start_time = time.time()
-        last_report_time = start_time
+        self.scores: list[int] = []
+        self.total_steps = 0
+        self.training_start_time = time.time()
+        last_report_time = self.training_start_time
         steps_since_report = 0
-        best_score = 0
+        self.best_score = 0
+        self.current_episode = 0
         
         for episode in range(config.MAX_EPISODES):
+            self.current_episode = episode
             state = self.game.reset()
             episode_reward = 0.0
             episode_steps = 0
@@ -1094,7 +1152,7 @@ class HeadlessTrainer:
                 self.agent.remember(state, action, reward, next_state, done)
                 
                 # Learn every N steps
-                if total_steps % config.LEARN_EVERY == 0:
+                if self.total_steps % config.LEARN_EVERY == 0:
                     for _ in range(config.GRADIENT_STEPS):
                         self.agent.learn()
                 
@@ -1102,22 +1160,22 @@ class HeadlessTrainer:
                 state = next_state
                 episode_reward += reward
                 episode_steps += 1
-                total_steps += 1
+                self.total_steps += 1
                 steps_since_report += 1
             
             # Episode complete
             self.agent.decay_epsilon()
-            scores.append(info['score'])
+            self.scores.append(info['score'])
             
             # Time-based progress reporting
             current_time = time.time()
             elapsed_since_report = current_time - last_report_time
             
             if elapsed_since_report >= config.REPORT_INTERVAL_SECONDS or episode % config.LOG_EVERY == 0:
-                elapsed_total = current_time - start_time
+                elapsed_total = current_time - self.training_start_time
                 steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 eps_per_hour = episode / elapsed_total * 3600 if elapsed_total > 0 else 0
-                avg_score = np.mean(scores[-100:]) if scores else 0
+                avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 
                 print(f"Ep {episode:5d} | "
                       f"Score: {info['score']:4d} | "
@@ -1130,35 +1188,51 @@ class HeadlessTrainer:
                 steps_since_report = 0
             
             # Save checkpoints
-            if info['score'] > best_score:
-                best_score = info['score']
-                self._save_model("breakout_best.pth", quiet=True)
+            if info['score'] > self.best_score:
+                self.best_score = info['score']
+                self._save_model("breakout_best.pth", save_reason="best", quiet=True)
             
             if episode % config.SAVE_EVERY == 0 and episode > 0:
-                self._save_model(f"breakout_ep{episode}.pth")
+                self._save_model(f"breakout_ep{episode}.pth", save_reason="periodic")
         
         # Final save
-        self._save_model("breakout_final.pth")
+        self._save_model("breakout_final.pth", save_reason="final")
         
         # Summary
-        total_time = time.time() - start_time
+        total_time = time.time() - self.training_start_time
         print("\n" + "=" * 70)
         print("✅ TRAINING COMPLETE!")
         print("=" * 70)
         print(f"   Total episodes:   {config.MAX_EPISODES}")
-        print(f"   Total steps:      {total_steps:,}")
+        print(f"   Total steps:      {self.total_steps:,}")
         print(f"   Total time:       {total_time/60:.1f} minutes")
-        print(f"   Avg steps/sec:    {total_steps/total_time:,.0f}")
-        print(f"   Best score:       {best_score}")
-        print(f"   Final avg score:  {np.mean(scores[-100:]):.1f}")
+        print(f"   Avg steps/sec:    {self.total_steps/total_time:,.0f}")
+        print(f"   Best score:       {self.best_score}")
+        print(f"   Final avg score:  {np.mean(self.scores[-100:]):.1f}")
         print("=" * 70)
     
-    def _save_model(self, filename: str, quiet: bool = False) -> None:
-        """Save the current model."""
+    def _save_model(
+        self,
+        filename: str,
+        save_reason: str = "manual",
+        quiet: bool = False
+    ) -> None:
+        """Save the current model with rich metadata."""
         filepath = os.path.join(self.config.MODEL_DIR, filename)
-        self.agent.save(filepath)
-        if not quiet:
-            print(f"💾 Model saved: {filename}")
+        
+        # Calculate metrics for metadata
+        avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
+        
+        self.agent.save(
+            filepath=filepath,
+            save_reason=save_reason,
+            episode=self.current_episode,
+            best_score=self.best_score,
+            avg_score_last_100=float(avg_score),
+            win_rate=0.0,  # Not tracked in headless mode
+            training_start_time=self.training_start_time,
+            quiet=quiet
+        )
 
 
 def parse_args():
@@ -1191,6 +1265,14 @@ Examples:
     mode_group.add_argument(
         '--headless', action='store_true',
         help='Headless training: no visualization (faster)'
+    )
+    mode_group.add_argument(
+        '--inspect', type=str, metavar='MODEL_PATH',
+        help='Inspect a model file and show its metadata'
+    )
+    mode_group.add_argument(
+        '--list-models', action='store_true',
+        help='List all saved models with their metadata'
     )
     
     # Model options
@@ -1254,9 +1336,114 @@ Examples:
     return parser.parse_args()
 
 
+def inspect_model(filepath: str) -> None:
+    """Inspect a model file and display its metadata."""
+    from src.ai.agent import Agent
+    
+    info = Agent.inspect_model(filepath)
+    if not info:
+        return
+    
+    print("\n" + "=" * 60)
+    print(f"🔍 Model Inspection: {info['filename']}")
+    print("=" * 60)
+    print(f"   File Size: {info['file_size_mb']:.2f} MB")
+    print(f"   Modified:  {info['file_modified']}")
+    print(f"\n   Steps:     {info['steps']:,}" if isinstance(info['steps'], int) else f"\n   Steps:     {info['steps']}")
+    print(f"   Epsilon:   {info['epsilon']:.4f}" if isinstance(info['epsilon'], float) else f"   Epsilon:   {info['epsilon']}")
+    print(f"   State Size: {info['state_size']}")
+    print(f"   Action Size: {info['action_size']}")
+    
+    if info['has_metadata'] and info['metadata']:
+        meta = info['metadata']
+        print(f"\n   📊 Training Metadata:")
+        print(f"   ─────────────────────")
+        print(f"   Save Reason:    {meta.get('save_reason', 'unknown')}")
+        print(f"   Episode:        {meta.get('episode', 'unknown'):,}" if isinstance(meta.get('episode'), int) else f"   Episode:        {meta.get('episode', 'unknown')}")
+        print(f"   Best Score:     {meta.get('best_score', 'unknown')}")
+        print(f"   Avg Score(100): {meta.get('avg_score_last_100', 0):.1f}")
+        print(f"   Win Rate:       {meta.get('win_rate', 0)*100:.1f}%")
+        print(f"   Avg Loss:       {meta.get('avg_loss', 0):.4f}")
+        
+        training_time = meta.get('total_training_time_seconds', 0)
+        if training_time > 0:
+            hours = int(training_time // 3600)
+            minutes = int((training_time % 3600) // 60)
+            print(f"   Training Time:  {hours}h {minutes}m")
+        
+        print(f"\n   ⚙️ Config Snapshot:")
+        print(f"   ─────────────────────")
+        print(f"   Learning Rate:  {meta.get('learning_rate', 'unknown')}")
+        print(f"   Gamma:          {meta.get('gamma', 'unknown')}")
+        print(f"   Batch Size:     {meta.get('batch_size', 'unknown')}")
+        print(f"   Hidden Layers:  {meta.get('hidden_layers', 'unknown')}")
+        print(f"   Dueling DQN:    {meta.get('use_dueling', 'unknown')}")
+    else:
+        print(f"\n   ⚠️ No detailed metadata (legacy save format)")
+    
+    print("=" * 60 + "\n")
+
+
+def list_models(model_dir: str = 'models') -> None:
+    """List all model files in the models directory."""
+    from src.ai.agent import Agent
+    from datetime import datetime
+    
+    models = Agent.list_models(model_dir)
+    
+    if not models:
+        print(f"\n❌ No model files found in '{model_dir}/'")
+        return
+    
+    print("\n" + "=" * 80)
+    print(f"📁 Saved Models in '{model_dir}/' ({len(models)} files)")
+    print("=" * 80)
+    print(f"{'Filename':<35} {'Episode':>8} {'Steps':>12} {'Best':>6} {'Epsilon':>8} {'Size':>8}")
+    print("-" * 80)
+    
+    for model in models:
+        filename = model['filename'][:33] + '..' if len(model['filename']) > 35 else model['filename']
+        
+        # Get metadata if available
+        if model['has_metadata'] and model['metadata']:
+            meta = model['metadata']
+            episode = meta.get('episode', '?')
+            steps = meta.get('total_steps', model.get('steps', '?'))
+            best = meta.get('best_score', '?')
+            epsilon = meta.get('epsilon', model.get('epsilon', '?'))
+        else:
+            episode = '?'
+            steps = model.get('steps', '?')
+            best = '?'
+            epsilon = model.get('epsilon', '?')
+        
+        size_mb = f"{model['file_size_mb']:.1f}MB"
+        
+        # Format values
+        ep_str = f"{episode:,}" if isinstance(episode, int) else str(episode)
+        steps_str = f"{steps:,}" if isinstance(steps, int) else str(steps)
+        best_str = str(best)
+        eps_str = f"{epsilon:.3f}" if isinstance(epsilon, float) else str(epsilon)
+        
+        print(f"{filename:<35} {ep_str:>8} {steps_str:>12} {best_str:>6} {eps_str:>8} {size_mb:>8}")
+    
+    print("=" * 80)
+    print(f"\nUse --inspect <path> to see detailed info about a specific model.\n")
+
+
 def main():
     """Main entry point."""
     args = parse_args()
+    
+    # Handle --inspect command (no pygame needed)
+    if args.inspect:
+        inspect_model(args.inspect)
+        return
+    
+    # Handle --list-models command (no pygame needed)
+    if args.list_models:
+        list_models()
+        return
     
     # Load config
     config = Config()
@@ -1275,7 +1462,7 @@ def main():
             trainer.train()
         except KeyboardInterrupt:
             print("\n\n⛔ Training interrupted by user")
-            trainer._save_model("breakout_interrupted.pth")
+            trainer._save_model("breakout_interrupted.pth", save_reason="interrupted")
         return
     
     # Apply CLI overrides to config for visualized mode
@@ -1308,7 +1495,7 @@ def main():
             app.run_training()
     except KeyboardInterrupt:
         print("\n\n⛔ Training interrupted by user")
-        app._save_model("breakout_interrupted.pth")
+        app._save_model("breakout_interrupted.pth", save_reason="interrupted")
         if app.web_dashboard:
             app.web_dashboard.log("⛔ Training interrupted by user", "warning")
     finally:

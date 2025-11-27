@@ -267,6 +267,11 @@ function connectSocket() {
         });
         renderConsoleLogs();
     });
+
+    socket.on('save_event', (data) => {
+        updateSaveStatus(data);
+        flashSaveIndicator();
+    });
 }
 
 /**
@@ -691,7 +696,7 @@ function toggleSettings() {
 // ============================================================
 
 /**
- * Show load model modal
+ * Show load model modal with enhanced metadata
  */
 function showLoadModal() {
     const modal = document.getElementById('load-modal');
@@ -709,15 +714,51 @@ function showLoadModal() {
             }
 
             list.innerHTML = data.models.map(model => {
-                const date = new Date(model.modified * 1000).toLocaleString();
-                const size = (model.size / 1024).toFixed(1) + ' KB';
+                const size = (model.size / (1024 * 1024)).toFixed(2) + ' MB';
+                const meta = model.metadata || {};
+                const hasMeta = model.has_metadata;
+                
+                // Get values from metadata or fallback
+                const episode = hasMeta ? (meta.episode || '?') : '?';
+                const bestScore = hasMeta ? (meta.best_score || '?') : '?';
+                const avgScore = hasMeta ? (meta.avg_score_last_100?.toFixed(1) || '?') : '?';
+                const epsilon = model.epsilon ? model.epsilon.toFixed(3) : '?';
+                const reason = hasMeta ? (meta.save_reason || '') : '';
+                
+                // Format episode and best score
+                const episodeStr = typeof episode === 'number' ? episode.toLocaleString() : episode;
+                
+                // Reason badge
+                const reasonBadge = reason ? `<span class="reason-badge ${reason}">${reason}</span>` : '';
+                
                 return `
                     <div class="model-item" onclick="loadModel('${model.path}')">
-                        <div class="model-name">📁 ${model.name}</div>
-                        <div class="model-info">
-                            <span>${size}</span>
-                            <span>${date}</span>
+                        <div class="model-header">
+                            <div class="model-name">
+                                📁 ${model.name}
+                                ${reasonBadge}
+                            </div>
+                            <span class="model-size">${size}</span>
                         </div>
+                        <div class="model-stats">
+                            <div class="model-stat">
+                                <span class="model-stat-label">Episode</span>
+                                <span class="model-stat-value">${episodeStr}</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Best</span>
+                                <span class="model-stat-value">${bestScore}</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Avg(100)</span>
+                                <span class="model-stat-value">${avgScore}</span>
+                            </div>
+                            <div class="model-stat">
+                                <span class="model-stat-label">Epsilon</span>
+                                <span class="model-stat-value">${epsilon}</span>
+                            </div>
+                        </div>
+                        <div class="model-date">${model.modified_str || ''}</div>
                     </div>
                 `;
             }).join('');
@@ -991,4 +1032,105 @@ function loadConfig() {
             }
         })
         .catch(err => console.error('Config load error:', err));
+    
+    // Also fetch save status
+    fetchSaveStatus();
 }
+
+// ============================================================
+// SAVE MANAGEMENT FUNCTIONS
+// ============================================================
+
+/**
+ * Fetch current save status from server
+ */
+function fetchSaveStatus() {
+    fetch('/api/save-status')
+        .then(response => response.json())
+        .then(data => {
+            updateSaveStatus(data);
+        })
+        .catch(err => console.error('Save status fetch error:', err));
+}
+
+/**
+ * Update save status display
+ */
+function updateSaveStatus(data) {
+    const timeEl = document.getElementById('last-save-time');
+    const fileEl = document.getElementById('last-save-file');
+    const reasonEl = document.getElementById('last-save-reason');
+    const countEl = document.getElementById('saves-count');
+    
+    if (timeEl) {
+        timeEl.textContent = data.time_since_save_str || 'Never';
+    }
+    if (fileEl) {
+        fileEl.textContent = data.last_save_filename || '-';
+    }
+    if (reasonEl) {
+        reasonEl.textContent = data.last_save_reason || '-';
+        reasonEl.className = 'save-value save-reason ' + (data.last_save_reason || '');
+    }
+    if (countEl) {
+        countEl.textContent = data.saves_this_session || 0;
+    }
+}
+
+/**
+ * Flash save indicator when save occurs
+ */
+function flashSaveIndicator() {
+    const indicator = document.getElementById('save-indicator');
+    if (indicator) {
+        indicator.classList.remove('active');
+        // Trigger reflow
+        void indicator.offsetWidth;
+        indicator.classList.add('active');
+        
+        // Remove after animation
+        setTimeout(() => {
+            indicator.classList.remove('active');
+        }, 2000);
+    }
+}
+
+/**
+ * Save model with custom name
+ */
+function saveModelAs() {
+    const input = document.getElementById('save-as-name');
+    let filename = input.value.trim();
+    
+    if (!filename) {
+        filename = 'custom_save';
+    }
+    
+    // Clean filename
+    filename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    
+    socket.emit('control', { action: 'save_as', filename: filename });
+    addConsoleLog(`Saving as: ${filename}.pth`, 'action');
+    
+    // Clear input and show feedback
+    input.value = '';
+    const btn = document.querySelector('.save-as-btn');
+    const originalText = btn.textContent;
+    btn.textContent = '✓ Saved!';
+    setTimeout(() => {
+        btn.textContent = originalText;
+    }, 1500);
+}
+
+// Periodically update save status time
+setInterval(() => {
+    fetch('/api/save-status')
+        .then(response => response.json())
+        .then(data => {
+            const timeEl = document.getElementById('last-save-time');
+            if (timeEl && data.time_since_save_str) {
+                timeEl.textContent = data.time_since_save_str;
+            }
+        })
+        .catch(() => {});
+}, 10000);  // Update every 10 seconds

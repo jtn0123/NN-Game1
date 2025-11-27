@@ -261,6 +261,39 @@
                     </div>
                 </div>
 
+                <!-- Save Management Panel -->
+                <div class="save-card" id="save-card">
+                    <div class="card-header">
+                        <h3>💾 Model Saves</h3>
+                        <span class="save-indicator" id="save-indicator"></span>
+                    </div>
+                    <div class="save-status" id="save-status">
+                        <div class="save-status-row">
+                            <span class="save-label">Last Save:</span>
+                            <span class="save-value" id="last-save-time">Never</span>
+                        </div>
+                        <div class="save-status-row">
+                            <span class="save-label">File:</span>
+                            <span class="save-value" id="last-save-file">-</span>
+                        </div>
+                        <div class="save-status-row">
+                            <span class="save-label">Reason:</span>
+                            <span class="save-value save-reason" id="last-save-reason">-</span>
+                        </div>
+                        <div class="save-status-row">
+                            <span class="save-label">Saves:</span>
+                            <span class="save-value" id="saves-count">0</span>
+                        </div>
+                    </div>
+                    <div class="save-actions">
+                        <div class="save-as-row">
+                            <input type="text" id="save-as-name" placeholder="custom_name" maxlength="30">
+                            <button class="save-as-btn" onclick="saveModelAs()" title="Save with custom name">Save As</button>
+                        </div>
+                        <button class="browse-models-btn" onclick="showLoadModal()">📂 Browse All Models</button>
+                    </div>
+                </div>
+
                 <!-- Settings Panel -->
                 <div class="settings-card collapsed" id="settings-card">
                     <div class="card-header clickable" onclick="toggleSettings()">
@@ -323,9 +356,9 @@
 
     <!-- Load Model Modal -->
     <div class="modal" id="load-modal">
-        <div class="modal-content">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h3>📂 Load Model</h3>
+                <h3>📂 Model Browser</h3>
                 <button class="close-btn" onclick="hideLoadModal()">×</button>
             </div>
             <div class="modal-body">
