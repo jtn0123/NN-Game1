@@ -103,7 +103,8 @@ class TestActivationCapture:
     """Test activation capture for visualization."""
     
     def test_activations_captured(self, network, config):
-        """Activations should be captured after forward pass."""
+        """Activations should be captured after forward pass when enabled."""
+        network.capture_activations = True  # Enable capture
         x = torch.randn(1, config.STATE_SIZE)
         _ = network(x)
         
@@ -112,6 +113,7 @@ class TestActivationCapture:
     
     def test_activation_shapes(self, network, config):
         """Captured activations should have correct shapes."""
+        network.capture_activations = True  # Enable capture
         x = torch.randn(1, config.STATE_SIZE)
         _ = network(x)
         

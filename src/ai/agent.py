@@ -224,6 +224,18 @@ class Agent:
         
         # Training metrics (bounded to prevent memory growth during long training)
         self.losses: deque[float] = deque(maxlen=10000)
+        
+        # Pre-allocated tensors for action selection (avoids tensor creation per step)
+        self._state_tensor = torch.empty((1, state_size), dtype=torch.float32, device=self.device)
+        
+        # Pre-allocated batch tensors for learning (avoids allocation per learning step)
+        batch_size = self.config.BATCH_SIZE
+        self._batch_states = torch.empty((batch_size, state_size), dtype=torch.float32, device=self.device)
+        self._batch_actions = torch.empty(batch_size, dtype=torch.int64, device=self.device)
+        self._batch_rewards = torch.empty(batch_size, dtype=torch.float32, device=self.device)
+        self._batch_next_states = torch.empty((batch_size, state_size), dtype=torch.float32, device=self.device)
+        self._batch_dones = torch.empty(batch_size, dtype=torch.float32, device=self.device)
+        self._cached_batch_size = batch_size
     
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """
@@ -243,8 +255,9 @@ class Agent:
         # Exploitation: best Q-value action
         # Use inference_mode() for better performance than no_grad()
         with torch.inference_mode():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.policy_net(state_tensor)
+            # Reuse pre-allocated tensor to avoid allocation overhead
+            self._state_tensor.copy_(torch.from_numpy(state).unsqueeze(0))
+            q_values = self.policy_net(self._state_tensor)
             return q_values.argmax(dim=1).item()
     
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
@@ -258,8 +271,9 @@ class Agent:
             Array of Q-values for each action
         """
         with torch.inference_mode():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.policy_net(state_tensor)
+            # Reuse pre-allocated tensor to avoid allocation overhead
+            self._state_tensor.copy_(torch.from_numpy(state).unsqueeze(0))
+            q_values = self.policy_net(self._state_tensor)
             return q_values.cpu().numpy()[0]
     
     def remember(
@@ -343,19 +357,34 @@ class Agent:
         Returns:
             Loss value if training occurred, None otherwise
         """
-        # Sample batch
-        states_np, actions_np, rewards_np, next_states_np, dones_np = self.memory.sample(
-            self.config.BATCH_SIZE
+        # Sample batch (no-copy is safe since we consume immediately)
+        batch_size = self.config.BATCH_SIZE
+        states_np, actions_np, rewards_np, next_states_np, dones_np = self.memory.sample_no_copy(
+            batch_size
         )
         
-        # Convert to tensors with non-blocking transfers for better GPU utilization
-        # non_blocking=True allows CPU-GPU transfer to overlap with computation
-        non_blocking = self.device.type in ('cuda', 'mps')
-        states = torch.FloatTensor(states_np).to(self.device, non_blocking=non_blocking)
-        actions = torch.LongTensor(actions_np).to(self.device, non_blocking=non_blocking)
-        rewards = torch.FloatTensor(rewards_np).to(self.device, non_blocking=non_blocking)
-        next_states = torch.FloatTensor(next_states_np).to(self.device, non_blocking=non_blocking)
-        dones = torch.FloatTensor(dones_np).to(self.device, non_blocking=non_blocking)
+        # Resize pre-allocated tensors if batch size changed
+        if batch_size != self._cached_batch_size:
+            self._batch_states = torch.empty((batch_size, self.state_size), dtype=torch.float32, device=self.device)
+            self._batch_actions = torch.empty(batch_size, dtype=torch.int64, device=self.device)
+            self._batch_rewards = torch.empty(batch_size, dtype=torch.float32, device=self.device)
+            self._batch_next_states = torch.empty((batch_size, self.state_size), dtype=torch.float32, device=self.device)
+            self._batch_dones = torch.empty(batch_size, dtype=torch.float32, device=self.device)
+            self._cached_batch_size = batch_size
+        
+        # Copy to pre-allocated tensors (faster than creating new tensors)
+        self._batch_states.copy_(torch.from_numpy(states_np))
+        self._batch_actions.copy_(torch.from_numpy(actions_np))
+        self._batch_rewards.copy_(torch.from_numpy(rewards_np))
+        self._batch_next_states.copy_(torch.from_numpy(next_states_np))
+        self._batch_dones.copy_(torch.from_numpy(dones_np))
+        
+        # Use the pre-allocated tensors
+        states = self._batch_states
+        actions = self._batch_actions
+        rewards = self._batch_rewards
+        next_states = self._batch_next_states
+        dones = self._batch_dones
         
         # Clip rewards to prevent extreme gradients (if enabled)
         if self.config.REWARD_CLIP > 0:

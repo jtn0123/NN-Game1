@@ -168,11 +168,17 @@ class NeuralNetVisualizer:
             state: Current game state
             selected_action: Currently selected action (if any)
         """
+        # Enable activation capture for visualization
+        agent.policy_net.capture_activations = True
+        
         # Get network info
         layer_info = agent.policy_net.get_layer_info()
+        q_values = agent.get_q_values(state)  # This forward pass captures activations
         activations = agent.policy_net.get_activations()
         weights = agent.policy_net.get_weights()
-        q_values = agent.get_q_values(state)
+        
+        # Disable activation capture (saves overhead during training)
+        agent.policy_net.capture_activations = False
         
         # Calculate layer positions (cache for performance)
         if self._cached_layer_info != str(layer_info):

@@ -1243,8 +1243,8 @@ class HeadlessTrainer:
             config.USE_TORCH_COMPILE = True
             print("🚀 Turbo mode: learn_every=4, batch=256, torch.compile=True")
         
-        # Create game (no pygame needed - game logic is pure Python)
-        self.game = Breakout(config)
+        # Create game in headless mode (skips visual effects for max speed)
+        self.game = Breakout(config, headless=True)
         
         # Create AI agent
         self.agent = Agent(
@@ -1301,10 +1301,8 @@ class HeadlessTrainer:
                 # Store experience
                 self.agent.remember(state, action, reward, next_state, done)
                 
-                # Learn every N steps
-                if self.total_steps % config.LEARN_EVERY == 0:
-                    for _ in range(config.GRADIENT_STEPS):
-                        self.agent.learn()
+                # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
+                self.agent.learn()
                 
                 # Update state
                 state = next_state

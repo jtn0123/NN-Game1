@@ -128,8 +128,8 @@ class ReplayBuffer:
         Returns:
             Tuple of numpy arrays: (states, actions, rewards, next_states, dones)
         """
-        # Generate random indices using numpy (faster than random.sample for large buffers)
-        indices = np.random.randint(0, len(self.buffer), size=batch_size)
+        # Generate random indices WITHOUT replacement to avoid training on duplicates
+        indices = np.random.choice(len(self.buffer), size=batch_size, replace=False)
         
         # Ensure pre-allocated arrays are ready
         self._ensure_batch_arrays(batch_size)
@@ -165,7 +165,8 @@ class ReplayBuffer:
         Returns:
             Tuple of numpy arrays (views, not copies)
         """
-        indices = np.random.randint(0, len(self.buffer), size=batch_size)
+        # Generate random indices WITHOUT replacement to avoid training on duplicates
+        indices = np.random.choice(len(self.buffer), size=batch_size, replace=False)
         self._ensure_batch_arrays(batch_size)
         
         for i, idx in enumerate(indices):

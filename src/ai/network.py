@@ -81,6 +81,12 @@ class DQN(nn.Module):
         # Store activations for visualization
         self.activations: Dict[str, torch.Tensor] = {}
         
+        # Flag to enable/disable activation capture (disable during training for speed)
+        self.capture_activations = False
+        
+        # Cache activation function (avoids dict lookup every forward pass)
+        self._activation_fn = self._get_activation_fn()
+        
         # Build network layers
         self.layers = nn.ModuleList()
         self._build_network()
@@ -121,10 +127,12 @@ class DQN(nn.Module):
         return cast(Callable[..., Any], result)
     
     def _register_hooks(self) -> None:
-        """Register forward hooks to capture activations."""
+        """Register forward hooks to capture activations (only when enabled)."""
         def get_activation(name):
             def hook(module, input, output):
-                self.activations[name] = output.detach()
+                # Only capture when flag is set (skip during training for speed)
+                if self.capture_activations:
+                    self.activations[name] = output.detach()
             return hook
         
         for i, layer in enumerate(self.layers):
@@ -141,11 +149,10 @@ class DQN(nn.Module):
             Q-values tensor of shape (batch_size, action_size)
         """
         x = state
-        activation_fn = self._get_activation_fn()
         
-        # Apply hidden layers with activation
+        # Apply hidden layers with activation (use cached function for speed)
         for i, layer in enumerate(self.layers[:-1]):
-            x = activation_fn(layer(x))
+            x = self._activation_fn(layer(x))
         
         # Output layer (no activation - raw Q-values)
         x = self.layers[-1](x)
@@ -261,6 +268,12 @@ class DuelingDQN(nn.Module):
         # Store activations for visualization
         self.activations: Dict[str, torch.Tensor] = {}
         
+        # Flag to enable/disable activation capture (disable during training for speed)
+        self.capture_activations = False
+        
+        # Cache activation function (avoids dict lookup every forward pass)
+        self._activation_fn = self._get_activation_fn()
+        
         # Build network layers
         self._build_network()
         
@@ -323,10 +336,12 @@ class DuelingDQN(nn.Module):
         return cast(Callable[..., Any], result)
     
     def _register_hooks(self) -> None:
-        """Register forward hooks to capture activations."""
+        """Register forward hooks to capture activations (only when enabled)."""
         def get_activation(name):
             def hook(module, input, output):
-                self.activations[name] = output.detach()
+                # Only capture when flag is set (skip during training for speed)
+                if self.capture_activations:
+                    self.activations[name] = output.detach()
             return hook
         
         # Register hooks on feature layers
@@ -348,18 +363,17 @@ class DuelingDQN(nn.Module):
             Q-values tensor of shape (batch_size, action_size)
         """
         x = state
-        activation_fn = self._get_activation_fn()
         
-        # Pass through shared feature layers
+        # Pass through shared feature layers (use cached activation fn for speed)
         for layer in self.feature_layers:
-            x = activation_fn(layer(x))
+            x = self._activation_fn(layer(x))
         
         # Value stream
-        value = activation_fn(self.value_hidden(x))
+        value = self._activation_fn(self.value_hidden(x))
         value = self.value_output(value)  # Shape: (batch, 1)
         
         # Advantage stream
-        advantage = activation_fn(self.advantage_hidden(x))
+        advantage = self._activation_fn(self.advantage_hidden(x))
         advantage = self.advantage_output(advantage)  # Shape: (batch, action_size)
         
         # Combine streams: Q = V + (A - mean(A))

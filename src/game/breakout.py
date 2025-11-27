@@ -149,14 +149,16 @@ class Breakout(BaseGame):
         2 = Move RIGHT
     """
     
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Optional[Config] = None, headless: bool = False):
         """
         Initialize the Breakout game.
         
         Args:
             config: Configuration object (uses default if None)
+            headless: If True, skip visual effects for faster training
         """
         self.config = config or Config()
+        self.headless = headless
         
         # Screen dimensions
         self.width = self.config.SCREEN_WIDTH
@@ -176,14 +178,26 @@ class Breakout(BaseGame):
         # For state representation
         self._num_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
         
+        # Track brick count incrementally (avoids counting every step)
+        self._bricks_remaining = self._num_bricks
+        
+        # Pre-allocated arrays for get_state() (avoids allocation per step)
+        self._state_array = np.zeros(8 + self._num_bricks, dtype=np.float32)
+        self._brick_states = np.ones(self._num_bricks, dtype=np.float32)
+        
         # For reward shaping (tracking ball)
         self._prev_distance_to_target: float = 0.0
         
-        # Visual effects
-        self.particles = ParticleSystem(max_particles=500)
-        self.ball_trail = TrailRenderer(length=12)
-        self.background_surface: Optional[pygame.Surface] = None  # Cached gradient background
-        self._create_background()
+        # Visual effects (skip in headless mode for performance)
+        if not headless:
+            self.particles = ParticleSystem(max_particles=500)
+            self.ball_trail = TrailRenderer(length=12)
+            self.background_surface: Optional[pygame.Surface] = None  # Cached gradient background
+            self._create_background()
+        else:
+            self.particles = None  # type: ignore
+            self.ball_trail = None  # type: ignore
+            self.background_surface = None
         
         # Initialize the game
         self.reset()
@@ -229,9 +243,14 @@ class Breakout(BaseGame):
         # Create bricks
         self._create_bricks()
         
-        # Reset visual effects
-        self.particles.clear()
-        self.ball_trail.clear()
+        # Reset brick count and pre-allocated brick states
+        self._bricks_remaining = self._num_bricks
+        self._brick_states.fill(1.0)
+        
+        # Reset visual effects (only if not headless)
+        if not self.headless:
+            self.particles.clear()
+            self.ball_trail.clear()
         
         return self.get_state()
     
@@ -296,15 +315,14 @@ class Breakout(BaseGame):
         # Move ball
         self.ball.move()
         
-        # Update ball trail
-        self.ball_trail.update(self.ball.x, self.ball.y)
-        
-        # Emit ball trail particles
-        self.particles.emit_ball_trail(
-            self.ball.x, self.ball.y,
-            self.config.COLOR_BALL,
-            (self.ball.dx, self.ball.dy)
-        )
+        # Update visual effects (skip in headless mode)
+        if not self.headless:
+            self.ball_trail.update(self.ball.x, self.ball.y)
+            self.particles.emit_ball_trail(
+                self.ball.x, self.ball.y,
+                self.config.COLOR_BALL,
+                (self.ball.dx, self.ball.dy)
+            )
         
         # Handle collisions
         reward += self._handle_collisions()
@@ -322,11 +340,12 @@ class Breakout(BaseGame):
             elif curr_distance > prev_distance:
                 reward += self.config.REWARD_TRACKING_BAD
         
-        # Update particle system
-        self.particles.update()
+        # Update particle system (skip in headless mode)
+        if not self.headless:
+            self.particles.update()
         
-        # Check win condition
-        if all(not brick.alive for brick in self.bricks):
+        # Check win condition (use tracked count for speed)
+        if self._bricks_remaining == 0:
             self.won = True
             self.game_over = True
             reward += self.config.REWARD_WIN
@@ -375,13 +394,14 @@ class Breakout(BaseGame):
         if self.ball.rect.colliderect(self.paddle.rect) and self.ball.dy > 0:
             reward += self.config.REWARD_PADDLE_HIT
             
-            # Emit paddle hit particles
-            self.particles.emit_paddle_hit(
-                self.ball.x,
-                self.paddle.y,
-                self.config.COLOR_PADDLE,
-                count=8
-            )
+            # Emit paddle hit particles (skip in headless mode)
+            if not self.headless:
+                self.particles.emit_paddle_hit(
+                    self.ball.x,
+                    self.paddle.y,
+                    self.config.COLOR_PADDLE,
+                    count=8
+                )
             
             # Calculate bounce angle based on where ball hits paddle
             # Hitting edges = sharper angle, center = straight up
@@ -399,21 +419,24 @@ class Breakout(BaseGame):
             self.ball.y = self.paddle.y - self.ball.radius - 1
         
         # Brick collisions
-        for brick in self.bricks:
+        for brick_idx, brick in enumerate(self.bricks):
             if brick.alive and self.ball.rect.colliderect(brick.rect):
                 brick.alive = False
                 self.score += 10
                 reward += self.config.REWARD_BRICK_HIT
+                self._bricks_remaining -= 1  # Track incrementally
+                self._brick_states[brick_idx] = 0.0  # Update pre-allocated array
                 
-                # Emit brick destruction particles!
-                brick_center_x = brick.rect.centerx
-                brick_center_y = brick.rect.centery
-                self.particles.emit_brick_break(
-                    brick_center_x,
-                    brick_center_y,
-                    brick.color,
-                    count=15
-                )
+                # Emit brick destruction particles (skip in headless mode)
+                if not self.headless:
+                    brick_center_x = brick.rect.centerx
+                    brick_center_y = brick.rect.centery
+                    self.particles.emit_brick_break(
+                        brick_center_x,
+                        brick_center_y,
+                        brick.color,
+                        count=15
+                    )
                 
                 # Determine collision side for proper bounce
                 # Calculate overlap on each side
@@ -519,24 +542,26 @@ class Breakout(BaseGame):
         distance_to_target = (predicted_x - paddle_center) / self.width + 0.5
         distance_to_target = np.clip(distance_to_target, 0.0, 1.0)
         
-        # Brick states (1 if alive, 0 if broken)
-        brick_states = np.array([1.0 if b.alive else 0.0 for b in self.bricks])
+        # Use pre-allocated state array (avoids allocation per step)
+        self._state_array[0] = ball_x
+        self._state_array[1] = ball_y
+        self._state_array[2] = ball_dx
+        self._state_array[3] = ball_dy
+        self._state_array[4] = paddle_x
+        self._state_array[5] = relative_x
+        self._state_array[6] = predicted_landing
+        self._state_array[7] = distance_to_target
+        # Brick states are updated incrementally in _handle_collisions()
+        self._state_array[8:] = self._brick_states
         
-        # Combine into single vector
-        state = np.concatenate([
-            np.array([ball_x, ball_y, ball_dx, ball_dy, paddle_x,
-                      relative_x, predicted_landing, distance_to_target]),
-            brick_states
-        ])
-        
-        return state.astype(np.float32)
+        return self._state_array
     
     def _get_info(self) -> dict:
         """Get additional game information."""
         return {
             'score': self.score,
             'lives': self.lives,
-            'bricks_remaining': sum(1 for b in self.bricks if b.alive),
+            'bricks_remaining': self._bricks_remaining,  # Use tracked count (faster)
             'won': self.won
         }
     
