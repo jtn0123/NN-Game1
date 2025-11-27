@@ -1003,15 +1003,19 @@ class GameApp:
         filename: str,
         save_reason: str = "manual",
         quiet: bool = False
-    ) -> None:
-        """Save the current model with rich metadata."""
+    ) -> bool:
+        """Save the current model with rich metadata.
+        
+        Returns:
+            True if save succeeded, False otherwise
+        """
         filepath = os.path.join(self.config.MODEL_DIR, filename)
         
         # Calculate metrics for metadata
         avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
         win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, 'get_win_rate') else 0.0
         
-        self.agent.save(
+        result = self.agent.save(
             filepath=filepath,
             save_reason=save_reason,
             episode=self.episode,
@@ -1022,25 +1026,32 @@ class GameApp:
             quiet=quiet
         )
         
-        # Record save to web dashboard
-        if self.web_dashboard:
+        # Only record save to web dashboard if save succeeded
+        if result is not None and self.web_dashboard:
             self.web_dashboard.publisher.record_save(
                 filename=filename,
                 reason=save_reason,
                 episode=self.episode,
                 best_score=self.best_score_ever
             )
+        
+        return result is not None
     
     def _save_model_as(self, filename: str) -> None:
         """Save model with a custom filename (from web dashboard)."""
-        # Ensure .pth extension
-        if not filename.endswith('.pth'):
-            filename = filename + '.pth'
+        # Remove .pth extension if present (we'll add it back later)
+        if filename.endswith('.pth'):
+            filename = filename[:-4]
         
-        # Sanitize filename
-        filename = "".join(c for c in filename if c.isalnum() or c in '._-').strip()
-        if not filename:
-            filename = "custom_save.pth"
+        # Sanitize filename (only alphanumeric, underscore, hyphen)
+        filename = "".join(c for c in filename if c.isalnum() or c in '_-').strip()
+        
+        # Ensure we have a valid base name (not empty or just dots)
+        if not filename or filename.replace('.', '') == '':
+            filename = "custom_save"
+        
+        # Add .pth extension
+        filename = filename + '.pth'
         
         self._save_model(filename, save_reason="manual")
         if self.web_dashboard:
@@ -1216,14 +1227,18 @@ class HeadlessTrainer:
         filename: str,
         save_reason: str = "manual",
         quiet: bool = False
-    ) -> None:
-        """Save the current model with rich metadata."""
+    ) -> bool:
+        """Save the current model with rich metadata.
+        
+        Returns:
+            True if save succeeded, False otherwise
+        """
         filepath = os.path.join(self.config.MODEL_DIR, filename)
         
         # Calculate metrics for metadata
         avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
         
-        self.agent.save(
+        result = self.agent.save(
             filepath=filepath,
             save_reason=save_reason,
             episode=self.current_episode,
@@ -1233,6 +1248,8 @@ class HeadlessTrainer:
             training_start_time=self.training_start_time,
             quiet=quiet
         )
+        
+        return result is not None
 
 
 def parse_args():

@@ -1106,8 +1106,17 @@ function saveModelAs() {
         filename = 'custom_save';
     }
     
-    // Clean filename
-    filename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    // Clean filename - only allow alphanumeric, underscore, hyphen
+    // (dots not allowed to match Python backend sanitization)
+    filename = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+    
+    // Remove leading/trailing underscores that may result from sanitization
+    filename = filename.replace(/^_+|_+$/g, '');
+    
+    // Ensure we have a valid filename after sanitization
+    if (!filename) {
+        filename = 'custom_save';
+    }
     
     socket.emit('control', { action: 'save_as', filename: filename });
     addConsoleLog(`Saving as: ${filename}.pth`, 'action');

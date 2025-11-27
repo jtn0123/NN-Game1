@@ -564,9 +564,17 @@ class WebDashboard:
             from datetime import datetime
             
             # Security: ensure path is within model directory
-            model_dir = os.path.abspath(self.config.MODEL_DIR)
-            full_path = os.path.abspath(filepath)
-            if not full_path.startswith(model_dir):
+            # Use realpath to resolve symlinks, preventing symlink attacks
+            model_dir = os.path.realpath(self.config.MODEL_DIR)
+            full_path = os.path.realpath(filepath)
+            # Use os.path.commonpath to properly check containment
+            # This prevents path traversal attacks like /models_evil/file.pth
+            try:
+                common = os.path.commonpath([model_dir, full_path])
+                if common != model_dir:
+                    return jsonify({'error': 'Invalid path'}), 403
+            except ValueError:
+                # commonpath raises ValueError if paths are on different drives (Windows)
                 return jsonify({'error': 'Invalid path'}), 403
             
             if not os.path.exists(full_path):
