@@ -119,10 +119,7 @@ class Config:
     SI_REWARD_UFO_HIT: float = 5.0  # UFO bonus
     SI_REWARD_PLAYER_DEATH: float = -2.5  # Death penalty (3 lives, so moderate penalty)
     SI_REWARD_LEVEL_CLEAR: float = 0.0  # Removed - score-based rewards only
-    # Time penalty: small negative reward per step to discourage defensive play
-    # This encourages aggressive alien-killing rather than just dodging forever
-    # -0.001 means ~5 penalty over 5000 steps (balanced against alien kills)
-    SI_REWARD_STEP: float = -0.001
+    SI_REWARD_STEP: float = 0.0  # Removed - score-based rewards only
     
     # Win condition: Number of levels/waves to complete to win (0 = endless mode, no wins)
     SI_WIN_LEVELS: int = 10  # Complete 10 levels to win
@@ -430,29 +427,6 @@ class Config:
     
     # Save model every N episodes
     SAVE_EVERY: int = 100
-    
-    # =========================================================================
-    # EVALUATION SETTINGS (Deterministic Performance Tracking)
-    # =========================================================================
-    
-    # Run deterministic evaluation (ε=0) every N episodes
-    # This measures TRUE performance, separate from noisy training metrics
-    # Set to 0 to disable periodic evaluation
-    EVAL_EVERY: int = 500
-    
-    # Number of games per evaluation run
-    EVAL_EPISODES: int = 30
-    
-    # Max steps per eval game (prevents stuck games)
-    EVAL_MAX_STEPS: int = 5000
-    
-    # Plateau detection: warn if no improvement after N evals
-    EVAL_PLATEAU_THRESHOLD: int = 5
-    
-    # Auto-exploration boost: when plateau detected, reset epsilon to explore new strategies
-    # This helps escape local optima by forcing the agent to try new behaviors
-    EVAL_PLATEAU_EPSILON_BOOST: float = 0.15  # Reset epsilon to this value when plateau detected
-    EVAL_PLATEAU_BOOST_EPISODES: int = 1000   # Keep boosted epsilon for this many episodes
     
     # Render every N episodes during training (0 = never)
     RENDER_EVERY: int = 1

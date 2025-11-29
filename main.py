@@ -76,6 +76,7 @@ from src.game.breakout import Breakout, VecBreakout
 from src.game.space_invaders import VecSpaceInvaders
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
+from src.ai.evaluator import Evaluator  # Deterministic performance tracking
 from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
 
 # Optional web dashboard
@@ -1791,6 +1792,21 @@ class HeadlessTrainer:
                 self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(initial_model_path)}", "success")
                 # Sync history to dashboard NOW that dashboard is ready
                 self._sync_history_to_dashboard_after_load(initial_model_path)
+        
+        # Initialize evaluator for deterministic performance tracking
+        # Uses a separate single-game instance (not vectorized) for consistent eval
+        self.evaluator: Optional[Evaluator] = None
+        self._exploration_boost_active: bool = False
+        self._exploration_boost_end_episode: int = 0
+        if config.EVAL_EVERY > 0:
+            eval_game = GameClass(config, headless=True)  # type: ignore[call-arg]
+            self.evaluator = Evaluator(
+                game=eval_game,
+                agent=self.agent,
+                config=config,
+                log_dir=os.path.join(config.LOG_DIR, 'eval'),
+                plateau_threshold=config.EVAL_PLATEAU_THRESHOLD
+            )
     
     def _sync_history_to_dashboard_after_load(self, filepath: str) -> None:
         """
@@ -2730,11 +2746,68 @@ class HeadlessTrainer:
                             save_replay_buffer=False  # Periodic saves are lightweight
                         )
                         self._cleanup_old_periodic_saves(keep_last=5)
+                    
+                    # Run deterministic evaluation periodically
+                    if (self.evaluator is not None and 
+                        config.EVAL_EVERY > 0 and 
+                        self.current_episode % config.EVAL_EVERY == 0 and 
+                        self.current_episode > 0):
+                        eval_results = self.evaluator.evaluate(
+                            num_episodes=config.EVAL_EPISODES,
+                            max_steps=config.EVAL_MAX_STEPS,
+                            episode_num=self.current_episode
+                        )
+                        self.evaluator.log_results(eval_results)
+                        
+                        # Auto-exploration boost: when plateau detected, increase epsilon
+                        if self.evaluator.is_plateau() and not self._exploration_boost_active:
+                            self._exploration_boost_active = True
+                            self._exploration_boost_end_episode = (
+                                self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES
+                            )
+                            old_epsilon = self.agent.epsilon
+                            self.agent.epsilon = config.EVAL_PLATEAU_EPSILON_BOOST
+                            print(f"\n🚀 PLATEAU DETECTED! Boosting exploration: "
+                                  f"ε {old_epsilon:.3f} → {self.agent.epsilon:.3f} "
+                                  f"for {config.EVAL_PLATEAU_BOOST_EPISODES} episodes\n")
+                            if self.web_dashboard:
+                                self.web_dashboard.log(
+                                    f"🚀 Exploration boost activated! ε → {self.agent.epsilon:.2f}",
+                                    "warning"
+                                )
+                        
+                        # Log to web dashboard if available
+                        if self.web_dashboard:
+                            plateau_str = " ⚠️ PLATEAU DETECTED" if self.evaluator.is_plateau() else ""
+                            self.web_dashboard.log(
+                                f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
+                                f"max level {eval_results.max_level}, "
+                                f"{eval_results.win_rate*100:.0f}% wins{plateau_str}",
+                                "info" if not self.evaluator.is_plateau() else "warning"
+                            )
             
             # Decay epsilon once per step if any episodes completed
             # (NOT per environment - that would decay too fast with many parallel envs)
             if np.any(dones):
-                self.agent.decay_epsilon(self.current_episode)
+                # Check if exploration boost period has ended
+                if (self._exploration_boost_active and 
+                    self.current_episode >= self._exploration_boost_end_episode):
+                    self._exploration_boost_active = False
+                    # Reset epsilon to minimum and let it decay normally
+                    self.agent.epsilon = config.EPSILON_END
+                    print(f"\n✓ Exploration boost ended. Resuming normal ε={self.agent.epsilon:.3f}\n")
+                    if self.web_dashboard:
+                        self.web_dashboard.log(
+                            f"✓ Exploration boost ended, ε → {self.agent.epsilon:.3f}",
+                            "info"
+                        )
+                    # Reset plateau counter so we can detect new plateaus
+                    if self.evaluator:
+                        self.evaluator.evals_since_improvement = 0
+                
+                # Only decay epsilon if not in boost mode
+                if not self._exploration_boost_active:
+                    self.agent.decay_epsilon(self.current_episode)
                 self.agent.step_scheduler()  # Step learning rate scheduler
             
             # Update states for next iteration (already auto-reset in VecBreakout)
