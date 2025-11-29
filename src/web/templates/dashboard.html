@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neural Network AI - Training Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,10 +44,13 @@
                 <!-- Score Chart -->
                 <div class="chart-card">
                     <div class="card-header">
-                        <h2 data-tooltip="Shows score per episode over time. Green line = individual episode scores. Yellow dashed = 20-episode moving average. Upward trend indicates learning progress." data-tooltip-position="right">📊 Training Progress</h2>
-                        <div class="chart-legend">
-                            <span class="legend-item score" data-tooltip="Raw score for each episode">● Score</span>
-                            <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes - better shows overall trend">● Average</span>
+                        <h2 data-tooltip="Shows score per episode over time. Green line = individual episode scores. Yellow dashed = 20-episode moving average. Upward trend indicates learning progress. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="right">📊 Training Progress</h2>
+                        <div class="chart-header-controls">
+                            <div class="chart-legend">
+                                <span class="legend-item score" data-tooltip="Raw score for each episode">● Score</span>
+                                <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes - better shows overall trend">● Average</span>
+                            </div>
+                            <button class="chart-reset-btn" onclick="resetChartView('score')" title="Reset view to latest episodes">↻ Reset View</button>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -59,7 +63,8 @@
                     <!-- Loss Chart -->
                     <div class="chart-card half">
                         <div class="card-header">
-                            <h2 data-tooltip="Measures prediction error (log scale). Spikes are normal during exploration. Generally should trend downward as the AI improves its value estimates." data-tooltip-position="right">📉 Loss</h2>
+                            <h2 data-tooltip="Measures prediction error (log scale). Spikes are normal during exploration. Generally should trend downward as the AI improves its value estimates. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="right">📉 Loss</h2>
+                            <button class="chart-reset-btn" onclick="resetChartView('loss')" title="Reset view to latest episodes">↻</button>
                         </div>
                         <div class="chart-container small">
                             <canvas id="lossChart"></canvas>
@@ -69,7 +74,8 @@
                     <!-- Q-Value Chart -->
                     <div class="chart-card half">
                         <div class="card-header">
-                            <h2 data-tooltip="Average expected future reward. Rising Q-values mean the AI is learning to recognize valuable game states. Stable or slowly increasing = healthy learning." data-tooltip-position="left">📈 Avg Q-Value</h2>
+                            <h2 data-tooltip="Average expected future reward. Rising Q-values mean the AI is learning to recognize valuable game states. Stable or slowly increasing = healthy learning. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="left">📈 Avg Q-Value</h2>
+                            <button class="chart-reset-btn" onclick="resetChartView('qvalue')" title="Reset view to latest episodes">↻</button>
                         </div>
                         <div class="chart-container small">
                             <canvas id="qvalueChart"></canvas>
@@ -127,7 +133,8 @@
                                 <button class="filter-btn" data-filter="action" onclick="setLogFilter('action')">Actions</button>
                                 <button class="filter-btn" data-filter="warning" onclick="setLogFilter('warning')">Warnings</button>
                             </div>
-                            <button class="copy-btn" onclick="copyLogsToClipboard()" title="Copy logs to clipboard">📋 Copy</button>
+                            <button class="copy-btn" onclick="copyLogsToClipboard()" title="Copy logs to clipboard (structured format for metrics)">📋 Copy</button>
+                            <button class="export-btn" onclick="exportMetrics()" title="Export current metrics in structured format for models">📊 Export Metrics</button>
                             <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
                         </div>
                     </div>

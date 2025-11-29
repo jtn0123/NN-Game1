@@ -117,14 +117,13 @@ class Config:
     # Space Invaders rewards - tuned for AI training
     SI_REWARD_ALIEN_HIT: float = 1.0  # Per alien killed
     SI_REWARD_UFO_HIT: float = 5.0  # UFO bonus
-    SI_REWARD_PLAYER_DEATH: float = -5.0  # Less harsh (was -10)
-    SI_REWARD_LEVEL_CLEAR: float = 30.0  # Per level cleared (was 50)
-    SI_REWARD_SHOOT: float = -0.005  # Tiny penalty to discourage spam
-    SI_REWARD_STEP: float = 0.001  # Small survival reward
+    SI_REWARD_PLAYER_DEATH: float = -5.0  # Death penalty
+    SI_REWARD_LEVEL_CLEAR: float = 50.0  # Big reward for clearing a level
+    SI_REWARD_STEP: float = 0.005  # Small survival reward per step
     
     # Win condition: Number of levels/waves to complete to win (0 = endless mode, no wins)
-    # For Space Invaders, completing many levels is a true win
-    SI_WIN_LEVELS: int = 10  # Complete 10 levels to win (set to 0 for endless mode)
+    # Lower threshold so agent can experience winning and get the reward signal
+    SI_WIN_LEVELS: int = 3  # Complete 3 levels to win (achievable target)
     
     # Space Invaders colors (CRT phosphor aesthetic)
     SI_COLOR_BACKGROUND: Tuple[int, int, int] = (0, 5, 0)  # Near black with green tint
@@ -350,9 +349,9 @@ class Config:
     # Trades off bias vs variance in value estimation
     USE_N_STEP_RETURNS: bool = True
 
-    # Number of steps to look ahead (typically 3-5)
-    # 5 steps provides faster credit assignment for Space Invaders
-    N_STEP_SIZE: int = 5
+    # Number of steps to look ahead (typically 2-3)
+    # 3 steps for better credit assignment in reactive gameplay
+    N_STEP_SIZE: int = 3
 
     # =========================================================================
     # NOISY NETWORKS

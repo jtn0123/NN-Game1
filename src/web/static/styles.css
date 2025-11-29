@@ -226,6 +226,14 @@ body {
     color: var(--text-primary);
 }
 
+.chart-header-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
 .chart-legend {
     display: flex;
     gap: 16px;
@@ -234,6 +242,28 @@ body {
 .legend-item {
     font-size: 0.8rem;
     color: var(--text-secondary);
+}
+
+.chart-reset-btn {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-main);
+    white-space: nowrap;
+}
+
+.chart-reset-btn:hover {
+    background: rgba(100, 181, 246, 0.1);
+    transform: rotate(90deg);
+}
+
+.chart-reset-btn:active {
+    transform: rotate(180deg);
 }
 
 .legend-item.score { color: var(--accent-success); }
@@ -315,6 +345,28 @@ body {
 .copy-btn.copied {
     background: var(--accent-success);
     border-color: var(--accent-success);
+    color: white;
+}
+
+.export-btn {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    border: 1px solid var(--accent-purple);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent-purple);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-main);
+}
+
+.export-btn:hover {
+    background: rgba(171, 71, 188, 0.1);
+}
+
+.export-btn.copied {
+    background: var(--accent-purple);
+    border-color: var(--accent-purple);
     color: white;
 }
 

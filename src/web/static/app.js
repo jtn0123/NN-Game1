@@ -14,6 +14,15 @@ let scoreChart = null;
 let lossChart = null;
 let qvalueChart = null;
 
+// Chart history storage - keep all data for scrolling
+let fullHistory = {
+    scores: [],
+    losses: [],
+    q_values: [],
+    epsilons: [],
+    labels: []
+};
+
 // State
 let isPaused = false;
 let socket = null;
@@ -115,6 +124,27 @@ function initCharts() {
                         return 'Episode ' + context[0].label;
                     }
                 }
+            },
+            zoom: {
+                pan: {
+                    enabled: true,
+                    mode: 'x',
+                    modifierKey: null, // Allow panning without modifier key
+                    threshold: 10
+                },
+                zoom: {
+                    wheel: {
+                        enabled: true,
+                        modifierKey: 'ctrl',
+                    },
+                    pinch: {
+                        enabled: true
+                    },
+                    mode: 'x',
+                    limits: {
+                        x: { min: 'original', max: 'original' }
+                    }
+                }
             }
         },
         scales: {
@@ -124,8 +154,9 @@ function initCharts() {
                 },
                 ticks: {
                     color: '#5a5e72',
-                    maxTicksLimit: 8
-                }
+                    maxTicksLimit: 20
+                },
+                type: 'linear'
             },
             y: {
                 grid: {
@@ -178,6 +209,18 @@ function initCharts() {
         },
         options: chartOptions
     });
+    
+    // Track pan/zoom events for score chart
+    scoreChart.canvas.addEventListener('mousemove', (e) => {
+        if (e.buttons === 1) { // Left mouse button held down
+            userHasPanned.score = true;
+        }
+    });
+    scoreChart.canvas.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            userHasPanned.score = true;
+        }
+    });
 
     // Loss Chart
     const lossCtx = document.getElementById('lossChart').getContext('2d');
@@ -226,6 +269,18 @@ function initCharts() {
             }
         }
     });
+    
+    // Track pan/zoom events for loss chart
+    lossChart.canvas.addEventListener('mousemove', (e) => {
+        if (e.buttons === 1) { // Left mouse button held down
+            userHasPanned.loss = true;
+        }
+    });
+    lossChart.canvas.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            userHasPanned.loss = true;
+        }
+    });
 
     // Q-Value Chart
     const qvalueCtx = document.getElementById('qvalueChart').getContext('2d');
@@ -266,6 +321,56 @@ function initCharts() {
             }
         }
     });
+    
+    // Track pan/zoom events for Q-value chart
+    qvalueChart.canvas.addEventListener('mousemove', (e) => {
+        if (e.buttons === 1) { // Left mouse button held down
+            userHasPanned.qvalue = true;
+        }
+    });
+    qvalueChart.canvas.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            userHasPanned.qvalue = true;
+        }
+    });
+}
+
+/**
+ * Reset chart view to show latest data
+ */
+function resetChartView(chartName = 'all') {
+    const charts = {
+        score: scoreChart,
+        loss: lossChart,
+        qvalue: qvalueChart
+    };
+    
+    const visibleWindow = 200;
+    const labels = fullHistory.labels || [];
+    
+    if (labels.length === 0) return;
+    
+    const minX = Math.max(0, labels.length - visibleWindow);
+    const maxX = labels.length;
+    
+    const resetChart = (chart) => {
+        if (!chart || !chart.options || !chart.options.scales) return;
+        chart.options.scales.x.min = labels[minX];
+        chart.options.scales.x.max = labels[maxX - 1];
+        chart.update('none');
+    };
+    
+    if (chartName === 'all') {
+        resetChart(scoreChart);
+        resetChart(lossChart);
+        resetChart(qvalueChart);
+        userHasPanned.score = false;
+        userHasPanned.loss = false;
+        userHasPanned.qvalue = false;
+    } else if (charts[chartName]) {
+        resetChart(charts[chartName]);
+        userHasPanned[chartName] = false;
+    }
 }
 
 /**
@@ -567,44 +672,146 @@ function updateDashboard(data) {
     updateCharts(history, state.episode);
 }
 
+// Track if user has manually panned charts (don't auto-scroll if they have)
+let userHasPanned = {
+    score: false,
+    loss: false,
+    qvalue: false
+};
+
 /**
  * Update charts with history data
  * @param {Object} history - History data with scores, losses, q_values arrays
  * @param {number} currentEpisode - The actual current episode number
  */
 function updateCharts(history, currentEpisode) {
-    const maxPoints = 200;
-    const scores = history.scores.slice(-maxPoints);
-    const losses = history.losses.slice(-maxPoints);
-    const qvalues = history.q_values ? history.q_values.slice(-maxPoints) : [];
+    // Store all available history data (up to 500 from backend)
+    const allScores = history.scores || [];
+    const allLosses = history.losses || [];
+    const allQValues = history.q_values || [];
     
-    // Calculate running average
-    const avgScores = calculateRunningAverage(scores, 20);
+    // Update full history storage
+    fullHistory.scores = allScores;
+    fullHistory.losses = allLosses;
+    fullHistory.q_values = allQValues;
     
-    // Generate labels based on actual current episode, not history length
-    // This correctly handles the case where history.scores.length is capped at 500
-    // but the actual episode number continues beyond that
-    const startEp = Math.max(0, currentEpisode - scores.length);
-    const labels = scores.map((_, i) => startEp + i + 1);
-
-    // Update score chart
+    // Generate labels for all episodes
+    const startEp = Math.max(0, currentEpisode - allScores.length);
+    const labels = allScores.map((_, i) => startEp + i + 1);
+    fullHistory.labels = labels;
+    
+    // Calculate running average for all scores
+    const avgScores = calculateRunningAverage(allScores, 20);
+    
+    // Get current viewport ranges for each chart (to maintain user's pan position)
+    let scoreXRange = null;
+    let lossXRange = null;
+    let qvalueXRange = null;
+    
+    try {
+        if (scoreChart && scoreChart.scales && scoreChart.scales.x && scoreChart.scales.x.min !== undefined) {
+            scoreXRange = {
+                min: scoreChart.scales.x.min,
+                max: scoreChart.scales.x.max
+            };
+        }
+        if (lossChart && lossChart.scales && lossChart.scales.x && lossChart.scales.x.min !== undefined) {
+            lossXRange = {
+                min: lossChart.scales.x.min,
+                max: lossChart.scales.x.max
+            };
+        }
+        if (qvalueChart && qvalueChart.scales && qvalueChart.scales.x && qvalueChart.scales.x.min !== undefined) {
+            qvalueXRange = {
+                min: qvalueChart.scales.x.min,
+                max: qvalueChart.scales.x.max
+            };
+        }
+    } catch (e) {
+        // Charts not fully initialized yet, ignore
+    }
+    
+    // Update score chart with all data
     scoreChart.data.labels = labels;
-    scoreChart.data.datasets[0].data = scores;
+    scoreChart.data.datasets[0].data = allScores;
     scoreChart.data.datasets[1].data = avgScores;
-    scoreChart.update('none');
-
-    // Update loss chart
-    const validLosses = losses.map(l => Math.max(l, 0.0001));
+    
+    // Update loss chart with all data
+    const validLosses = allLosses.map(l => Math.max(l, 0.0001));
     lossChart.data.labels = labels;
     lossChart.data.datasets[0].data = validLosses;
-    lossChart.update('none');
-
-    // Update Q-value chart
-    if (qvalues.length > 0) {
+    
+    // Update Q-value chart with all data
+    if (allQValues.length > 0) {
         qvalueChart.data.labels = labels;
-        qvalueChart.data.datasets[0].data = qvalues;
+        qvalueChart.data.datasets[0].data = allQValues;
+    }
+    
+    // Determine if we should auto-scroll to latest (only if user hasn't panned)
+    const shouldAutoScroll = allScores.length > 0 && !userHasPanned.score;
+    const visibleWindow = 200; // Show last 200 episodes by default
+    
+    // Update charts with viewport settings
+    if (shouldAutoScroll && allScores.length > visibleWindow) {
+        // Auto-scroll to show latest data
+        const minX = Math.max(0, allScores.length - visibleWindow);
+        const maxX = allScores.length;
+        
+        if (scoreChart && scoreChart.options && scoreChart.options.scales) {
+            scoreChart.options.scales.x.min = labels[minX];
+            scoreChart.options.scales.x.max = labels[maxX - 1];
+        }
+        if (lossChart && lossChart.options && lossChart.options.scales) {
+            lossChart.options.scales.x.min = labels[minX];
+            lossChart.options.scales.x.max = labels[maxX - 1];
+        }
+        if (qvalueChart && qvalueChart.options && qvalueChart.options.scales && allQValues.length > 0) {
+            qvalueChart.options.scales.x.min = labels[minX];
+            qvalueChart.options.scales.x.max = labels[maxX - 1];
+        }
+    } else if (scoreXRange && userHasPanned.score && scoreChart && scoreChart.options && scoreChart.options.scales) {
+        // Maintain user's pan position for score chart
+        scoreChart.options.scales.x.min = scoreXRange.min;
+        scoreChart.options.scales.x.max = scoreXRange.max;
+    }
+    
+    if (lossXRange && userHasPanned.loss && lossChart && lossChart.options && lossChart.options.scales) {
+        // Maintain user's pan position for loss chart
+        lossChart.options.scales.x.min = lossXRange.min;
+        lossChart.options.scales.x.max = lossXRange.max;
+    }
+    
+    if (qvalueXRange && userHasPanned.qvalue && qvalueChart && qvalueChart.options && qvalueChart.options.scales) {
+        // Maintain user's pan position for Q-value chart
+        qvalueChart.options.scales.x.min = qvalueXRange.min;
+        qvalueChart.options.scales.x.max = qvalueXRange.max;
+    }
+    
+    // If no panning and small dataset, show all
+    if (allScores.length > 0 && allScores.length <= visibleWindow) {
+        if (scoreChart && scoreChart.options && scoreChart.options.scales) {
+            scoreChart.options.scales.x.min = undefined;
+            scoreChart.options.scales.x.max = undefined;
+        }
+        if (lossChart && lossChart.options && lossChart.options.scales) {
+            lossChart.options.scales.x.min = undefined;
+            lossChart.options.scales.x.max = undefined;
+        }
+        if (qvalueChart && qvalueChart.options && qvalueChart.options.scales && allQValues.length > 0) {
+            qvalueChart.options.scales.x.min = undefined;
+            qvalueChart.options.scales.x.max = undefined;
+        }
+    }
+    
+    // Update charts
+    scoreChart.update('none');
+    lossChart.update('none');
+    if (allQValues.length > 0) {
         qvalueChart.update('none');
     }
+    
+    // Detect if user pans (reset auto-scroll flag)
+    // We'll add event listeners for this
 }
 
 /**
@@ -740,6 +947,18 @@ function clearLogs() {
  * Copy all console logs to clipboard
  */
 function copyLogsToClipboard() {
+    // Check if we're copying metrics - if so, use structured format
+    if (currentLogFilter === 'metric' || currentLogFilter === 'all') {
+        copyLogsStructured();
+    } else {
+        copyLogsSimple();
+    }
+}
+
+/**
+ * Copy logs in simple format (original behavior)
+ */
+function copyLogsSimple() {
     let text = '';
 
     // Get filtered logs
@@ -771,6 +990,346 @@ function copyLogsToClipboard() {
     }).catch(err => {
         console.error('Failed to copy logs:', err);
     });
+}
+
+/**
+ * Copy logs in structured format optimized for model consumption
+ * Includes current training state and formatted metrics
+ */
+function copyLogsStructured() {
+    // Fetch current state from dashboard
+    fetchWithTimeout('/api/status')
+        .then(response => response.json())
+        .then(stateData => {
+            let text = '';
+            
+            // Header with training context
+            const state = stateData.state || {};
+            const history = stateData.history || {};
+            
+            text += '='.repeat(80) + '\n';
+            text += 'NEURAL NETWORK TRAINING LOGS - STRUCTURED FORMAT\n';
+            text += '='.repeat(80) + '\n\n';
+            
+            // Current Training State
+            text += 'CURRENT TRAINING STATE:\n';
+            text += '-'.repeat(80) + '\n';
+            text += `Episode: ${state.episode || 0}\n`;
+            text += `Current Score: ${state.score || 0}\n`;
+            text += `Best Score: ${state.best_score || 0}\n`;
+            text += `Win Rate: ${((state.win_rate || 0) * 100).toFixed(1)}%\n`;
+            text += `Epsilon (Exploration): ${(state.epsilon || 0).toFixed(4)}\n`;
+            text += `Loss: ${(state.loss || 0).toFixed(6)}\n`;
+            text += `Average Q-Value: ${(state.avg_q_value || 0).toFixed(4)}\n`;
+            text += `Total Steps: ${(state.total_steps || 0).toLocaleString()}\n`;
+            text += `Steps/Second: ${(state.steps_per_second || 0).toFixed(0)}\n`;
+            text += `Episodes/Second: ${(state.episodes_per_second || 0).toFixed(2)}\n`;
+            text += `Memory Usage: ${(state.memory_size || 0).toLocaleString()} / ${(state.memory_capacity || 0).toLocaleString()}\n`;
+            text += `Exploration Actions: ${(state.exploration_actions || 0).toLocaleString()}\n`;
+            text += `Exploitation Actions: ${(state.exploitation_actions || 0).toLocaleString()}\n`;
+            text += `Target Network Updates: ${(state.target_updates || 0).toLocaleString()}\n`;
+            text += `Device: ${state.device || 'unknown'}\n`;
+            text += `Torch Compiled: ${state.torch_compiled ? 'Yes' : 'No'}\n`;
+            text += `Performance Mode: ${state.performance_mode || 'normal'}\n`;
+            text += `Parallel Environments: ${state.num_envs || 1}\n`;
+            text += `Status: ${state.is_paused ? 'Paused' : (state.is_running ? 'Training' : 'Idle')}\n`;
+            text += '\n';
+            
+            // Recent History Summary (last 20 episodes)
+            if (history.scores && history.scores.length > 0) {
+                const recentScores = history.scores.slice(-20);
+                const recentLosses = history.losses.slice(-20);
+                const recentQValues = history.q_values ? history.q_values.slice(-20) : [];
+                
+                text += 'RECENT PERFORMANCE (Last 20 Episodes):\n';
+                text += '-'.repeat(80) + '\n';
+                text += `Average Score: ${(recentScores.reduce((a, b) => a + b, 0) / recentScores.length).toFixed(1)}\n`;
+                text += `Max Score: ${Math.max(...recentScores)}\n`;
+                text += `Min Score: ${Math.min(...recentScores)}\n`;
+                if (recentLosses.length > 0) {
+                    text += `Average Loss: ${(recentLosses.reduce((a, b) => a + b, 0) / recentLosses.length).toFixed(6)}\n`;
+                }
+                if (recentQValues.length > 0) {
+                    text += `Average Q-Value: ${(recentQValues.reduce((a, b) => a + b, 0) / recentQValues.length).toFixed(4)}\n`;
+                }
+                text += '\n';
+            }
+            
+            // Get filtered logs
+            let logsToExport = consoleLogs;
+            if (currentLogFilter !== 'all') {
+                logsToExport = consoleLogs.filter(log => log.level === currentLogFilter);
+            }
+            
+            // Format logs section
+            text += 'CONSOLE LOGS:\n';
+            text += '-'.repeat(80) + '\n';
+            
+            if (logsToExport.length === 0) {
+                text += '(No logs to display)\n';
+            } else {
+                // Group logs by type for better readability
+                const logsByLevel = {};
+                logsToExport.forEach(log => {
+                    if (!logsByLevel[log.level]) {
+                        logsByLevel[log.level] = [];
+                    }
+                    logsByLevel[log.level].push(log);
+                });
+                
+                // Output logs grouped by level
+                const levelOrder = ['metric', 'action', 'success', 'info', 'warning', 'error', 'debug'];
+                levelOrder.forEach(level => {
+                    if (logsByLevel[level] && logsByLevel[level].length > 0) {
+                        text += `\n[${level.toUpperCase()} LOGS]\n`;
+                        logsByLevel[level].forEach(log => {
+                            let line = `  [${log.time}] ${log.message}`;
+                            if (log.data) {
+                                // Format data nicely
+                                try {
+                                    const dataStr = JSON.stringify(log.data, null, 2);
+                                    line += `\n    Data: ${dataStr.split('\n').join('\n    ')}`;
+                                } catch (e) {
+                                    line += ` ${JSON.stringify(log.data)}`;
+                                }
+                            }
+                            text += line + '\n';
+                        });
+                    }
+                });
+            }
+            
+            text += '\n' + '='.repeat(80) + '\n';
+            text += `Generated: ${new Date().toISOString()}\n`;
+            text += '='.repeat(80) + '\n';
+            
+            // Copy to clipboard
+            navigator.clipboard.writeText(text).then(() => {
+                // Visual feedback
+                const btn = document.querySelector('.copy-btn');
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 1500);
+            }).catch(err => {
+                console.error('Failed to copy logs:', err);
+                // Fallback to simple format
+                copyLogsSimple();
+            });
+        })
+        .catch(err => {
+            console.error('Failed to fetch state for structured copy:', err);
+            // Fallback to simple format
+            copyLogsSimple();
+        });
+}
+
+/**
+ * Export current metrics in structured format optimized for model consumption
+ * This exports only the current state, not logs
+ */
+function exportMetrics() {
+    // Fetch current state from dashboard
+    fetchWithTimeout('/api/status')
+        .then(response => response.json())
+        .then(stateData => {
+            let text = '';
+            
+            const state = stateData.state || {};
+            const history = stateData.history || {};
+            
+            // Header
+            text += '='.repeat(80) + '\n';
+            text += 'NEURAL NETWORK TRAINING METRICS - STRUCTURED FORMAT\n';
+            text += 'Optimized for model consumption and analysis\n';
+            text += '='.repeat(80) + '\n\n';
+            
+            // Training Configuration
+            text += 'TRAINING CONFIGURATION:\n';
+            text += '-'.repeat(80) + '\n';
+            fetchWithTimeout('/api/config')
+                .then(configResponse => configResponse.json())
+                .then(config => {
+                    text += `Learning Rate: ${config.learning_rate || 'unknown'}\n`;
+                    text += `Gamma (Discount Factor): ${config.gamma || 'unknown'}\n`;
+                    text += `Epsilon Start: ${config.epsilon_start || 'unknown'}\n`;
+                    text += `Epsilon End: ${config.epsilon_end || 'unknown'}\n`;
+                    text += `Epsilon Decay: ${config.epsilon_decay || 'unknown'}\n`;
+                    text += `Batch Size: ${config.batch_size || 'unknown'}\n`;
+                    text += `Memory Size: ${config.memory_size || 'unknown'}\n`;
+                    text += `Target Update Frequency: ${config.target_update || 'unknown'}\n`;
+                    text += `Learn Every: ${config.learn_every || 'unknown'} steps\n`;
+                    text += `Gradient Steps: ${config.gradient_steps || 'unknown'}\n`;
+                    text += `Hidden Layers: ${JSON.stringify(config.hidden_layers || [])}\n`;
+                    text += `Game: ${config.game_name || 'unknown'}\n`;
+                    text += '\n';
+                    
+                    // Current Training State
+                    text += 'CURRENT TRAINING STATE:\n';
+                    text += '-'.repeat(80) + '\n';
+                    text += `Episode: ${state.episode || 0}\n`;
+                    text += `Current Score: ${state.score || 0}\n`;
+                    text += `Best Score: ${state.best_score || 0}\n`;
+                    text += `Win Rate: ${((state.win_rate || 0) * 100).toFixed(1)}%\n`;
+                    text += `Epsilon (Exploration Rate): ${(state.epsilon || 0).toFixed(4)}\n`;
+                    text += `Loss: ${(state.loss || 0).toFixed(6)}\n`;
+                    text += `Average Q-Value: ${(state.avg_q_value || 0).toFixed(4)}\n`;
+                    text += `Total Steps: ${(state.total_steps || 0).toLocaleString()}\n`;
+                    text += `Steps/Second: ${(state.steps_per_second || 0).toFixed(0)}\n`;
+                    text += `Episodes/Second: ${(state.episodes_per_second || 0).toFixed(2)}\n`;
+                    text += `Memory Usage: ${(state.memory_size || 0).toLocaleString()} / ${(state.memory_capacity || 0).toLocaleString()} (${((state.memory_size / state.memory_capacity) * 100 || 0).toFixed(1)}%)\n`;
+                    text += `Exploration Actions: ${(state.exploration_actions || 0).toLocaleString()}\n`;
+                    text += `Exploitation Actions: ${(state.exploitation_actions || 0).toLocaleString()}\n`;
+                    text += `Exploration Ratio: ${state.exploration_actions + state.exploitation_actions > 0 ? ((state.exploration_actions / (state.exploration_actions + state.exploitation_actions)) * 100).toFixed(1) : 0}%\n`;
+                    text += `Target Network Updates: ${(state.target_updates || 0).toLocaleString()}\n`;
+                    text += `Device: ${state.device || 'unknown'}\n`;
+                    text += `Torch Compiled: ${state.torch_compiled ? 'Yes' : 'No'}\n`;
+                    text += `Performance Mode: ${state.performance_mode || 'normal'}\n`;
+                    text += `Parallel Environments: ${state.num_envs || 1}\n`;
+                    text += `Status: ${state.is_paused ? 'Paused' : (state.is_running ? 'Training' : 'Idle')}\n`;
+                    text += '\n';
+                    
+                    // Performance History
+                    if (history.scores && history.scores.length > 0) {
+                        text += 'PERFORMANCE HISTORY:\n';
+                        text += '-'.repeat(80) + '\n';
+                        
+                        const recentScores = history.scores.slice(-50);
+                        const recentLosses = history.losses.slice(-50);
+                        const recentQValues = history.q_values ? history.q_values.slice(-50) : [];
+                        const recentEpsilons = history.epsilons ? history.epsilons.slice(-50) : [];
+                        
+                        // Summary statistics
+                        text += `Total Episodes Recorded: ${history.scores.length}\n`;
+                        text += `Recent Episodes (Last 50):\n`;
+                        text += `  Average Score: ${(recentScores.reduce((a, b) => a + b, 0) / recentScores.length).toFixed(1)}\n`;
+                        text += `  Max Score: ${Math.max(...recentScores)}\n`;
+                        text += `  Min Score: ${Math.min(...recentScores)}\n`;
+                        text += `  Score Trend: ${recentScores.length >= 10 ? (recentScores.slice(-10).reduce((a, b) => a + b, 0) / 10 > recentScores.slice(0, 10).reduce((a, b) => a + b, 0) / 10 ? 'Improving' : 'Declining') : 'Insufficient data'}\n`;
+                        
+                        if (recentLosses.length > 0) {
+                            text += `  Average Loss: ${(recentLosses.reduce((a, b) => a + b, 0) / recentLosses.length).toFixed(6)}\n`;
+                            text += `  Min Loss: ${Math.min(...recentLosses).toFixed(6)}\n`;
+                            text += `  Max Loss: ${Math.max(...recentLosses).toFixed(6)}\n`;
+                        }
+                        
+                        if (recentQValues.length > 0) {
+                            text += `  Average Q-Value: ${(recentQValues.reduce((a, b) => a + b, 0) / recentQValues.length).toFixed(4)}\n`;
+                            text += `  Q-Value Trend: ${recentQValues.length >= 10 ? (recentQValues.slice(-10).reduce((a, b) => a + b, 0) / 10 > recentQValues.slice(0, 10).reduce((a, b) => a + b, 0) / 10 ? 'Increasing' : 'Decreasing') : 'Insufficient data'}\n`;
+                        }
+                        
+                        if (recentEpsilons.length > 0) {
+                            text += `  Current Epsilon: ${recentEpsilons[recentEpsilons.length - 1].toFixed(4)}\n`;
+                            text += `  Epsilon Decay Progress: ${((1 - recentEpsilons[recentEpsilons.length - 1]) * 100).toFixed(1)}%\n`;
+                        }
+                        
+                        text += '\n';
+                        
+                        // Last 10 episodes detail
+                        text += 'LAST 10 EPISODES DETAIL:\n';
+                        text += '-'.repeat(80) + '\n';
+                        const last10 = Math.min(10, recentScores.length);
+                        const startEp = Math.max(0, (state.episode || 0) - last10);
+                        for (let i = recentScores.length - last10; i < recentScores.length; i++) {
+                            const epNum = startEp + (i - (recentScores.length - last10)) + 1;
+                            text += `Episode ${epNum}: Score=${recentScores[i]}`;
+                            if (i < recentLosses.length) {
+                                text += `, Loss=${recentLosses[i].toFixed(4)}`;
+                            }
+                            if (i < recentQValues.length) {
+                                text += `, Q-Value=${recentQValues[i].toFixed(2)}`;
+                            }
+                            text += '\n';
+                        }
+                        text += '\n';
+                    }
+                    
+                    // JSON format for programmatic access
+                    text += 'STRUCTURED DATA (JSON):\n';
+                    text += '-'.repeat(80) + '\n';
+                    const structuredData = {
+                        timestamp: new Date().toISOString(),
+                        configuration: config,
+                        current_state: {
+                            episode: state.episode || 0,
+                            score: state.score || 0,
+                            best_score: state.best_score || 0,
+                            win_rate: state.win_rate || 0,
+                            epsilon: state.epsilon || 0,
+                            loss: state.loss || 0,
+                            avg_q_value: state.avg_q_value || 0,
+                            total_steps: state.total_steps || 0,
+                            steps_per_second: state.steps_per_second || 0,
+                            episodes_per_second: state.episodes_per_second || 0,
+                            memory_size: state.memory_size || 0,
+                            memory_capacity: state.memory_capacity || 0,
+                            exploration_actions: state.exploration_actions || 0,
+                            exploitation_actions: state.exploitation_actions || 0,
+                            target_updates: state.target_updates || 0,
+                            device: state.device || 'unknown',
+                            torch_compiled: state.torch_compiled || false,
+                            performance_mode: state.performance_mode || 'normal',
+                            num_envs: state.num_envs || 1,
+                            is_paused: state.is_paused || false,
+                            is_running: state.is_running || false
+                        },
+                        recent_history: {
+                            scores: history.scores ? history.scores.slice(-50) : [],
+                            losses: history.losses ? history.losses.slice(-50) : [],
+                            q_values: history.q_values ? history.q_values.slice(-50) : [],
+                            epsilons: history.epsilons ? history.epsilons.slice(-50) : []
+                        }
+                    };
+                    text += JSON.stringify(structuredData, null, 2);
+                    text += '\n\n';
+                    
+                    text += '='.repeat(80) + '\n';
+                    text += `Generated: ${new Date().toISOString()}\n`;
+                    text += '='.repeat(80) + '\n';
+                    
+                    // Copy to clipboard
+                    navigator.clipboard.writeText(text).then(() => {
+                        // Visual feedback
+                        const btn = document.querySelector('.export-btn');
+                        if (btn) {
+                            const originalText = btn.textContent;
+                            btn.textContent = '✓ Exported!';
+                            btn.classList.add('copied');
+                            setTimeout(() => {
+                                btn.textContent = originalText;
+                                btn.classList.remove('copied');
+                            }, 2000);
+                        }
+                        addConsoleLog('Metrics exported to clipboard in structured format', 'success');
+                    }).catch(err => {
+                        console.error('Failed to copy metrics:', err);
+                        addConsoleLog('Failed to export metrics', 'error');
+                    });
+                })
+                .catch(err => {
+                    console.error('Failed to fetch config:', err);
+                    // Continue without config
+                    navigator.clipboard.writeText(text).then(() => {
+                        const btn = document.querySelector('.export-btn');
+                        if (btn) {
+                            const originalText = btn.textContent;
+                            btn.textContent = '✓ Exported!';
+                            btn.classList.add('copied');
+                            setTimeout(() => {
+                                btn.textContent = originalText;
+                                btn.classList.remove('copied');
+                            }, 2000);
+                        }
+                    });
+                });
+        })
+        .catch(err => {
+            console.error('Failed to fetch state for metrics export:', err);
+            addConsoleLog('Failed to export metrics: ' + err.message, 'error');
+        });
 }
 
 /**
@@ -974,15 +1533,26 @@ function updateSpeed(value) {
 
 /**
  * Refresh screenshot
+ * Returns true if polling should continue, false if headless mode detected
  */
 function refreshScreenshot() {
-    fetchWithTimeout('/api/screenshot')
+    return fetchWithTimeout('/api/screenshot')
         .then(response => response.json())
         .then(data => {
+            const img = document.getElementById('game-preview');
+            const placeholder = document.getElementById('preview-placeholder');
+            
+            // Check if headless mode - stop polling and show headless placeholder
+            if (data.headless) {
+                if (placeholder) {
+                    placeholder.innerHTML = '🚀 Headless Mode<br><span style="font-size: 0.8em; opacity: 0.7;">No preview available</span>';
+                    placeholder.classList.remove('hidden');
+                }
+                if (img) img.classList.remove('visible');
+                return false; // Signal to stop polling
+            }
+            
             if (data.image && data.image.length > 0) {
-                const img = document.getElementById('game-preview');
-                const placeholder = document.getElementById('preview-placeholder');
-
                 // Create a new image to verify it loads properly
                 const tempImg = new Image();
                 tempImg.onload = () => {
@@ -999,11 +1569,13 @@ function refreshScreenshot() {
                 tempImg.src = 'data:image/png;base64,' + data.image;
             } else {
                 // No image data
-                const placeholder = document.getElementById('preview-placeholder');
-                const img = document.getElementById('game-preview');
-                placeholder.classList.remove('hidden');
-                img.classList.remove('visible');
+                if (placeholder) {
+                    placeholder.innerHTML = '🎮 Game Preview';
+                    placeholder.classList.remove('hidden');
+                }
+                if (img) img.classList.remove('visible');
             }
+            return true; // Continue polling
         })
         .catch(err => {
             if (err.name !== 'AbortError') {
@@ -1011,6 +1583,7 @@ function refreshScreenshot() {
             }
             const placeholder = document.getElementById('preview-placeholder');
             if (placeholder) placeholder.classList.remove('hidden');
+            return true; // Continue polling on error (might recover)
         });
 }
 
@@ -1019,12 +1592,24 @@ function refreshScreenshot() {
  */
 function startScreenshotPolling() {
     let intervalId = null;
+    let isHeadless = false;
+
+    // Function to check screenshot and handle headless mode
+    const checkScreenshot = async () => {
+        const shouldContinue = await refreshScreenshot();
+        if (!shouldContinue) {
+            // Headless mode detected - stop polling
+            isHeadless = true;
+            stopPolling();
+            console.log('Headless mode detected - screenshot polling disabled');
+        }
+    };
 
     // Function to start/resume polling
     const startPolling = () => {
-        if (!intervalId) {
-            refreshScreenshot();
-            intervalId = setInterval(refreshScreenshot, 2000);
+        if (!intervalId && !isHeadless) {
+            checkScreenshot();
+            intervalId = setInterval(checkScreenshot, 2000);
         }
     };
 
@@ -1040,7 +1625,7 @@ function startScreenshotPolling() {
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             stopPolling();
-        } else {
+        } else if (!isHeadless) {
             startPolling();
         }
     });

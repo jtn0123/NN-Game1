@@ -1828,7 +1828,8 @@ class HeadlessTrainer:
         self.web_dashboard.publisher.set_system_info(
             device=device_str,
             torch_compiled=torch_compiled,
-            target_episodes=self.config.MAX_EPISODES
+            target_episodes=self.config.MAX_EPISODES,
+            headless=True  # No pygame, no screenshots
         )
 
         # ADD: Set number of parallel environments

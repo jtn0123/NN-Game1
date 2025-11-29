@@ -140,6 +140,8 @@ class TrainingState:
     performance_mode: str = "normal"
     # Number of parallel environments
     num_envs: int = 1
+    # Headless mode (no pygame, no screenshots)
+    headless: bool = False
 
 
 @dataclass
@@ -451,12 +453,13 @@ class MetricsPublisher:
         """Set performance mode preset."""
         self.state.performance_mode = mode
     
-    def set_system_info(self, device: str, torch_compiled: bool, target_episodes: int) -> None:
+    def set_system_info(self, device: str, torch_compiled: bool, target_episodes: int, headless: bool = False) -> None:
         """Set system information."""
         self.state.device = device
         self.state.torch_compiled = torch_compiled
         self.state.target_episodes = target_episodes
         self.state.training_start_time = time.time()
+        self.state.headless = headless
     
     def record_save(
         self,
@@ -758,10 +761,13 @@ class WebDashboard:
         
         @self.app.route('/api/screenshot')
         def api_screenshot():
+            # If headless mode, return early with flag (no screenshots available)
+            if self.publisher.state.headless:
+                return jsonify({'image': None, 'headless': True})
             screenshot = self.publisher.get_screenshot()
             if screenshot:
-                return jsonify({'image': screenshot})
-            return jsonify({'image': None})
+                return jsonify({'image': screenshot, 'headless': False})
+            return jsonify({'image': None, 'headless': False})
         
         @self.app.route('/api/nn-visualization')
         def api_nn_visualization():
