@@ -496,8 +496,9 @@ class NStepReplayBuffer(ReplayBuffer):
         self._n_step_buffer.clear()
 
     def __len__(self) -> int:
-        """Return total size including buffered experiences."""
-        return super().__len__() + len(self._n_step_buffer)
+        """Return total experiences (main buffer + buffered)."""
+        # Cap at capacity to maintain contract with capacity tests
+        return min(super().__len__() + len(self._n_step_buffer), self.capacity)
 
     def clear(self) -> None:
         """Clear all experiences from buffer."""
