@@ -285,7 +285,7 @@ class Agent:
             q_values = self.policy_net(self._state_tensor)
             return q_values.argmax(dim=1).item()
     
-    def select_actions_batch(self, states: np.ndarray, training: bool = True) -> np.ndarray:
+    def select_actions_batch(self, states: np.ndarray, training: bool = True) -> Tuple[np.ndarray, int, int]:
         """
         Select actions for a batch of states using epsilon-greedy policy.
         
@@ -297,21 +297,27 @@ class Agent:
             training: If True, use epsilon-greedy; if False, use greedy
             
         Returns:
-            Array of selected action indices, shape (batch_size,)
+            Tuple of:
+            - actions: Array of selected action indices, shape (batch_size,)
+            - num_explored: Number of random (exploration) actions taken
+            - num_exploited: Number of greedy (exploitation) actions taken
         """
         batch_size = states.shape[0]
         actions = np.empty(batch_size, dtype=np.int64)
+        num_explored = 0
+        num_exploited = 0
         
         if training:
             # Determine which states get random actions (exploration)
             explore_mask = np.random.random(batch_size) < self.epsilon
-            num_explore = explore_mask.sum()
+            num_explored = int(explore_mask.sum())
+            num_exploited = batch_size - num_explored
             
-            if num_explore > 0:
+            if num_explored > 0:
                 # Random actions for exploring states
-                actions[explore_mask] = np.random.randint(0, self.action_size, size=num_explore)
+                actions[explore_mask] = np.random.randint(0, self.action_size, size=num_explored)
             
-            if num_explore < batch_size:
+            if num_exploited > 0:
                 # Exploitation: best Q-value actions for non-exploring states
                 exploit_mask = ~explore_mask
                 exploit_states = states[exploit_mask]
@@ -323,12 +329,13 @@ class Agent:
                     actions[exploit_mask] = best_actions
         else:
             # Pure greedy: all actions from network
+            num_exploited = batch_size
             with torch.inference_mode():
                 states_tensor = torch.from_numpy(states).to(self.device)
                 q_values = self.policy_net(states_tensor)
                 actions = q_values.argmax(dim=1).cpu().numpy()
         
-        return actions
+        return actions, num_explored, num_exploited
     
     def remember_batch(
         self,

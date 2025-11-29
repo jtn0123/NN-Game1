@@ -358,7 +358,8 @@ class GameApp:
             'end': self.config.EPSILON_END,
             'decay': self.config.EPSILON_DECAY
         })
-        self.web_dashboard.log(f"Target episodes: {self.config.MAX_EPISODES}", "info")
+        target_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
+        self.web_dashboard.log(f"Target episodes: {target_str}", "info")
         self.web_dashboard.log("Ready to train! Use controls to manage training.", "info")
     
     def _toggle_pause(self) -> None:
@@ -769,7 +770,8 @@ class GameApp:
         print("\n" + "=" * 60)
         print("🧠 Starting AI Training with Live Visualization")
         print("=" * 60)
-        print(f"   Episodes:       {self.config.MAX_EPISODES}")
+        eps_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
+        print(f"   Episodes:       {eps_str}")
         print(f"   Learning Rate:  {self.config.LEARNING_RATE}")
         print(f"   Device:         {self.config.DEVICE}")
         print(f"   Batch Size:     {self.config.BATCH_SIZE}")
@@ -800,7 +802,8 @@ class GameApp:
         avg_step_time = 0.001
         step_time_samples: list[float] = []
         
-        while self.running and self.episode < self.config.MAX_EPISODES:
+        # MAX_EPISODES == 0 means unlimited (train until manually stopped)
+        while self.running and (self.config.MAX_EPISODES == 0 or self.episode < self.config.MAX_EPISODES):
             frame_start = time.time()
             self._handle_events()
             
@@ -1079,7 +1082,8 @@ class GameApp:
         print("\n" + "=" * 60)
         print("🚀 Starting Headless Training (No Visualization)")
         print("=" * 60)
-        print(f"   Episodes:       {self.config.MAX_EPISODES}")
+        eps_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
+        print(f"   Episodes:       {eps_str}")
         print(f"   Device:         {self.config.DEVICE}")
         print(f"   Batch Size:     {self.config.BATCH_SIZE}")
         print(f"   Learn Every:    {self.config.LEARN_EVERY} steps")
@@ -1532,7 +1536,8 @@ class HeadlessTrainer:
         self.web_dashboard.log(f"Network: {self.config.HIDDEN_LAYERS}", "info")
         self.web_dashboard.log(f"Learn every: {self.config.LEARN_EVERY}, Grad steps: {self.config.GRADIENT_STEPS}", "info")
         self.web_dashboard.log(f"Batch size: {self.config.BATCH_SIZE}", "info")
-        self.web_dashboard.log(f"Target episodes: {self.config.MAX_EPISODES}", "info")
+        target_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
+        self.web_dashboard.log(f"Target episodes: {target_str}", "info")
     
     def _toggle_pause(self) -> None:
         """Toggle pause state."""
@@ -1749,7 +1754,8 @@ class HeadlessTrainer:
         if self.web_dashboard:
             print("🌐 Web dashboard enabled")
         print("=" * 70)
-        print(f"   Episodes:        {start_episode} → {config.MAX_EPISODES}")
+        eps_str = "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
+        print(f"   Episodes:        {start_episode} → {eps_str}")
         print(f"   Device:          {config.DEVICE}")
         print(f"   Batch size:      {config.BATCH_SIZE}")
         print(f"   Learn every:     {config.LEARN_EVERY} steps")
@@ -1896,7 +1902,7 @@ class HeadlessTrainer:
         print("\n" + "=" * 70)
         print("✅ TRAINING COMPLETE!")
         print("=" * 70)
-        print(f"   Total episodes:   {config.MAX_EPISODES - start_episode}")
+        print(f"   Total episodes:   {self.current_episode - start_episode}")
         print(f"   Total steps:      {self.total_steps:,}")
         print(f"   Total time:       {total_time/60:.1f} minutes")
         print(f"   Avg steps/sec:    {self.total_steps/total_time:,.0f}")
@@ -1928,7 +1934,8 @@ class HeadlessTrainer:
             print("🌐 Web dashboard enabled")
         print("=" * 70)
         print(f"   Environments:    {num_envs} parallel games")
-        print(f"   Episodes:        {start_episode} → {config.MAX_EPISODES}")
+        eps_str = "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
+        print(f"   Episodes:        {start_episode} → {eps_str}")
         print(f"   Device:          {config.DEVICE}")
         print(f"   Batch size:      {config.BATCH_SIZE}")
         print(f"   Learn every:     {config.LEARN_EVERY} steps")
@@ -1955,13 +1962,16 @@ class HeadlessTrainer:
         last_score = 0
         last_info: dict = {}
         
-        while self.current_episode < config.MAX_EPISODES:
+        # MAX_EPISODES == 0 means unlimited (train until manually stopped)
+        while config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES:
             # Handle pause (only if web dashboard is active)
             while self.paused:
                 time.sleep(0.1)
             
             # Batch action selection for all environments
-            actions = self.agent.select_actions_batch(states, training=True)
+            actions, num_explored, num_exploited = self.agent.select_actions_batch(states, training=True)
+            self.exploration_actions += num_explored
+            self.exploitation_actions += num_exploited
             
             # Step all environments simultaneously
             next_states, rewards, dones, infos = self.vec_env.step_no_copy(actions)
@@ -2000,6 +2010,16 @@ class HeadlessTrainer:
                         avg_loss = self.agent.get_average_loss(100)
                         initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
                         bricks_broken = initial_bricks - infos[i].get('bricks_remaining', initial_bricks)
+                        
+                        # Calculate Q-values from a representative state
+                        q_values = self.agent.get_q_values(states[i])
+                        avg_q_value = float(np.mean(q_values))
+                        
+                        # Track target updates
+                        if self.agent.steps > self.last_target_update_step + config.TARGET_UPDATE:
+                            self.target_updates += 1
+                            self.last_target_update_step = self.agent.steps
+                        
                         self.web_dashboard.emit_metrics(
                             episode=self.current_episode,
                             score=score,
@@ -2009,9 +2029,17 @@ class HeadlessTrainer:
                             won=won,
                             reward=float(env_episode_rewards[i]),
                             memory_size=len(self.agent.memory),
+                            avg_q_value=avg_q_value,
+                            exploration_actions=self.exploration_actions,
+                            exploitation_actions=self.exploitation_actions,
+                            target_updates=self.target_updates,
                             bricks_broken=bricks_broken,
                             episode_length=int(env_episode_steps[i])
                         )
+                        # Update performance settings in dashboard state
+                        self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                        self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                        self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
                     
                     # Store for reporting
                     last_score = score
@@ -2170,7 +2198,7 @@ Examples:
     # Training parameters
     parser.add_argument(
         '--episodes', type=int, default=None,
-        help='Number of training episodes'
+        help='Number of training episodes (default: unlimited, trains until stopped)'
     )
     parser.add_argument(
         '--lr', type=float, default=None,

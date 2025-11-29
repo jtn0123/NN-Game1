@@ -104,10 +104,11 @@ class ReplayBuffer:
             self._init_arrays(len(state))
         
         # Store experience at current position
-        self.states[self._position] = state
+        # Use np.copyto for explicit copy semantics (safe with views from VecBreakout)
+        np.copyto(self.states[self._position], state)
         self.actions[self._position] = action
         self.rewards[self._position] = reward
-        self.next_states[self._position] = next_state
+        np.copyto(self.next_states[self._position], next_state)
         self.dones[self._position] = float(done)
         
         # Update position and size
@@ -125,8 +126,8 @@ class ReplayBuffer:
             Tuple of numpy arrays: (states, actions, rewards, next_states, dones)
             All arrays are copies to prevent modification of buffer data.
         """
-        # Vectorized random sampling
-        indices = np.random.randint(0, self._size, size=batch_size)
+        # Sample without replacement to ensure diverse batches
+        indices = np.random.choice(self._size, size=batch_size, replace=False)
         
         # Vectorized extraction via fancy indexing (no Python loop!)
         return (
@@ -150,8 +151,8 @@ class ReplayBuffer:
         Returns:
             Tuple of numpy array views (not copies)
         """
-        # Vectorized random sampling
-        indices = np.random.randint(0, self._size, size=batch_size)
+        # Sample without replacement to ensure diverse batches
+        indices = np.random.choice(self._size, size=batch_size, replace=False)
         
         # Return views - faster but caller must use immediately
         return (
@@ -172,7 +173,8 @@ class ReplayBuffer:
         Returns:
             Tuple: (states, actions, rewards, next_states, dones, indices)
         """
-        indices = np.random.randint(0, self._size, size=batch_size)
+        # Sample without replacement to ensure diverse batches
+        indices = np.random.choice(self._size, size=batch_size, replace=False)
         
         return (
             self.states[indices].copy(),
@@ -272,10 +274,11 @@ class PrioritizedReplayBuffer:
         if not self._initialized:
             self._init_arrays(len(state))
         
-        self.states[self._position] = state
+        # Use np.copyto for explicit copy semantics (safe with views from VecBreakout)
+        np.copyto(self.states[self._position], state)
         self.actions[self._position] = action
         self.rewards[self._position] = reward
-        self.next_states[self._position] = next_state
+        np.copyto(self.next_states[self._position], next_state)
         self.dones[self._position] = float(done)
         self.priorities[self._position] = self.max_priority
         

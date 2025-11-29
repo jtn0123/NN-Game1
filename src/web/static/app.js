@@ -1035,8 +1035,14 @@ function updateETA(state) {
     if (!etaElement) return;
     
     const currentEpisode = state.episode || 0;
-    const targetEps = state.target_episodes || 2000;
+    const targetEps = state.target_episodes || 0;
     const epsPerSec = state.episodes_per_second || 0;
+    
+    // Unlimited mode (target_episodes == 0)
+    if (targetEps === 0) {
+        etaElement.textContent = '∞ Unlimited';
+        return;
+    }
     
     if (currentEpisode >= targetEps) {
         etaElement.textContent = 'Complete!';

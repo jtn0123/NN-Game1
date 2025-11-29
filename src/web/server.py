@@ -108,7 +108,7 @@ class TrainingState:
     torch_compiled: bool = False
     # Training time tracking
     training_start_time: float = 0.0
-    target_episodes: int = 2000
+    target_episodes: int = 0  # 0 = unlimited
     # Performance mode: 'normal', 'fast', 'turbo'
     performance_mode: str = "normal"
 

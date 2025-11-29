@@ -264,8 +264,8 @@ class Config:
     # TRAINING CONTROL
     # =========================================================================
     
-    # Total episodes to train
-    MAX_EPISODES: int = 2000
+    # Total episodes to train (0 = unlimited, train until manually stopped)
+    MAX_EPISODES: int = 0
     
     # Maximum steps per episode (prevents infinite games)
     MAX_STEPS_PER_EPISODE: int = 10000
