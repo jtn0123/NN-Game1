@@ -338,7 +338,9 @@ class PrioritizedReplayBuffer:
             probs = np.ones(self._size, dtype=np.float32) / self._size
         
         # Sample indices based on priorities
-        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=False)
+        # Use replace=True if batch size exceeds buffer size (early training)
+        use_replacement = batch_size > self._size
+        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=use_replacement)
         
         # Calculate importance sampling weights
         weights = (self._size * probs[indices]) ** (-self.beta)
@@ -393,7 +395,7 @@ class PrioritizedReplayBuffer:
             indices: Indices of sampled experiences
             td_errors: Absolute TD errors from training
         """
-        priorities = np.abs(td_errors) + 1e-6  # Small epsilon to avoid zero priority
+        priorities = np.abs(td_errors) + 1e-6  # Small epsilon ensures non-zero priorities when td_error=0
         self.priorities[indices] = priorities
         self.max_priority = max(self.max_priority, priorities.max())
     

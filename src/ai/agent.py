@@ -36,6 +36,7 @@ from datetime import datetime
 import random
 import os
 import time
+import threading
 
 from .network import DQN, DuelingDQN
 from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
@@ -286,7 +287,8 @@ class Agent:
         
         # Training metrics (bounded to prevent memory growth during long training)
         self.losses: deque[float] = deque(maxlen=10000)
-        
+        self._losses_lock = threading.Lock()  # Thread safety for concurrent reads/writes
+
         # Track whether last action was exploration (for accurate metrics)
         self._last_action_explored: bool = False
         
@@ -528,11 +530,6 @@ class Agent:
         Returns:
             Loss value if training occurred, None otherwise
         """
-        # Reset noise for NoisyNet exploration
-        if hasattr(self.policy_net, 'reset_noise'):
-            self.policy_net.reset_noise()  # type: ignore[operator]
-            self.target_net.reset_noise()  # type: ignore[operator]
-
         batch_size = self.config.BATCH_SIZE
         
         # Sample batch - different path for PER vs uniform
@@ -550,8 +547,11 @@ class Agent:
             indices = None
             weights = None
         
-        # Resize pre-allocated tensors if batch size changed
-        if batch_size != self._cached_batch_size:
+        # Resize pre-allocated tensors if batch size changed OR device changed OR not yet allocated
+        # This prevents device mismatch errors when loading models trained on different devices
+        if (batch_size != self._cached_batch_size or
+            not hasattr(self, '_batch_states') or
+            self._batch_states.device != self.device):
             self._batch_states = torch.empty((batch_size, self.state_size), dtype=torch.float32, device=self.device)
             self._batch_actions = torch.empty(batch_size, dtype=torch.int64, device=self.device)
             self._batch_rewards = torch.empty(batch_size, dtype=torch.float32, device=self.device)
@@ -602,6 +602,12 @@ class Agent:
         
         # Optimize (outside autocast for numerical stability)
         self.optimizer.zero_grad()
+
+        # Reset noise for NoisyNet exploration (after zero_grad to avoid gradient issues)
+        if hasattr(self.policy_net, 'reset_noise'):
+            self.policy_net.reset_noise()  # type: ignore[operator]
+            self.target_net.reset_noise()  # type: ignore[operator]
+
         loss.backward()
         
         # Gradient clipping for stability
@@ -618,9 +624,10 @@ class Agent:
             assert isinstance(self.memory, PrioritizedReplayBuffer)
             self.memory.update_priorities(indices, td_errors.abs().cpu().numpy())
         
-        # Store loss for metrics
+        # Store loss for metrics (thread-safe)
         loss_value = loss.item()
-        self.losses.append(loss_value)
+        with self._losses_lock:
+            self.losses.append(loss_value)
         
         return loss_value
     
@@ -1064,15 +1071,16 @@ class Agent:
         return self.policy_net.get_activations()
     
     def get_average_loss(self, n: int = 100) -> float:
-        """Get average of last n losses."""
-        if not self.losses:
-            return 0.0
-        # Iterate from end - O(n) instead of O(len) for converting entire deque to list
-        count = min(n, len(self.losses))
-        total = 0.0
-        it = iter(reversed(self.losses))
-        for _ in range(count):
-            total += next(it)
+        """Get average of last n losses (thread-safe)."""
+        with self._losses_lock:
+            if not self.losses:
+                return 0.0
+            # Iterate from end - O(n) instead of O(len) for converting entire deque to list
+            count = min(n, len(self.losses))
+            total = 0.0
+            it = iter(reversed(self.losses))
+            for _ in range(count):
+                total += next(it)
         return total / count
 
 

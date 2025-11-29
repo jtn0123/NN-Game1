@@ -167,7 +167,9 @@ class Breakout(BaseGame):
         self._inv_height = 1.0 / self.height
         self._max_speed = max(config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
         self._inv_max_speed = 1.0 / self._max_speed
-        self._inv_paddle_range = 1.0 / (self.width - config.PADDLE_WIDTH)
+        # Guard against paddle width >= screen width
+        paddle_range = max(1.0, self.width - config.PADDLE_WIDTH)
+        self._inv_paddle_range = 1.0 / paddle_range
         
         # For reward shaping (tracking ball)
         self._prev_distance_to_target: float = 0.0
@@ -316,7 +318,16 @@ class Breakout(BaseGame):
         
         # Move ball
         self.ball.move()
-        
+
+        # Clamp ball speed to prevent tunneling through paddle/bricks
+        # If ball moves more than paddle/brick height in one frame, it can phase through
+        max_safe_speed = min(self.config.PADDLE_HEIGHT, self.config.BRICK_HEIGHT) * 0.8
+        current_speed = np.sqrt(self.ball.dx**2 + self.ball.dy**2)
+        if current_speed > max_safe_speed:
+            scale = max_safe_speed / current_speed
+            self.ball.dx *= scale
+            self.ball.dy *= scale
+
         # Update visual effects (skip in headless mode)
         if not self.headless:
             self.ball_trail.update(self.ball.x, self.ball.y)
@@ -430,7 +441,9 @@ class Breakout(BaseGame):
                 self.score += 10
                 reward += self.config.REWARD_BRICK_HIT
                 self._bricks_remaining -= 1  # Track incrementally
-                self._brick_states[brick_idx] = 0.0  # Update pre-allocated array
+                # Update pre-allocated array (with bounds check for safety)
+                if brick_idx < len(self._brick_states):
+                    self._brick_states[brick_idx] = 0.0
                 
                 # Emit brick destruction particles (skip in headless mode)
                 if not self.headless:
@@ -468,7 +481,10 @@ class Breakout(BaseGame):
     def _predict_landing_x(self) -> float:
         """
         Predict where the ball will land at paddle level.
-        Uses simple physics with wall bounce simulation.
+        Uses physics simulation with wall bounces (horizontal and top).
+        
+        Note: Does not simulate brick collisions - this is an approximation.
+        For balls moving through brick area, prediction accuracy decreases.
         
         Returns:
             Predicted x position (in pixels) where ball will reach paddle level
@@ -476,35 +492,72 @@ class Breakout(BaseGame):
         assert self.ball is not None, "Ball must be initialized"
         assert self.paddle is not None, "Paddle must be initialized"
         
-        # If ball is moving up, return current x (no immediate landing)
-        if self.ball.dy <= 0:
-            return self.ball.x
+        # Start simulation from current ball state
+        sim_x = float(self.ball.x)
+        sim_y = float(self.ball.y)
+        sim_dx = float(self.ball.dx)
+        sim_dy = float(self.ball.dy)
         
-        # Calculate time to reach paddle level
         target_y = self.paddle.y - self.ball.radius
-        if self.ball.y >= target_y:
-            return self.ball.x  # Already at or past paddle level
         
-        time_to_paddle = (target_y - self.ball.y) / self.ball.dy
+        # Already at or past paddle level
+        if sim_y >= target_y:
+            return sim_x
         
-        # Predict x position accounting for wall bounces
-        predicted_x = self.ball.x + self.ball.dx * time_to_paddle
-
-        # Simulate wall bounces (handle multiple bounces)
-        # Add max iteration guard to prevent infinite loops with extreme velocities
-        max_bounces = 10
+        # Simulate ball trajectory with wall bounces
+        # Max iterations to prevent infinite loops
+        max_iterations = 100
         iterations = 0
-        while (predicted_x < 0 or predicted_x > self.width) and iterations < max_bounces:
-            if predicted_x < 0:
-                predicted_x = -predicted_x
-            elif predicted_x > self.width:
-                predicted_x = 2 * self.width - predicted_x
+        
+        while iterations < max_iterations:
             iterations += 1
-
-        # Clamp to screen bounds if we hit max iterations
-        predicted_x = max(0, min(self.width, predicted_x))
-
-        return predicted_x
+            
+            # If ball is moving down, calculate time to paddle
+            if sim_dy > 0:
+                time_to_paddle = (target_y - sim_y) / sim_dy
+                
+                # Calculate x position at paddle level
+                predicted_x = sim_x + sim_dx * time_to_paddle
+                
+                # Check for horizontal wall bounces during descent
+                bounce_iterations = 0
+                while (predicted_x < 0 or predicted_x > self.width) and bounce_iterations < 10:
+                    if predicted_x < 0:
+                        predicted_x = -predicted_x
+                    elif predicted_x > self.width:
+                        predicted_x = 2 * self.width - predicted_x
+                    bounce_iterations += 1
+                
+                # Clamp and return
+                return max(0.0, min(float(self.width), predicted_x))
+            
+            # Ball is moving up - simulate until it bounces off top wall
+            # Time to hit top wall (y = ball_radius)
+            top_wall_y = self.ball.radius
+            if sim_dy < 0 and sim_y > top_wall_y:
+                time_to_top = (top_wall_y - sim_y) / sim_dy
+                
+                # Move ball to top wall position
+                sim_x += sim_dx * time_to_top
+                sim_y = top_wall_y
+                
+                # Handle horizontal bounces at top
+                while sim_x < 0 or sim_x > self.width:
+                    if sim_x < 0:
+                        sim_x = -sim_x
+                        sim_dx = -sim_dx
+                    elif sim_x > self.width:
+                        sim_x = 2 * self.width - sim_x
+                        sim_dx = -sim_dx
+                
+                # Bounce off top wall
+                sim_dy = -sim_dy
+            else:
+                # Ball not moving toward top, shouldn't happen but handle gracefully
+                break
+        
+        # Fallback: return current x if simulation didn't converge
+        return float(self.ball.x)
     
     def get_state(self) -> np.ndarray:
         """
@@ -742,6 +795,7 @@ class VecBreakout:
         self._states = np.empty((num_envs, self.state_size), dtype=np.float32)
         self._rewards = np.empty(num_envs, dtype=np.float32)
         self._dones = np.empty(num_envs, dtype=np.bool_)
+        self._pending_resets = np.zeros(num_envs, dtype=np.bool_)  # Track envs needing reset
     
     def reset(self) -> np.ndarray:
         """
@@ -781,45 +835,63 @@ class VecBreakout:
             - infos: list of info dicts
         """
         infos = []
-        
+
         for i, (env, action) in enumerate(zip(self.envs, actions)):
             next_state, reward, done, info = env.step(int(action))
-            
+
             self._states[i] = next_state
             self._rewards[i] = reward
             self._dones[i] = done
             infos.append(info)
-            
-            # Auto-reset environments that are done
+
+            # Auto-reset environment internally but don't overwrite state array yet
+            # This ensures terminal state is returned to caller, not reset state
             if done:
-                self._states[i] = env.reset()
-        
-        return self._states.copy(), self._rewards.copy(), self._dones.copy(), infos
+                env.reset()
+
+        # Return terminal states for done episodes (critical for correct replay buffer data)
+        states_to_return = self._states.copy()
+        rewards_to_return = self._rewards.copy()
+        dones_to_return = self._dones.copy()
+
+        # NOW update state array for next iteration (after returning terminal states)
+        for i, done in enumerate(self._dones):
+            if done:
+                self._states[i] = self.envs[i].get_state()
+
+        return states_to_return, rewards_to_return, dones_to_return, infos
     
     def step_no_copy(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """
         Step without copying arrays (faster but caller must use immediately).
-        
+
         Args:
             actions: Array of actions, shape (num_envs,)
-            
+
         Returns:
             Tuple of (next_states, rewards, dones, infos) - arrays are views
         """
+        # Process pending resets from previous step (after caller used terminal states)
+        for i in range(self.num_envs):
+            if self._pending_resets[i]:
+                self._states[i] = self.envs[i].get_state()
+                self._pending_resets[i] = False
+
         infos = []
-        
+
         for i, (env, action) in enumerate(zip(self.envs, actions)):
             next_state, reward, done, info = env.step(int(action))
-            
+
             self._states[i] = next_state
             self._rewards[i] = reward
             self._dones[i] = done
             infos.append(info)
-            
-            # Auto-reset environments that are done
+
+            # Mark for reset but don't overwrite state yet (ensures terminal state is returned)
             if done:
-                self._states[i] = env.reset()
-        
+                env.reset()  # Reset environment internally
+                self._pending_resets[i] = True  # Will update state array on next call
+
         return self._states, self._rewards, self._dones, infos
     
     def get_states(self) -> np.ndarray:

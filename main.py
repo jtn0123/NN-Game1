@@ -1521,10 +1521,9 @@ class GameApp:
                 step=self.agent.steps,
                 action_labels=action_labels
             )
-        except Exception as e:
-            # Don't crash training on visualization errors
-            if self.config.VERBOSE:
-                print(f"NN visualization error: {e}")
+        except Exception:
+            # Don't crash training on visualization errors - silently ignore
+            pass
     
     def _save_model(
         self,
@@ -2125,11 +2124,10 @@ class HeadlessTrainer:
                 step=self.agent.steps,
                 action_labels=action_labels
             )
-        except Exception as e:
-            # Don't crash training on visualization errors
-            if self.config.VERBOSE:
-                print(f"NN visualization error: {e}")
-    
+        except Exception:
+            # Don't crash training on visualization errors - silently ignore
+            pass
+
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
         changes = []
@@ -2574,7 +2572,8 @@ class HeadlessTrainer:
                         self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
                         
                         # Emit NN visualization data (throttled by server to ~10 FPS)
-                        self._emit_nn_visualization(states[i], actions[i])
+                        # Convert numpy int64 to Python int for JSON serialization
+                        self._emit_nn_visualization(states[i], int(actions[i]))
                     
                     # Store for reporting
                     last_score = score

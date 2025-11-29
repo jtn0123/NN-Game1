@@ -32,6 +32,7 @@ from collections import deque
 from enum import Enum
 import base64
 import io
+import numpy as np
 
 try:
     from flask import Flask, render_template, jsonify, request
@@ -45,6 +46,32 @@ except ImportError:
 import sys
 sys.path.append('../..')
 from config import Config
+
+
+def _make_json_safe(obj: Any) -> Any:
+    """
+    Convert NumPy types to native Python types for JSON serialization.
+
+    Recursively processes dictionaries and lists to ensure all NumPy types
+    are converted to JSON-compatible Python types.
+
+    Args:
+        obj: Object to convert (can be NumPy type, dict, list, or primitive)
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_make_json_safe(item) for item in obj]
+    return obj
 
 
 class LogLevel(Enum):
@@ -184,7 +211,7 @@ class MetricsPublisher:
         self.history_length = history_length
         self.state = TrainingState()
         self.save_status = SaveStatus()
-        
+
         # Metric history
         self.scores: Deque[int] = deque(maxlen=history_length)
         self.losses: Deque[float] = deque(maxlen=history_length)
@@ -192,10 +219,13 @@ class MetricsPublisher:
         self.rewards: Deque[float] = deque(maxlen=history_length)
         self.q_values: Deque[float] = deque(maxlen=history_length)
         self.episode_lengths: Deque[int] = deque(maxlen=history_length)
-        
+
         # Console log history
         self.console_logs: Deque[LogMessage] = deque(maxlen=500)
-        
+
+        # Thread safety for callbacks
+        self._callback_lock = threading.Lock()
+
         # Callbacks
         self._on_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._on_log_callbacks: List[Callable[[LogMessage], None]] = []
@@ -297,8 +327,10 @@ class MetricsPublisher:
             recent = list(self.scores)[-100:]
             self.state.win_rate = sum(1 for s in recent if s >= 300) / len(recent)
         
-        # Notify callbacks
-        for callback in self._on_update_callbacks:
+        # Notify callbacks (thread-safe copy to avoid modification during iteration)
+        with self._callback_lock:
+            callbacks = self._on_update_callbacks.copy()
+        for callback in callbacks:
             callback(self.get_snapshot())
     
     def log(
@@ -316,8 +348,10 @@ class MetricsPublisher:
         )
         self.console_logs.append(log_entry)
         
-        # Notify log callbacks
-        for callback in self._on_log_callbacks:
+        # Notify log callbacks (thread-safe copy to avoid modification during iteration)
+        with self._callback_lock:
+            callbacks = self._on_log_callbacks.copy()
+        for callback in callbacks:
             callback(log_entry)
     
     def set_screenshot(self, surface) -> None:
@@ -338,12 +372,17 @@ class MetricsPublisher:
                 self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
             except ImportError:
                 # Fallback: try direct pygame save to BytesIO
-                buffer = io.BytesIO()
-                # Create a temp surface copy for saving
-                temp_surface = surface.copy()
-                pygame.image.save(temp_surface, buffer, 'screenshot.png')
-                buffer.seek(0)
-                self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
+                try:
+                    buffer = io.BytesIO()
+                    # Create a temp surface copy for saving
+                    temp_surface = surface.copy()
+                    # Use PNG format directly without filename extension
+                    pygame.image.save(temp_surface, buffer)
+                    buffer.seek(0)
+                    self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
+                except Exception as fallback_error:
+                    print(f"Screenshot fallback error: {fallback_error}")
+                    self._screenshot_data = None
         except Exception as e:
             print(f"Screenshot error: {e}")
             self._screenshot_data = None  # Clear corrupted data
@@ -373,11 +412,13 @@ class MetricsPublisher:
     
     def on_update(self, callback) -> None:
         """Register a callback for metric updates."""
-        self._on_update_callbacks.append(callback)
-    
+        with self._callback_lock:
+            self._on_update_callbacks.append(callback)
+
     def on_log(self, callback) -> None:
         """Register a callback for log messages."""
-        self._on_log_callbacks.append(callback)
+        with self._callback_lock:
+            self._on_log_callbacks.append(callback)
     
     def set_paused(self, paused: bool) -> None:
         """Set training paused state."""
@@ -428,9 +469,11 @@ class MetricsPublisher:
         self.save_status.last_save_best_score = best_score
         self.save_status.saves_this_session += 1
         
-        # Notify save callbacks
+        # Notify save callbacks (thread-safe copy to avoid modification during iteration)
         save_info = self.get_save_status()
-        for callback in self._on_save_callbacks:
+        with self._callback_lock:
+            callbacks = self._on_save_callbacks.copy()
+        for callback in callbacks:
             callback(save_info)
     
     def get_save_status(self) -> Dict[str, Any]:
@@ -462,7 +505,8 @@ class MetricsPublisher:
     
     def on_save(self, callback) -> None:
         """Register a callback for save events."""
-        self._on_save_callbacks.append(callback)
+        with self._callback_lock:
+            self._on_save_callbacks.append(callback)
     
     def update_nn_visualization(
         self,
@@ -506,9 +550,11 @@ class MetricsPublisher:
         if action_labels:
             self._nn_data.action_labels = action_labels
         
-        # Notify callbacks
+        # Notify callbacks (thread-safe copy to avoid modification during iteration)
         nn_dict = self._nn_data.to_dict()
-        for callback in self._on_nn_update_callbacks:
+        with self._callback_lock:
+            callbacks = self._on_nn_update_callbacks.copy()
+        for callback in callbacks:
             callback(nn_dict)
     
     def get_nn_visualization(self) -> Dict[str, Any]:
@@ -517,7 +563,8 @@ class MetricsPublisher:
     
     def on_nn_update(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback for neural network visualization updates."""
-        self._on_nn_update_callbacks.append(callback)
+        with self._callback_lock:
+            self._on_nn_update_callbacks.append(callback)
     
     def reset_all_state(self) -> None:
         """Reset all training state - used when starting fresh."""
@@ -871,11 +918,15 @@ class WebDashboard:
             if not os.path.exists(full_path):
                 return jsonify({'error': 'Model not found'}), 404
             
-            # Security: Reject symlinks to prevent symlink-based attacks
+            # Security: Reject symlinks in ANY path component to prevent symlink-based attacks
             # Even though realpath resolves them and the containment check catches external targets,
-            # it's safer to explicitly reject symlinks
-            if os.path.islink(os.path.join(legacy_model_dir, filepath)):
-                return jsonify({'error': 'Cannot delete symbolic links'}), 403
+            # it's safer to explicitly reject symlinks in all path components
+            path_to_check = os.path.join(legacy_model_dir, filepath)
+            current_path = path_to_check
+            while current_path and current_path != legacy_model_dir:
+                if os.path.islink(current_path):
+                    return jsonify({'error': 'Cannot delete files with symbolic links in path'}), 403
+                current_path = os.path.dirname(current_path)
             
             # Ensure it's a .pth file
             if not full_path.endswith('.pth'):
@@ -952,14 +1003,14 @@ class WebDashboard:
         
         @self.socketio.on('connect')
         def handle_connect():
-            # Send current state on connect
-            emit('state_update', self.publisher.get_snapshot())
+            # Send current state on connect (convert NumPy types for JSON serialization)
+            emit('state_update', _make_json_safe(self.publisher.get_snapshot()))
             # Send recent logs
-            emit('console_logs', {'logs': self.publisher.get_console_logs(100)})
+            emit('console_logs', {'logs': _make_json_safe(self.publisher.get_console_logs(100))})
             # Send current NN visualization data if available
             nn_data = self.publisher.get_nn_visualization()
             if nn_data.get('layer_info'):
-                emit('nn_update', nn_data)
+                emit('nn_update', _make_json_safe(nn_data))
         
         @self.socketio.on('control')
         def handle_control(data):
@@ -1069,10 +1120,11 @@ class WebDashboard:
             self.socketio.emit('nn_update', nn_data)
         
         # Clear any existing callbacks before registering (prevents duplication)
-        self.publisher._on_update_callbacks.clear()
-        self.publisher._on_log_callbacks.clear()
-        self.publisher._on_save_callbacks.clear()
-        self.publisher._on_nn_update_callbacks.clear()
+        with self.publisher._callback_lock:
+            self.publisher._on_update_callbacks.clear()
+            self.publisher._on_log_callbacks.clear()
+            self.publisher._on_save_callbacks.clear()
+            self.publisher._on_nn_update_callbacks.clear()
         
         self.publisher.on_update(broadcast_update)
         self.publisher.on_log(broadcast_log)

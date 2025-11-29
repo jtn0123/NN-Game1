@@ -456,6 +456,9 @@ class Config:
         assert self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end"
         assert self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1"
         assert self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1"
+        assert self.SCREEN_WIDTH > 0, "Screen width must be positive"
+        assert self.SCREEN_HEIGHT > 0, "Screen height must be positive"
+        assert self.BALL_SPEED > 0, "Ball speed must be positive"
 
 
 # Global config instance for easy importing
