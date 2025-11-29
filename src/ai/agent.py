@@ -392,9 +392,10 @@ class Agent:
         next_states = self._batch_next_states
         dones = self._batch_dones
         
-        # Clip rewards to prevent extreme gradients (if enabled)
+        # Clip negative rewards to prevent extreme gradients (if enabled)
+        # Only clip negative side to preserve win bonus signal (REWARD_WIN = 100)
         if self.config.REWARD_CLIP > 0:
-            rewards = torch.clamp(rewards, -self.config.REWARD_CLIP, self.config.REWARD_CLIP)
+            rewards = torch.clamp(rewards, min=-self.config.REWARD_CLIP)
         
         # Use mixed precision autocast if enabled (significant speedup on MPS/CUDA)
         # Only forward passes use float16; loss computed in float32 for numerical stability

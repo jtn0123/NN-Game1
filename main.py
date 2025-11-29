@@ -1084,6 +1084,7 @@ class GameApp:
         total_steps = 0
         
         scores: list[int] = []
+        best_score = 0
         start_time = time.time()
         last_report_time = start_time
         steps_since_report = 0
@@ -1134,7 +1135,8 @@ class GameApp:
             if episode % self.config.SAVE_EVERY == 0 and episode > 0:
                 self._save_model(f"breakout_ep{episode}.pth")
             
-            if info['score'] > max(scores[:-1], default=0):
+            if info['score'] > best_score:
+                best_score = info['score']
                 self._save_model("breakout_best.pth", quiet=True)
         
         self._save_model("breakout_final.pth")

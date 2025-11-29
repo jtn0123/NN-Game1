@@ -573,7 +573,14 @@ class Breakout(BaseGame):
         
         Args:
             screen: Pygame surface to draw on
+        
+        Note:
+            In headless mode, this method does nothing since visual effects are disabled.
         """
+        # Skip rendering in headless mode (particles/ball_trail are None)
+        if self.headless:
+            return
+        
         assert self.paddle is not None, "Paddle must be initialized"
         assert self.ball is not None, "Ball must be initialized"
         
