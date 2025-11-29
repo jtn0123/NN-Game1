@@ -279,8 +279,8 @@
                         <div class="game-desc">${game.description}</div>
                         <span class="difficulty ${diffClass}">${game.difficulty}</span>
                         <div class="game-stats">
-                            <span><span class="stat-label">States:</span> ${game.state_size}</span>
-                            <span><span class="stat-label">Actions:</span> ${game.action_size}</span>
+                            <span><span class="stat-label">Actions:</span> ${game.actions.length}</span>
+                            <span><span class="stat-label">Controls:</span> ${game.actions.join(', ')}</span>
                         </div>
                     `;
                     grid.appendChild(card);

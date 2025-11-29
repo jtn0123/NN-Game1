@@ -163,6 +163,10 @@ class Dashboard:
         # Animation
         self.pulse_phase = 0.0
         self.scroll_offset = 0
+
+        # Cache gradient background surface to avoid redrawing every frame
+        self._cached_gradient: Optional[pygame.Surface] = None
+        self._create_gradient_surface()
     
     def update(
         self,
@@ -249,20 +253,25 @@ class Dashboard:
         # Draw metric cards on the right (with epsilon gauge integrated)
         cards_x = self.x + chart_width + 20
         self._draw_metric_cards(screen, cards_x, chart_y, cards_panel_width)
-    
-    def _draw_background(self, screen: pygame.Surface) -> None:
-        """Draw dashboard background with subtle gradient."""
-        rect = pygame.Rect(self.x, self.y, self.width, self.height)
-        
-        # Gradient background
+
+    def _create_gradient_surface(self) -> None:
+        """Create and cache the gradient background surface."""
+        self._cached_gradient = pygame.Surface((self.width, self.height))
         for i in range(self.height):
             progress = i / self.height
             r = int(self.bg_color[0] + (self.panel_color[0] - self.bg_color[0]) * progress * 0.5)
             g = int(self.bg_color[1] + (self.panel_color[1] - self.bg_color[1]) * progress * 0.5)
             b = int(self.bg_color[2] + (self.panel_color[2] - self.bg_color[2]) * progress * 0.5)
-            pygame.draw.line(screen, (r, g, b), 
-                           (self.x, self.y + i), (self.x + self.width, self.y + i))
-        
+            pygame.draw.line(self._cached_gradient, (r, g, b),
+                           (0, i), (self.width, i))
+
+    def _draw_background(self, screen: pygame.Surface) -> None:
+        """Draw dashboard background with subtle gradient."""
+        rect = pygame.Rect(self.x, self.y, self.width, self.height)
+
+        # Blit cached gradient surface
+        screen.blit(self._cached_gradient, (self.x, self.y))
+
         # Border
         pygame.draw.rect(screen, (45, 50, 70), rect, 2, border_radius=5)
     

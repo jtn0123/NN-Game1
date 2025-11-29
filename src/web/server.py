@@ -561,10 +561,11 @@ class WebDashboard:
         template_dir = os.path.join(base_dir, 'templates')
         static_dir = os.path.join(base_dir, 'static')
         
-        self.app = Flask(__name__, 
+        self.app = Flask(__name__,
                         template_folder=template_dir,
                         static_folder=static_dir)
-        self.app.config['SECRET_KEY'] = 'neural-network-game-ai'
+        # Generate secure random secret key (not hardcoded for security)
+        self.app.config['SECRET_KEY'] = base64.b64encode(os.urandom(24)).decode('utf-8')
         
         # SocketIO setup
         self.socketio = SocketIO(self.app, cors_allowed_origins="*", async_mode='threading')

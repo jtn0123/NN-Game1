@@ -65,7 +65,7 @@ import argparse
 import sys
 import os
 import time
-from typing import Optional, Callable, Any, Type, Union
+from typing import Optional, Callable, Any, Type, Union, Tuple
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -120,7 +120,11 @@ class GameApp:
         
         # Initialize Pygame
         pygame.init()
-        
+
+        # Cache fonts to avoid recreating them every frame
+        self._pause_font = pygame.font.Font(None, 72)
+        self._speed_font = pygame.font.Font(None, 24)
+
         # Get game info for display
         game_info = get_game_info(config.GAME_NAME)
         game_display_name = game_info['name'] if game_info else config.GAME_NAME.title()
@@ -1255,9 +1259,8 @@ class GameApp:
         if self.paused:
             game_center_x = self.config.SCREEN_WIDTH // 2
             game_center_y = self.config.SCREEN_HEIGHT // 2
-            
-            font = pygame.font.Font(None, 72)
-            text = font.render("PAUSED", True, (255, 200, 50))
+
+            text = self._pause_font.render("PAUSED", True, (255, 200, 50))
             text_rect = text.get_rect(center=(game_center_x, game_center_y))
             
             # Background with semi-transparent fill using SRCALPHA surface
@@ -1271,8 +1274,7 @@ class GameApp:
         
         # Render speed indicator if not normal (top right of game area)
         if self.game_speed != 1.0:
-            font = pygame.font.Font(None, 24)
-            speed_text = font.render(f"Speed: {self.game_speed}x", True, (150, 150, 150))
+            speed_text = self._speed_font.render(f"Speed: {self.game_speed}x", True, (150, 150, 150))
             self.game_surface.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
         
         # Capture screenshot for web dashboard (before scaling, every 10 frames)
@@ -1287,15 +1289,18 @@ class GameApp:
         # Clear main screen and scale game surface to fit window
         self.screen.fill((0, 0, 0))
         
-        # Calculate scaled size
-        scaled_width = int(self.config.SCREEN_WIDTH * self.scale_factor)
-        scaled_height = int(self.config.SCREEN_HEIGHT * self.scale_factor)
-        
-        # Scale the game surface (use smoothscale for better quality)
-        scaled_surface = pygame.transform.smoothscale(self.game_surface, (scaled_width, scaled_height))
-        
-        # Blit centered on screen
-        self.screen.blit(scaled_surface, (self.game_offset_x, self.game_offset_y))
+        # Scale the game surface (optimize: skip scaling at 1:1 ratio)
+        if abs(self.scale_factor - 1.0) < 0.001:  # Effectively 1.0
+            # No scaling needed - blit directly
+            self.screen.blit(self.game_surface, (self.game_offset_x, self.game_offset_y))
+        else:
+            # Calculate scaled size
+            scaled_width = int(self.config.SCREEN_WIDTH * self.scale_factor)
+            scaled_height = int(self.config.SCREEN_HEIGHT * self.scale_factor)
+            # Use smoothscale for better quality
+            scaled_surface = pygame.transform.smoothscale(self.game_surface, (scaled_width, scaled_height))
+            # Blit centered on screen
+            self.screen.blit(scaled_surface, (self.game_offset_x, self.game_offset_y))
         
         pygame.display.flip()
     

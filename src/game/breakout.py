@@ -188,7 +188,7 @@ class Breakout(BaseGame):
         # Pre-computed normalization constants for get_state() (avoids division per call)
         self._inv_width = 1.0 / self.width
         self._inv_height = 1.0 / self.height
-        self._max_speed = config.BALL_SPEED * 1.5
+        self._max_speed = max(config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
         self._inv_max_speed = 1.0 / self._max_speed
         self._inv_paddle_range = 1.0 / (self.width - config.PADDLE_WIDTH)
         
@@ -204,9 +204,15 @@ class Breakout(BaseGame):
             self.ball_trail = TrailRenderer(length=12)
             self.background_surface: Optional[pygame.Surface] = None  # Cached gradient background
             self._create_background()
+            # Cache fonts to avoid recreating them every frame
+            pygame.font.init()  # Ensure fonts are initialized
+            self._hud_font = pygame.font.Font(None, 36)
+            self._big_font = pygame.font.Font(None, 72)
         else:
             self.particles = None  # type: ignore
             self.ball_trail = None  # type: ignore
+            self._hud_font = None  # type: ignore
+            self._big_font = None  # type: ignore
             self.background_surface = None
         
         # Initialize the game
@@ -268,12 +274,18 @@ class Breakout(BaseGame):
         return self.get_state()
     
     def _create_background(self) -> None:
-        """Create cached gradient background surface."""
+        """Create cached gradient background surface with grid."""
         self.background_surface = create_gradient_surface(
             self.width, self.height,
             (10, 10, 30),   # Dark blue at top
             (25, 15, 45)    # Dark purple at bottom
         )
+        # Bake grid pattern into background (avoids redrawing each frame)
+        grid_color = (30, 30, 50)
+        for x in range(0, self.width, 40):
+            pygame.draw.line(self.background_surface, grid_color, (x, 0), (x, self.height), 1)
+        for y in range(0, self.height, 40):
+            pygame.draw.line(self.background_surface, grid_color, (0, y), (self.width, y), 1)
     
     def _reset_ball(self) -> None:
         """Reset ball position and velocity."""
@@ -500,14 +512,21 @@ class Breakout(BaseGame):
         
         # Predict x position accounting for wall bounces
         predicted_x = self.ball.x + self.ball.dx * time_to_paddle
-        
+
         # Simulate wall bounces (handle multiple bounces)
-        while predicted_x < 0 or predicted_x > self.width:
+        # Add max iteration guard to prevent infinite loops with extreme velocities
+        max_bounces = 10
+        iterations = 0
+        while (predicted_x < 0 or predicted_x > self.width) and iterations < max_bounces:
             if predicted_x < 0:
                 predicted_x = -predicted_x
             elif predicted_x > self.width:
                 predicted_x = 2 * self.width - predicted_x
-        
+            iterations += 1
+
+        # Clamp to screen bounds if we hit max iterations
+        predicted_x = max(0, min(self.width, predicted_x))
+
         return predicted_x
     
     def get_state(self) -> np.ndarray:
@@ -607,18 +626,11 @@ class Breakout(BaseGame):
             # Fill edges that might be exposed during shake
             screen.fill((5, 5, 15))
         
-        # Draw gradient background
+        # Draw gradient background (with grid baked in)
         if self.background_surface:
             screen.blit(self.background_surface, (shake_x, shake_y))
         else:
             screen.fill(self.config.COLOR_BACKGROUND)
-        
-        # Draw subtle animated grid pattern
-        grid_color = (30, 30, 50)
-        for x in range(0, self.width, 40):
-            pygame.draw.line(screen, grid_color, (x + shake_x, shake_y), (x + shake_x, self.height + shake_y), 1)
-        for y in range(0, self.height, 40):
-            pygame.draw.line(screen, grid_color, (shake_x, y + shake_y), (self.width + shake_x, y + shake_y), 1)
         
         # Draw bricks with offset
         for brick in self.bricks:
@@ -679,27 +691,24 @@ class Breakout(BaseGame):
     
     def _draw_hud(self, screen: pygame.Surface) -> None:
         """Draw heads-up display (score, lives)."""
-        font = pygame.font.Font(None, 36)
-        
         # Score (top left)
-        score_text = font.render(f"Score: {self.score}", True, self.config.COLOR_TEXT)
+        score_text = self._hud_font.render(f"Score: {self.score}", True, self.config.COLOR_TEXT)
         screen.blit(score_text, (10, 10))
-        
+
         # Lives (top right)
-        lives_text = font.render(f"Lives: {self.lives}", True, self.config.COLOR_TEXT)
+        lives_text = self._hud_font.render(f"Lives: {self.lives}", True, self.config.COLOR_TEXT)
         screen.blit(lives_text, (self.width - 100, 10))
-        
+
         # Game over or win message
         if self.game_over:
-            big_font = pygame.font.Font(None, 72)
             if self.won:
                 msg = "YOU WIN!"
                 color = (46, 204, 113)
             else:
                 msg = "GAME OVER"
                 color = (231, 76, 60)
-            
-            text = big_font.render(msg, True, color)
+
+            text = self._big_font.render(msg, True, color)
             text_rect = text.get_rect(center=(self.width // 2, self.height // 2))
             
             # Draw background box

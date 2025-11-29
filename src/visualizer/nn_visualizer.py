@@ -142,6 +142,10 @@ class NeuralNetVisualizer:
         # Activation history for mini sparklines
         self.activation_history: Dict[str, deque] = {}
         self.history_length = 30
+
+        # Cache gradient background surface to avoid redrawing every frame
+        self._cached_gradient: Optional[pygame.Surface] = None
+        self._create_gradient_surface()
         
         # Cached layer positions
         self._cached_positions: Optional[List[Dict[str, Any]]] = None
@@ -244,21 +248,26 @@ class NeuralNetVisualizer:
             self.activation_history[key].append(np.mean(np.abs(smoothed[key])))
         
         return smoothed
-    
-    def _draw_background(self, screen: pygame.Surface) -> None:
-        """Draw enhanced visualization background panel."""
-        # Main background with gradient effect
-        panel_rect = pygame.Rect(self.x, self.y, self.width, self.height)
-        
-        # Draw gradient background
+
+    def _create_gradient_surface(self) -> None:
+        """Create and cache the gradient background surface."""
+        self._cached_gradient = pygame.Surface((self.width, self.height))
         for i in range(self.height):
             progress = i / self.height
             r = int(self.bg_color[0] + (self.panel_color[0] - self.bg_color[0]) * progress)
             g = int(self.bg_color[1] + (self.panel_color[1] - self.bg_color[1]) * progress)
             b = int(self.bg_color[2] + (self.panel_color[2] - self.bg_color[2]) * progress)
-            pygame.draw.line(screen, (r, g, b), 
-                           (self.x, self.y + i), (self.x + self.width, self.y + i))
-        
+            pygame.draw.line(self._cached_gradient, (r, g, b),
+                           (0, i), (self.width, i))
+
+    def _draw_background(self, screen: pygame.Surface) -> None:
+        """Draw enhanced visualization background panel."""
+        # Main background with gradient effect
+        panel_rect = pygame.Rect(self.x, self.y, self.width, self.height)
+
+        # Blit cached gradient surface
+        screen.blit(self._cached_gradient, (self.x, self.y))
+
         # Animated border glow
         glow_intensity = int(20 + 10 * math.sin(self.pulse_phase))
         border_color = (40 + glow_intensity, 60 + glow_intensity, 100 + glow_intensity)

@@ -901,10 +901,10 @@ function loadModel(path) {
     addConsoleLog(`Loading model: ${path.split('/').pop()}`, 'action');
 }
 
-// Close modal on outside click
+// Close modal on outside click (click on backdrop, not content)
 document.addEventListener('click', (e) => {
-    const modal = document.getElementById('load-modal');
-    if (e.target === modal) {
+    // Check if click was directly on an element with 'modal' class
+    if (e.target.classList && e.target.classList.contains('modal')) {
         hideLoadModal();
     }
 });
@@ -1250,7 +1250,8 @@ function updateSaveStatus(data) {
     }
     if (reasonEl) {
         reasonEl.textContent = data.last_save_reason || '-';
-        reasonEl.className = 'save-value save-reason ' + (data.last_save_reason || '');
+        // Set base classes only (don't inject unsanitized data into className)
+        reasonEl.className = 'save-value save-reason';
     }
     if (countEl) {
         countEl.textContent = data.saves_this_session || 0;
@@ -1565,7 +1566,7 @@ function showRestartBanner(game, command) {
 /**
  * Copy restart command to clipboard
  */
-function copyRestartCommand() {
+function copyRestartCommand(event) {
     const command = document.getElementById('restart-command');
     if (command) {
         navigator.clipboard.writeText(command.textContent).then(() => {
