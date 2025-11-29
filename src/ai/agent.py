@@ -315,6 +315,10 @@ class Agent:
         Returns:
             Loss value if training occurred, None otherwise
         """
+        # Always increment learn step counter to track calls to learn()
+        # This ensures consistent LEARN_EVERY behavior across the training lifecycle
+        self._learn_step += 1
+        
         # Don't learn until we have enough experiences
         if len(self.memory) < self.config.MEMORY_MIN:
             return None
@@ -324,7 +328,6 @@ class Agent:
         
         # Skip learning based on LEARN_EVERY setting for performance
         learn_every = getattr(self.config, 'LEARN_EVERY', 1)
-        self._learn_step += 1
         if self._learn_step % learn_every != 0:
             return None
         
