@@ -65,7 +65,7 @@ import argparse
 import sys
 import os
 import time
-from typing import Optional, Callable, Any, Type
+from typing import Optional, Callable, Any, Type, Union
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -156,7 +156,8 @@ class GameApp:
             print(f"❌ Unknown game: {config.GAME_NAME}")
             print(f"   Available games: {', '.join(list_games())}")
             sys.exit(1)
-        self.game = GameClass(config)
+        # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
+        self.game: BaseGame = GameClass(config)  # type: ignore[call-arg]
         
         # Create AI agent
         self.agent = Agent(
@@ -1437,6 +1438,10 @@ class HeadlessTrainer:
             print(f"   Available games: {', '.join(list_games())}")
             sys.exit(1)
         
+        # Type annotations for game and vec_env
+        self.vec_env: Optional[VecBreakout] = None
+        self.game: BaseGame
+        
         if self.num_envs > 1:
             # Create vectorized environment for parallel game execution
             # TODO: Add VecEnv support for other games
@@ -1447,13 +1452,13 @@ class HeadlessTrainer:
             else:
                 print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
                 print(f"   Falling back to single environment")
-                self.vec_env = None
-                self.game = GameClass(config, headless=True)
+                # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
+                self.game = GameClass(config, headless=True)  # type: ignore[call-arg]
                 self.num_envs = 1
         else:
             # Single game mode (original behavior)
-            self.vec_env = None
-            self.game = GameClass(config, headless=True)
+            # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
+            self.game = GameClass(config, headless=True)  # type: ignore[call-arg]
         
         # Create AI agent
         self.agent = Agent(
@@ -2004,6 +2009,9 @@ class HeadlessTrainer:
         This method runs N games simultaneously, collecting N experiences per step
         and performing batched action selection for improved throughput.
         """
+        # This method is only called when num_envs > 1, so vec_env is always set
+        assert self.vec_env is not None, "train_vectorized requires vec_env to be initialized"
+        
         config = self.config
         num_envs = self.num_envs
         
