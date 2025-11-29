@@ -1495,11 +1495,7 @@ class HeadlessTrainer:
             action_size=self.game.action_size
         )
         if initial_model_path:
-            metadata, _ = self.agent.load(initial_model_path)
-            if metadata:
-                self.best_score = metadata.best_score
-                self.current_episode = metadata.episode
-                self.total_steps = metadata.total_steps
+            self._load_model(initial_model_path)
         
         # Web dashboard (if enabled)
         self.web_dashboard: Optional[Any] = None

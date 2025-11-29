@@ -125,7 +125,13 @@ class ReplayBuffer:
         Returns:
             Tuple of numpy arrays: (states, actions, rewards, next_states, dones)
             All arrays are copies to prevent modification of buffer data.
+            
+        Raises:
+            RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
+        if not self._initialized:
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+        
         # Sample without replacement to ensure diverse batches
         indices = np.random.choice(self._size, size=batch_size, replace=False)
         
@@ -150,7 +156,13 @@ class ReplayBuffer:
             
         Returns:
             Tuple of numpy array views (not copies)
+            
+        Raises:
+            RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
+        if not self._initialized:
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+        
         # Sample without replacement to ensure diverse batches
         indices = np.random.choice(self._size, size=batch_size, replace=False)
         
@@ -172,7 +184,13 @@ class ReplayBuffer:
             
         Returns:
             Tuple: (states, actions, rewards, next_states, dones, indices)
+            
+        Raises:
+            RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
+        if not self._initialized:
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+        
         # Sample without replacement to ensure diverse batches
         indices = np.random.choice(self._size, size=batch_size, replace=False)
         
