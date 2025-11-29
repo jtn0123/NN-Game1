@@ -26,7 +26,7 @@ import threading
 import time
 import json
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Deque, Callable
+from typing import Optional, Dict, Any, List, Deque, Callable, Tuple
 from dataclasses import dataclass, asdict, field
 from collections import deque
 from enum import Enum
@@ -176,10 +176,11 @@ class MetricsPublisher:
         self._episode_times: Deque[float] = deque(maxlen=10)
         self._last_episode_time: float = time.time()
         
-        # Steps/second tracking
-        self._step_times: Deque[float] = deque(maxlen=100)
-        self._last_step_count: int = 0
-        self._last_step_time: float = time.time()
+        # Steps/second tracking - use time-windowed approach for accurate real-time rate
+        # Store (timestamp, step_count) tuples for rolling window calculation
+        self._step_samples: Deque[Tuple[float, int]] = deque(maxlen=50)
+        self._last_steps_per_sec: float = 0.0
+        self._steps_window_seconds: float = 3.0  # Calculate rate over last 3 seconds
     
     def update(
         self,
@@ -228,15 +229,29 @@ class MetricsPublisher:
             avg_time = sum(self._episode_times) / len(self._episode_times)
             self.state.episodes_per_second = 1.0 / avg_time if avg_time > 0 else 0.0
         
-        # Calculate steps per second
-        step_delta = total_steps - self._last_step_count
-        time_delta = current_time - self._last_step_time
-        if time_delta > 0 and step_delta > 0:
-            current_steps_per_sec = step_delta / time_delta
-            self._step_times.append(current_steps_per_sec)
-            self.state.steps_per_second = sum(self._step_times) / len(self._step_times)
-        self._last_step_count = total_steps
-        self._last_step_time = current_time
+        # Calculate steps per second using time-windowed approach
+        # This gives accurate real-time rate instead of lifetime average
+        self._step_samples.append((current_time, total_steps))
+        
+        # Remove samples older than window
+        cutoff_time = current_time - self._steps_window_seconds
+        while len(self._step_samples) > 1 and self._step_samples[0][0] < cutoff_time:
+            self._step_samples.popleft()
+        
+        # Calculate rate from remaining samples
+        if len(self._step_samples) >= 2:
+            oldest_time, oldest_steps = self._step_samples[0]
+            newest_time, newest_steps = self._step_samples[-1]
+            time_delta = newest_time - oldest_time
+            step_delta = newest_steps - oldest_steps
+            
+            if time_delta > 0.1:  # Need at least 100ms of data
+                self._last_steps_per_sec = step_delta / time_delta
+                self.state.steps_per_second = self._last_steps_per_sec
+            else:
+                self.state.steps_per_second = self._last_steps_per_sec
+        else:
+            self.state.steps_per_second = self._last_steps_per_sec
         
         # Calculate win rate
         if len(self.scores) > 0:

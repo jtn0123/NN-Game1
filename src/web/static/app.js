@@ -330,9 +330,11 @@ function updateDashboard(data) {
     // Update system status badges
     updateSystemStatus(state);
     
-    // Update performance mode buttons
+    // Update performance mode buttons and sync settings
     if (state.performance_mode) {
         updatePerformanceModeUI(state.performance_mode);
+        // Sync settings inputs to match current mode
+        syncSettingsFromMode(state.performance_mode);
     }
     
     // Update learn_every in settings if changed from server
@@ -863,13 +865,54 @@ function setPerformanceMode(mode) {
     socket.emit('control', { action: 'performance_mode', mode: mode });
     updatePerformanceModeUI(mode);
     
+    // Update settings inputs to match the mode
+    syncSettingsFromMode(mode);
+    
     // Log the change
     const modeNames = {
         'normal': 'Normal (learn every step)',
         'fast': 'Fast (learn every 4 steps)',
-        'turbo': 'Turbo (learn every 4 + batch 256)'
+        'turbo': 'Turbo (learn every 8, batch 128, 2 grad steps)'
     };
     addConsoleLog(`Performance mode: ${modeNames[mode]}`, 'action');
+}
+
+/**
+ * Sync settings inputs when performance mode changes
+ */
+function syncSettingsFromMode(mode) {
+    let learnEvery, batchSize, gradientSteps;
+    
+    if (mode === 'normal') {
+        learnEvery = 1;
+        batchSize = 128;
+        gradientSteps = 1;
+    } else if (mode === 'fast') {
+        learnEvery = 4;
+        batchSize = 128;
+        gradientSteps = 1;
+    } else if (mode === 'turbo') {
+        // Match backend turbo preset - optimized for M4 CPU based on benchmarks
+        learnEvery = 8;
+        batchSize = 128;
+        gradientSteps = 2;
+    }
+    
+    // Update the settings inputs
+    const learnEveryInput = document.getElementById('setting-learn-every');
+    const batchInput = document.getElementById('setting-batch');
+    const gradStepsInput = document.getElementById('setting-grad-steps');
+    
+    if (learnEveryInput) {
+        learnEveryInput.value = learnEvery;
+        updateLearnEveryLabel(learnEvery);
+    }
+    if (batchInput) {
+        batchInput.value = batchSize;
+    }
+    if (gradStepsInput) {
+        gradStepsInput.value = gradientSteps;
+    }
 }
 
 /**

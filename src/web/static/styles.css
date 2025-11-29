@@ -125,11 +125,11 @@ body {
 /* Main Content */
 .main-content {
     display: grid;
-    grid-template-columns: 1fr 420px;
+    grid-template-columns: minmax(0, 1fr) 420px;
     gap: 20px;
     flex: 1;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 /* Charts Column */
@@ -138,6 +138,7 @@ body {
     flex-direction: column;
     gap: 20px;
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
 }
 
@@ -405,6 +406,8 @@ body {
     overflow-x: hidden;
     max-height: calc(100vh - 140px);
     padding-right: 4px;
+    min-width: 420px;
+    flex-shrink: 0;
 }
 
 /* Metrics Grid */
@@ -987,17 +990,25 @@ body {
 /* Responsive */
 @media (max-width: 1400px) {
     .main-content {
-        grid-template-columns: 1fr 380px;
+        grid-template-columns: minmax(0, 1fr) 380px;
+    }
+    
+    .stats-column {
+        min-width: 380px;
     }
 }
 
 @media (max-width: 1200px) {
     .main-content {
         grid-template-columns: 1fr;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
     
     .stats-column {
         order: -1;
+        min-width: 100%;
+        max-height: none;
     }
     
     .metrics-grid {
@@ -1542,6 +1553,11 @@ body {
     color: var(--accent-success);
 }
 
+.save-reason.loaded {
+    background: rgba(0, 188, 212, 0.2);
+    color: var(--accent-cyan);
+}
+
 .save-actions {
     display: flex;
     flex-direction: column;
@@ -1674,6 +1690,11 @@ body {
 .model-name .reason-badge.final {
     background: rgba(76, 175, 80, 0.2);
     color: var(--accent-success);
+}
+
+.model-name .reason-badge.loaded {
+    background: rgba(0, 188, 212, 0.2);
+    color: var(--accent-cyan);
 }
 
 .model-size {

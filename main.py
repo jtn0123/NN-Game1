@@ -29,9 +29,9 @@ Usage:
 
 Performance Options:
     --headless        Skip pygame entirely for max throughput
-    --turbo           Preset: learn-every=4, batch=256, torch.compile
+    --turbo           Preset: learn-every=8, batch=128, grad-steps=2 (~5000 steps/sec)
     --learn-every N   Learn every N steps (default: 1, try 4 for ~4x speedup)
-    --batch-size N    Training batch size (default: 128, try 256 for M4)
+    --batch-size N    Training batch size (default: 128)
     --torch-compile   Enable torch.compile() for ~20-50% extra speedup
 
 The visualization shows:
@@ -149,11 +149,8 @@ class GameApp:
             config=config
         )
         
-        # Load model if specified (basic load - full history restored after dashboard init)
-        self._initial_model_path = args.model if args.model and os.path.exists(args.model) else None
-        if self._initial_model_path:
-            # Basic load to restore agent state, ignore history return for now
-            self.agent.load(self._initial_model_path, quiet=True)
+        # Load model if specified, or auto-load most recent save
+        self._initial_model_path = self._resolve_model_path(args.model)
         
         # Create visualizations - positioned relative to the fixed game size
         self.nn_visualizer = NeuralNetVisualizer(
@@ -233,9 +230,53 @@ class GameApp:
             # Log startup info
             self._log_startup_info()
         
-        # Restore training history from initial model load (now that dashboard is ready)
+        # Load the initial model (now that dashboard is ready)
         if self._initial_model_path:
-            self._restore_training_history(self._initial_model_path)
+            self._load_model(self._initial_model_path)
+            if self.web_dashboard:
+                self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(self._initial_model_path)}", "success")
+    
+    def _resolve_model_path(self, explicit_path: Optional[str]) -> Optional[str]:
+        """
+        Resolve which model to load on startup.
+        
+        Priority:
+        1. Explicitly specified --model path
+        2. Most recently modified .pth file in models directory
+        
+        Args:
+            explicit_path: Path from --model argument, or None
+            
+        Returns:
+            Path to model file, or None if no model to load
+        """
+        # If explicit path specified and exists, use it
+        if explicit_path and os.path.exists(explicit_path):
+            return explicit_path
+        
+        # Otherwise, find most recent save in models directory
+        model_dir = self.config.MODEL_DIR
+        if not os.path.exists(model_dir):
+            return None
+        
+        # Find all .pth files
+        model_files = []
+        for f in os.listdir(model_dir):
+            if f.endswith('.pth'):
+                filepath = os.path.join(model_dir, f)
+                mtime = os.path.getmtime(filepath)
+                model_files.append((filepath, mtime))
+        
+        if not model_files:
+            return None
+        
+        # Sort by modification time, newest first
+        model_files.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return the most recent file
+        most_recent = model_files[0][0]
+        print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
+        return most_recent
     
     def _restore_training_history(self, filepath: str) -> None:
         """Restore training history from a saved model (called after dashboard is ready)."""
@@ -334,7 +375,7 @@ class GameApp:
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
         try:
-            metadata, training_history = self.agent.load(filepath)
+            metadata, training_history = self.agent.load(filepath, quiet=True)
             
             # Restore training history if available
             if training_history and len(training_history.scores) > 0:
@@ -368,27 +409,112 @@ class GameApp:
                 if metadata:
                     self.episode = metadata.episode
                     self.best_score_ever = metadata.best_score
+                    self.steps = metadata.total_steps
                 else:
                     self.episode = len(training_history.scores)
                     self.best_score_ever = max(training_history.scores) if training_history.scores else 0
                 
                 history_msg = f" ({len(training_history.scores)} episodes restored)"
+                
+                # Sync web dashboard with restored history
+                if self.web_dashboard:
+                    self._sync_web_dashboard_history(training_history, metadata)
             else:
                 history_msg = " (no history)"
                 # Still restore episode counter from metadata if available
                 if metadata:
                     self.episode = metadata.episode
                     self.best_score_ever = metadata.best_score
+                    self.steps = metadata.total_steps
             
             if self.web_dashboard:
                 self.web_dashboard.log(f"📂 Loaded model: {os.path.basename(filepath)}{history_msg}", "success", {
                     'path': filepath,
                     'epsilon': self.agent.epsilon,
-                    'steps': self.agent.steps
+                    'steps': self.agent.steps,
+                    'episode': self.episode,
+                    'best_score': self.best_score_ever
                 })
+                # Update save status to reflect loaded model
+                self.web_dashboard.publisher.record_save(
+                    filename=os.path.basename(filepath),
+                    reason="loaded",
+                    episode=self.episode,
+                    best_score=self.best_score_ever
+                )
         except Exception as e:
             if self.web_dashboard:
                 self.web_dashboard.log(f"❌ Failed to load model: {str(e)}", "error")
+            import traceback
+            traceback.print_exc()
+    
+    def _sync_web_dashboard_history(self, training_history: TrainingHistory, metadata: Optional[Any]) -> None:
+        """Sync training history to web dashboard metrics publisher."""
+        if not self.web_dashboard:
+            return
+        
+        publisher = self.web_dashboard.publisher
+        
+        # Clear existing history in publisher
+        publisher.scores.clear()
+        publisher.losses.clear()
+        publisher.epsilons.clear()
+        publisher.rewards.clear()
+        publisher.q_values.clear()
+        publisher.episode_lengths.clear()
+        
+        # Restore scores to publisher for chart display
+        for i, score in enumerate(training_history.scores):
+            publisher.scores.append(score)
+            
+            # Add losses if available
+            if i < len(training_history.losses):
+                publisher.losses.append(training_history.losses[i])
+            else:
+                publisher.losses.append(0.0)
+            
+            # Add epsilons
+            if i < len(training_history.epsilons):
+                publisher.epsilons.append(training_history.epsilons[i])
+            else:
+                publisher.epsilons.append(0.5)
+            
+            # Add rewards
+            if i < len(training_history.rewards):
+                publisher.rewards.append(training_history.rewards[i])
+            else:
+                publisher.rewards.append(0.0)
+            
+            # Add steps as episode lengths
+            if i < len(training_history.steps):
+                publisher.episode_lengths.append(training_history.steps[i])
+            else:
+                publisher.episode_lengths.append(0)
+            
+            # Q-values aren't stored in history, so use placeholder
+            publisher.q_values.append(0.0)
+        
+        # Update publisher state from metadata
+        if metadata:
+            publisher.state.episode = metadata.episode
+            publisher.state.best_score = metadata.best_score
+            publisher.state.epsilon = metadata.epsilon
+            publisher.state.total_steps = metadata.total_steps
+            publisher.state.memory_size = metadata.memory_buffer_size
+            publisher.state.loss = metadata.avg_loss
+        else:
+            publisher.state.episode = self.episode
+            publisher.state.best_score = self.best_score_ever
+            publisher.state.epsilon = self.agent.epsilon
+            publisher.state.total_steps = self.agent.steps
+        
+        # Calculate win rate from history
+        if training_history.wins:
+            recent_wins = training_history.wins[-100:]
+            publisher.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins)
+        
+        # Emit an update to connected clients
+        self.web_dashboard.socketio.emit('state_update', publisher.get_snapshot())
     
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
@@ -456,9 +582,10 @@ class GameApp:
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 1
         elif mode == 'turbo':
-            self.config.LEARN_EVERY = 4
-            self.config.BATCH_SIZE = 256
-            self.config.GRADIENT_STEPS = 1
+            # Match CLI turbo preset - optimized for M4 CPU based on benchmarks
+            self.config.LEARN_EVERY = 8
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 2
         
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
@@ -1477,7 +1604,7 @@ Examples:
     )
     parser.add_argument(
         '--turbo', action='store_true',
-        help='Turbo mode preset: --learn-every 4 --batch-size 256 --torch-compile'
+        help='Turbo mode preset: learn-every 8, batch 128, 2 grad steps (~5000 steps/sec on M4)'
     )
     parser.add_argument(
         '--torch-compile', action='store_true',
