@@ -233,9 +233,9 @@ class MetricsPublisher:
         # This gives accurate real-time rate instead of lifetime average
         self._step_samples.append((current_time, total_steps))
         
-        # Remove samples older than window
+        # Remove samples older than window, but keep at least 2 for rate calculation
         cutoff_time = current_time - self._steps_window_seconds
-        while len(self._step_samples) > 1 and self._step_samples[0][0] < cutoff_time:
+        while len(self._step_samples) > 2 and self._step_samples[0][0] < cutoff_time:
             self._step_samples.popleft()
         
         # Calculate rate from remaining samples
