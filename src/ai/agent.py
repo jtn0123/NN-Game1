@@ -268,8 +268,8 @@ class Agent:
         # Use inference_mode() for better performance than no_grad()
         with torch.inference_mode():
             # Reuse pre-allocated tensor to avoid allocation overhead
-            # Must move numpy tensor to device before copy (from_numpy creates CPU tensor)
-            self._state_tensor.copy_(torch.from_numpy(state).unsqueeze(0).to(self.device))
+            # copy_() handles CPU→device transfer automatically (no .to(device) needed)
+            self._state_tensor.copy_(torch.from_numpy(state.reshape(1, -1)))
             q_values = self.policy_net(self._state_tensor)
             return q_values.argmax(dim=1).item()
     
@@ -285,8 +285,8 @@ class Agent:
         """
         with torch.inference_mode():
             # Reuse pre-allocated tensor to avoid allocation overhead
-            # Must move numpy tensor to device before copy (from_numpy creates CPU tensor)
-            self._state_tensor.copy_(torch.from_numpy(state).unsqueeze(0).to(self.device))
+            # copy_() handles CPU→device transfer automatically (no .to(device) needed)
+            self._state_tensor.copy_(torch.from_numpy(state.reshape(1, -1)))
             q_values = self.policy_net(self._state_tensor)
             return q_values.cpu().numpy()[0]
     
@@ -393,12 +393,12 @@ class Agent:
             self._cached_batch_size = batch_size
         
         # Copy to pre-allocated tensors (faster than creating new tensors)
-        # Must move numpy tensors to device before copy (from_numpy creates CPU tensors)
-        self._batch_states.copy_(torch.from_numpy(states_np).to(self.device))
-        self._batch_actions.copy_(torch.from_numpy(actions_np).to(self.device))
-        self._batch_rewards.copy_(torch.from_numpy(rewards_np).to(self.device))
-        self._batch_next_states.copy_(torch.from_numpy(next_states_np).to(self.device))
-        self._batch_dones.copy_(torch.from_numpy(dones_np).to(self.device))
+        # copy_() handles CPU→device transfer automatically (no .to(device) needed)
+        self._batch_states.copy_(torch.from_numpy(states_np))
+        self._batch_actions.copy_(torch.from_numpy(actions_np))
+        self._batch_rewards.copy_(torch.from_numpy(rewards_np))
+        self._batch_next_states.copy_(torch.from_numpy(next_states_np))
+        self._batch_dones.copy_(torch.from_numpy(dones_np))
         
         # Use the pre-allocated tensors
         states = self._batch_states
@@ -856,9 +856,13 @@ class Agent:
         """Get average of last n losses."""
         if not self.losses:
             return 0.0
-        # Convert deque to list for slicing (deques don't support slice syntax)
-        losses_list = list(self.losses)
-        return float(np.mean(losses_list[-n:]))
+        # Iterate from end - O(n) instead of O(len) for converting entire deque to list
+        count = min(n, len(self.losses))
+        total = 0.0
+        it = iter(reversed(self.losses))
+        for _ in range(count):
+            total += next(it)
+        return total / count
 
 
 # Testing
