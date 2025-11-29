@@ -128,7 +128,7 @@ class GameApp:
 
         # Get game info for display
         game_info = get_game_info(config.GAME_NAME)
-        game_display_name = game_info['name'] if game_info else config.GAME_NAME.title()
+        game_display_name = game_info.get('name', config.GAME_NAME.title()) if game_info else config.GAME_NAME.title()
         pygame.display.set_caption(f"🧠 Neural Network AI - {game_display_name}")
         
         # Calculate window size
@@ -660,39 +660,64 @@ class GameApp:
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
         changes = []
-        
+
         if 'learning_rate' in config_data:
-            old_lr = self.config.LEARNING_RATE
-            self.config.LEARNING_RATE = config_data['learning_rate']
-            # Update optimizer learning rate
-            for param_group in self.agent.optimizer.param_groups:
-                param_group['lr'] = config_data['learning_rate']
-            changes.append(f"LR: {old_lr} → {config_data['learning_rate']}")
+            try:
+                lr = float(config_data['learning_rate'])
+                old_lr = self.config.LEARNING_RATE
+                self.config.LEARNING_RATE = lr
+                # Update optimizer learning rate
+                for param_group in self.agent.optimizer.param_groups:
+                    param_group['lr'] = lr
+                changes.append(f"LR: {old_lr} → {lr}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid learning_rate value: {config_data['learning_rate']}")
         
         if 'epsilon' in config_data:
             old_eps = self.agent.epsilon
-            self.agent.epsilon = config_data['epsilon']
-            changes.append(f"Epsilon: {old_eps:.4f} → {config_data['epsilon']:.4f}")
+            # Clamp epsilon to valid range
+            self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, config_data['epsilon']))
+            changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
         
         if 'epsilon_decay' in config_data:
-            self.config.EPSILON_DECAY = config_data['epsilon_decay']
-            changes.append(f"Decay: {config_data['epsilon_decay']}")
-        
+            try:
+                decay = float(config_data['epsilon_decay'])
+                self.config.EPSILON_DECAY = decay
+                changes.append(f"Decay: {decay}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']}")
+
         if 'gamma' in config_data:
-            self.config.GAMMA = config_data['gamma']
-            changes.append(f"Gamma: {config_data['gamma']}")
-        
+            try:
+                gamma = float(config_data['gamma'])
+                self.config.GAMMA = gamma
+                changes.append(f"Gamma: {gamma}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid gamma value: {config_data['gamma']}")
+
         if 'batch_size' in config_data:
-            self.config.BATCH_SIZE = config_data['batch_size']
-            changes.append(f"Batch: {config_data['batch_size']}")
-        
+            try:
+                batch_size = int(config_data['batch_size'])
+                self.config.BATCH_SIZE = batch_size
+                changes.append(f"Batch: {batch_size}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']}")
+
         if 'learn_every' in config_data:
-            self.config.LEARN_EVERY = config_data['learn_every']
-            changes.append(f"LearnEvery: {config_data['learn_every']}")
-        
+            try:
+                learn_every = int(config_data['learn_every'])
+                self.config.LEARN_EVERY = learn_every
+                changes.append(f"LearnEvery: {learn_every}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']}")
+
         if 'gradient_steps' in config_data:
-            self.config.GRADIENT_STEPS = config_data['gradient_steps']
-            changes.append(f"GradSteps: {config_data['gradient_steps']}")
+            try:
+                grad_steps = int(config_data['gradient_steps'])
+                self.config.GRADIENT_STEPS = grad_steps
+                changes.append(f"GradSteps: {grad_steps}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']}")
         
         if self.web_dashboard and changes:
             self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)
@@ -733,6 +758,9 @@ class GameApp:
             self.config.LEARN_EVERY = 32
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 2
+        else:
+            print(f"⚠️  Unknown performance mode: {mode}")
+            return
 
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
@@ -765,9 +793,13 @@ class GameApp:
     
     def _update_scale(self) -> None:
         """Calculate scaling factor to fit game in window while maintaining aspect ratio."""
+        # Guard against zero dimensions during window minimize/restore
+        if self.window_width <= 0 or self.window_height <= 0:
+            return
+
         game_aspect = self.config.SCREEN_WIDTH / self.config.SCREEN_HEIGHT
         window_aspect = self.window_width / self.window_height
-        
+
         if window_aspect > game_aspect:
             # Window is wider than game - scale by height
             self.scale_factor = self.window_height / self.config.SCREEN_HEIGHT
@@ -808,16 +840,16 @@ class GameApp:
     def _speed_up(self) -> None:
         """Increase speed to next preset."""
         for preset in self.SPEED_PRESETS:
-            if preset > self.game_speed:
+            if preset > self.game_speed + 0.01:  # Epsilon comparison for float precision
                 self._set_speed(preset, force_log=True)
                 return
         # Already at max
         self._set_speed(self.SPEED_PRESETS[-1], force_log=True)
-    
+
     def _speed_down(self) -> None:
         """Decrease speed to previous preset."""
         for preset in reversed(self.SPEED_PRESETS):
-            if preset < self.game_speed:
+            if preset < self.game_speed - 0.01:  # Epsilon comparison for float precision
                 self._set_speed(preset, force_log=True)
                 return
         # Already at min
@@ -1089,7 +1121,7 @@ class GameApp:
                         
                         if info['score'] > self.best_score_ever:
                             self.best_score_ever = info['score']
-                            self._save_model(f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True)
+                            self._save_model(f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=False)
                             if self.web_dashboard:
                                 avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
                                 self.web_dashboard.log(
@@ -1130,7 +1162,7 @@ class GameApp:
                         )
             
             # Render the current state
-            if not self.args.headless:
+            if not self.args.headless and not self.paused:
                 render_action = self.selected_action if self.selected_action is not None else 1
                 self._render_frame(state, render_action, info if info else {})
                 
@@ -1304,7 +1336,7 @@ class GameApp:
         print(f"   Total steps:     {total_steps:,}")
         print(f"   Avg steps/sec:   {total_steps/total_time:,.0f}")
         print(f"   Final avg score: {np.mean(scores[-100:]):.1f}")
-        print(f"   Best score:      {max(scores)}")
+        print(f"   Best score:      {max(scores) if scores else 0}")
         print("=" * 60)
     
     def _handle_events(self) -> None:
@@ -1391,7 +1423,7 @@ class GameApp:
             self.game_surface.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
         
         # Capture screenshot for web dashboard (before scaling, every 10 frames)
-        self.frame_count += 1
+        self.frame_count = (self.frame_count + 1) % 10000  # Keep bounded to avoid overflow
         if self.web_dashboard and self.frame_count % 10 == 0:
             self.web_dashboard.capture_screenshot(self.game_surface)
         
@@ -1454,7 +1486,7 @@ class GameApp:
                 if len(act.shape) > 1:
                     act = act[0]  # Take first batch item
                 # Normalize and limit to max_neurons
-                act_list = act[:max_neurons].tolist()
+                act_list = act[:min(max_neurons, len(act))].tolist()
                 activations[key] = act_list
             
             # Format weights for JSON (sample connections for performance)
@@ -1482,7 +1514,8 @@ class GameApp:
             )
         except Exception as e:
             # Don't crash training on visualization errors
-            pass
+            if self.config.VERBOSE:
+                print(f"NN visualization error: {e}")
     
     def _save_model(
         self,
@@ -2057,7 +2090,7 @@ class HeadlessTrainer:
                 if len(act.shape) > 1:
                     act = act[0]  # Take first batch item
                 # Normalize and limit to max_neurons
-                act_list = act[:max_neurons].tolist()
+                act_list = act[:min(max_neurons, len(act))].tolist()
                 activations[key] = act_list
             
             # Format weights for JSON (sample connections for performance)
@@ -2085,7 +2118,8 @@ class HeadlessTrainer:
             )
         except Exception as e:
             # Don't crash training on visualization errors
-            pass
+            if self.config.VERBOSE:
+                print(f"NN visualization error: {e}")
     
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
@@ -2100,28 +2134,49 @@ class HeadlessTrainer:
         
         if 'epsilon' in config_data:
             old_eps = self.agent.epsilon
-            self.agent.epsilon = config_data['epsilon']
-            changes.append(f"Epsilon: {old_eps:.4f} → {config_data['epsilon']:.4f}")
+            # Clamp epsilon to valid range
+            self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, config_data['epsilon']))
+            changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
         
         if 'epsilon_decay' in config_data:
-            self.config.EPSILON_DECAY = config_data['epsilon_decay']
-            changes.append(f"Decay: {config_data['epsilon_decay']}")
-        
+            try:
+                decay = float(config_data['epsilon_decay'])
+                self.config.EPSILON_DECAY = decay
+                changes.append(f"Decay: {decay}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']}")
+
         if 'gamma' in config_data:
-            self.config.GAMMA = config_data['gamma']
-            changes.append(f"Gamma: {config_data['gamma']}")
-        
+            try:
+                gamma = float(config_data['gamma'])
+                self.config.GAMMA = gamma
+                changes.append(f"Gamma: {gamma}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid gamma value: {config_data['gamma']}")
+
         if 'batch_size' in config_data:
-            self.config.BATCH_SIZE = config_data['batch_size']
-            changes.append(f"Batch: {config_data['batch_size']}")
-        
+            try:
+                batch_size = int(config_data['batch_size'])
+                self.config.BATCH_SIZE = batch_size
+                changes.append(f"Batch: {batch_size}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']}")
+
         if 'learn_every' in config_data:
-            self.config.LEARN_EVERY = config_data['learn_every']
-            changes.append(f"LearnEvery: {config_data['learn_every']}")
-        
+            try:
+                learn_every = int(config_data['learn_every'])
+                self.config.LEARN_EVERY = learn_every
+                changes.append(f"LearnEvery: {learn_every}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']}")
+
         if 'gradient_steps' in config_data:
-            self.config.GRADIENT_STEPS = config_data['gradient_steps']
-            changes.append(f"GradSteps: {config_data['gradient_steps']}")
+            try:
+                grad_steps = int(config_data['gradient_steps'])
+                self.config.GRADIENT_STEPS = grad_steps
+                changes.append(f"GradSteps: {grad_steps}")
+            except (ValueError, TypeError):
+                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']}")
         
         if self.web_dashboard and changes:
             self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)
@@ -2146,6 +2201,9 @@ class HeadlessTrainer:
             self.config.LEARN_EVERY = 32
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 2
+        else:
+            print(f"⚠️  Unknown performance mode: {mode}")
+            return
 
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
@@ -2360,7 +2418,8 @@ class HeadlessTrainer:
         print(f"   Avg steps/sec:    {self.total_steps/total_time:,.0f}")
         print(f"   Best score:       {self.best_score}")
         print(f"   Final avg score:  {np.mean(self.scores[-100:]):.1f}")
-        win_rate = sum(self.wins[-100:]) / len(self.wins[-100:]) if self.wins else 0
+        recent_wins = self.wins[-100:]
+        win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0
         print(f"   Win rate (100):   {win_rate*100:.1f}%")
         print("=" * 70)
         
@@ -2406,12 +2465,12 @@ class HeadlessTrainer:
         steps_since_report = 0
         
         # Per-environment episode tracking
-        env_episode_rewards = np.zeros(num_envs, dtype=np.float32)
+        env_episode_rewards = np.zeros(num_envs, dtype=np.float64)  # Use float64 to prevent precision loss
         env_episode_steps = np.zeros(num_envs, dtype=np.int64)
         episodes_completed = 0
         
         # Initialize all environments
-        states = self.vec_env.reset()  # Shape: (num_envs, state_size)
+        states = self.vec_env.reset().copy()  # Shape: (num_envs, state_size) - copy to avoid aliasing
         
         # Track last completed episode info for reporting
         last_score = 0
@@ -2560,7 +2619,8 @@ class HeadlessTrainer:
         print(f"   Avg steps/sec:    {self.total_steps/total_time:,.0f}")
         print(f"   Best score:       {self.best_score}")
         print(f"   Final avg score:  {np.mean(self.scores[-100:]):.1f}")
-        win_rate = sum(self.wins[-100:]) / len(self.wins[-100:]) if self.wins else 0
+        recent_wins = self.wins[-100:]
+        win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0
         print(f"   Win rate (100):   {win_rate*100:.1f}%")
         print("=" * 70)
         
@@ -2584,7 +2644,8 @@ class HeadlessTrainer:
         
         # Calculate metrics for metadata
         avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
-        win_rate = sum(self.wins[-100:]) / len(self.wins[-100:]) if self.wins else 0.0
+        recent_wins = self.wins[-100:]
+        win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0.0
         
         result = self.agent.save(
             filepath=filepath,

@@ -283,7 +283,7 @@ class MetricsPublisher:
             time_delta = newest_time - oldest_time
             step_delta = newest_steps - oldest_steps
             
-            if time_delta > 0.1:  # Need at least 100ms of data
+            if time_delta > 0.1 and step_delta > 0:  # Need at least 100ms of data and positive steps
                 self._last_steps_per_sec = step_delta / time_delta
                 self.state.steps_per_second = self._last_steps_per_sec
             else:
@@ -309,7 +309,7 @@ class MetricsPublisher:
     ) -> None:
         """Add a log message to the console."""
         log_entry = LogMessage(
-            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:12],  # Properly format with milliseconds
             level=level,
             message=message,
             data=data
@@ -346,6 +346,7 @@ class MetricsPublisher:
                 self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
         except Exception as e:
             print(f"Screenshot error: {e}")
+            self._screenshot_data = None  # Clear corrupted data
     
     def get_screenshot(self) -> Optional[str]:
         """Get the latest screenshot as base64."""
@@ -787,6 +788,10 @@ class WebDashboard:
             from datetime import datetime
             
             # Security: ensure path is within model directory
+            # Reject paths with directory traversal attempts
+            if '..' in filepath or filepath.startswith('/') or filepath.startswith('\\'):
+                return jsonify({'error': 'Invalid path'}), 403
+
             # Always join with model_dir first to prevent absolute path injection
             model_dir = os.path.realpath(self.config.MODEL_DIR)
             # Join filepath with model_dir, then resolve to prevent traversal
@@ -1094,16 +1099,20 @@ class WebDashboard:
         def run_server():
             print(f"\n🌐 Web Dashboard running at http://localhost:{self.port}")
             print("   Open in browser to view training progress\n")
-            
-            self.socketio.run(
-                self.app,
-                host=self.host,
-                port=self.port,
-                debug=False,
-                use_reloader=False,
-                log_output=False,
-                allow_unsafe_werkzeug=True
-            )
+
+            try:
+                self.socketio.run(
+                    self.app,
+                    host=self.host,
+                    port=self.port,
+                    debug=False,
+                    use_reloader=False,
+                    log_output=False,
+                    allow_unsafe_werkzeug=True
+                )
+            except OSError as e:
+                print(f"\n❌ Failed to start web dashboard on port {self.port}: {e}")
+                print(f"   Port {self.port} may already be in use. Try a different port with --port\n")
         
         self._server_thread = threading.Thread(target=run_server, daemon=True)
         self._server_thread.start()
