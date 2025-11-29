@@ -147,6 +147,14 @@ class TrainingState:
     num_envs: int = 1
     # Headless mode (no pygame, no screenshots)
     headless: bool = False
+    # Per-action Q-values (for Phase 1 enhanced analysis)
+    q_value_left: float = 0.0
+    q_value_stay: float = 0.0
+    q_value_right: float = 0.0
+    # Action frequency tracking
+    action_count_left: int = 0
+    action_count_stay: int = 0
+    action_count_right: int = 0
 
 
 @dataclass
@@ -192,16 +200,139 @@ class NNVisualizationData:
     step: int = 0
     # Action labels
     action_labels: List[str] = field(default_factory=lambda: ["LEFT", "STAY", "RIGHT"])
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
+    # Phase 1.3: Only include weights if explicitly requested (reduces bandwidth)
+    include_weights: bool = False
+    # Track last weight update to avoid unnecessary transmission
+    _last_weights_step: int = 0
+
+    def to_dict(self, include_weights: bool = False) -> Dict[str, Any]:
+        """
+        Convert to dict, optionally excluding weights to reduce bandwidth.
+
+        Phase 1.3: Only include weights if explicitly requested or if they've changed
+        significantly since last transmission.
+        """
+        data = {
             'layer_info': self.layer_info,
             'activations': self.activations,
             'q_values': self.q_values,
             'selected_action': self.selected_action,
-            'weights': self.weights,
             'step': self.step,
             'action_labels': self.action_labels
+        }
+        # Only include weights if requested or every 100 steps
+        if include_weights or (self.step - self._last_weights_step > 100):
+            data['weights'] = self.weights
+            self._last_weights_step = self.step
+        else:
+            data['weights'] = []  # Empty weights signal "no weight update"
+        return data
+
+
+@dataclass
+class NeuronInspectionData:
+    """
+    Phase 2: Neuron inspection and analysis data.
+
+    Tracks per-neuron activation history and statistics for interactive inspection.
+    """
+    # Layer and neuron identification
+    layer_idx: int = 0
+    neuron_idx: int = 0
+    layer_name: str = ""
+
+    # Activation history (last 500 steps)
+    activation_history: List[float] = field(default_factory=list)
+
+    # Incoming weights (from previous layer)
+    incoming_weights: List[float] = field(default_factory=list)
+    incoming_weight_stats: Dict[str, float] = field(default_factory=dict)
+
+    # Outgoing weights (to next layer)
+    outgoing_weights: List[float] = field(default_factory=list)
+    outgoing_weight_stats: Dict[str, float] = field(default_factory=dict)
+
+    # Contribution to Q-values
+    q_value_contributions: Dict[str, float] = field(default_factory=dict)
+
+    # Current statistics
+    current_activation: float = 0.0
+    dead_steps: int = 0  # Steps where activation was near zero
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-safe dictionary."""
+        return {
+            'layer_idx': self.layer_idx,
+            'neuron_idx': self.neuron_idx,
+            'layer_name': self.layer_name,
+            'activation_history': self.activation_history[-100:],  # Last 100 for visualization
+            'current_activation': self.current_activation,
+            'incoming_weights': self.incoming_weights[:50],  # Sample top 50
+            'incoming_weight_stats': self.incoming_weight_stats,
+            'outgoing_weights': self.outgoing_weights[:50],  # Sample top 50
+            'outgoing_weight_stats': self.outgoing_weight_stats,
+            'q_value_contributions': self.q_value_contributions,
+            'dead_steps': self.dead_steps,
+        }
+
+
+@dataclass
+class LayerAnalysisData:
+    """
+    Phase 2: Per-layer analysis data.
+
+    Tracks statistics for each layer (dead neurons, saturation, etc.)
+    """
+    layer_idx: int = 0
+    layer_name: str = ""
+    neuron_count: int = 0
+
+    # Activation statistics
+    avg_activation: float = 0.0
+    activation_std: float = 0.0
+    activation_min: float = 0.0
+    activation_max: float = 0.0
+    activation_histogram: List[int] = field(default_factory=list)
+
+    # Neuron health
+    dead_neuron_count: int = 0  # Activation < 0.01
+    saturated_neuron_count: int = 0  # Activation > 0.95
+
+    # Weight statistics
+    weight_mean: float = 0.0
+    weight_std: float = 0.0
+    weight_min: float = 0.0
+    weight_max: float = 0.0
+    weight_histogram: List[int] = field(default_factory=list)
+
+    # Gradient statistics (when available)
+    gradient_mean: float = 0.0
+    gradient_std: float = 0.0
+    gradient_max_magnitude: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-safe dictionary."""
+        return {
+            'layer_idx': self.layer_idx,
+            'layer_name': self.layer_name,
+            'neuron_count': self.neuron_count,
+            'avg_activation': self.avg_activation,
+            'activation_std': self.activation_std,
+            'activation_min': self.activation_min,
+            'activation_max': self.activation_max,
+            'activation_histogram': self.activation_histogram,
+            'dead_neuron_count': self.dead_neuron_count,
+            'dead_neuron_percent': (self.dead_neuron_count / max(1, self.neuron_count)) * 100,
+            'saturated_neuron_count': self.saturated_neuron_count,
+            'saturated_percent': (self.saturated_neuron_count / max(1, self.neuron_count)) * 100,
+            'weight_mean': self.weight_mean,
+            'weight_std': self.weight_std,
+            'weight_min': self.weight_min,
+            'weight_max': self.weight_max,
+            'weight_histogram': self.weight_histogram,
+            'gradient_mean': self.gradient_mean,
+            'gradient_std': self.gradient_std,
+            'gradient_max_magnitude': self.gradient_max_magnitude,
         }
 
 
@@ -231,6 +362,20 @@ class MetricsPublisher:
         self.episode_lengths: Deque[int] = deque(maxlen=history_length)
         self.wins: Deque[bool] = deque(maxlen=history_length)  # Track actual wins per episode
 
+        # Phase 1: Per-action Q-value history (last 1000 steps)
+        self.q_values_left: Deque[float] = deque(maxlen=1000)
+        self.q_values_stay: Deque[float] = deque(maxlen=1000)
+        self.q_values_right: Deque[float] = deque(maxlen=1000)
+
+        # Phase 1: Action frequency tracking
+        self.action_frequency: Dict[str, int] = {
+            'left': 0,
+            'stay': 0,
+            'right': 0,
+            'exploration': 0,  # Random actions from exploration
+            'exploitation': 0,  # Greedy actions from exploitation
+        }
+
         # Console log history
         self.console_logs: Deque[LogMessage] = deque(maxlen=500)
 
@@ -259,8 +404,42 @@ class MetricsPublisher:
         self._nn_data = NNVisualizationData()
         self._on_nn_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._last_nn_update_time: float = 0.0
-        self._nn_update_interval: float = 0.1  # 10 FPS throttle
-    
+        self._nn_update_interval: float = 0.1  # 10 FPS throttle (adaptive)
+        self._adaptive_update_enabled: bool = True  # Enable adaptive updates
+
+        # Phase 2: Neuron inspection and layer analysis
+        self._neuron_inspection_data: Dict[Tuple[int, int], NeuronInspectionData] = {}  # (layer, neuron) -> data
+        self._layer_analysis_data: Dict[int, LayerAnalysisData] = {}  # layer_idx -> data
+        self._on_neuron_select_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._on_layer_analysis_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+
+    def _calculate_adaptive_update_rate(self, steps_per_sec: float) -> None:
+        """
+        Phase 1.2: Calculate adaptive visualization update rate based on training speed.
+
+        High-speed training (>2000 steps/sec): Send NN data at 10Hz (50ms)
+        Medium speed (500-2000 steps/sec): Send at 20-30Hz
+        Slow training (<500 steps/sec): Send at 60Hz for smooth visuals
+
+        This reduces bandwidth and overhead during fast training while
+        maintaining visual responsiveness during slow training.
+        """
+        if not self._adaptive_update_enabled:
+            return
+
+        if steps_per_sec > 2000:
+            # Very high speed - reduce update frequency
+            self._nn_update_interval = 0.1  # 10Hz
+        elif steps_per_sec > 1000:
+            # High speed
+            self._nn_update_interval = 0.067  # ~15Hz
+        elif steps_per_sec > 500:
+            # Medium speed
+            self._nn_update_interval = 0.033  # ~30Hz
+        else:
+            # Slow/visual training - keep responsive
+            self._nn_update_interval = 0.016  # ~60Hz
+
     def update(
         self,
         episode: int,
@@ -276,9 +455,19 @@ class MetricsPublisher:
         exploitation_actions: int = 0,
         target_updates: int = 0,
         bricks_broken: int = 0,
-        episode_length: int = 0
+        episode_length: int = 0,
+        q_value_left: float = 0.0,
+        q_value_stay: float = 0.0,
+        q_value_right: float = 0.0,
+        selected_action: Optional[int] = None
     ) -> None:
-        """Update metrics with new episode data."""
+        """
+        Update metrics with new episode data.
+
+        Args:
+            q_value_left, q_value_stay, q_value_right: Q-values for each action (Phase 1)
+            selected_action: Index of action taken (0=LEFT, 1=STAY, 2=RIGHT)
+        """
         self.state.episode = episode
         self.state.score = score
         self.state.best_score = max(self.state.best_score, score)
@@ -292,7 +481,33 @@ class MetricsPublisher:
         self.state.target_updates = target_updates
         self.state.bricks_broken_total += bricks_broken
         self.state.total_reward += reward
-        
+
+        # Phase 1: Record per-action Q-values
+        self.state.q_value_left = q_value_left
+        self.state.q_value_stay = q_value_stay
+        self.state.q_value_right = q_value_right
+
+        # Phase 1: Record per-action Q-value history
+        self.q_values_left.append(q_value_left)
+        self.q_values_stay.append(q_value_stay)
+        self.q_values_right.append(q_value_right)
+
+        # Phase 1: Track action frequency
+        if selected_action is not None:
+            action_names = ['left', 'stay', 'right']
+            if 0 <= selected_action < len(action_names):
+                self.state.action_count_left += (1 if selected_action == 0 else 0)
+                self.state.action_count_stay += (1 if selected_action == 1 else 0)
+                self.state.action_count_right += (1 if selected_action == 2 else 0)
+                self.action_frequency[action_names[selected_action]] += 1
+
+        # Phase 1: Track exploration vs exploitation
+        if exploration_actions > 0 or exploitation_actions > 0:
+            if exploration_actions > self.action_frequency.get('exploration', 0):
+                self.action_frequency['exploration'] = exploration_actions
+            if exploitation_actions > self.action_frequency.get('exploitation', 0):
+                self.action_frequency['exploitation'] = exploitation_actions
+
         self.scores.append(score)
         self.losses.append(loss)
         self.epsilons.append(epsilon)
@@ -332,7 +547,10 @@ class MetricsPublisher:
                 self.state.steps_per_second = self._last_steps_per_sec
         else:
             self.state.steps_per_second = self._last_steps_per_sec
-        
+
+        # Phase 1.2: Adjust visualization update rate based on training speed
+        self._calculate_adaptive_update_rate(self.state.steps_per_second)
+
         # Calculate win rate from actual wins (game-specific)
         # Use the actual 'won' flag from the game, not hardcoded score thresholds
         if len(self.wins) > 0:
@@ -565,22 +783,207 @@ class MetricsPublisher:
         if action_labels:
             self._nn_data.action_labels = action_labels
         
-        # Notify callbacks (thread-safe copy to avoid modification during iteration)
-        nn_dict = self._nn_data.to_dict()
+        # Phase 1.3: Notify callbacks with selective weight transmission
+        # Only include weights if they were significantly updated (every 100 steps)
+        nn_dict = self._nn_data.to_dict(include_weights=False)
         with self._callback_lock:
             callbacks = self._on_nn_update_callbacks.copy()
         for callback in callbacks:
             callback(nn_dict)
-    
-    def get_nn_visualization(self) -> Dict[str, Any]:
-        """Get current neural network visualization data."""
-        return self._nn_data.to_dict()
+
+    def get_nn_visualization(self, include_weights: bool = False) -> Dict[str, Any]:
+        """
+        Get current neural network visualization data.
+
+        Phase 1.3: Optionally include weights (only when explicitly requested or
+        on periodic updates to reduce bandwidth).
+        """
+        return self._nn_data.to_dict(include_weights=include_weights)
     
     def on_nn_update(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback for neural network visualization updates."""
         with self._callback_lock:
             self._on_nn_update_callbacks.append(callback)
-    
+
+    # ===== Phase 2: Neuron Inspection & Layer Analysis =====
+
+    def update_neuron_inspection(
+        self,
+        layer_idx: int,
+        neuron_idx: int,
+        layer_name: str,
+        current_activation: float,
+        activation_history: Optional[List[float]] = None,
+        incoming_weights: Optional[List[float]] = None,
+        outgoing_weights: Optional[List[float]] = None,
+        q_contributions: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """
+        Phase 2: Update neuron inspection data.
+
+        Args:
+            layer_idx: Layer index
+            neuron_idx: Neuron index in layer
+            layer_name: Human-readable layer name
+            current_activation: Current activation value
+            activation_history: List of recent activation values
+            incoming_weights: Weights from previous layer
+            outgoing_weights: Weights to next layer
+            q_contributions: Contribution to each Q-value
+        """
+        key = (layer_idx, neuron_idx)
+        if key not in self._neuron_inspection_data:
+            self._neuron_inspection_data[key] = NeuronInspectionData(
+                layer_idx=layer_idx,
+                neuron_idx=neuron_idx,
+                layer_name=layer_name,
+            )
+
+        data = self._neuron_inspection_data[key]
+        data.current_activation = current_activation
+
+        if activation_history is not None:
+            data.activation_history = list(activation_history)[-500:]  # Keep last 500
+
+        if incoming_weights is not None:
+            incoming_weights = np.asarray(incoming_weights)
+            if incoming_weights.size > 0:
+                data.incoming_weights = incoming_weights.tolist()
+                data.incoming_weight_stats = {
+                    'mean': float(np.mean(incoming_weights)),
+                    'std': float(np.std(incoming_weights)),
+                    'min': float(np.min(incoming_weights)),
+                    'max': float(np.max(incoming_weights)),
+                }
+
+        if outgoing_weights is not None:
+            outgoing_weights = np.asarray(outgoing_weights)
+            if outgoing_weights.size > 0:
+                data.outgoing_weights = outgoing_weights.tolist()
+                data.outgoing_weight_stats = {
+                    'mean': float(np.mean(outgoing_weights)),
+                    'std': float(np.std(outgoing_weights)),
+                    'min': float(np.min(outgoing_weights)),
+                    'max': float(np.max(outgoing_weights)),
+                }
+
+        if q_contributions:
+            data.q_value_contributions = q_contributions
+
+    def get_neuron_details(self, layer_idx: int, neuron_idx: int) -> Dict[str, Any]:
+        """
+        Phase 2: Get detailed information about a specific neuron.
+
+        Args:
+            layer_idx: Layer index
+            neuron_idx: Neuron index
+
+        Returns:
+            Dictionary with neuron details
+        """
+        key = (layer_idx, neuron_idx)
+        if key not in self._neuron_inspection_data:
+            return {'error': 'Neuron not found'}
+        return self._neuron_inspection_data[key].to_dict()
+
+    def update_layer_analysis(
+        self,
+        layer_idx: int,
+        layer_name: str,
+        neuron_count: int,
+        activations: np.ndarray,
+        weights: Optional[np.ndarray] = None,
+        gradients: Optional[np.ndarray] = None,
+    ) -> None:
+        """
+        Phase 2: Update layer analysis statistics.
+
+        Args:
+            layer_idx: Layer index
+            layer_name: Layer name
+            neuron_count: Number of neurons in layer
+            activations: Current activation values (shape: neuron_count)
+            weights: Weight matrix (optional)
+            gradients: Gradient values (optional)
+        """
+        if layer_idx not in self._layer_analysis_data:
+            self._layer_analysis_data[layer_idx] = LayerAnalysisData(
+                layer_idx=layer_idx,
+                layer_name=layer_name,
+                neuron_count=neuron_count,
+            )
+
+        data = self._layer_analysis_data[layer_idx]
+
+        # Update activation statistics
+        data.avg_activation = float(np.mean(activations))
+        data.activation_std = float(np.std(activations))
+        data.activation_min = float(np.min(activations))
+        data.activation_max = float(np.max(activations))
+
+        # Count dead and saturated neurons
+        data.dead_neuron_count = int(np.sum(np.abs(activations) < 0.01))
+        data.saturated_neuron_count = int(np.sum(np.abs(activations) > 0.95))
+
+        # Create activation histogram
+        hist, _ = np.histogram(activations, bins=20)
+        data.activation_histogram = hist.tolist()
+
+        # Update weight statistics if provided
+        if weights is not None:
+            flat_weights = weights.flatten()
+            data.weight_mean = float(np.mean(flat_weights))
+            data.weight_std = float(np.std(flat_weights))
+            data.weight_min = float(np.min(flat_weights))
+            data.weight_max = float(np.max(flat_weights))
+
+            # Weight histogram
+            hist, _ = np.histogram(flat_weights, bins=20)
+            data.weight_histogram = hist.tolist()
+
+        # Update gradient statistics if provided
+        if gradients is not None:
+            flat_grads = gradients.flatten()
+            data.gradient_mean = float(np.mean(np.abs(flat_grads)))
+            data.gradient_std = float(np.std(flat_grads))
+            data.gradient_max_magnitude = float(np.max(np.abs(flat_grads)))
+
+    def get_layer_analysis(self, layer_idx: int) -> Dict[str, Any]:
+        """
+        Phase 2: Get analysis data for a specific layer.
+
+        Args:
+            layer_idx: Layer index
+
+        Returns:
+            Dictionary with layer analysis
+        """
+        if layer_idx not in self._layer_analysis_data:
+            return {'error': 'Layer not found'}
+        return self._layer_analysis_data[layer_idx].to_dict()
+
+    def get_all_layer_analysis(self) -> List[Dict[str, Any]]:
+        """
+        Phase 2: Get analysis for all layers.
+
+        Returns:
+            List of layer analysis dictionaries
+        """
+        return [data.to_dict() for data in sorted(
+            self._layer_analysis_data.values(),
+            key=lambda x: x.layer_idx
+        )]
+
+    def on_neuron_select(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """Phase 2: Register callback for neuron selection."""
+        with self._callback_lock:
+            self._on_neuron_select_callbacks.append(callback)
+
+    def on_layer_analysis(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """Phase 2: Register callback for layer analysis updates."""
+        with self._callback_lock:
+            self._on_layer_analysis_callbacks.append(callback)
+
     def reset_all_state(self) -> None:
         """Reset all training state - used when starting fresh."""
         # Clear all history
@@ -1017,7 +1420,27 @@ class WebDashboard:
                 'stats': stats,
                 'current_game': self.config.GAME_NAME
             })
-    
+
+        # ===== Phase 2: Neuron Inspection & Layer Analysis Endpoints =====
+
+        @self.app.route('/api/neuron/<int:layer_idx>/<int:neuron_idx>')
+        def api_neuron_details(layer_idx, neuron_idx):
+            """Phase 2: Get details for a specific neuron."""
+            details = self.publisher.get_neuron_details(layer_idx, neuron_idx)
+            return jsonify(_make_json_safe(details))
+
+        @self.app.route('/api/layer/<int:layer_idx>')
+        def api_layer_analysis(layer_idx):
+            """Phase 2: Get analysis data for a specific layer."""
+            analysis = self.publisher.get_layer_analysis(layer_idx)
+            return jsonify(_make_json_safe(analysis))
+
+        @self.app.route('/api/layers')
+        def api_all_layers():
+            """Phase 2: Get analysis data for all layers."""
+            layers = self.publisher.get_all_layer_analysis()
+            return jsonify(_make_json_safe({'layers': layers}))
+
     def _register_socket_events(self) -> None:
         """Register SocketIO events."""
         

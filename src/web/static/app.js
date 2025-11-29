@@ -928,7 +928,12 @@ function updateDashboard(data) {
     // Update steps/sec (new performance metric)
     const stepsPerSec = state.steps_per_second || 0;
     document.getElementById('info-steps-sec').textContent = stepsPerSec.toLocaleString(undefined, {maximumFractionDigits: 0});
-    
+
+    // Phase 1.2: Update neural network visualizer render rate based on training speed
+    if (nnVisualizer) {
+        updateNNVisualizerRenderRate(stepsPerSec);
+    }
+
     // Update ETA
     updateETA(state);
     
@@ -3003,12 +3008,19 @@ class NeuralNetworkVisualizer {
             return;
         }
         this.ctx = this.canvas.getContext('2d');
-        
+
         // State
         this.data = null;
         this.isEnabled = true;
         this.animationId = null;
-        
+
+        // Phase 1.2 & 1.4: Adaptive rendering
+        this.renderInterval = 33;  // Default ~30Hz, will adapt based on training speed
+        this.lastRenderTime = 0;
+        this.avgRenderTime = 0;
+        this.renderQueue = [];
+        this.skipNextWeightDraw = false;  // Phase 1.3: Skip weights when empty
+
         // Animation state
         this.pulsePhase = 0;
         this.pulses = [];
@@ -3068,13 +3080,32 @@ class NeuralNetworkVisualizer {
     }
     
     startAnimation() {
-        const animate = () => {
+        const animate = (currentTime) => {
+            // Phase 1.4: Adaptive render throttling
+            // Only render if enough time has passed since last render
             if (this.isEnabled && this.data) {
-                this.render();
+                const timeSinceLastRender = currentTime - this.lastRenderTime;
+                if (timeSinceLastRender >= this.renderInterval) {
+                    const renderStart = performance.now();
+                    this.render();
+                    const renderDuration = performance.now() - renderStart;
+
+                    // Track render performance and adjust interval if struggling
+                    this.avgRenderTime = this.avgRenderTime * 0.8 + renderDuration * 0.2;
+                    if (this.avgRenderTime > this.renderInterval * 0.8) {
+                        // Struggling to keep up - increase render interval (reduce FPS)
+                        this.renderInterval = Math.min(100, this.renderInterval + 5);
+                    } else if (this.avgRenderTime < this.renderInterval * 0.3 && this.renderInterval > 16) {
+                        // Running smoothly - can afford to render more frequently
+                        this.renderInterval = Math.max(16, this.renderInterval - 2);
+                    }
+
+                    this.lastRenderTime = currentTime;
+                }
             }
             this.animationId = requestAnimationFrame(animate);
         };
-        animate();
+        animate(performance.now());
     }
     
     stopAnimation() {
@@ -3258,7 +3289,12 @@ class NeuralNetworkVisualizer {
     drawConnections(layerPositions, activations) {
         const ctx = this.ctx;
         const weights = this.data.weights || [];
-        
+
+        // Phase 1.3: Skip weight drawing if weights array is empty (selective transmission)
+        if (!weights || weights.length === 0) {
+            return;
+        }
+
         for (let i = 0; i < layerPositions.length - 1; i++) {
             const fromLayer = layerPositions[i];
             const toLayer = layerPositions[i + 1];
@@ -3650,6 +3686,30 @@ function initNNVisualizer() {
 function toggleNNVisualization() {
     if (nnVisualizer) {
         nnVisualizer.toggle(!nnVisualizer.isEnabled);
+    }
+}
+
+/**
+ * Phase 1.2: Update NN visualizer render rate based on training speed.
+ *
+ * High-speed training: Reduce render FPS to save resources
+ * Slow training: Increase render FPS for smooth visuals
+ */
+function updateNNVisualizerRenderRate(stepsPerSec) {
+    if (!nnVisualizer) return;
+
+    if (stepsPerSec > 2000) {
+        // Very high speed training - render at 10Hz
+        nnVisualizer.renderInterval = 100;
+    } else if (stepsPerSec > 1000) {
+        // High speed - render at ~15Hz
+        nnVisualizer.renderInterval = 67;
+    } else if (stepsPerSec > 500) {
+        // Medium speed - render at ~30Hz
+        nnVisualizer.renderInterval = 33;
+    } else {
+        // Slow training or visual mode - render at up to 60Hz for smoothness
+        nnVisualizer.renderInterval = 16;
     }
 }
 
