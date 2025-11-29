@@ -515,6 +515,55 @@ class MetricsPublisher:
     def on_nn_update(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback for neural network visualization updates."""
         self._on_nn_update_callbacks.append(callback)
+    
+    def reset_all_state(self) -> None:
+        """Reset all training state - used when starting fresh."""
+        # Clear all history
+        self.scores.clear()
+        self.losses.clear()
+        self.epsilons.clear()
+        self.rewards.clear()
+        self.q_values.clear()
+        self.episode_lengths.clear()
+        
+        # Clear console logs
+        self.console_logs.clear()
+        
+        # Reset state to initial values
+        self.state.episode = 0
+        self.state.score = 0
+        self.state.best_score = 0
+        self.state.epsilon = 1.0
+        self.state.loss = 0.0
+        self.state.total_steps = 0
+        self.state.win_rate = 0.0
+        self.state.memory_size = 0
+        self.state.avg_q_value = 0.0
+        self.state.exploration_actions = 0
+        self.state.exploitation_actions = 0
+        self.state.target_updates = 0
+        self.state.total_reward = 0.0
+        self.state.bricks_broken_total = 0
+        self.state.episodes_per_second = 0.0
+        self.state.steps_per_second = 0.0
+        
+        # Reset timing
+        self._episode_times.clear()
+        self._last_episode_time = time.time()
+        self._step_samples.clear()
+        self._last_steps_per_sec = 0.0
+        
+        # Reset training start time
+        self.state.training_start_time = time.time()
+        
+        # Reset save status
+        self.save_status = SaveStatus()
+        
+        # Clear screenshot
+        self._screenshot_data = None
+        
+        # Reset NN visualization
+        self._nn_data = NNVisualizationData()
 
 
 class WebDashboard:

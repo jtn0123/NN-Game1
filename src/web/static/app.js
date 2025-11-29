@@ -305,10 +305,71 @@ function connectSocket() {
         }
     });
 
+    socket.on('training_reset', (data) => {
+        try {
+            // Clear all charts
+            if (scoreChart) {
+                scoreChart.data.labels = [];
+                scoreChart.data.datasets[0].data = [];
+                scoreChart.data.datasets[1].data = [];
+                scoreChart.update('none');
+            }
+            if (lossChart) {
+                lossChart.data.labels = [];
+                lossChart.data.datasets[0].data = [];
+                lossChart.update('none');
+            }
+            if (qvalueChart) {
+                qvalueChart.data.labels = [];
+                qvalueChart.data.datasets[0].data = [];
+                qvalueChart.update('none');
+            }
+            
+            // Clear console logs
+            consoleLogs = [];
+            renderConsoleLogs();
+            
+            // Reset metrics display
+            document.getElementById('metric-episode').textContent = '0';
+            document.getElementById('metric-score').textContent = '0';
+            document.getElementById('metric-best').textContent = '0';
+            document.getElementById('metric-winrate').textContent = '0%';
+            
+            // Reset epsilon gauge
+            document.getElementById('epsilon-value').textContent = '1.000';
+            document.getElementById('epsilon-fill').style.width = '100%';
+            
+            // Reset extended info
+            document.getElementById('info-loss').textContent = '0.0000';
+            document.getElementById('info-steps').textContent = '0';
+            document.getElementById('info-eps').textContent = '0.00';
+            document.getElementById('info-qvalue').textContent = '0.00';
+            document.getElementById('info-target').textContent = '0';
+            document.getElementById('info-actions').textContent = '0 / 0';
+            document.getElementById('info-memory').textContent = '0 / 100k';
+            document.getElementById('info-steps-sec').textContent = '0';
+            
+            // Reset memory bar
+            const memoryBar = document.getElementById('memory-bar-fill');
+            if (memoryBar) {
+                memoryBar.style.width = '0%';
+                memoryBar.style.background = 'var(--accent-warning)';
+            }
+            
+            console.log('Training reset - charts and UI cleared');
+        } catch (err) {
+            console.error('Error handling training reset:', err);
+        }
+    });
+
     socket.on('console_logs', (data) => {
         try {
-            // Initial batch of logs on connect
-            if (data && data.logs) {
+            // If empty array, clear logs
+            if (data && data.logs && data.logs.length === 0) {
+                consoleLogs = [];
+                renderConsoleLogs();
+            } else if (data && data.logs) {
+                // Initial batch of logs on connect
                 data.logs.forEach(log => {
                     addConsoleLog(log.message, log.level, log.timestamp, log.data, false);
                 });

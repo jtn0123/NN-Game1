@@ -409,6 +409,9 @@ class GameApp:
         from src.ai.agent import Agent
         
         if self.web_dashboard:
+            # Clear logs first, then log the fresh start
+            self.web_dashboard.publisher.console_logs.clear()
+            self.web_dashboard.publisher.reset_all_state()
             self.web_dashboard.log("🔄 Starting fresh training - resetting agent and clearing memory", "warning")
         
         # Create a new agent (fresh neural network)
@@ -446,14 +449,38 @@ class GameApp:
         self.selected_action = None
         
         if self.web_dashboard:
-            self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared", "success")
-            # Update dashboard with reset state
-            self.web_dashboard.publisher.state.episode = 0
-            self.web_dashboard.publisher.state.score = 0
-            self.web_dashboard.publisher.state.best_score = 0
-            self.web_dashboard.publisher.state.total_steps = 0
-            self.web_dashboard.publisher.state.epsilon = self.config.EPSILON_START
-            self.web_dashboard.publisher.state.memory_size = 0
+            # Update publisher state with fresh values
+            publisher = self.web_dashboard.publisher
+            publisher.state.episode = 0
+            publisher.state.score = 0
+            publisher.state.best_score = 0
+            publisher.state.total_steps = 0
+            publisher.state.epsilon = self.config.EPSILON_START
+            publisher.state.memory_size = 0
+            publisher.state.loss = 0.0
+            publisher.state.win_rate = 0.0
+            publisher.state.avg_q_value = 0.0
+            publisher.state.exploration_actions = 0
+            publisher.state.exploitation_actions = 0
+            publisher.state.target_updates = 0
+            publisher.state.total_reward = 0.0
+            publisher.state.bricks_broken_total = 0
+            publisher.state.episodes_per_second = 0.0
+            publisher.state.steps_per_second = 0.0
+            publisher.state.training_start_time = time.time()
+            
+            # Emit reset event to frontend to clear charts
+            self.web_dashboard.socketio.emit('training_reset', {
+                'message': 'Training reset - starting fresh'
+            })
+            
+            # Emit cleared logs
+            self.web_dashboard.socketio.emit('console_logs', {'logs': []})
+            
+            # Emit updated state with empty history
+            self.web_dashboard.socketio.emit('state_update', publisher.get_snapshot())
+            
+            self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared, all charts and logs reset", "success")
         
         print("✅ Fresh training started - agent reset, memory cleared")
     
@@ -1769,6 +1796,9 @@ class HeadlessTrainer:
         from src.ai.agent import Agent
         
         if self.web_dashboard:
+            # Clear logs first, then log the fresh start
+            self.web_dashboard.publisher.console_logs.clear()
+            self.web_dashboard.publisher.reset_all_state()
             self.web_dashboard.log("🔄 Starting fresh training - resetting agent and clearing memory", "warning")
         
         # Create a new agent (fresh neural network)
@@ -1794,14 +1824,38 @@ class HeadlessTrainer:
         self.last_target_update_step = 0
         
         if self.web_dashboard:
-            self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared", "success")
-            # Update dashboard with reset state
-            self.web_dashboard.publisher.state.episode = 0
-            self.web_dashboard.publisher.state.score = 0
-            self.web_dashboard.publisher.state.best_score = 0
-            self.web_dashboard.publisher.state.total_steps = 0
-            self.web_dashboard.publisher.state.epsilon = self.config.EPSILON_START
-            self.web_dashboard.publisher.state.memory_size = 0
+            # Update publisher state with fresh values
+            publisher = self.web_dashboard.publisher
+            publisher.state.episode = 0
+            publisher.state.score = 0
+            publisher.state.best_score = 0
+            publisher.state.total_steps = 0
+            publisher.state.epsilon = self.config.EPSILON_START
+            publisher.state.memory_size = 0
+            publisher.state.loss = 0.0
+            publisher.state.win_rate = 0.0
+            publisher.state.avg_q_value = 0.0
+            publisher.state.exploration_actions = 0
+            publisher.state.exploitation_actions = 0
+            publisher.state.target_updates = 0
+            publisher.state.total_reward = 0.0
+            publisher.state.bricks_broken_total = 0
+            publisher.state.episodes_per_second = 0.0
+            publisher.state.steps_per_second = 0.0
+            publisher.state.training_start_time = time.time()
+            
+            # Emit reset event to frontend to clear charts
+            self.web_dashboard.socketio.emit('training_reset', {
+                'message': 'Training reset - starting fresh'
+            })
+            
+            # Emit cleared logs
+            self.web_dashboard.socketio.emit('console_logs', {'logs': []})
+            
+            # Emit updated state with empty history
+            self.web_dashboard.socketio.emit('state_update', publisher.get_snapshot())
+            
+            self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared, all charts and logs reset", "success")
         
         print("✅ Fresh training started - agent reset, memory cleared")
     
