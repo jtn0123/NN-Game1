@@ -114,7 +114,48 @@ class ReplayBuffer:
         # Update position and size
         self._position = (self._position + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
-    
+
+    def push_batch(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        dones: np.ndarray
+    ) -> None:
+        """
+        Add multiple experiences to the buffer at once (vectorized for speed).
+
+        This is optimized for vectorized environments where multiple games
+        run in parallel. Much faster than calling push() in a loop.
+
+        Args:
+            states: Batch of current states (batch_size, state_size)
+            actions: Batch of actions taken (batch_size,)
+            rewards: Batch of rewards received (batch_size,)
+            next_states: Batch of next states (batch_size, state_size)
+            dones: Batch of done flags (batch_size,)
+        """
+        batch_size = len(states)
+
+        # Lazy initialization on first push
+        if not self._initialized:
+            self._init_arrays(states.shape[1])
+
+        # Calculate indices where batch will be stored
+        indices = np.arange(self._position, self._position + batch_size) % self.capacity
+
+        # Vectorized copy to buffer (much faster than loop)
+        self.states[indices] = states
+        self.actions[indices] = actions
+        self.rewards[indices] = rewards
+        self.next_states[indices] = next_states
+        self.dones[indices] = dones.astype(float)
+
+        # Update position and size
+        self._position = (self._position + batch_size) % self.capacity
+        self._size = min(self._size + batch_size, self.capacity)
+
     def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Sample a random batch of experiences using vectorized numpy indexing.
@@ -132,8 +173,8 @@ class ReplayBuffer:
         if not self._initialized:
             raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
         
-        # Sample without replacement to ensure diverse batches
-        indices = np.random.choice(self._size, size=batch_size, replace=False)
+        # Sample with replacement for speed (duplicates are rare with large buffers)
+        indices = np.random.choice(self._size, size=batch_size, replace=True)
         
         # Vectorized extraction via fancy indexing (no Python loop!)
         return (
@@ -163,9 +204,9 @@ class ReplayBuffer:
         if not self._initialized:
             raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
         
-        # Sample without replacement to ensure diverse batches
-        indices = np.random.choice(self._size, size=batch_size, replace=False)
-        
+        # Sample with replacement for speed (duplicates are rare with large buffers)
+        indices = np.random.choice(self._size, size=batch_size, replace=True)
+
         # Return views - faster but caller must use immediately
         return (
             self.states[indices],
@@ -173,34 +214,6 @@ class ReplayBuffer:
             self.rewards[indices],
             self.next_states[indices],
             self.dones[indices]
-        )
-    
-    def sample_with_indices(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Sample and also return the indices (needed for PER priority updates).
-        
-        Args:
-            batch_size: Number of experiences to sample
-            
-        Returns:
-            Tuple: (states, actions, rewards, next_states, dones, indices)
-            
-        Raises:
-            RuntimeError: If buffer has not been initialized (no push() calls yet)
-        """
-        if not self._initialized:
-            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
-        
-        # Sample without replacement to ensure diverse batches
-        indices = np.random.choice(self._size, size=batch_size, replace=False)
-        
-        return (
-            self.states[indices].copy(),
-            self.actions[indices].copy(),
-            self.rewards[indices].copy(),
-            self.next_states[indices].copy(),
-            self.dones[indices].copy(),
-            indices
         )
     
     def __len__(self) -> int:

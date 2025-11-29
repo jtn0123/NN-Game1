@@ -20,7 +20,6 @@ Game Rules:
 import numpy as np
 import pygame
 from typing import Tuple, List, Optional
-import math
 
 from .base_game import BaseGame
 from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
@@ -80,18 +79,6 @@ class Ball:
         self.x += self.dx
         self.y += self.dy
     
-    def draw(self, screen: pygame.Surface, color: Tuple[int, int, int]) -> None:
-        """Draw the ball with a glow effect."""
-        # Glow
-        glow_radius = self.radius + 4
-        glow_color = tuple(min(255, c + 50) for c in color)
-        pygame.draw.circle(screen, glow_color, (int(self.x), int(self.y)), glow_radius)
-        # Main ball
-        pygame.draw.circle(screen, color, (int(self.x), int(self.y)), self.radius)
-        # Highlight
-        highlight_pos = (int(self.x - self.radius//3), int(self.y - self.radius//3))
-        pygame.draw.circle(screen, (255, 255, 255), highlight_pos, self.radius//3)
-
 
 class Paddle:
     """Player-controlled paddle at the bottom."""
@@ -120,16 +107,6 @@ class Paddle:
         # Keep paddle on screen
         self.x = max(0, min(self.x, screen_width - self.width))
     
-    def draw(self, screen: pygame.Surface, color: Tuple[int, int, int]) -> None:
-        """Draw the paddle with rounded corners and gradient effect."""
-        rect = self.rect
-        # Main paddle (rounded)
-        pygame.draw.rect(screen, color, rect, border_radius=5)
-        # Top highlight
-        highlight = pygame.Rect(rect.x + 5, rect.y + 2, rect.width - 10, 3)
-        lighter = tuple(min(255, c + 60) for c in color)
-        pygame.draw.rect(screen, lighter, highlight, border_radius=2)
-
 
 class Breakout(BaseGame):
     """

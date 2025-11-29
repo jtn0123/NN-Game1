@@ -20,6 +20,7 @@ let socket = null;
 let currentLogFilter = 'all';
 let consoleLogs = [];
 const MAX_CONSOLE_LOGS = 500;
+let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
 let targetEpisodes = 2000;
@@ -37,9 +38,25 @@ const FETCH_TIMEOUT_MS = 10000; // 10 second timeout for API calls
 function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
+
     return fetch(url, { ...options, signal: controller.signal })
         .finally(() => clearTimeout(timeoutId));
+}
+
+/**
+ * Throttle function - limits how often a function can be called
+ */
+function throttle(func, limit) {
+    let inThrottle;
+    let lastResult;
+    return function(...args) {
+        if (!inThrottle) {
+            lastResult = func.apply(this, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+        return lastResult;
+    };
 }
 
 // Initialize on DOM load
@@ -257,6 +274,9 @@ function initCharts() {
 function connectSocket() {
     socket = io();
 
+    // Throttle dashboard updates to 60fps max (prevent excessive DOM manipulation)
+    const throttledUpdateDashboard = throttle(updateDashboard, 16);  // ~60fps
+
     socket.on('connect', () => {
         console.log('Connected to server');
         updateConnectionStatus(true);
@@ -271,7 +291,7 @@ function connectSocket() {
 
     socket.on('state_update', (data) => {
         try {
-            updateDashboard(data);
+            throttledUpdateDashboard(data);
         } catch (err) {
             console.error('Error processing state update:', err);
         }
@@ -575,20 +595,50 @@ function renderConsoleLogs() {
     // Keep only last 100 visible logs for performance
     const visibleLogs = filteredLogs.slice(-100);
 
-    container.innerHTML = visibleLogs.map(log => {
-        let dataStr = '';
-        if (log.data) {
-            dataStr = `<span class="log-data">${JSON.stringify(log.data)}</span>`;
-        }
-        return `
-            <div class="console-line ${log.level}">
+    // Incremental update: only append new logs since last render
+    const newLogsCount = visibleLogs.length - lastRenderedLogCount;
+    if (newLogsCount > 0 && lastRenderedLogCount > 0 && currentLogFilter === 'all') {
+        // Append only new logs (only when not filtering)
+        const newLogs = visibleLogs.slice(-newLogsCount);
+        const fragment = document.createDocumentFragment();
+        newLogs.forEach(log => {
+            const div = document.createElement('div');
+            div.className = `console-line ${log.level}`;
+            let dataStr = log.data ? `<span class="log-data">${JSON.stringify(log.data)}</span>` : '';
+            div.innerHTML = `
                 <span class="log-time">${log.time}</span>
                 <span class="log-level">${log.level.toUpperCase()}</span>
                 <span class="log-message">${escapeHtml(log.message)}</span>
                 ${dataStr}
-            </div>
-        `;
-    }).join('');
+            `;
+            fragment.appendChild(div);
+        });
+        container.appendChild(fragment);
+
+        // Limit DOM children to 100
+        while (container.children.length > 100) {
+            container.removeChild(container.firstChild);
+        }
+    } else {
+        // Full rebuild (first render, filter change, or log trimmed)
+        container.innerHTML = visibleLogs.map(log => {
+            let dataStr = '';
+            if (log.data) {
+                dataStr = `<span class="log-data">${JSON.stringify(log.data)}</span>`;
+            }
+            return `
+                <div class="console-line ${log.level}">
+                    <span class="log-time">${log.time}</span>
+                    <span class="log-level">${log.level.toUpperCase()}</span>
+                    <span class="log-message">${escapeHtml(log.message)}</span>
+                    ${dataStr}
+                </div>
+            `;
+        }).join('');
+        lastRenderedLogCount = 0;  // Reset on full rebuild
+    }
+
+    lastRenderedLogCount = visibleLogs.length;
 
     // Auto-scroll to bottom
     const consoleContainer = document.getElementById('console-container');
@@ -777,9 +827,35 @@ function refreshScreenshot() {
  * Start polling for screenshots
  */
 function startScreenshotPolling() {
-    // Fetch immediately on page load, then poll every 2 seconds
-    refreshScreenshot();
-    setInterval(refreshScreenshot, 2000);
+    let intervalId = null;
+
+    // Function to start/resume polling
+    const startPolling = () => {
+        if (!intervalId) {
+            refreshScreenshot();
+            intervalId = setInterval(refreshScreenshot, 2000);
+        }
+    };
+
+    // Function to stop polling
+    const stopPolling = () => {
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
+    };
+
+    // Use Page Visibility API to pause polling when tab is hidden
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopPolling();
+        } else {
+            startPolling();
+        }
+    });
+
+    // Start polling initially
+    startPolling();
 }
 
 // ============================================================

@@ -117,8 +117,16 @@ class ParticleSystem:
     
     def update(self, dt: float = 1.0) -> None:
         """Update all particles and remove dead ones."""
-        self.particles = [p for p in self.particles if p.update(dt)]
-        
+        # In-place filtering: avoid list recreation each frame
+        write_idx = 0
+        for read_idx in range(len(self.particles)):
+            if self.particles[read_idx].update(dt):
+                if write_idx != read_idx:
+                    self.particles[write_idx] = self.particles[read_idx]
+                write_idx += 1
+        # Truncate list to new size (reuses existing list object)
+        del self.particles[write_idx:]
+
         # Update screen shake
         self.shake_intensity *= self.shake_decay
         if self.shake_intensity < 0.5:
