@@ -1456,16 +1456,18 @@ class HeadlessTrainer:
         python main.py --headless --turbo --web --port 5001  # With web dashboard
     """
     
-    def __init__(self, config: Config, args: argparse.Namespace):
+    def __init__(self, config: Config, args: argparse.Namespace, existing_dashboard: Optional[Any] = None):
         """
         Initialize headless trainer.
         
         Args:
             config: Configuration object
             args: Command line arguments
+            existing_dashboard: Optional existing WebDashboard to reuse (for launcher mode)
         """
         self.config = config
         self.args = args
+        self._existing_dashboard = existing_dashboard
         
         # Apply CLI overrides to config
         if args.lr:
@@ -1565,7 +1567,16 @@ class HeadlessTrainer:
         
         # Setup web dashboard if enabled
         self.paused = False
-        if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
+        if self._existing_dashboard is not None:
+            # Reuse existing dashboard from launcher mode (already running on the port)
+            self.web_dashboard = self._existing_dashboard
+            self._setup_web_callbacks()
+            # Dashboard is already started, just send system info
+            self._send_system_info()
+            self._log_startup_info()
+            if initial_model_path:
+                self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(initial_model_path)}", "success")
+        elif hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
             self._setup_web_callbacks()
             self.web_dashboard.start()
@@ -2630,24 +2641,19 @@ def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
     print(f"🚀 Command: {' '.join(new_args)}\n")
     
     # Small delay so web client can receive the message
-    time.sleep(0.5)
+    time.sleep(0.3)
     
-    # Start new process and exit (releases port properly)
-    # Don't use start_new_session so Ctrl+C still works on the child
-    subprocess.Popen(new_args)
-    sys.exit(0)
+    # Replace this process with the new one (port will be released, Ctrl+C works)
+    os.execv(sys.executable, new_args)
 
 
 def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     """Run web-based game launcher mode.
     
     This mode starts a web server without any training, allowing the user
-    to select a game from the browser. When a game is selected, this process
-    restarts itself with the chosen game.
+    to select a game from the browser. When a game is selected, training
+    starts in the SAME process (no restart needed).
     """
-    import subprocess
-    import sys
-    import signal
     import threading
     
     try:
@@ -2662,15 +2668,15 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     print("=" * 60)
     print(f"\n🌐 Open http://localhost:{args.port} to select a game\n")
     
-    # Track if we should restart with a new game
-    restart_game = None
-    restart_event = threading.Event()
+    # Track selected game
+    selected_game = None
+    selection_event = threading.Event()
     
     def on_game_selected(game_name: str) -> None:
         """Called when user selects a game from web UI."""
-        nonlocal restart_game
-        restart_game = game_name
-        restart_event.set()
+        nonlocal selected_game
+        selected_game = game_name
+        selection_event.set()
     
     # Create web dashboard in launcher mode
     dashboard = WebDashboard(config, port=args.port, launcher_mode=True)
@@ -2696,47 +2702,38 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     
     try:
         # Wait for game selection or keyboard interrupt
-        while not restart_event.is_set():
-            restart_event.wait(timeout=0.5)
+        while not selection_event.is_set():
+            selection_event.wait(timeout=0.5)
     except KeyboardInterrupt:
         print("\n\n👋 Launcher closed by user")
         return
     
-    if restart_game:
-        print(f"\n🎮 Starting {restart_game}...")
+    if selected_game:
+        print(f"\n🎮 Starting {selected_game}...")
         
-        # Build new command with game selected
-        new_args = [sys.executable, sys.argv[0]]
-        new_args.extend(['--game', restart_game])
-        new_args.append('--headless')
-        if args.web:
-            new_args.extend(['--web', '--port', str(args.port)])
-        if args.turbo:
-            new_args.append('--turbo')
-        if hasattr(args, 'vec_envs') and args.vec_envs > 1:
-            new_args.extend(['--vec-envs', str(args.vec_envs)])
-        if args.episodes:
-            new_args.extend(['--episodes', str(args.episodes)])
-        if args.model:
-            new_args.extend(['--model', args.model])
+        # Update config with selected game
+        config.GAME_NAME = selected_game
+        args.game = selected_game
         
-        print(f"🚀 Launching: {' '.join(new_args)}\n")
+        # Switch dashboard out of launcher mode (same server, same port!)
+        dashboard.launcher_mode = False
         
-        # Stop the dashboard publisher
+        # Notify browser to switch to dashboard view
+        dashboard.socketio.emit('game_ready', {'game': selected_game})
+        
+        # Now run HeadlessTrainer with the same dashboard (no process restart!)
+        print(f"🚀 Training {selected_game} in-place (same server)\n")
+        
+        # Create trainer and run - reuse the existing dashboard
+        trainer = HeadlessTrainer(config, args, existing_dashboard=dashboard)
+        
         try:
-            dashboard.stop()
-        except Exception:
-            pass
-        
-        # Use subprocess + exit instead of os.execv to cleanly release the port
-        # The daemon thread will die when we exit, releasing the socket
-        import time
-        time.sleep(0.5)  # Let client receive final message
-        
-        # Start new process and exit (releases port properly)
-        # Don't use start_new_session so Ctrl+C still works on the child
-        subprocess.Popen(new_args)
-        sys.exit(0)
+            trainer.train()
+        except KeyboardInterrupt:
+            print("\n\n⛔ Training interrupted by user")
+            trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+        finally:
+            print("\n👋 Training complete")
 
 
 def main():

@@ -599,7 +599,9 @@ class WebDashboard:
         
         @self.app.route('/api/status')
         def api_status():
-            return jsonify(self.publisher.get_snapshot())
+            snapshot = self.publisher.get_snapshot()
+            snapshot['launcher_mode'] = self.launcher_mode
+            return jsonify(snapshot)
         
         @self.app.route('/api/config')
         def api_config():

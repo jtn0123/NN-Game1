@@ -262,7 +262,11 @@
                 data.games.forEach(game => {
                     const card = document.createElement('div');
                     card.className = 'game-card';
+                    card.setAttribute('role', 'button');
+                    card.setAttribute('tabindex', '0');
+                    card.setAttribute('aria-label', `Select ${game.name}`);
                     card.onclick = () => selectGame(game.id, card);
+                    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') selectGame(game.id, card); };
                     
                     // Determine difficulty class
                     let diffClass = 'medium';
@@ -312,63 +316,30 @@
 
         socket.on('game_starting', (data) => {
             document.getElementById('status-msg').textContent = data.message;
+        });
+
+        // Handle game_ready event from server - same process, just mode switch
+        socket.on('game_ready', (data) => {
+            console.log('Game ready event received:', data);
+            document.getElementById('status-msg').textContent = `${data.game} is ready! Redirecting to dashboard...`;
             
-            // Start checking for the new server and redirect when ready
-            waitForDashboardAndRedirect();
+            // Short delay then redirect - server is now serving dashboard at /
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 500);
         });
 
         socket.on('disconnect', () => {
-            console.log('Launcher disconnected, new process starting...');
-            // If we were starting a game, wait and redirect
-            if (selectedGame) {
-                document.getElementById('status-msg').textContent = 'Server restarting, please wait...';
-                waitForDashboardAndRedirect();
+            console.log('Socket disconnected');
+            // Only show reconnecting message if we weren't already redirecting
+            if (selectedGame && !document.getElementById('status-msg').textContent.includes('Redirecting')) {
+                document.getElementById('status-msg').textContent = 'Connection lost. Reconnecting...';
             }
         });
 
         socket.on('connect', () => {
-            console.log('Connected to launcher');
+            console.log('Connected to server');
         });
-
-        // Poll for new server and redirect when ready
-        function waitForDashboardAndRedirect() {
-            let attempts = 0;
-            const maxAttempts = 30;  // 30 seconds max
-            
-            const checkServer = setInterval(async () => {
-                attempts++;
-                
-                try {
-                    // Try to check if the new server is ready
-                    // The new server will have /api/status that returns training data
-                    const response = await fetch('/api/status');
-                    if (response.ok) {
-                        const data = await response.json();
-                        // If we get training data (has episode count), the game process is ready
-                        if (data && (data.episode !== undefined || data.game_name)) {
-                            clearInterval(checkServer);
-                            document.getElementById('status-msg').textContent = 'Redirecting to dashboard...';
-                            // Small delay then redirect to root (which will show dashboard)
-                            setTimeout(() => {
-                                window.location.href = '/';
-                            }, 300);
-                            return;
-                        }
-                    }
-                } catch (e) {
-                    // Server not ready yet, keep trying
-                }
-                
-                if (attempts < maxAttempts) {
-                    document.getElementById('status-msg').textContent = 
-                        `Starting ${selectedGame}... (${attempts}s)`;
-                } else {
-                    clearInterval(checkServer);
-                    document.getElementById('status-msg').textContent = 
-                        'Timeout - please refresh the page manually';
-                }
-            }, 1000);
-        }
     </script>
 </body>
 </html>
