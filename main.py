@@ -713,8 +713,9 @@ class GameApp:
             self.web_dashboard.publisher.set_performance_mode(mode)
             self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
             self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
+            self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
             self.web_dashboard.log(
-                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE})",
+                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE}, grad_steps={self.config.GRADIENT_STEPS})",
                 "action"
             )
         print(f"⚡ Performance mode: {mode.upper()}")

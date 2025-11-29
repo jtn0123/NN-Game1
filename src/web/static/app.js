@@ -1273,6 +1273,12 @@ document.addEventListener('keydown', (e) => {
                 resetEpisode();
             }
             break;
+        case 'q':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                saveAndQuit();
+            }
+            break;
         case '1':
             setPerformanceMode('normal');
             break;
@@ -1281,6 +1287,9 @@ document.addEventListener('keydown', (e) => {
             break;
         case '3':
             setPerformanceMode('turbo');
+            break;
+        case '4':
+            setPerformanceMode('ultra');
             break;
     }
 });

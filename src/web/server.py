@@ -994,11 +994,6 @@ class WebDashboard:
             elif action == 'save_and_quit':
                 if self.on_save_and_quit_callback:
                     self.on_save_and_quit_callback()
-                    # Notify all clients about the game switch
-                    self.socketio.emit('game_switched', {
-                        'game': game_name,
-                        'message': f'Switching to {game_name}...'
-                    })
             elif action == 'stop_for_game_switch':
                 game_name = data.get('game')
                 # Log the switch request

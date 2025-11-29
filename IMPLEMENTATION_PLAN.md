@@ -619,15 +619,49 @@ if (vecEnvsEl && state.num_envs) {
 
 ---
 
+## Bug Fixes Applied
+
+### Bug 1: `save_and_quit` Handler NameError (FIXED)
+
+**File:** `src/web/server.py`  
+**Issue:** Lines 997-1001 contained extraneous code that referenced `game_name`, which was not defined in the `save_and_quit` context. This would cause a `NameError` at runtime.
+
+**Fix:** Removed the erroneous `game_switched` emit that was mistakenly copied from the `switch_game` handler.
+
+### Bug 2: Missing `gradient_steps` in GameApp (FIXED)
+
+**File:** `main.py`  
+**Issue:** `GameApp._set_performance_mode()` only updated `learn_every` and `batch_size` on the publisher state, but omitted `gradient_steps`. The log message also didn't include grad_steps. This caused stale values in the dashboard when Ultra mode was activated.
+
+**Fix:** Added `self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS` and updated the log message to include `grad_steps`.
+
+---
+
+## Improvements Added
+
+### Keyboard Shortcuts
+
+**File:** `src/web/static/app.js`
+
+Added keyboard shortcuts for new features:
+- `Ctrl+Q` / `Cmd+Q` - Save & Quit
+- `4` - Ultra performance mode (complements existing 1/2/3 for Normal/Fast/Turbo)
+
+Updated tooltip on Save & Quit button to document the shortcut.
+
+---
+
 ## Testing Checklist
 
 - [ ] Save & Quit button appears in controls grid
 - [ ] Save & Quit shows confirmation dialog
-- [ ] Save & Quit saves model and exits gracefully
-- [ ] Ultra mode button appears and activates
+- [ ] Save & Quit saves model and exits gracefully (Ctrl+Q works)
+- [ ] Ultra mode button appears and activates (key 4 works)
 - [ ] Ultra mode sets correct parameters (learn_every=16, batch=256, grad_steps=4)
+- [ ] Ultra mode updates all three values in dashboard display
 - [ ] Vec-envs input shows in settings
 - [ ] Changing vec-envs shows restart warning
 - [ ] Current vec-envs count displays in training stats
 - [ ] All styles render correctly in dark theme
+- [ ] No NameError when using Save & Quit
 
