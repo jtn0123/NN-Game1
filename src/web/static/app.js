@@ -389,8 +389,25 @@ function updateDashboard(data) {
     document.getElementById('info-loss').textContent = state.loss.toFixed(4);
     document.getElementById('info-steps').textContent = state.total_steps.toLocaleString();
     document.getElementById('info-eps').textContent = state.episodes_per_second.toFixed(2);
-    document.getElementById('info-memory').textContent = 
-        `${(state.memory_size / 1000).toFixed(0)}k / ${(state.memory_capacity / 1000).toFixed(0)}k`;
+    // Update memory with visual indicator
+    const memoryPct = state.memory_capacity > 0 ? (state.memory_size / state.memory_capacity * 100) : 0;
+    const memoryEl = document.getElementById('info-memory');
+    const memoryText = `${(state.memory_size / 1000).toFixed(0)}k / ${(state.memory_capacity / 1000).toFixed(0)}k`;
+    memoryEl.textContent = memoryText;
+    
+    // Update memory progress bar if it exists
+    const memoryBar = document.getElementById('memory-bar-fill');
+    if (memoryBar) {
+        memoryBar.style.width = `${memoryPct}%`;
+        // Change color based on fill level
+        if (memoryPct >= 100) {
+            memoryBar.style.background = 'var(--accent-success)';
+        } else if (memoryPct >= 50) {
+            memoryBar.style.background = 'var(--accent-primary)';
+        } else {
+            memoryBar.style.background = 'var(--accent-warning)';
+        }
+    }
     document.getElementById('info-qvalue').textContent = state.avg_q_value.toFixed(2);
     document.getElementById('info-target').textContent = state.target_updates.toLocaleString();
     document.getElementById('info-actions').textContent = 
@@ -422,14 +439,19 @@ function updateDashboard(data) {
         document.getElementById('setting-grad-steps').value = state.gradient_steps;
     }
     
-    // Update status badge
+    // Update status badge - check for actual training activity, not just is_running flag
     const statusBadge = document.getElementById('info-status');
+    const isActivelyTraining = state.total_steps > 0 || state.episode > 0 || state.steps_per_second > 0;
+    
     if (state.is_paused) {
         statusBadge.textContent = 'Paused';
         statusBadge.className = 'info-value status-badge paused';
-    } else if (state.is_running) {
+    } else if (isActivelyTraining) {
         statusBadge.textContent = 'Training';
         statusBadge.className = 'info-value status-badge training';
+    } else if (state.is_running) {
+        statusBadge.textContent = 'Starting...';
+        statusBadge.className = 'info-value status-badge starting';
     } else {
         statusBadge.textContent = 'Idle';
         statusBadge.className = 'info-value status-badge idle';

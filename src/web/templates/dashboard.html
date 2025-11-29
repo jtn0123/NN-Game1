@@ -208,9 +208,14 @@
                             <span class="info-label">⏱️ ETA</span>
                             <span class="info-value" id="info-eta">∞ Unlimited</span>
                         </div>
-                        <div class="info-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
+                        <div class="info-row memory-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
                             <span class="info-label">Memory</span>
-                            <span class="info-value" id="info-memory">0 / 100k</span>
+                            <div class="memory-display">
+                                <span class="info-value" id="info-memory">0 / 100k</span>
+                                <div class="memory-bar">
+                                    <div class="memory-bar-fill" id="memory-bar-fill"></div>
+                                </div>
+                            </div>
                         </div>
                         <div class="info-row" data-tooltip="Average predicted future reward. Higher Q-values mean the AI expects better outcomes. Should increase during successful training as the AI learns which states lead to high scores.">
                             <span class="info-label">Avg Q-Value</span>
@@ -224,9 +229,9 @@
                             <span class="info-label">Explore/Exploit</span>
                             <span class="info-value" id="info-actions">0 / 0</span>
                         </div>
-                        <div class="info-row">
+                        <div class="info-row status-row">
                             <span class="info-label">Status</span>
-                            <span class="info-value status-badge" id="info-status">Training</span>
+                            <span class="info-value status-badge training" id="info-status">Training</span>
                         </div>
                     </div>
                 </div>
@@ -344,41 +349,56 @@
                         <span class="collapse-icon" id="settings-icon">▼</span>
                     </div>
                     <div class="settings-content" id="settings-content">
-                        <div class="setting-row" data-tooltip="How fast the network learns. Too high = unstable, overshooting. Too low = very slow learning. Default 0.0001 is a safe starting point.">
-                            <label for="setting-lr">Learning Rate</label>
-                            <input type="number" id="setting-lr" value="0.0001" step="0.00001" min="0">
+                        <div class="settings-divider first">
+                            <span>🧠 Learning</span>
                         </div>
-                        <div class="setting-row" data-tooltip="Current exploration rate. Set to 1.0 to restart exploration, or lower to make AI rely more on learned behavior.">
-                            <label for="setting-epsilon">Epsilon</label>
-                            <input type="number" id="setting-epsilon" value="1.0" step="0.01" min="0" max="1">
+                        
+                        <div class="settings-group">
+                            <div class="setting-row" data-tooltip="How fast the network learns. Too high = unstable, overshooting. Too low = very slow learning. Default 0.0001 is a safe starting point.">
+                                <label for="setting-lr">Learning Rate</label>
+                                <input type="number" id="setting-lr" value="0.0001" step="0.00001" min="0">
+                            </div>
+                            <div class="setting-row" data-tooltip="Discount factor for future rewards. 0.99 means future rewards are 99% as valuable as immediate rewards. Higher = more long-term planning.">
+                                <label for="setting-gamma">Gamma (γ)</label>
+                                <input type="number" id="setting-gamma" value="0.99" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="setting-row" data-tooltip="Number of experiences sampled from memory per training step. Larger batches = more stable but slower learning. M4 Mac benefits from 128-256.">
+                                <label for="setting-batch">Batch Size</label>
+                                <input type="number" id="setting-batch" value="128" step="32" min="32">
+                            </div>
                         </div>
-                        <div class="setting-row" data-tooltip="Multiplier applied to epsilon after each episode. 0.995 means epsilon reduces by 0.5% each episode. Lower = faster decay to exploitation.">
-                            <label for="setting-decay">Epsilon Decay</label>
-                            <input type="number" id="setting-decay" value="0.995" step="0.001" min="0" max="1">
+                        
+                        <div class="settings-divider">
+                            <span>🎲 Exploration</span>
                         </div>
-                        <div class="setting-row" data-tooltip="Discount factor for future rewards. 0.99 means future rewards are 99% as valuable as immediate rewards. Higher = more long-term planning.">
-                            <label for="setting-gamma">Gamma</label>
-                            <input type="number" id="setting-gamma" value="0.99" step="0.01" min="0" max="1">
-                        </div>
-                        <div class="setting-row" data-tooltip="Number of experiences sampled from memory per training step. Larger batches = more stable but slower learning. M4 Mac benefits from 128-256.">
-                            <label for="setting-batch">Batch Size</label>
-                            <input type="number" id="setting-batch" value="128" step="32" min="32">
+                        
+                        <div class="settings-group">
+                            <div class="setting-row" data-tooltip="Current exploration rate. Set to 1.0 to restart exploration, or lower to make AI rely more on learned behavior.">
+                                <label for="setting-epsilon">Epsilon (ε)</label>
+                                <input type="number" id="setting-epsilon" value="1.0" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="setting-row" data-tooltip="Multiplier applied to epsilon after each episode. 0.995 means epsilon reduces by 0.5% each episode. Lower = faster decay to exploitation.">
+                                <label for="setting-decay">Decay Rate</label>
+                                <input type="number" id="setting-decay" value="0.995" step="0.001" min="0" max="1">
+                            </div>
                         </div>
                         
                         <div class="settings-divider">
                             <span>⚡ Performance</span>
                         </div>
                         
-                        <div class="setting-row" data-tooltip="Learn every N steps. 1=every step (detailed), 4=every 4th step (~4x faster). Higher values increase throughput but may slow convergence.">
-                            <label for="setting-learn-every">Learn Every</label>
-                            <div class="range-input">
-                                <input type="range" id="setting-learn-every" value="1" min="1" max="16" step="1" oninput="updateLearnEveryLabel(this.value)">
-                                <span id="learn-every-value">1 step</span>
+                        <div class="settings-group">
+                            <div class="setting-row" data-tooltip="Learn every N steps. 1=every step (detailed), 4=every 4th step (~4x faster). Higher values increase throughput but may slow convergence.">
+                                <label for="setting-learn-every">Learn Every</label>
+                                <div class="range-input">
+                                    <input type="range" id="setting-learn-every" value="1" min="1" max="16" step="1" oninput="updateLearnEveryLabel(this.value)">
+                                    <span id="learn-every-value">1 step</span>
+                                </div>
                             </div>
-                        </div>
-                        <div class="setting-row" data-tooltip="Number of gradient updates per learning call. Useful to compensate when learn_every > 1.">
-                            <label for="setting-grad-steps">Gradient Steps</label>
-                            <input type="number" id="setting-grad-steps" value="1" step="1" min="1" max="8">
+                            <div class="setting-row" data-tooltip="Number of gradient updates per learning call. Useful to compensate when learn_every > 1.">
+                                <label for="setting-grad-steps">Gradient Steps</label>
+                                <input type="number" id="setting-grad-steps" value="1" step="1" min="1" max="8">
+                            </div>
                         </div>
                         
                         <button class="apply-btn" onclick="applySettings()">Apply Changes</button>
