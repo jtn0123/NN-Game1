@@ -201,10 +201,48 @@ class Agent:
             self.policy_net.parameters(),  # type: ignore[attr-defined]
             lr=self.config.LEARNING_RATE
         )
-        
-        # Replay buffer - use PER if enabled
-        self._use_per = getattr(self.config, 'USE_PRIORITIZED_REPLAY', False)
-        if self._use_per:
+
+        # Learning rate scheduler
+        self.scheduler = None
+        if getattr(self.config, 'USE_LR_SCHEDULER', False):
+            scheduler_type = getattr(self.config, 'LR_SCHEDULER_TYPE', 'cosine')
+            if scheduler_type == 'cosine':
+                from torch.optim.lr_scheduler import CosineAnnealingLR
+                self.scheduler = CosineAnnealingLR(
+                    self.optimizer,
+                    T_max=2000,
+                    eta_min=getattr(self.config, 'LR_MIN', 1e-5)
+                )
+                print(f"✓ Cosine LR scheduler enabled (T_max=2000, eta_min={getattr(self.config, 'LR_MIN', 1e-5)})")
+            elif scheduler_type == 'step':
+                from torch.optim.lr_scheduler import StepLR
+                step_size = getattr(self.config, 'LR_SCHEDULER_STEP', 500)
+                gamma = getattr(self.config, 'LR_SCHEDULER_GAMMA', 0.5)
+                self.scheduler = StepLR(
+                    self.optimizer,
+                    step_size=step_size,
+                    gamma=gamma
+                )
+                print(f"✓ Step LR scheduler enabled (step_size={step_size}, gamma={gamma})")
+
+        # Replay buffer - prioritize N-step > PER > basic
+        use_n_step = getattr(self.config, 'USE_N_STEP_RETURNS', False)
+
+        if use_n_step:
+            self._use_per = False  # N-step buffer doesn't support PER currently
+            from src.ai.replay_buffer import NStepReplayBuffer
+            n_steps = getattr(self.config, 'N_STEP_SIZE', 3)
+            self.memory = NStepReplayBuffer(
+                capacity=self.config.MEMORY_SIZE,
+                state_size=state_size,
+                n_steps=n_steps,
+                gamma=self.config.GAMMA
+            )
+            print(f"✓ N-step returns enabled (n={n_steps})")
+        else:
+            self._use_per = getattr(self.config, 'USE_PRIORITIZED_REPLAY', False)
+
+        if not use_n_step and self._use_per:
             self.memory = PrioritizedReplayBuffer(
                 capacity=self.config.MEMORY_SIZE,
                 state_size=state_size,
@@ -265,14 +303,14 @@ class Agent:
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """
         Select an action using epsilon-greedy policy.
-        
+
         Args:
             state: Current game state
             training: If True, use epsilon-greedy; if False, use greedy
-            
+
         Returns:
             Selected action index
-            
+
         Note:
             After calling this method, check `agent._last_action_explored` to
             determine if the action was exploration (random) or exploitation (greedy).
@@ -281,16 +319,32 @@ class Agent:
             # Exploration: random action
             self._last_action_explored = True
             return random.randrange(self.action_size)
-        
+
         # Exploitation: best Q-value action
         self._last_action_explored = False
+
+        # Reset noise for NoisyNet exploration (only in training mode)
+        if training and hasattr(self.policy_net, 'reset_noise'):
+            self.policy_net.reset_noise()
+
+        # Set network to eval mode if not training (for NoisyNet and other layers)
+        was_training = self.policy_net.training
+        if not training:
+            self.policy_net.eval()
+
         # Use inference_mode() for better performance than no_grad()
         with torch.inference_mode():
             # Reuse pre-allocated tensor to avoid allocation overhead
             # copy_() handles CPU→device transfer automatically (no .to(device) needed)
             self._state_tensor.copy_(torch.from_numpy(state.reshape(1, -1)))
             q_values = self.policy_net(self._state_tensor)
-            return q_values.argmax(dim=1).item()
+            action = q_values.argmax(dim=1).item()
+
+        # Restore training mode
+        if was_training:
+            self.policy_net.train()
+
+        return action
     
     def select_actions_batch(self, states: np.ndarray, training: bool = True) -> Tuple[np.ndarray, int, int]:
         """
@@ -463,15 +517,20 @@ class Agent:
     def _learn_step_internal(self) -> Optional[float]:
         """
         Internal learning step with mixed precision and optimized transfers.
-        
+
         This performs a single gradient update. The caller (learn()) is responsible
         for incrementing the steps counter and triggering target network updates.
-        
+
         Supports both uniform and prioritized experience replay.
-            
+
         Returns:
             Loss value if training occurred, None otherwise
         """
+        # Reset noise for NoisyNet exploration
+        if hasattr(self.policy_net, 'reset_noise'):
+            self.policy_net.reset_noise()
+            self.target_net.reset_noise()
+
         batch_size = self.config.BATCH_SIZE
         
         # Sample batch - different path for PER vs uniform
@@ -573,24 +632,31 @@ class Agent:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute current and target Q-values using Double DQN.
-        
+
         Returns:
             Tuple of (current_q, target_q) tensors
         """
         # Compute current Q-values
         current_q = self.policy_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-        
+
         # Compute target Q-values using DOUBLE DQN
         with torch.no_grad():
             # Step 1: Use POLICY network to select best actions for next states
             best_actions = self.policy_net(next_states).argmax(dim=1, keepdim=True)
-            
+
             # Step 2: Use TARGET network to evaluate those actions
             next_q = self.target_net(next_states).gather(1, best_actions).squeeze(1)
-            
-            # Compute TD target
-            target_q = rewards + (1 - dones) * self.config.GAMMA * next_q
-        
+
+            # Compute TD target (adjust gamma for N-step returns)
+            use_n_step = getattr(self.config, 'USE_N_STEP_RETURNS', False)
+            if use_n_step:
+                n_steps = getattr(self.config, 'N_STEP_SIZE', 3)
+                effective_gamma = self.config.GAMMA ** n_steps
+            else:
+                effective_gamma = self.config.GAMMA
+
+            target_q = rewards + (1 - dones) * effective_gamma * next_q
+
         return current_q, target_q
     
     def update_target_network(self) -> None:
@@ -620,7 +686,12 @@ class Agent:
             self.config.EPSILON_END,
             self.epsilon * self.config.EPSILON_DECAY
         )
-    
+
+    def step_scheduler(self) -> None:
+        """Step the learning rate scheduler after each episode."""
+        if self.scheduler is not None:
+            self.scheduler.step()
+
     def save(
         self,
         filepath: str,

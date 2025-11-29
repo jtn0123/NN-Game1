@@ -178,8 +178,8 @@ class Config:
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
     # 0.90 = more short-sighted, prefers immediate rewards
-    # 0.97 = balanced, prioritizes near-term rewards for more stable learning
-    GAMMA: float = 0.97
+    # 0.99 = more far-sighted for Space Invaders long-term planning
+    GAMMA: float = 0.99
     
     # Batch size - Number of experiences to sample per training step
     # Larger = more stable gradients but slower per step
@@ -201,7 +201,8 @@ class Config:
     # If > 0, uses soft updates instead of hard updates
     # target = TAU * policy + (1 - TAU) * target
     # Typical values: 0.001 to 0.01
-    TARGET_TAU: float = 0.005
+    # Slower updates for more stability
+    TARGET_TAU: float = 0.001
     
     # Use soft updates instead of hard updates
     USE_SOFT_UPDATE: bool = True
@@ -223,12 +224,13 @@ class Config:
     
     # Learn every N steps (1 = every step, higher = faster but less frequent learning)
     # M4 optimal: 8-16 for CPU, 4 for MPS
-    LEARN_EVERY: int = 8
-    
+    LEARN_EVERY: int = 16
+
     # Number of gradient updates per learning call
     # Compensates for LEARN_EVERY > 1 to maintain learning throughput
     # Rule of thumb: GRADIENT_STEPS = LEARN_EVERY / 4 (for similar grad/sec)
-    GRADIENT_STEPS: int = 2
+    # Increased for larger effective batch size
+    GRADIENT_STEPS: int = 4
     
     # Use torch.compile() for potential speedup (PyTorch 2.0+)
     # Note: Minimal benefit on CPU for small models, can cause overhead
@@ -252,18 +254,20 @@ class Config:
     # Starting exploration rate (1.0 = 100% random)
     EPSILON_START: float = 1.0
     
-    # Minimum exploration rate (0.005 = 0.5% random for fewer late-game mistakes)
-    EPSILON_END: float = 0.005
-    
+    # Minimum exploration rate (0.02 = 2% random to escape local optima)
+    EPSILON_END: float = 0.02
+
     # Decay rate per episode (higher = slower decay)
-    # EPSILON_DECAY = 0.995 means epsilon *= 0.995 after each episode
-    EPSILON_DECAY: float = 0.995
-    
+    # EPSILON_DECAY = 0.998 means epsilon *= 0.998 after each episode
+    # Slower decay for Space Invaders complexity
+    EPSILON_DECAY: float = 0.998
+
     # Exploration decay strategy: 'exponential', 'linear', 'cosine'
     EXPLORATION_STRATEGY: str = 'exponential'
-    
+
     # Warmup episodes before epsilon starts decaying
-    EPSILON_WARMUP: int = 0
+    # Allows buffer to fill with diverse experiences
+    EPSILON_WARMUP: int = 100
     
     # =========================================================================
     # PRIORITIZED EXPERIENCE REPLAY
@@ -271,17 +275,60 @@ class Config:
     
     # Enable prioritized replay (samples important experiences more often)
     # Improves learning efficiency by 30-40% at cost of ~10% speed overhead
-    USE_PRIORITIZED_REPLAY: bool = False
-    
+    # Enabled for Space Invaders improvements
+    USE_PRIORITIZED_REPLAY: bool = True
+
     # Priority exponent (0 = uniform sampling, 1 = full prioritization)
     PER_ALPHA: float = 0.6
-    
+
     # Importance sampling start (anneals to 1.0 over PER_BETA_FRAMES)
     PER_BETA_START: float = 0.4
-    
+
     # Number of frames over which to anneal beta from start to 1.0
-    PER_BETA_FRAMES: int = 100000
-    
+    # Slower annealing for more stable learning
+    PER_BETA_FRAMES: int = 200000
+
+    # =========================================================================
+    # LEARNING RATE SCHEDULING
+    # =========================================================================
+
+    # Enable learning rate scheduler (reduces LR over time for fine-tuning)
+    USE_LR_SCHEDULER: bool = True
+
+    # Scheduler type: 'cosine' (smooth decay) or 'step' (periodic drops)
+    LR_SCHEDULER_TYPE: str = 'cosine'
+
+    # For step scheduler: decay LR every N episodes
+    LR_SCHEDULER_STEP: int = 500
+
+    # For step scheduler: multiply LR by this factor
+    LR_SCHEDULER_GAMMA: float = 0.5
+
+    # Minimum learning rate (floor for schedulers)
+    LR_MIN: float = 1e-5
+
+    # =========================================================================
+    # N-STEP RETURNS
+    # =========================================================================
+
+    # Enable N-step returns for faster reward propagation
+    # Trades off bias vs variance in value estimation
+    USE_N_STEP_RETURNS: bool = True
+
+    # Number of steps to look ahead (typically 3-5)
+    N_STEP_SIZE: int = 3
+
+    # =========================================================================
+    # NOISY NETWORKS
+    # =========================================================================
+
+    # Enable NoisyNet (learnable parameter noise for exploration)
+    # When enabled, set EPSILON_END = 0.0 as network handles exploration
+    USE_NOISY_NETWORKS: bool = True
+
+    # Standard deviation for noise initialization
+    NOISY_STD_INIT: float = 0.5
+
     # =========================================================================
     # REWARD SHAPING
     # =========================================================================

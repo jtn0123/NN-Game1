@@ -26,10 +26,77 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Optional, Callable, Dict, Any, cast
 import numpy as np
+import math
 
 import sys
 sys.path.append('../..')
 from config import Config
+
+
+class NoisyLinear(nn.Module):
+    """
+    Linear layer with learnable parameter noise for exploration.
+
+    Replaces epsilon-greedy exploration with learned, state-dependent exploration.
+    The noise parameters are learned during training, allowing the network
+    to learn when and how much to explore.
+
+    Reference:
+        Fortunato et al., 2017 - "Noisy Networks for Exploration"
+    """
+
+    def __init__(self, in_features: int, out_features: int, std_init: float = 0.5):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.std_init = std_init
+
+        # Learnable mean parameters
+        self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias_mu = nn.Parameter(torch.empty(out_features))
+
+        # Learnable noise parameters (sigma)
+        self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias_sigma = nn.Parameter(torch.empty(out_features))
+
+        # Noise buffers (not learned, regenerated each forward pass)
+        self.register_buffer('weight_epsilon', torch.empty(out_features, in_features))
+        self.register_buffer('bias_epsilon', torch.empty(out_features))
+
+        self.reset_parameters()
+        self.reset_noise()
+
+    def reset_parameters(self):
+        """Initialize learnable parameters."""
+        mu_range = 1 / math.sqrt(self.in_features)
+        self.weight_mu.data.uniform_(-mu_range, mu_range)
+        self.weight_sigma.data.fill_(self.std_init / math.sqrt(self.in_features))
+        self.bias_mu.data.uniform_(-mu_range, mu_range)
+        self.bias_sigma.data.fill_(self.std_init / math.sqrt(self.out_features))
+
+    def reset_noise(self):
+        """Sample new noise for exploration."""
+        epsilon_in = self._scale_noise(self.in_features)
+        epsilon_out = self._scale_noise(self.out_features)
+        self.weight_epsilon.copy_(epsilon_out.outer(epsilon_in))
+        self.bias_epsilon.copy_(epsilon_out)
+
+    @staticmethod
+    def _scale_noise(size: int) -> torch.Tensor:
+        """Factorized Gaussian noise (more efficient than independent)."""
+        x = torch.randn(size)
+        return x.sign() * x.abs().sqrt()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass with noisy weights during training."""
+        if self.training:
+            weight = self.weight_mu + self.weight_sigma * self.weight_epsilon
+            bias = self.bias_mu + self.bias_sigma * self.bias_epsilon
+        else:
+            # Use mean parameters during evaluation (no noise)
+            weight = self.weight_mu
+            bias = self.bias_mu
+        return F.linear(x, weight, bias)
 
 
 class DQN(nn.Module):
@@ -305,11 +372,19 @@ class DuelingDQN(nn.Module):
         
         # Value stream: shared -> hidden -> 1 (state value)
         self.value_hidden = nn.Linear(shared_output_size, stream_hidden_size)
-        self.value_output = nn.Linear(stream_hidden_size, 1)
-        
+
         # Advantage stream: shared -> hidden -> action_size (per-action advantage)
         self.advantage_hidden = nn.Linear(shared_output_size, stream_hidden_size)
-        self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)
+
+        # Final output layers - use NoisyLinear if enabled
+        use_noisy = getattr(self.config, 'USE_NOISY_NETWORKS', False)
+        if use_noisy:
+            noisy_std = getattr(self.config, 'NOISY_STD_INIT', 0.5)
+            self.value_output = NoisyLinear(stream_hidden_size, 1, noisy_std)
+            self.advantage_output = NoisyLinear(stream_hidden_size, self.action_size, noisy_std)
+        else:
+            self.value_output = nn.Linear(stream_hidden_size, 1)
+            self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)
         
         # For compatibility with DQN interface, create a layers list
         self.layers = nn.ModuleList(list(self.feature_layers) + [
@@ -379,9 +454,16 @@ class DuelingDQN(nn.Module):
         # Combine streams: Q = V + (A - mean(A))
         # Subtracting mean ensures identifiability and stability
         q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
-        
+
         return q_values
-    
+
+    def reset_noise(self):
+        """Reset noise for all noisy layers."""
+        if isinstance(self.value_output, NoisyLinear):
+            self.value_output.reset_noise()
+        if isinstance(self.advantage_output, NoisyLinear):
+            self.advantage_output.reset_noise()
+
     def get_layer_info(self) -> List[Dict]:
         """
         Get information about each layer for visualization.

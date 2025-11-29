@@ -678,7 +678,8 @@ class SpaceInvaders(BaseGame):
         
         self._max_player_bullets = self.config.SI_MAX_PLAYER_BULLETS
         # Enhanced state: ship_x, bullets, aliens, movement, danger metrics, lowest alien y
-        self._state_size = 1 + self._max_player_bullets * 2 + self._num_aliens + 5
+        # New features: +7 (shoot_cooldown, active_bullets, aliens_ratio, lives, level, ufo_x, ufo_present)
+        self._state_size = 1 + self._max_player_bullets * 2 + self._num_aliens + 5 + 7
         self._state_array = np.zeros(self._state_size, dtype=np.float32)
         self._alien_states = np.ones(self._num_aliens, dtype=np.float32)
         
@@ -688,7 +689,14 @@ class SpaceInvaders(BaseGame):
         self._time = 0.0
         self._shoot_cooldown = 0
         self._shoot_cooldown_max = 10
-        
+
+        # Accuracy tracking for reward shaping
+        self._shots_fired = 0
+        self._shots_hit = 0
+
+        # Action repeat tracking for penalty
+        self._action_history: List[int] = []
+
         # Create visual effects
         self._scanline_surface: Optional[pygame.Surface] = None
         self._crt_vignette: Optional[pygame.Surface] = None
@@ -811,9 +819,11 @@ class SpaceInvaders(BaseGame):
         self._aliens_remaining = self._num_aliens
         self._alien_states.fill(1.0)
         self._shoot_cooldown = 0
+        self._shots_fired = 0
+        self._shots_hit = 0
         self.screen_shake = 0
         self.flash_alpha = 0
-        
+
         return self.get_state()
     
     def _create_shields(self) -> None:
@@ -922,11 +932,21 @@ class SpaceInvaders(BaseGame):
         assert self.ship is not None
         
         self._time += 1.0 / 60.0
-        reward = self.config.SI_REWARD_STEP
-        
+        reward = 0.0  # Will add dynamic survival reward later
+
         if self._shoot_cooldown > 0:
             self._shoot_cooldown -= 1
-        
+
+        # Action repeat penalty
+        self._action_history.append(action)
+        if len(self._action_history) > 10:
+            self._action_history.pop(0)
+
+        if len(self._action_history) >= 5:
+            unique_ratio = len(set(self._action_history[-5:])) / 5.0
+            if unique_ratio < 0.4:  # Less than 2 unique actions in last 5
+                reward -= 0.02  # Small repetition penalty
+
         # Track bullets that are about to pass the ship (for dodge reward)
         ship_y = self.ship.y
         bullets_near_ship_before = sum(
@@ -959,18 +979,31 @@ class SpaceInvaders(BaseGame):
         bullets_dodged = bullets_near_ship_before - bullets_near_ship_after
         if bullets_dodged > 0 and not self.player_invincible:
             reward += 0.1 * bullets_dodged  # Small reward for each dodged bullet
-        
-        # Penalty for aliens getting too low (encourages shooting them)
+
+        # Dynamic survival reward based on threat level
+        threat_level = 0.0
+
+        # Factor 1: How low are the aliens?
         lowest_alien_y = 0
         for alien in self.aliens:
             if alien.alive:
                 lowest_alien_y = max(lowest_alien_y, alien.y + alien.height)
-        
-        danger_threshold = self.ground_y - 150  # Start penalizing when aliens are close
-        if lowest_alien_y > danger_threshold:
-            danger_ratio = (lowest_alien_y - danger_threshold) / 150
-            reward -= 0.005 * danger_ratio  # Gradual penalty as aliens approach
-        
+        lowest_ratio = lowest_alien_y / self.ground_y
+        threat_level += lowest_ratio * 0.5
+
+        # Factor 2: Active alien bullets
+        active_bullets = sum(1 for b in self.alien_bullets if b.alive)
+        bullet_threat = min(active_bullets / 5.0, 1.0)
+        threat_level += bullet_threat * 0.3
+
+        # Factor 3: Low lives
+        life_threat = 1 - (self.lives / self.config.LIVES)
+        threat_level += life_threat * 0.2
+
+        # Scaled survival reward (higher reward in more dangerous situations)
+        base_step_reward = self.config.SI_REWARD_STEP
+        reward += base_step_reward * (1 + threat_level * 2)  # Up to 3x step reward
+
         # Update visual effects
         self._update_effects()
         
@@ -1036,7 +1069,8 @@ class SpaceInvaders(BaseGame):
             (100, 255, 200)  # Cyan-green for player bullets
         )
         self.player_bullets.append(bullet)
-    
+        self._shots_fired += 1  # Track for accuracy bonus
+
     def _update_bullets(self) -> None:
         for bullet in self.player_bullets:
             bullet.update()
@@ -1161,7 +1195,29 @@ class SpaceInvaders(BaseGame):
                     points = 30 - alien.alien_type * 10
                     self.score += points
                     reward += self.config.SI_REWARD_ALIEN_HIT
-                    
+
+                    # Progressive bonus: more reward as fewer aliens remain
+                    progress_bonus = 0.5 * (1 - self._aliens_remaining / self._num_aliens)
+                    reward += progress_bonus
+
+                    # Column-clear bonus: reward for clearing columns (reduces threat)
+                    col = idx % self.config.SI_ALIEN_COLS
+                    aliens_in_col = sum(1 for i, a in enumerate(self.aliens)
+                                        if a.alive and i % self.config.SI_ALIEN_COLS == col)
+                    if aliens_in_col == 0:
+                        reward += 2.0  # Column clear bonus
+
+                    # Edge alien bonus: killing edge aliens slows horizontal movement
+                    if col == 0 or col == self.config.SI_ALIEN_COLS - 1:
+                        reward += 0.3  # Edge alien bonus
+
+                    # Accuracy bonus
+                    self._shots_hit += 1
+                    if self._shots_fired > 10:
+                        accuracy = self._shots_hit / self._shots_fired
+                        if accuracy > 0.3:
+                            reward += 0.5 * accuracy  # Up to 0.5 bonus for good accuracy
+
                     # Visual effects
                     self._spawn_explosion(
                         alien_rect.centerx, alien_rect.centery, 
@@ -1323,7 +1379,38 @@ class SpaceInvaders(BaseGame):
                 self._state_array[idx] = 0.5  # Centered = no threat
         else:
             self._state_array[idx] = 0.5
-        
+        idx += 1
+
+        # New Feature 1: Shoot cooldown (helps agent time shots)
+        self._state_array[idx] = self._shoot_cooldown / self._shoot_cooldown_max
+        idx += 1
+
+        # New Feature 2: Active alien bullets (threat level)
+        active_alien_bullets = sum(1 for b in self.alien_bullets if b.alive)
+        self._state_array[idx] = min(active_alien_bullets / 10.0, 1.0)
+        idx += 1
+
+        # New Feature 3: Aliens remaining ratio (progress indicator)
+        self._state_array[idx] = self._aliens_remaining / self._num_aliens
+        idx += 1
+
+        # New Feature 4: Lives remaining (risk awareness)
+        self._state_array[idx] = self.lives / self.config.LIVES
+        idx += 1
+
+        # New Feature 5: Level (difficulty awareness)
+        self._state_array[idx] = min(self.level / 10.0, 1.0)
+        idx += 1
+
+        # New Features 6-7: UFO presence and position
+        if self.ufo is not None and self.ufo.alive:
+            self._state_array[idx] = self.ufo.x * self._inv_width
+            self._state_array[idx + 1] = 1.0  # UFO present flag
+        else:
+            self._state_array[idx] = 0.5
+            self._state_array[idx + 1] = 0.0  # No UFO
+        idx += 2
+
         return self._state_array.copy()
     
     def _get_info(self) -> dict:

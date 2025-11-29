@@ -415,6 +415,96 @@ class PrioritizedReplayBuffer:
         self.beta = self.beta_start
 
 
+
+class NStepReplayBuffer(ReplayBuffer):
+    """
+    Replay buffer with N-step returns for faster reward propagation.
+
+    Instead of single-step TD targets r + γ * max Q(s'), uses N-step returns:
+        r₁ + γ * r₂ + γ² * r₃ + ... + γⁿ * max Q(sₙ)
+
+    This provides:
+        - Faster credit assignment (rewards propagate back faster)
+        - Lower bias (less bootstrapping)
+        - Higher variance (more Monte Carlo-like)
+
+    Typically N=3-5 provides good trade-off between bias and variance.
+
+    Reference:
+        Hessel et al., 2017 - "Rainbow: Combining Improvements in Deep RL"
+    """
+
+    def __init__(self, capacity: int, state_size: int = 0,
+                 n_steps: int = 3, gamma: float = 0.99):
+        """
+        Initialize N-step replay buffer.
+
+        Args:
+            capacity: Maximum buffer size
+            state_size: Size of state vector (auto-detected if 0)
+            n_steps: Number of steps to look ahead (typically 3-5)
+            gamma: Discount factor for computing N-step returns
+        """
+        super().__init__(capacity, state_size)
+        self.n_steps = n_steps
+        self.gamma = gamma
+
+        # Temporary buffer to accumulate N-step trajectories
+        self._n_step_buffer = []
+
+    def push(self, state, action, reward, next_state, done):
+        """
+        Add experience and compute N-step return when ready.
+
+        Accumulates experiences until we have N steps or episode ends,
+        then computes N-step returns and stores them.
+        """
+        # Store in temporary buffer
+        self._n_step_buffer.append((state.copy(), action, reward, next_state.copy(), done))
+
+        # Flush when we have N steps or episode ended
+        if done or len(self._n_step_buffer) >= self.n_steps:
+            self._flush_n_step_buffer(done)
+
+    def _flush_n_step_buffer(self, done: bool):
+        """Compute and store N-step experiences."""
+        if not self._n_step_buffer:
+            return
+
+        n = len(self._n_step_buffer)
+
+        # For each experience in the buffer, compute its N-step return
+        for i in range(n):
+            state, action, _, _, _ = self._n_step_buffer[i]
+
+            # Compute discounted N-step return from position i
+            n_step_reward = 0.0
+            for j in range(i, n):
+                _, _, r, _, d = self._n_step_buffer[j]
+                n_step_reward += (self.gamma ** (j - i)) * r
+                if d:
+                    break
+
+            # The N-step next state is the final state in the trajectory
+            final_idx = min(i + self.n_steps - 1, n - 1)
+            _, _, _, n_step_next_state, n_step_done = self._n_step_buffer[final_idx]
+
+            # Store the N-step experience in the base buffer
+            super().push(state, action, n_step_reward, n_step_next_state, n_step_done)
+
+        # Clear temporary buffer
+        self._n_step_buffer.clear()
+
+    def __len__(self) -> int:
+        """Return total size including buffered experiences."""
+        return super().__len__() + len(self._n_step_buffer)
+
+    def clear(self) -> None:
+        """Clear all experiences from buffer."""
+        super().clear()
+        self._n_step_buffer.clear()
+
+
 # Testing
 if __name__ == "__main__":
     print("Testing ReplayBuffer (contiguous numpy storage)...")
