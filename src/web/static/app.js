@@ -28,6 +28,20 @@ let targetEpisodes = 2000;
 let lastSpeedChangeTime = 0;
 const SPEED_UPDATE_DEBOUNCE = 2000; // Ignore server speed updates for 2s after user change
 
+// Fetch timeout configuration
+const FETCH_TIMEOUT_MS = 10000; // 10 second timeout for API calls
+
+/**
+ * Fetch with timeout wrapper
+ */
+function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    return fetch(url, { ...options, signal: controller.signal })
+        .finally(() => clearTimeout(timeoutId));
+}
+
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
@@ -253,24 +267,42 @@ function connectSocket() {
     });
 
     socket.on('state_update', (data) => {
-        updateDashboard(data);
+        try {
+            updateDashboard(data);
+        } catch (err) {
+            console.error('Error processing state update:', err);
+        }
     });
 
     socket.on('console_log', (log) => {
-        addConsoleLog(log.message, log.level, log.timestamp, log.data);
+        try {
+            addConsoleLog(log.message, log.level, log.timestamp, log.data);
+        } catch (err) {
+            console.error('Error processing console log:', err);
+        }
     });
 
     socket.on('console_logs', (data) => {
-        // Initial batch of logs on connect
-        data.logs.forEach(log => {
-            addConsoleLog(log.message, log.level, log.timestamp, log.data, false);
-        });
-        renderConsoleLogs();
+        try {
+            // Initial batch of logs on connect
+            if (data && data.logs) {
+                data.logs.forEach(log => {
+                    addConsoleLog(log.message, log.level, log.timestamp, log.data, false);
+                });
+                renderConsoleLogs();
+            }
+        } catch (err) {
+            console.error('Error processing console logs:', err);
+        }
     });
 
     socket.on('save_event', (data) => {
-        updateSaveStatus(data);
-        flashSaveIndicator();
+        try {
+            updateSaveStatus(data);
+            flashSaveIndicator();
+        } catch (err) {
+            console.error('Error processing save event:', err);
+        }
     });
 }
 
@@ -633,7 +665,7 @@ function updateSpeed(value) {
  * Refresh screenshot
  */
 function refreshScreenshot() {
-    fetch('/api/screenshot')
+    fetchWithTimeout('/api/screenshot')
         .then(response => response.json())
         .then(data => {
             if (data.image && data.image.length > 0) {
@@ -663,9 +695,11 @@ function refreshScreenshot() {
             }
         })
         .catch(err => {
-            console.error('Screenshot fetch error:', err);
+            if (err.name !== 'AbortError') {
+                console.error('Screenshot fetch error:', err);
+            }
             const placeholder = document.getElementById('preview-placeholder');
-            placeholder.classList.remove('hidden');
+            if (placeholder) placeholder.classList.remove('hidden');
         });
 }
 
@@ -707,7 +741,7 @@ function showLoadModal() {
     modal.classList.add('visible');
     
     // Fetch available models
-    fetch('/api/models')
+    fetchWithTimeout('/api/models')
         .then(response => response.json())
         .then(data => {
             const list = document.getElementById('model-list');
@@ -821,16 +855,20 @@ function updateFooterTime() {
  * Initial data fetch
  */
 function fetchInitialData() {
-    fetch('/api/status')
+    fetchWithTimeout('/api/status')
         .then(response => response.json())
         .then(data => {
             updateDashboard(data);
         })
-        .catch(err => console.error('Initial fetch error:', err));
+        .catch(err => {
+            if (err.name !== 'AbortError') {
+                console.error('Initial fetch error:', err);
+            }
+        });
 }
 
-// Fetch initial data after connection
-setTimeout(fetchInitialData, 500);
+// Fetch initial data immediately (socket will also send state on connect)
+fetchInitialData();
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
@@ -848,7 +886,11 @@ document.addEventListener('keydown', (e) => {
             }
             break;
         case 'r':
-            resetEpisode();
+            // Require Ctrl/Cmd+R to prevent accidental resets
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault(); // Prevent browser refresh
+                resetEpisode();
+            }
             break;
         case '1':
             setPerformanceMode('normal');
@@ -1060,7 +1102,7 @@ function applySettings() {
  * Load config from server (enhanced)
  */
 function loadConfig() {
-    fetch('/api/config')
+    fetchWithTimeout('/api/config')
         .then(response => response.json())
         .then(data => {
             document.getElementById('setting-lr').value = data.learning_rate;
@@ -1083,7 +1125,11 @@ function loadConfig() {
                 updateSystemStatus({ device: data.device, torch_compiled: false });
             }
         })
-        .catch(err => console.error('Config load error:', err));
+        .catch(err => {
+            if (err.name !== 'AbortError') {
+                console.error('Config load error:', err);
+            }
+        });
     
     // Also fetch save status
     fetchSaveStatus();
@@ -1097,12 +1143,16 @@ function loadConfig() {
  * Fetch current save status from server
  */
 function fetchSaveStatus() {
-    fetch('/api/save-status')
+    fetchWithTimeout('/api/save-status')
         .then(response => response.json())
         .then(data => {
             updateSaveStatus(data);
         })
-        .catch(err => console.error('Save status fetch error:', err));
+        .catch(err => {
+            if (err.name !== 'AbortError') {
+                console.error('Save status fetch error:', err);
+            }
+        });
 }
 
 /**
@@ -1185,7 +1235,7 @@ function saveModelAs() {
 
 // Periodically update save status time
 setInterval(() => {
-    fetch('/api/save-status')
+    fetchWithTimeout('/api/save-status', {}, 5000)  // 5s timeout for periodic update
         .then(response => response.json())
         .then(data => {
             const timeEl = document.getElementById('last-save-time');
@@ -1193,5 +1243,5 @@ setInterval(() => {
                 timeEl.textContent = data.time_since_save_str;
             }
         })
-        .catch(() => {});
+        .catch(() => {});  // Silently ignore errors for periodic updates
 }, 10000);  // Update every 10 seconds
