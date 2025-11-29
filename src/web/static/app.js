@@ -67,10 +67,9 @@ document.addEventListener('DOMContentLoaded', () => {
     startScreenshotPolling();
     updateFooterTime();
     setInterval(updateFooterTime, 1000);
-    loadConfig();
+    loadConfig();  // This will call initVecEnvsHandler() after config is loaded
     loadGames();
     loadGameStats();
-    initVecEnvsHandler();
 });
 
 /**
@@ -1583,6 +1582,9 @@ function loadConfig() {
                 originalVecEnvs = data.vec_envs;
                 document.getElementById('setting-vec-envs').value = originalVecEnvs;
             }
+            
+            // Initialize vec-envs handler AFTER originalVecEnvs is set from server
+            initVecEnvsHandler();
 
             // Update system status from config
             if (data.device) {

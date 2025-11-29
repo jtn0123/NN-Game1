@@ -243,6 +243,7 @@ class GameApp:
             self.web_dashboard.on_config_change_callback = self._apply_config
             self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
             self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(game, args)
+            self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
             self.web_dashboard.start()
             
             # Send system info to dashboard
@@ -483,6 +484,27 @@ class GameApp:
             self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared, all charts and logs reset", "success")
         
         print("✅ Fresh training started - agent reset, memory cleared")
+    
+    def _save_and_quit(self) -> None:
+        """Save the model and exit the application gracefully."""
+        if self.web_dashboard:
+            self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
+        
+        # Save the model
+        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown")
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
+        
+        print("\n👋 Save & Quit requested. Model saved. Exiting...")
+        
+        # Give time for the save event to propagate to clients
+        time.sleep(0.5)
+        
+        # Exit gracefully
+        self.running = False
+        pygame.quit()
+        sys.exit(0)
     
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
