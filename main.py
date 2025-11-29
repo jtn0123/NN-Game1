@@ -2286,6 +2286,7 @@ class HeadlessTrainer:
         self.training_start_time = time.time()
         last_report_time = self.training_start_time
         steps_since_report = 0
+        last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
         
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         episode = start_episode
@@ -2387,11 +2388,17 @@ class HeadlessTrainer:
                     # Emit NN visualization data (throttled by server to ~10 FPS)
                     self._emit_nn_visualization(state, action)
             
-            # Time-based progress reporting (terminal)
+            # Progress reporting (terminal) - only log when episodes complete
             current_time = time.time()
             elapsed_since_report = current_time - last_report_time
             
-            if elapsed_since_report >= config.REPORT_INTERVAL_SECONDS or episode % config.LOG_EVERY == 0:
+            # Log every LOG_EVERY episodes OR if REPORT_INTERVAL_SECONDS has passed since last log
+            # Only log if this is a new episode (prevent duplicate logs)
+            should_log_by_episode = (episode - last_logged_episode) >= config.LOG_EVERY
+            should_log_by_time = elapsed_since_report >= config.REPORT_INTERVAL_SECONDS
+            is_new_episode = episode > last_logged_episode
+            
+            if is_new_episode and (should_log_by_episode or should_log_by_time):
                 elapsed_total = current_time - self.training_start_time
                 steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 eps_per_hour = (episode - start_episode) / elapsed_total * 3600 if elapsed_total > 0 else 0
@@ -2404,6 +2411,7 @@ class HeadlessTrainer:
                       f"⚡ {steps_per_sec:,.0f} steps/s | "
                       f"📊 {eps_per_hour:,.0f} ep/hr")
                 
+                last_logged_episode = episode
                 last_report_time = current_time
                 steps_since_report = 0
             
@@ -2491,6 +2499,7 @@ class HeadlessTrainer:
         # Track last completed episode info for reporting
         last_score = 0
         last_info: dict = {}
+        last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
         
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         while config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES:
@@ -2600,26 +2609,30 @@ class HeadlessTrainer:
             # Update states for next iteration (already auto-reset in VecBreakout)
             states = next_states.copy()
             
-            # Time-based progress reporting (terminal)
+            # Progress reporting (terminal) - only log when new episodes complete
+            # Check if we should log: either LOG_EVERY episodes completed OR time interval passed
             current_time = time.time()
             elapsed_since_report = current_time - last_report_time
+            should_log_by_episode = (self.current_episode - last_logged_episode) >= config.LOG_EVERY
+            should_log_by_time = elapsed_since_report >= config.REPORT_INTERVAL_SECONDS
             
-            if elapsed_since_report >= config.REPORT_INTERVAL_SECONDS or episodes_completed % config.LOG_EVERY == 0:
-                if episodes_completed > 0:
-                    elapsed_total = current_time - self.training_start_time
-                    steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
-                    eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
-                    avg_score = np.mean(self.scores[-100:]) if self.scores else 0
-                    
-                    print(f"Ep {self.current_episode:5d} | "
-                          f"Score: {last_score:4d} | "
-                          f"Avg: {avg_score:6.1f} | "
-                          f"ε: {self.agent.epsilon:.3f} | "
-                          f"⚡ {steps_per_sec:,.0f} steps/s | "
-                          f"📊 {eps_per_hour:,.0f} ep/hr")
-                    
-                    last_report_time = current_time
-                    steps_since_report = 0
+            # Only log if we have new episodes AND (LOG_EVERY condition OR time interval)
+            if self.current_episode > last_logged_episode and (should_log_by_episode or should_log_by_time):
+                elapsed_total = current_time - self.training_start_time
+                steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
+                eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
+                avg_score = np.mean(self.scores[-100:]) if self.scores else 0
+                
+                print(f"Ep {self.current_episode:5d} | "
+                      f"Score: {last_score:4d} | "
+                      f"Avg: {avg_score:6.1f} | "
+                      f"ε: {self.agent.epsilon:.3f} | "
+                      f"⚡ {steps_per_sec:,.0f} steps/s | "
+                      f"📊 {eps_per_hour:,.0f} ep/hr")
+                
+                last_logged_episode = self.current_episode
+                last_report_time = current_time
+                steps_since_report = 0
         
         # Final save
         self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")

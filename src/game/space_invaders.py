@@ -1011,8 +1011,19 @@ class SpaceInvaders(BaseGame):
         # Check level clear condition - progress to next level!
         if self._aliens_remaining == 0:
             reward += self.config.SI_REWARD_LEVEL_CLEAR
-            self._next_level()
-            # Don't end the game - continue to next level
+            
+            # Check win condition: complete SI_WIN_LEVELS levels to win
+            # Level starts at 1, so after completing level N, level becomes N+1
+            # We win when we've completed SI_WIN_LEVELS levels (i.e., level > SI_WIN_LEVELS)
+            # (0 means endless mode, no wins possible)
+            if self.config.SI_WIN_LEVELS > 0 and self.level >= self.config.SI_WIN_LEVELS:
+                # We've completed enough levels - win!
+                self.won = True
+                self.game_over = True
+                reward += self.config.SI_REWARD_LEVEL_CLEAR * 2  # Bonus for winning
+            else:
+                # Advance to next level if we haven't won yet
+                self._next_level()
         
         # Check if aliens reached the ground base (invasion!)
         for alien in self.aliens:

@@ -122,6 +122,10 @@ class Config:
     SI_REWARD_SHOOT: float = -0.005  # Tiny penalty to discourage spam
     SI_REWARD_STEP: float = 0.001  # Small survival reward
     
+    # Win condition: Number of levels/waves to complete to win (0 = endless mode, no wins)
+    # For Space Invaders, completing many levels is a true win
+    SI_WIN_LEVELS: int = 10  # Complete 10 levels to win (set to 0 for endless mode)
+    
     # Space Invaders colors (CRT phosphor aesthetic)
     SI_COLOR_BACKGROUND: Tuple[int, int, int] = (0, 5, 0)  # Near black with green tint
     SI_COLOR_SHIP: Tuple[int, int, int] = (0, 255, 100)  # Bright green
@@ -131,6 +135,20 @@ class Config:
     SI_COLOR_ALIEN_3: Tuple[int, int, int] = (100, 200, 255)  # Cyan (bottom)
     SI_COLOR_UFO: Tuple[int, int, int] = (255, 50, 50)  # Red
     SI_COLOR_SHIELD: Tuple[int, int, int] = (0, 220, 80)  # Bright green bunkers
+    
+    # Curriculum learning (optional - disabled by default)
+    # When enabled, starts with easier game settings and gradually increases difficulty
+    SI_CURRICULUM_ENABLED: bool = False
+    
+    # Curriculum stages: each stage defines game parameters and episode count
+    # Format: {'alien_rows': int, 'alien_shoot_chance': float, 'episodes': int or None}
+    # None for episodes means "continue indefinitely at this difficulty"
+    SI_CURRICULUM_STAGES: List[dict] = field(default_factory=lambda: [
+        {'alien_rows': 2, 'alien_shoot_chance': 0.0005, 'episodes': 500},
+        {'alien_rows': 3, 'alien_shoot_chance': 0.0008, 'episodes': 500},
+        {'alien_rows': 4, 'alien_shoot_chance': 0.001, 'episodes': 500},
+        {'alien_rows': 5, 'alien_shoot_chance': 0.001, 'episodes': None},  # Full game
+    ])
     
     # =========================================================================
     # NEURAL NETWORK ARCHITECTURE
@@ -188,7 +206,8 @@ class Config:
     # Learning rate - How big of steps to take during optimization
     # Too high: unstable training, loss explodes
     # Too low: very slow learning
-    LEARNING_RATE: float = 0.0001
+    # 0.0003 provides faster initial learning for Space Invaders
+    LEARNING_RATE: float = 0.0003
     
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
@@ -216,8 +235,8 @@ class Config:
     # If > 0, uses soft updates instead of hard updates
     # target = TAU * policy + (1 - TAU) * target
     # Typical values: 0.001 to 0.01
-    # Slower updates for more stability
-    TARGET_TAU: float = 0.001
+    # 0.005 provides faster learning propagation while maintaining stability
+    TARGET_TAU: float = 0.005
     
     # Use soft updates instead of hard updates
     USE_SOFT_UPDATE: bool = True
@@ -238,14 +257,13 @@ class Config:
     # =========================================================================
     
     # Learn every N steps (1 = every step, higher = faster but less frequent learning)
-    # M4 optimal: 8-16 for CPU, 4 for MPS
-    LEARN_EVERY: int = 16
+    # Lower value = more frequent updates for faster learning
+    LEARN_EVERY: int = 4
 
     # Number of gradient updates per learning call
     # Compensates for LEARN_EVERY > 1 to maintain learning throughput
-    # Rule of thumb: GRADIENT_STEPS = LEARN_EVERY / 4 (for similar grad/sec)
-    # Increased for larger effective batch size
-    GRADIENT_STEPS: int = 4
+    # Rule of thumb: GRADIENT_STEPS = LEARN_EVERY / 2 (for similar grad/sec)
+    GRADIENT_STEPS: int = 2
     
     # Use torch.compile() for potential speedup (PyTorch 2.0+)
     # Note: Minimal benefit on CPU for small models, can cause overhead
@@ -267,22 +285,24 @@ class Config:
     # =========================================================================
     
     # Starting exploration rate (1.0 = 100% random)
-    EPSILON_START: float = 1.0
+    # With USE_NOISY_NETWORKS=True: Use small epsilon (0.05-0.1) as fallback
+    # NoisyNets handle primary exploration, epsilon provides backup diversity
+    EPSILON_START: float = 0.1
     
     # Minimum exploration rate (0.02 = 2% random to escape local optima)
+    # Keep small epsilon even with NoisyNets to prevent policy collapse
     EPSILON_END: float = 0.02
 
     # Decay rate per episode (higher = slower decay)
-    # EPSILON_DECAY = 0.998 means epsilon *= 0.998 after each episode
-    # Slower decay for Space Invaders complexity
-    EPSILON_DECAY: float = 0.998
+    # EPSILON_DECAY = 0.9995 means epsilon *= 0.9995 after each episode (slower decay)
+    EPSILON_DECAY: float = 0.9995
 
     # Exploration decay strategy: 'exponential', 'linear', 'cosine'
     EXPLORATION_STRATEGY: str = 'exponential'
 
     # Warmup episodes before epsilon starts decaying
     # Allows buffer to fill with diverse experiences
-    EPSILON_WARMUP: int = 100
+    EPSILON_WARMUP: int = 200
     
     # =========================================================================
     # PRIORITIZED EXPERIENCE REPLAY
@@ -331,18 +351,20 @@ class Config:
     USE_N_STEP_RETURNS: bool = True
 
     # Number of steps to look ahead (typically 3-5)
-    N_STEP_SIZE: int = 3
+    # 5 steps provides faster credit assignment for Space Invaders
+    N_STEP_SIZE: int = 5
 
     # =========================================================================
     # NOISY NETWORKS
     # =========================================================================
 
     # Enable NoisyNet (learnable parameter noise for exploration)
-    # When enabled, set EPSILON_END = 0.0 as network handles exploration
+    # Combined with small epsilon-greedy for hybrid exploration
     USE_NOISY_NETWORKS: bool = True
 
     # Standard deviation for noise initialization
-    NOISY_STD_INIT: float = 0.5
+    # Higher values = more initial exploration (0.5 standard, 0.7 for more exploration)
+    NOISY_STD_INIT: float = 0.7
 
     # =========================================================================
     # REWARD SHAPING

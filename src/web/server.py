@@ -219,6 +219,7 @@ class MetricsPublisher:
         self.rewards: Deque[float] = deque(maxlen=history_length)
         self.q_values: Deque[float] = deque(maxlen=history_length)
         self.episode_lengths: Deque[int] = deque(maxlen=history_length)
+        self.wins: Deque[bool] = deque(maxlen=history_length)  # Track actual wins per episode
 
         # Console log history
         self.console_logs: Deque[LogMessage] = deque(maxlen=500)
@@ -288,6 +289,7 @@ class MetricsPublisher:
         self.rewards.append(reward)
         self.q_values.append(avg_q_value)
         self.episode_lengths.append(episode_length)
+        self.wins.append(won)  # Track actual wins
         
         # Calculate episodes per second
         current_time = time.time()
@@ -321,11 +323,13 @@ class MetricsPublisher:
         else:
             self.state.steps_per_second = self._last_steps_per_sec
         
-        # Calculate win rate
-        if len(self.scores) > 0:
-            # Assume score > 300 is a win (configurable)
-            recent = list(self.scores)[-100:]
-            self.state.win_rate = sum(1 for s in recent if s >= 300) / len(recent)
+        # Calculate win rate from actual wins (game-specific)
+        # Use the actual 'won' flag from the game, not hardcoded score thresholds
+        if len(self.wins) > 0:
+            recent_wins = list(self.wins)[-100:]
+            self.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins)
+        else:
+            self.state.win_rate = 0.0
         
         # Notify callbacks (thread-safe copy to avoid modification during iteration)
         with self._callback_lock:

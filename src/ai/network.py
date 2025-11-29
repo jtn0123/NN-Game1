@@ -90,8 +90,7 @@ class NoisyLinear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with noisy weights during training."""
         if self.training:
-            # Reset noise for each forward pass to ensure fresh exploration
-            self.reset_noise()
+            # Use noisy weights (noise is reset before forward pass by caller)
             weight = self.weight_mu + self.weight_sigma * self.weight_epsilon  # type: ignore[operator]
             bias = self.bias_mu + self.bias_sigma * self.bias_epsilon  # type: ignore[operator]
         else:

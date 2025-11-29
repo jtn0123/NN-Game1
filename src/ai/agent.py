@@ -227,6 +227,9 @@ class Agent:
                 )
                 print(f"✓ Step LR scheduler enabled (step_size={step_size}, gamma={gamma})")
 
+        # Track if using NoisyNets for exploration (disables epsilon-greedy)
+        self._use_noisy_nets = getattr(self.config, 'USE_NOISY_NETWORKS', False)
+        
         # Replay buffer - prioritize N-step > PER > basic
         use_n_step = getattr(self.config, 'USE_N_STEP_RETURNS', False)
         self._use_per = False  # Default to False, set True only if using PER
@@ -306,11 +309,15 @@ class Agent:
     
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """
-        Select an action using epsilon-greedy policy.
+        Select an action using epsilon-greedy policy with optional NoisyNets.
+
+        Supports hybrid exploration: epsilon-greedy provides fallback random
+        exploration while NoisyNets provide learned, state-dependent exploration.
+        This prevents policy collapse if NoisyNet sigmas decay too aggressively.
 
         Args:
             state: Current game state
-            training: If True, use epsilon-greedy; if False, use greedy
+            training: If True, use exploration; if False, use greedy
 
         Returns:
             Selected action index
@@ -319,12 +326,14 @@ class Agent:
             After calling this method, check `agent._last_action_explored` to
             determine if the action was exploration (random) or exploitation (greedy).
         """
-        if training and random.random() < self.epsilon:
+        # Epsilon-greedy exploration (works alongside NoisyNets as fallback)
+        # Only skip if epsilon is exactly 0 (pure NoisyNets mode)
+        if training and self.epsilon > 0 and random.random() < self.epsilon:
             # Exploration: random action
             self._last_action_explored = True
             return random.randrange(self.action_size)
 
-        # Exploitation: best Q-value action
+        # Exploitation: best Q-value action (NoisyNets handle exploration internally)
         self._last_action_explored = False
 
         # Reset noise for NoisyNet exploration (only in training mode)
@@ -352,14 +361,15 @@ class Agent:
     
     def select_actions_batch(self, states: np.ndarray, training: bool = True) -> Tuple[np.ndarray, int, int]:
         """
-        Select actions for a batch of states using epsilon-greedy policy.
+        Select actions for a batch of states using epsilon-greedy or NoisyNets.
         
         This is optimized for vectorized environments, performing a single
-        forward pass for all states.
+        forward pass for all states. When USE_NOISY_NETWORKS is enabled,
+        exploration is handled by learned noise parameters instead of epsilon-greedy.
         
         Args:
             states: Batch of game states, shape (batch_size, state_size)
-            training: If True, use epsilon-greedy; if False, use greedy
+            training: If True, use exploration; if False, use greedy
             
         Returns:
             Tuple of:
@@ -372,7 +382,13 @@ class Agent:
         num_explored = 0
         num_exploited = 0
         
-        if training:
+        # Reset noise for NoisyNet exploration (only in training mode)
+        if training and hasattr(self.policy_net, 'reset_noise'):
+            self.policy_net.reset_noise()  # type: ignore[operator]
+        
+        # Epsilon-greedy exploration (works alongside NoisyNets as fallback)
+        # Only apply if epsilon > 0 and in training mode
+        if training and self.epsilon > 0:
             # Determine which states get random actions (exploration)
             # Use np.less() for clearer typing than < operator
             explore_mask = np.less(np.random.random(batch_size), self.epsilon)
@@ -385,6 +401,7 @@ class Agent:
             
             if num_exploited > 0:
                 # Exploitation: best Q-value actions for non-exploring states
+                # NoisyNets provide additional exploration within network forward pass
                 exploit_mask = ~explore_mask
                 exploit_states = states[exploit_mask]
                 
@@ -394,7 +411,8 @@ class Agent:
                     best_actions = q_values.argmax(dim=1).cpu().numpy()
                     actions[exploit_mask] = best_actions
         else:
-            # Pure greedy: all actions from network
+            # Pure NoisyNets or evaluation mode: all actions from network
+            # NoisyNets handle exploration via learned noise parameters
             num_exploited = batch_size
             with torch.inference_mode():
                 states_tensor = torch.from_numpy(states).to(self.device)
@@ -578,7 +596,13 @@ class Agent:
         # Only clip negative side to preserve win bonus signal (REWARD_WIN = 100)
         if self.config.REWARD_CLIP > 0:
             rewards = torch.clamp(rewards, min=-self.config.REWARD_CLIP)
-        
+
+        # Reset noise for NoisyNet exploration BEFORE forward pass
+        # This ensures fresh noise for each training step without modifying computation graph
+        if hasattr(self.policy_net, 'reset_noise'):
+            self.policy_net.reset_noise()  # type: ignore[operator]
+            self.target_net.reset_noise()  # type: ignore[operator]
+
         # Use mixed precision autocast if enabled (significant speedup on MPS/CUDA)
         # Only forward passes use float16; loss computed in float32 for numerical stability
         if self._use_mixed_precision:
@@ -602,12 +626,6 @@ class Agent:
         
         # Optimize (outside autocast for numerical stability)
         self.optimizer.zero_grad()
-
-        # Reset noise for NoisyNet exploration (after zero_grad to avoid gradient issues)
-        if hasattr(self.policy_net, 'reset_noise'):
-            self.policy_net.reset_noise()  # type: ignore[operator]
-            self.target_net.reset_noise()  # type: ignore[operator]
-
         loss.backward()
         
         # Gradient clipping for stability
@@ -696,7 +714,16 @@ class Agent:
             episode: Current episode number. Epsilon only decays after
                      EPSILON_WARMUP episodes to allow buffer to fill.
                      If None, bypasses warmup check (backward compatible).
+        
+        Note:
+            When USE_NOISY_NETWORKS is enabled with EPSILON_START > 0,
+            epsilon-greedy acts as a fallback exploration mechanism.
+            This hybrid approach prevents policy collapse if NoisyNet
+            sigmas decay too aggressively.
         """
+        # Allow epsilon decay even with NoisyNets if EPSILON_START > 0
+        # This provides hybrid exploration (NoisyNets + epsilon-greedy fallback)
+        
         warmup = getattr(self.config, 'EPSILON_WARMUP', 0)
 
         # Skip decay during warmup period (only if episode is explicitly provided)

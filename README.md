@@ -1,6 +1,8 @@
-# 🧠 Neural Network Game AI - Atari Breakout
+# 🧠 Neural Network Game AI - Breakout & Space Invaders
 
-A complete, educational implementation of a Deep Q-Learning (DQN) agent that learns to play Atari Breakout **in real-time** with a **live neural network visualizer**.
+A complete, educational implementation of a Deep Q-Learning (DQN) agent that learns to play classic arcade games **in real-time** with a **live neural network visualizer**.
+
+**Supported Games:** 🎮 Breakout | 👾 Space Invaders
 
 ![Project Architecture](docs/architecture.png)
 
@@ -14,9 +16,11 @@ A complete, educational implementation of a Deep Q-Learning (DQN) agent that lea
 4. [Quick Start](#-quick-start)
 5. [How It Works](#-how-it-works)
 6. [Configuration Guide](#-configuration-guide)
-7. [Benchmarking & Performance](#-benchmarking--performance)
-8. [Extending to Other Games](#-extending-to-other-games)
-9. [Troubleshooting](#-troubleshooting)
+7. [Advanced DQN Features](#-advanced-dqn-features)
+8. [Space Invaders Configuration](#-space-invaders-configuration)
+9. [Benchmarking & Performance](#-benchmarking--performance)
+10. [Extending to Other Games](#-extending-to-other-games)
+11. [Troubleshooting](#-troubleshooting)
 
 ---
 
@@ -24,10 +28,10 @@ A complete, educational implementation of a Deep Q-Learning (DQN) agent that lea
 
 ### What This Project Does
 
-This project demonstrates **reinforcement learning** by training a neural network to play Breakout:
+This project demonstrates **reinforcement learning** by training a neural network to play classic arcade games:
 
-1. **The Game** (`src/game/`) - A complete Atari Breakout implementation
-2. **The AI Brain** (`src/ai/`) - Deep Q-Network (DQN) that learns to play
+1. **The Games** (`src/game/`) - Complete implementations of Breakout and Space Invaders
+2. **The AI Brain** (`src/ai/`) - Advanced DQN with modern enhancements (Dueling, NoisyNets, PER, N-step)
 3. **The Visualizer** (`src/visualizer/`) - Real-time neural network activity visualization
 
 ### Key Features
@@ -55,8 +59,9 @@ NN-Game1/
 ├── src/
 │   ├── game/
 │   │   ├── __init__.py
-│   │   ├── breakout.py          # Game logic (state, physics, scoring)
-│   │   └── renderer.py          # Pygame rendering
+│   │   ├── base_game.py         # Abstract base class for games
+│   │   ├── breakout.py          # Breakout game logic
+│   │   └── space_invaders.py    # Space Invaders game logic
 │   │
 │   ├── ai/
 │   │   ├── __init__.py
@@ -255,7 +260,13 @@ We maintain TWO copies of the network:
 
 This prevents the "moving target" problem where Q-value estimates chase themselves.
 
-### 4. Exploration vs Exploitation (ε-greedy)
+### 4. Exploration vs Exploitation
+
+**Default: NoisyNets** (learned exploration via noisy network weights)
+
+The AI learns *when* and *how much* to explore through trainable noise parameters. This provides state-dependent exploration that's often more effective than random exploration.
+
+**Alternative: ε-greedy** (set `USE_NOISY_NETWORKS = False` in config.py)
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -299,22 +310,29 @@ All hyperparameters are in `config.py`:
 
 ```python
 # Learning Parameters
-LEARNING_RATE = 0.0001        # Higher = faster but unstable
-GAMMA = 0.99                   # Discount factor (0.95-0.99)
-BATCH_SIZE = 64               # Samples per training step
+LEARNING_RATE = 0.0003        # Optimized for faster learning
+GAMMA = 0.99                  # Discount factor (0.95-0.99)
+BATCH_SIZE = 128              # Samples per training step
 
-# Exploration
-EPSILON_START = 1.0           # Initial exploration rate
-EPSILON_END = 0.01            # Minimum exploration rate
+# Exploration (NoisyNets is default - these are for epsilon-greedy fallback)
+USE_NOISY_NETWORKS = True     # Learned exploration (default)
+EPSILON_START = 0.0           # Set to 1.0 if using epsilon-greedy
+EPSILON_END = 0.0             # Set to 0.02 if using epsilon-greedy
 EPSILON_DECAY = 0.995         # Decay rate per episode
 
 # Network Architecture
-HIDDEN_LAYERS = [256, 128]    # Neurons per hidden layer
+HIDDEN_LAYERS = [512, 256, 128]  # Neurons per hidden layer
+USE_DUELING = True               # Dueling DQN architecture
 
 # Training
-TARGET_UPDATE = 1000          # Steps between target network updates
+TARGET_TAU = 0.005            # Soft update coefficient
 MEMORY_SIZE = 100000          # Replay buffer capacity
 SAVE_EVERY = 100              # Episodes between checkpoints
+
+# Advanced Features
+USE_PRIORITIZED_REPLAY = True # Sample important experiences more
+USE_N_STEP_RETURNS = True     # Multi-step bootstrapping
+N_STEP_SIZE = 5               # Steps to look ahead
 ```
 
 ### Tuning Tips
@@ -325,6 +343,148 @@ SAVE_EVERY = 100              # Episodes between checkpoints
 | Learning is unstable | Decrease `LEARNING_RATE`, increase `BATCH_SIZE` |
 | AI gets stuck in local minimum | Increase `EPSILON_DECAY`, increase exploration |
 | Training too slow | Decrease `HIDDEN_LAYERS` size, use GPU |
+
+---
+
+## 🚀 Advanced DQN Features
+
+This implementation includes several modern improvements over vanilla DQN:
+
+### Dueling DQN Architecture
+
+Separates value and advantage estimation for better learning:
+
+```
+                              ┌─────────────┐
+                         ┌───►│ Value V(s)  │───┐
+┌────────┐   ┌────────┐  │    └─────────────┘   │    ┌──────────────┐
+│ State  │──►│ Shared │──┤                      ├───►│ Q(s,a) = V + │
+│        │   │ Layers │  │    ┌─────────────┐   │    │ (A - mean(A))│
+└────────┘   └────────┘  └───►│ Advantage   │───┘    └──────────────┘
+                              │ A(s,a)      │
+                              └─────────────┘
+```
+
+Enable with: `USE_DUELING = True` (default)
+
+### NoisyNets for Exploration
+
+Replaces epsilon-greedy with **learned exploration** through noisy network weights:
+
+```python
+# config.py
+USE_NOISY_NETWORKS = True   # Enable NoisyNets (default)
+EPSILON_START = 0.0         # When using NoisyNets, epsilon is disabled
+EPSILON_END = 0.0           # Exploration handled by learned noise parameters
+```
+
+**Benefits:**
+- ✅ State-dependent exploration (explores more in unfamiliar states)
+- ✅ No manual epsilon schedule tuning required
+- ✅ Often learns faster than epsilon-greedy
+
+**To use epsilon-greedy instead:**
+```python
+USE_NOISY_NETWORKS = False
+EPSILON_START = 1.0
+EPSILON_END = 0.02
+EPSILON_DECAY = 0.995
+```
+
+### Prioritized Experience Replay (PER)
+
+Samples important experiences more frequently:
+
+```python
+USE_PRIORITIZED_REPLAY = True  # Enable PER (default)
+PER_ALPHA = 0.6                # Priority exponent (0=uniform, 1=full priority)
+PER_BETA_START = 0.4           # Importance sampling correction
+```
+
+### N-Step Returns
+
+Faster reward propagation with multi-step bootstrapping:
+
+```python
+USE_N_STEP_RETURNS = True  # Enable N-step (default)
+N_STEP_SIZE = 5            # Look ahead 5 steps (faster credit assignment)
+```
+
+---
+
+## 👾 Space Invaders Configuration
+
+Space Invaders has game-specific settings optimized for AI learning:
+
+### Game Settings
+
+```python
+# Alien grid (5x11 = 55 aliens like the original)
+SI_ALIEN_ROWS = 5
+SI_ALIEN_COLS = 11
+
+# Movement speed (tuned for AI learning)
+SI_ALIEN_SPEED_X = 0.8      # Slower initial speed for learning
+SI_ALIEN_SPEED_Y = 10       # Smaller drops = more reaction time
+
+# Combat
+SI_MAX_PLAYER_BULLETS = 2   # Limited ammo like original
+SI_ALIEN_SHOOT_CHANCE = 0.001
+```
+
+### Reward Shaping
+
+```python
+SI_REWARD_ALIEN_HIT = 1.0       # Per alien killed
+SI_REWARD_UFO_HIT = 5.0         # Bonus UFO
+SI_REWARD_PLAYER_DEATH = -5.0   # Death penalty
+SI_REWARD_LEVEL_CLEAR = 30.0    # Level completion bonus
+SI_REWARD_SHOOT = -0.005        # Small penalty to prevent spam
+SI_REWARD_STEP = 0.001          # Survival reward
+```
+
+### Curriculum Learning (Optional)
+
+Start with easier settings and gradually increase difficulty:
+
+```python
+# Enable progressive difficulty (disabled by default)
+SI_CURRICULUM_ENABLED = True
+
+# Stages progress from easy to full game
+SI_CURRICULUM_STAGES = [
+    {'alien_rows': 2, 'alien_shoot_chance': 0.0005, 'episodes': 500},
+    {'alien_rows': 3, 'alien_shoot_chance': 0.0008, 'episodes': 500},
+    {'alien_rows': 4, 'alien_shoot_chance': 0.001, 'episodes': 500},
+    {'alien_rows': 5, 'alien_shoot_chance': 0.001, 'episodes': None},  # Full game
+]
+```
+
+### Training Space Invaders
+
+```bash
+# Train Space Invaders with visualization
+python main.py --game space_invaders
+
+# Headless training (faster)
+python main.py --game space_invaders --headless
+
+# Resume from checkpoint
+python main.py --game space_invaders --model models/space_invaders/space_invaders_best.pth
+```
+
+### Optimized Hyperparameters
+
+These settings are tuned for faster Space Invaders learning:
+
+| Parameter | Value | Reason |
+|-----------|-------|--------|
+| `LEARNING_RATE` | 0.0003 | 3x faster initial learning |
+| `TARGET_TAU` | 0.005 | Faster target network updates |
+| `N_STEP_SIZE` | 5 | Better credit assignment |
+| `LEARN_EVERY` | 4 | More frequent updates |
+| `GRADIENT_STEPS` | 2 | Balanced throughput |
+| `EPSILON_WARMUP` | 200 | More diverse initial experiences |
 
 ---
 
