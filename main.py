@@ -1099,12 +1099,13 @@ class GameApp:
                         # Terminal log
                         if self.episode % self.config.LOG_EVERY == 0:
                             avg_score = np.mean(list(self.dashboard.scores)[-100:]) if self.dashboard.scores else 0
+                            avg_loss = self.agent.get_average_loss(100)
                             print(f"Episode {self.episode:5d} | "
                                   f"Score: {info['score']:4d} | "
                                   f"Avg: {avg_score:6.1f} | "
-                                  f"ε: {self.agent.epsilon:.3f} | "
-                                  f"Steps: {episode_steps:5d} | "
-                                  f"Time: {episode_duration:.1f}s")
+                                  f"Loss: {avg_loss:.4f} | "
+                                  f"Q: {avg_q_value:.1f} | "
+                                  f"ε: {self.agent.epsilon:.3f}")
                         
                         # Track scores for metadata
                         self.recent_scores.append(info['score'])
@@ -1119,9 +1120,10 @@ class GameApp:
                         self.training_history_bricks.append(episode_bricks_broken)
                         self.training_history_wins.append(info.get('won', False))
                         
-                        # Save checkpoint
+                        # Save checkpoint (no replay buffer for periodic - saves disk space)
                         if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
                             self._save_model(f"{self.config.GAME_NAME}_ep{self.episode}.pth", save_reason="periodic")
+                            self._cleanup_old_periodic_saves(keep_last=5)
                             if self.web_dashboard:
                                 self.web_dashboard.log(
                                     f"💾 Checkpoint saved: {self.config.GAME_NAME}_ep{self.episode}.pth",
@@ -1315,10 +1317,15 @@ class GameApp:
                 elapsed_total = current_time - start_time
                 steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 avg_score = np.mean(scores[-100:]) if scores else 0
+                avg_loss = self.agent.get_average_loss(100)
+                q_values = self.agent.get_q_values(state)
+                avg_q = float(np.mean(q_values))
                 
                 print(f"Episode {episode:5d} | "
                       f"Score: {info['score']:4d} | "
                       f"Avg: {avg_score:6.1f} | "
+                      f"Loss: {avg_loss:.4f} | "
+                      f"Q: {avg_q:.1f} | "
                       f"ε: {self.agent.epsilon:.3f} | "
                       f"⚡ {steps_per_sec:,.0f} steps/s")
                 
@@ -1597,6 +1604,35 @@ class GameApp:
         self._save_model(filename, save_reason="manual")
         if self.web_dashboard:
             self.web_dashboard.log(f"💾 Saved as: {filename}", "success")
+    
+    def _cleanup_old_periodic_saves(self, keep_last: int = 5) -> None:
+        """
+        Delete old periodic checkpoint saves, keeping only the most recent ones.
+        """
+        import glob
+        import re
+        
+        model_dir = self.config.GAME_MODEL_DIR
+        game_name = self.config.GAME_NAME
+        
+        pattern = os.path.join(model_dir, f"{game_name}_ep*.pth")
+        periodic_saves = glob.glob(pattern)
+        
+        if len(periodic_saves) <= keep_last:
+            return
+        
+        def get_episode_num(path: str) -> int:
+            match = re.search(r'_ep(\d+)\.pth$', path)
+            return int(match.group(1)) if match else 0
+        
+        periodic_saves.sort(key=get_episode_num)
+        to_delete = periodic_saves[:-keep_last]
+        
+        for filepath in to_delete:
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
 
 
 class HeadlessTrainer:
@@ -2501,7 +2537,12 @@ class HeadlessTrainer:
                     self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
             
             if episode % config.SAVE_EVERY == 0 and episode > 0:
-                self._save_model(f"{self.config.GAME_NAME}_ep{episode}.pth", save_reason="periodic")
+                self._save_model(
+                    f"{self.config.GAME_NAME}_ep{episode}.pth",
+                    save_reason="periodic",
+                    save_replay_buffer=False  # Periodic saves are lightweight
+                )
+                self._cleanup_old_periodic_saves(keep_last=5)
             
             # Increment episode counter (was implicit in for loop, now explicit for while loop)
             episode += 1
@@ -2681,9 +2722,14 @@ class HeadlessTrainer:
                     episodes_completed += 1
                     self.current_episode += 1
                     
-                    # Save checkpoints
+                    # Save checkpoints (no replay buffer for periodic saves - saves disk space)
                     if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
-                        self._save_model(f"{self.config.GAME_NAME}_ep{self.current_episode}.pth", save_reason="periodic")
+                        self._save_model(
+                            f"{self.config.GAME_NAME}_ep{self.current_episode}.pth",
+                            save_reason="periodic",
+                            save_replay_buffer=False  # Periodic saves are lightweight
+                        )
+                        self._cleanup_old_periodic_saves(keep_last=5)
             
             # Decay epsilon once per step if any episodes completed
             # (NOT per environment - that would decay too fast with many parallel envs)
@@ -2715,6 +2761,8 @@ class HeadlessTrainer:
                 steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
+                avg_loss = self.agent.get_average_loss(100)
+                avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
                 
                 # Get level reached from last completed episode
                 level_reached = last_info.get('level', 1) if last_info else 1
@@ -2722,10 +2770,10 @@ class HeadlessTrainer:
                 progress_msg = (f"Ep {self.current_episode:5d} | "
                       f"Score: {last_score:4d} | "
                       f"Avg: {avg_score:6.1f} | "
-                      f"Lv: {level_reached} | "
+                      f"Loss: {avg_loss:.4f} | "
+                      f"Q: {avg_q:.1f} | "
                       f"ε: {self.agent.epsilon:.3f} | "
-                      f"⚡ {steps_per_sec:,.0f} steps/s | "
-                      f"📊 {eps_per_hour:,.0f} ep/hr")
+                      f"⚡ {steps_per_sec:,.0f} steps/s")
                 
                 print(progress_msg)
                 
@@ -2832,6 +2880,51 @@ class HeadlessTrainer:
                 self.web_dashboard.log(f"💾 Saved: {filename} ({save_reason})", "success")
         
         return result is not None
+    
+    def _cleanup_old_periodic_saves(self, keep_last: int = 5) -> None:
+        """
+        Delete old periodic checkpoint saves, keeping only the most recent ones.
+        
+        This prevents disk space bloat from accumulating ep100.pth, ep200.pth, etc.
+        Important saves (best, final, interrupted) are NOT deleted.
+        
+        Args:
+            keep_last: Number of recent periodic saves to keep
+        """
+        import glob
+        import re
+        
+        model_dir = self.config.GAME_MODEL_DIR
+        game_name = self.config.GAME_NAME
+        
+        # Find all periodic saves (e.g., space_invaders_ep100.pth, space_invaders_ep200.pth)
+        pattern = os.path.join(model_dir, f"{game_name}_ep*.pth")
+        periodic_saves = glob.glob(pattern)
+        
+        if len(periodic_saves) <= keep_last:
+            return  # Nothing to clean up
+        
+        # Extract episode numbers and sort
+        def get_episode_num(path: str) -> int:
+            match = re.search(r'_ep(\d+)\.pth$', path)
+            return int(match.group(1)) if match else 0
+        
+        # Sort by episode number (oldest first)
+        periodic_saves.sort(key=get_episode_num)
+        
+        # Delete all but the last `keep_last` saves
+        to_delete = periodic_saves[:-keep_last]
+        
+        for filepath in to_delete:
+            try:
+                os.remove(filepath)
+                if self.web_dashboard:
+                    self.web_dashboard.log(
+                        f"🗑️ Cleaned up old checkpoint: {os.path.basename(filepath)}",
+                        "info"
+                    )
+            except Exception as e:
+                print(f"⚠️ Could not delete {filepath}: {e}")
 
 
 def parse_args():
