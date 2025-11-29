@@ -74,62 +74,63 @@ class Config:
     # SPACE INVADERS SETTINGS
     # =========================================================================
     
-    # Grid of aliens
+    # Grid of aliens (classic: 5 rows x 11 columns = 55 aliens)
     SI_ALIEN_ROWS: int = 5
     SI_ALIEN_COLS: int = 11
-    SI_ALIEN_WIDTH: int = 40
-    SI_ALIEN_HEIGHT: int = 30
-    SI_ALIEN_PADDING: int = 10
-    SI_ALIEN_OFFSET_TOP: int = 80
-    SI_ALIEN_OFFSET_LEFT: int = 60
+    SI_ALIEN_WIDTH: int = 36
+    SI_ALIEN_HEIGHT: int = 26
+    SI_ALIEN_PADDING: int = 12
+    SI_ALIEN_OFFSET_TOP: int = 100  # Start aliens higher for more play space
+    SI_ALIEN_OFFSET_LEFT: int = 70
     
-    # Alien movement
-    SI_ALIEN_SPEED_X: float = 2.0
-    SI_ALIEN_SPEED_Y: int = 20  # Drop distance when hitting edge
-    SI_ALIEN_SPEED_MULTIPLIER: float = 1.05  # Speed increase per destroyed row
+    # Alien movement - tuned for AI learning with slower initial speed
+    SI_ALIEN_SPEED_X: float = 0.8  # Slower initial speed (was 2.0)
+    SI_ALIEN_SPEED_Y: int = 10  # Smaller drops (was 20) - gives AI more time
+    SI_ALIEN_SPEED_MULTIPLIER: float = 1.03  # Gradual speed increase
     
     # Player ship
     SI_SHIP_WIDTH: int = 50
     SI_SHIP_HEIGHT: int = 30
-    SI_SHIP_SPEED: int = 6
-    SI_SHIP_Y_OFFSET: int = 50  # Distance from bottom
+    SI_SHIP_SPEED: int = 7  # Slightly faster for responsive control
+    SI_SHIP_Y_OFFSET: int = 80  # More space from bottom for base visual
     
     # Bullets
     SI_BULLET_WIDTH: int = 4
     SI_BULLET_HEIGHT: int = 15
-    SI_BULLET_SPEED: int = 10
-    SI_MAX_PLAYER_BULLETS: int = 3
-    SI_ALIEN_SHOOT_CHANCE: float = 0.002  # Per alien per frame
-    SI_ALIEN_BULLET_SPEED: int = 5
+    SI_BULLET_SPEED: int = 12  # Faster bullets
+    SI_MAX_PLAYER_BULLETS: int = 2  # Limited to 2 like original
+    SI_ALIEN_SHOOT_CHANCE: float = 0.001  # Reduced from 0.002 - less spam
+    SI_ALIEN_BULLET_SPEED: int = 4  # Slower alien bullets for fairness
     
     # UFO bonus
-    SI_UFO_CHANCE: float = 0.001  # Per frame when no UFO exists
+    SI_UFO_CHANCE: float = 0.0008  # Slightly rarer
     SI_UFO_SPEED: int = 3
-    SI_UFO_POINTS: int = 100
+    SI_UFO_POINTS: int = 100  # 50-300 random in original, we use fixed
     
-    # Shields/barriers (optional - can be disabled)
-    SI_SHIELDS_ENABLED: bool = True
+    # Shields/bunkers (classic Space Invaders defense)
+    # Set to False to disable bunkers for simpler gameplay/training
+    SI_SHIELDS_ENABLED: bool = False
     SI_SHIELD_COUNT: int = 4
-    SI_SHIELD_WIDTH: int = 60
-    SI_SHIELD_HEIGHT: int = 40
+    SI_SHIELD_WIDTH: int = 50
+    SI_SHIELD_HEIGHT: int = 35
     
-    # Space Invaders rewards
-    SI_REWARD_ALIEN_HIT: float = 1.0
-    SI_REWARD_UFO_HIT: float = 5.0
-    SI_REWARD_PLAYER_DEATH: float = -10.0
-    SI_REWARD_LEVEL_CLEAR: float = 50.0
-    SI_REWARD_SHOOT: float = -0.01  # Small penalty to discourage spam
-    SI_REWARD_STEP: float = 0.0
+    # Space Invaders rewards - tuned for AI training
+    SI_REWARD_ALIEN_HIT: float = 1.0  # Per alien killed
+    SI_REWARD_UFO_HIT: float = 5.0  # UFO bonus
+    SI_REWARD_PLAYER_DEATH: float = -5.0  # Less harsh (was -10)
+    SI_REWARD_LEVEL_CLEAR: float = 30.0  # Per level cleared (was 50)
+    SI_REWARD_SHOOT: float = -0.005  # Tiny penalty to discourage spam
+    SI_REWARD_STEP: float = 0.001  # Small survival reward
     
     # Space Invaders colors (CRT phosphor aesthetic)
     SI_COLOR_BACKGROUND: Tuple[int, int, int] = (0, 5, 0)  # Near black with green tint
     SI_COLOR_SHIP: Tuple[int, int, int] = (0, 255, 100)  # Bright green
     SI_COLOR_BULLET: Tuple[int, int, int] = (0, 255, 200)  # Cyan
-    SI_COLOR_ALIEN_1: Tuple[int, int, int] = (255, 0, 100)  # Magenta
-    SI_COLOR_ALIEN_2: Tuple[int, int, int] = (0, 255, 150)  # Green
-    SI_COLOR_ALIEN_3: Tuple[int, int, int] = (100, 200, 255)  # Cyan
+    SI_COLOR_ALIEN_1: Tuple[int, int, int] = (255, 60, 100)  # Pink/magenta (top rows)
+    SI_COLOR_ALIEN_2: Tuple[int, int, int] = (100, 255, 100)  # Green (middle)
+    SI_COLOR_ALIEN_3: Tuple[int, int, int] = (100, 200, 255)  # Cyan (bottom)
     SI_COLOR_UFO: Tuple[int, int, int] = (255, 50, 50)  # Red
-    SI_COLOR_SHIELD: Tuple[int, int, int] = (0, 200, 100)  # Green
+    SI_COLOR_SHIELD: Tuple[int, int, int] = (0, 220, 80)  # Bright green bunkers
     
     # =========================================================================
     # NEURAL NETWORK ARCHITECTURE

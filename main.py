@@ -146,6 +146,15 @@ class GameApp:
         )
         self.clock = pygame.time.Clock()
         
+        # Create a fixed-size surface for game rendering (will be scaled to window)
+        self.game_surface = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
+        
+        # Scaling state
+        self.scale_factor = 1.0
+        self.game_offset_x = 0
+        self.game_offset_y = 0
+        self._update_scale()
+        
         # Create game from registry
         GameClass = get_game(config.GAME_NAME)
         if GameClass is None:
@@ -635,6 +644,27 @@ class GameApp:
         # Game display area stays fixed (training stats and NN viz are on web dashboard)
         self.game_width = self.config.SCREEN_WIDTH   # 800
         self.game_height = self.config.SCREEN_HEIGHT  # 600
+        
+        # Update scaling for the new window size
+        self._update_scale()
+    
+    def _update_scale(self) -> None:
+        """Calculate scaling factor to fit game in window while maintaining aspect ratio."""
+        game_aspect = self.config.SCREEN_WIDTH / self.config.SCREEN_HEIGHT
+        window_aspect = self.window_width / self.window_height
+        
+        if window_aspect > game_aspect:
+            # Window is wider than game - scale by height
+            self.scale_factor = self.window_height / self.config.SCREEN_HEIGHT
+            scaled_width = int(self.config.SCREEN_WIDTH * self.scale_factor)
+            self.game_offset_x = (self.window_width - scaled_width) // 2
+            self.game_offset_y = 0
+        else:
+            # Window is taller than game - scale by width
+            self.scale_factor = self.window_width / self.config.SCREEN_WIDTH
+            scaled_height = int(self.config.SCREEN_HEIGHT * self.scale_factor)
+            self.game_offset_x = 0
+            self.game_offset_y = (self.window_height - scaled_height) // 2
     
     # Speed presets for clean stepping
     SPEED_PRESETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000]
@@ -681,8 +711,12 @@ class GameApp:
     def run_human_mode(self) -> None:
         """Run in human play mode for testing the game."""
         print("\n🎮 Human Play Mode")
-        print("   Use LEFT/RIGHT arrow keys to move paddle")
-        print("   Press R to reset, Q to quit\n")
+        if self.config.GAME_NAME == 'space_invaders':
+            print("   Use LEFT/RIGHT arrow keys to move")
+            print("   SPACE to shoot")
+        else:
+            print("   Use LEFT/RIGHT arrow keys to move paddle")
+        print("   Press R to reset, Q to quit, F for fullscreen\n")
         
         state = self.game.reset()
         
@@ -691,11 +725,13 @@ class GameApp:
             
             # Get keyboard input
             keys = pygame.key.get_pressed()
-            action = 1  # STAY
+            action = 1  # STAY / IDLE
             if keys[pygame.K_LEFT]:
                 action = 0  # LEFT
             elif keys[pygame.K_RIGHT]:
                 action = 2  # RIGHT
+            elif keys[pygame.K_SPACE] and self.config.GAME_NAME == 'space_invaders':
+                action = 3  # SHOOT (Space Invaders only)
             
             # Step game
             state, reward, done, info = self.game.step(action)
@@ -1208,23 +1244,14 @@ class GameApp:
                         self._update_layout(display_info.current_w, display_info.current_h)
     
     def _render_frame(self, state: np.ndarray, action: int, info: dict) -> None:
-        """Render one frame of the visualization."""
-        # Clear screen
-        self.screen.fill((10, 10, 15))
+        """Render one frame of the visualization with proper scaling."""
+        # Clear the game surface (fixed size)
+        self.game_surface.fill((10, 10, 15))
         
-        # Render game only (training stats and NN viz are on web dashboard)
-        self.game.render(self.screen)
+        # Render game to the fixed-size game surface
+        self.game.render(self.game_surface)
         
-        # Capture screenshot for web dashboard (every 10 frames for responsive updates)
-        self.frame_count += 1
-        if self.web_dashboard and self.frame_count % 10 == 0:
-            self.web_dashboard.capture_screenshot(self.screen)
-        
-        # Emit NN visualization data to web dashboard (throttled by server)
-        if self.web_dashboard:
-            self._emit_nn_visualization(state, action)
-        
-        # Render pause indicator (centered on the game area)
+        # Render pause indicator (centered on the game surface)
         if self.paused:
             game_center_x = self.config.SCREEN_WIDTH // 2
             game_center_y = self.config.SCREEN_HEIGHT // 2
@@ -1237,16 +1264,38 @@ class GameApp:
             bg_rect = text_rect.inflate(40, 20)
             bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
             pygame.draw.rect(bg_surface, (0, 0, 0, 200), bg_surface.get_rect(), border_radius=10)
-            self.screen.blit(bg_surface, bg_rect.topleft)
-            pygame.draw.rect(self.screen, (255, 200, 50), bg_rect, 3, border_radius=10)
+            self.game_surface.blit(bg_surface, bg_rect.topleft)
+            pygame.draw.rect(self.game_surface, (255, 200, 50), bg_rect, 3, border_radius=10)
             
-            self.screen.blit(text, text_rect)
+            self.game_surface.blit(text, text_rect)
         
         # Render speed indicator if not normal (top right of game area)
         if self.game_speed != 1.0:
             font = pygame.font.Font(None, 24)
             speed_text = font.render(f"Speed: {self.game_speed}x", True, (150, 150, 150))
-            self.screen.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
+            self.game_surface.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
+        
+        # Capture screenshot for web dashboard (before scaling, every 10 frames)
+        self.frame_count += 1
+        if self.web_dashboard and self.frame_count % 10 == 0:
+            self.web_dashboard.capture_screenshot(self.game_surface)
+        
+        # Emit NN visualization data to web dashboard (throttled by server)
+        if self.web_dashboard:
+            self._emit_nn_visualization(state, action)
+        
+        # Clear main screen and scale game surface to fit window
+        self.screen.fill((0, 0, 0))
+        
+        # Calculate scaled size
+        scaled_width = int(self.config.SCREEN_WIDTH * self.scale_factor)
+        scaled_height = int(self.config.SCREEN_HEIGHT * self.scale_factor)
+        
+        # Scale the game surface (use smoothscale for better quality)
+        scaled_surface = pygame.transform.smoothscale(self.game_surface, (scaled_width, scaled_height))
+        
+        # Blit centered on screen
+        self.screen.blit(scaled_surface, (self.game_offset_x, self.game_offset_y))
         
         pygame.display.flip()
     

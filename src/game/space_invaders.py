@@ -128,6 +128,99 @@ class Particle:
             pygame.draw.rect(screen, color, (int(self.x), int(self.y), size, size))
 
 
+class ScorePopup:
+    """Floating score text that rises and fades."""
+    
+    def __init__(self, x: int, y: int, score: int, color: Tuple[int, int, int]):
+        self.x = x
+        self.y = float(y)
+        self.score = score
+        self.color = color
+        self.life = 1.0
+        self.speed = 1.5  # Rise speed
+    
+    def update(self) -> bool:
+        """Update popup. Returns True if still alive."""
+        self.y -= self.speed
+        self.life -= 0.025
+        return self.life > 0
+    
+    def draw(self, screen: pygame.Surface) -> None:
+        if self.life <= 0:
+            return
+        
+        font = pygame.font.Font(None, 24)
+        alpha = int(255 * self.life)
+        
+        # Create text with current alpha
+        text = f"+{self.score}"
+        color = tuple(int(c * self.life) for c in self.color)
+        
+        # Glow effect
+        glow_color = tuple(c // 2 for c in color)
+        glow_surf = font.render(text, True, glow_color)
+        screen.blit(glow_surf, (self.x - glow_surf.get_width() // 2 + 1, int(self.y) + 1))
+        
+        # Main text
+        text_surf = font.render(text, True, color)
+        screen.blit(text_surf, (self.x - text_surf.get_width() // 2, int(self.y)))
+
+
+class WaveAnnouncement:
+    """Large wave number announcement that fades in and out."""
+    
+    def __init__(self, wave: int, screen_width: int, screen_height: int):
+        self.wave = wave
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.timer = 0.0
+        self.duration = 2.0  # Total display time in seconds
+        self.alive = True
+    
+    def update(self, dt: float = 1/60) -> bool:
+        """Update announcement. Returns True if still alive."""
+        self.timer += dt
+        if self.timer >= self.duration:
+            self.alive = False
+        return self.alive
+    
+    def draw(self, screen: pygame.Surface) -> None:
+        if not self.alive:
+            return
+        
+        # Calculate alpha: fade in for 0.3s, hold, fade out for 0.3s
+        if self.timer < 0.3:
+            alpha = self.timer / 0.3
+        elif self.timer > self.duration - 0.3:
+            alpha = (self.duration - self.timer) / 0.3
+        else:
+            alpha = 1.0
+        
+        # Scale effect: start big, settle to normal
+        if self.timer < 0.2:
+            scale = 1.5 - 0.5 * (self.timer / 0.2)
+        else:
+            scale = 1.0
+        
+        font_size = int(72 * scale)
+        font = pygame.font.Font(None, font_size)
+        
+        text = f"WAVE {self.wave}"
+        color = (255, 200, 50)  # Gold
+        
+        # Glow effect
+        glow_color = tuple(int(c * 0.5 * alpha) for c in color)
+        glow_surf = font.render(text, True, glow_color)
+        glow_rect = glow_surf.get_rect(center=(self.screen_width // 2 + 2, self.screen_height // 2 + 2))
+        screen.blit(glow_surf, glow_rect)
+        
+        # Main text
+        text_color = tuple(int(c * alpha) for c in color)
+        text_surf = font.render(text, True, text_color)
+        text_rect = text_surf.get_rect(center=(self.screen_width // 2, self.screen_height // 2))
+        screen.blit(text_surf, text_rect)
+
+
 class Star:
     """A background star."""
     
@@ -425,6 +518,108 @@ class UFO:
                              (rect.centerx + offset, rect.centery + 2), 2)
 
 
+class ShieldBlock:
+    """A single destructible block of a shield/bunker."""
+    
+    def __init__(self, x: int, y: int, size: int, color: Tuple[int, int, int]):
+        self.x = x
+        self.y = y
+        self.size = size
+        self.color = color
+        self.health = 4  # Can take 4 hits before destroyed
+        self.alive = True
+    
+    @property
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(self.x, self.y, self.size, self.size)
+    
+    def hit(self) -> bool:
+        """Take damage. Returns True if destroyed."""
+        self.health -= 1
+        if self.health <= 0:
+            self.alive = False
+            return True
+        return False
+    
+    def draw(self, screen: pygame.Surface) -> None:
+        if not self.alive:
+            return
+        
+        # Color fades as health decreases
+        fade = self.health / 4.0
+        color = tuple(int(c * fade) for c in self.color)
+        
+        # Draw with slight erosion effect based on health
+        rect = self.rect
+        if self.health < 4:
+            # Add erosion visual
+            eroded_rect = rect.inflate(-1, -1)
+            pygame.draw.rect(screen, color, eroded_rect)
+        else:
+            pygame.draw.rect(screen, color, rect)
+
+
+class Shield:
+    """A protective bunker made of destructible blocks - classic Space Invaders defense."""
+    
+    def __init__(self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.color = color
+        self.blocks: List[ShieldBlock] = []
+        self._create_blocks()
+    
+    def _create_blocks(self) -> None:
+        """Create the classic bunker shape with small destructible blocks."""
+        block_size = 4  # Small blocks for granular destruction
+        
+        # Classic bunker shape pattern (wider at bottom, arch in middle bottom)
+        rows = self.height // block_size
+        cols = self.width // block_size
+        
+        for row in range(rows):
+            for col in range(cols):
+                bx = self.x + col * block_size
+                by = self.y + row * block_size
+                
+                # Create the classic bunker shape
+                # Full width for most of the bunker
+                # Arch cut-out at the bottom center
+                row_ratio = row / rows
+                col_ratio = col / cols
+                center_dist = abs(col_ratio - 0.5)
+                
+                # Skip blocks in the arch area (bottom center)
+                if row_ratio > 0.6 and center_dist < 0.25:
+                    continue
+                
+                # Skip corners for rounded top
+                if row_ratio < 0.2:
+                    if center_dist > 0.4:
+                        continue
+                
+                self.blocks.append(ShieldBlock(bx, by, block_size, self.color))
+    
+    def check_collision(self, bullet_rect: pygame.Rect) -> bool:
+        """Check if a bullet hits any block. Returns True if hit."""
+        for block in self.blocks:
+            if block.alive and bullet_rect.colliderect(block.rect):
+                block.hit()
+                return True
+        return False
+    
+    def draw(self, screen: pygame.Surface) -> None:
+        for block in self.blocks:
+            block.draw(screen)
+    
+    @property
+    def alive(self) -> bool:
+        """Shield is alive if any blocks remain."""
+        return any(block.alive for block in self.blocks)
+
+
 class SpaceInvaders(BaseGame):
     """Space Invaders game implementation with enhanced visuals."""
     
@@ -443,17 +638,23 @@ class SpaceInvaders(BaseGame):
         self.player_bullets: List[Bullet] = []
         self.alien_bullets: List[Bullet] = []
         self.ufo: Optional[UFO] = None
+        self.shields: List[Shield] = []  # Protective bunkers
         
         # Visual effects
         self.particles: List[Particle] = []
         self.stars: List[Star] = []
+        self.score_popups: List[ScorePopup] = []
+        self.wave_announcement: Optional[WaveAnnouncement] = None
         self.screen_shake = 0.0
         self.flash_alpha = 0
         
-        # Alien movement
+        # Alien movement - start slower for better AI learning
         self.alien_direction = 1
-        self.alien_speed = self.config.SI_ALIEN_SPEED_X
+        self.alien_base_speed = self.config.SI_ALIEN_SPEED_X
+        self.alien_speed = self.alien_base_speed
         self.alien_x_offset = 0.0
+        self.alien_drop_distance = self.config.SI_ALIEN_SPEED_Y
+        self.alien_pulse_phase = 0.0  # For visual pulse effect
         
         # Game state
         self.score = 0
@@ -461,13 +662,23 @@ class SpaceInvaders(BaseGame):
         self.game_over = False
         self.won = False
         self.level = 1
+        self.total_aliens_killed = 0
         
-        # State representation
+        # Player invincibility after death
+        self.player_invincible = False
+        self.invincibility_timer = 0.0
+        self.invincibility_duration = 2.0  # 2 seconds of invincibility
+        
+        # Ground base position (what the player defends)
+        self.ground_y = self.height - 25
+        
+        # State representation - enhanced with danger info
         self._num_aliens = self.config.SI_ALIEN_ROWS * self.config.SI_ALIEN_COLS
         self._aliens_remaining = self._num_aliens
         
         self._max_player_bullets = self.config.SI_MAX_PLAYER_BULLETS
-        self._state_size = 1 + self._max_player_bullets * 2 + self._num_aliens + 3
+        # Enhanced state: ship_x, bullets, aliens, movement, danger metrics, lowest alien y
+        self._state_size = 1 + self._max_player_bullets * 2 + self._num_aliens + 5
         self._state_array = np.zeros(self._state_size, dtype=np.float32)
         self._alien_states = np.ones(self._num_aliens, dtype=np.float32)
         
@@ -529,6 +740,26 @@ class SpaceInvaders(BaseGame):
         for _ in range(count):
             self.particles.append(Particle(x, y, color))
     
+    def _spawn_player_death_explosion(self) -> None:
+        """Spawn a dramatic player death explosion."""
+        if self.headless or self.ship is None:
+            return
+        
+        cx = self.ship.rect.centerx
+        cy = self.ship.rect.centery
+        
+        # Multi-color explosion for dramatic effect
+        colors = [
+            (255, 100, 50),   # Orange
+            (255, 200, 50),   # Yellow
+            (255, 50, 50),    # Red
+            (100, 255, 100),  # Green (ship color)
+        ]
+        
+        for color in colors:
+            for _ in range(15):
+                self.particles.append(Particle(cx, cy, color))
+    
     @property
     def state_size(self) -> int:
         return self._state_size
@@ -543,6 +774,12 @@ class SpaceInvaders(BaseGame):
         self.lives = self.config.LIVES
         self.game_over = False
         self.won = False
+        self.level = 1
+        self.total_aliens_killed = 0
+        
+        # Reset player invincibility
+        self.player_invincible = False
+        self.invincibility_timer = 0.0
         
         ship_x = (self.width - self.config.SI_SHIP_WIDTH) // 2
         ship_y = self.height - self.config.SI_SHIP_Y_OFFSET - self.config.SI_SHIP_HEIGHT
@@ -555,15 +792,21 @@ class SpaceInvaders(BaseGame):
         )
         
         self._create_aliens()
+        self._create_shields()
         
         self.player_bullets = []
         self.alien_bullets = []
         self.ufo = None
         self.particles = []
+        self.score_popups = []
+        self.wave_announcement = None
         
         self.alien_direction = 1
-        self.alien_speed = self.config.SI_ALIEN_SPEED_X
+        self.alien_base_speed = self.config.SI_ALIEN_SPEED_X
+        self.alien_pulse_phase = 0.0
+        self.alien_speed = self.alien_base_speed
         self.alien_x_offset = 0.0
+        self.alien_drop_distance = self.config.SI_ALIEN_SPEED_Y
         
         self._aliens_remaining = self._num_aliens
         self._alien_states.fill(1.0)
@@ -573,18 +816,95 @@ class SpaceInvaders(BaseGame):
         
         return self.get_state()
     
+    def _create_shields(self) -> None:
+        """Create the protective bunkers/shields."""
+        self.shields = []
+        
+        if not self.config.SI_SHIELDS_ENABLED:
+            return
+        
+        shield_count = self.config.SI_SHIELD_COUNT
+        shield_width = self.config.SI_SHIELD_WIDTH
+        shield_height = self.config.SI_SHIELD_HEIGHT
+        
+        # Position shields evenly across the screen, above the ship
+        total_shield_width = shield_count * shield_width
+        spacing = (self.width - total_shield_width) / (shield_count + 1)
+        
+        # Shield Y position - between aliens and ship
+        assert self.ship is not None
+        shield_y = self.ship.y - shield_height - 40
+        
+        for i in range(shield_count):
+            x = int(spacing + i * (shield_width + spacing))
+            shield = Shield(x, shield_y, shield_width, shield_height, self.config.SI_COLOR_SHIELD)
+            self.shields.append(shield)
+    
+    def _next_level(self) -> None:
+        """Progress to the next level with increased difficulty."""
+        self.level += 1
+        
+        # Reset aliens for new level
+        self._create_aliens()
+        
+        # Clear bullets but keep shields (they persist across levels, just like original)
+        self.player_bullets = []
+        self.alien_bullets = []
+        self.ufo = None
+        
+        # Reset alien movement
+        self.alien_direction = 1
+        self.alien_x_offset = 0.0
+        self.alien_pulse_phase = 0.0
+        
+        self._aliens_remaining = self._num_aliens
+        self._alien_states.fill(1.0)
+        
+        # Increase difficulty each level:
+        # - Aliens start lower (closer to player)
+        # - Base speed increases
+        # - Aliens shoot more frequently (handled in config multiplier)
+        self.alien_base_speed = self.config.SI_ALIEN_SPEED_X * (1 + 0.15 * (self.level - 1))
+        self.alien_speed = self.alien_base_speed
+        
+        # Move aliens closer to player on higher levels (original game behavior)
+        level_offset = min((self.level - 1) * 20, 100)  # Max 100 pixels closer
+        for alien in self.aliens:
+            alien.y += level_offset
+        
+        # Show wave announcement
+        if not self.headless:
+            self.wave_announcement = WaveAnnouncement(self.level, self.width, self.height)
+        
+        # Visual feedback for new level
+        self.flash_alpha = 100
+        self.screen_shake = 5
+    
     def _create_aliens(self) -> None:
-        """Create the alien grid."""
+        """Create the alien grid with authentic arcade layout.
+        
+        Original Space Invaders layout (5 rows, 11 columns):
+        - Row 0 (top): Squids - 30 points - type 0 (pink/magenta)
+        - Rows 1-2: Crabs - 20 points - type 1 (green)  
+        - Rows 3-4 (bottom): Octopuses - 10 points - type 2 (cyan)
+        """
         self.aliens = []
         
         colors = [
-            self.config.SI_COLOR_ALIEN_1,
-            self.config.SI_COLOR_ALIEN_2,
-            self.config.SI_COLOR_ALIEN_3,
+            self.config.SI_COLOR_ALIEN_1,  # Pink/magenta for squids (top)
+            self.config.SI_COLOR_ALIEN_2,  # Green for crabs (middle)
+            self.config.SI_COLOR_ALIEN_3,  # Cyan for octopuses (bottom)
         ]
         
         for row in range(self.config.SI_ALIEN_ROWS):
-            alien_type = min(row, 2)
+            # Authentic alien types: row 0 = squids, rows 1-2 = crabs, rows 3-4 = octopuses
+            if row == 0:
+                alien_type = 0  # Squid - 30 points
+            elif row <= 2:
+                alien_type = 1  # Crab - 20 points
+            else:
+                alien_type = 2  # Octopus - 10 points
+            
             color = colors[alien_type % len(colors)]
             
             for col in range(self.config.SI_ALIEN_COLS):
@@ -607,6 +927,13 @@ class SpaceInvaders(BaseGame):
         if self._shoot_cooldown > 0:
             self._shoot_cooldown -= 1
         
+        # Track bullets that are about to pass the ship (for dodge reward)
+        ship_y = self.ship.y
+        bullets_near_ship_before = sum(
+            1 for b in self.alien_bullets 
+            if b.alive and ship_y - 20 < b.y < ship_y + 10
+        )
+        
         # Handle action
         if action == 0:
             self.ship.move(-1, self.width)
@@ -624,31 +951,66 @@ class SpaceInvaders(BaseGame):
         self._update_ufo()
         reward += self._handle_collisions()
         
+        # Dodge reward: if bullets passed through ship area and we survived
+        bullets_near_ship_after = sum(
+            1 for b in self.alien_bullets 
+            if b.alive and ship_y - 20 < b.y < ship_y + 10
+        )
+        bullets_dodged = bullets_near_ship_before - bullets_near_ship_after
+        if bullets_dodged > 0 and not self.player_invincible:
+            reward += 0.1 * bullets_dodged  # Small reward for each dodged bullet
+        
+        # Penalty for aliens getting too low (encourages shooting them)
+        lowest_alien_y = 0
+        for alien in self.aliens:
+            if alien.alive:
+                lowest_alien_y = max(lowest_alien_y, alien.y + alien.height)
+        
+        danger_threshold = self.ground_y - 150  # Start penalizing when aliens are close
+        if lowest_alien_y > danger_threshold:
+            danger_ratio = (lowest_alien_y - danger_threshold) / 150
+            reward -= 0.005 * danger_ratio  # Gradual penalty as aliens approach
+        
         # Update visual effects
         self._update_effects()
         
-        # Check win condition
+        # Check level clear condition - progress to next level!
         if self._aliens_remaining == 0:
-            self.won = True
-            self.game_over = True
             reward += self.config.SI_REWARD_LEVEL_CLEAR
+            self._next_level()
+            # Don't end the game - continue to next level
         
-        # Check if aliens reached the bottom
+        # Check if aliens reached the ground base (invasion!)
         for alien in self.aliens:
-            if alien.alive and alien.y + alien.height >= self.ship.y:
+            if alien.alive and alien.y + alien.height >= self.ground_y:
                 self.game_over = True
-                reward += self.config.SI_REWARD_PLAYER_DEATH
+                reward += self.config.SI_REWARD_PLAYER_DEATH * 2  # Extra penalty for invasion
                 break
         
         return self.get_state(), reward, self.game_over, self._get_info()
     
     def _update_effects(self) -> None:
         """Update visual effects."""
+        # Update invincibility timer (even in headless mode)
+        if self.player_invincible:
+            self.invincibility_timer -= 1.0 / 60.0
+            if self.invincibility_timer <= 0:
+                self.player_invincible = False
+                self.invincibility_timer = 0.0
+        
         if self.headless:
             return
         
         # Update particles
         self.particles = [p for p in self.particles if p.update()]
+        
+        # Update score popups
+        self.score_popups = [p for p in self.score_popups if p.update()]
+        
+        # Update wave announcement
+        if self.wave_announcement is not None:
+            if not self.wave_announcement.update():
+                self.wave_announcement = None
         
         # Update stars
         for star in self.stars:
@@ -693,6 +1055,10 @@ class SpaceInvaders(BaseGame):
         
         self.alien_x_offset += self.alien_direction * self.alien_speed
         
+        # Update alien pulse phase (speeds up as fewer aliens remain)
+        pulse_speed = 0.5 + (1 - self._aliens_remaining / self._num_aliens) * 3
+        self.alien_pulse_phase += pulse_speed * (1.0 / 60.0)
+        
         for alien in self.aliens:
             if not alien.alive:
                 continue
@@ -704,10 +1070,12 @@ class SpaceInvaders(BaseGame):
                         a.y += self.config.SI_ALIEN_SPEED_Y
                 break
         
-        # Alien shooting
-        alive_aliens = [a for a in self.aliens if a.alive]
-        for alien in alive_aliens:
-            if random.random() < self.config.SI_ALIEN_SHOOT_CHANCE:
+        # Only bottom aliens in each column can shoot (authentic behavior)
+        bottom_aliens = self._get_bottom_aliens()
+        for alien in bottom_aliens:
+            # Increase shoot chance slightly as aliens are destroyed
+            shoot_chance = self.config.SI_ALIEN_SHOOT_CHANCE * (1 + 0.5 * (1 - self._aliens_remaining / self._num_aliens))
+            if random.random() < shoot_chance:
                 actual_x = alien.x + self.alien_x_offset + alien.width // 2
                 bullet = Bullet(
                     actual_x,
@@ -726,6 +1094,22 @@ class SpaceInvaders(BaseGame):
         
         return reward
     
+    def _get_bottom_aliens(self) -> List[Alien]:
+        """Get the bottom-most alive alien in each column (only these can shoot)."""
+        # Aliens are stored row by row, so we need to find the lowest in each column
+        cols = self.config.SI_ALIEN_COLS
+        bottom_per_col: List[Optional[Alien]] = [None] * cols
+        
+        for idx, alien in enumerate(self.aliens):
+            if not alien.alive:
+                continue
+            col = idx % cols
+            # Later rows have higher Y values, so we want the highest Y (lowest on screen)
+            if bottom_per_col[col] is None or alien.y > bottom_per_col[col].y:  # type: ignore
+                bottom_per_col[col] = alien
+        
+        return [a for a in bottom_per_col if a is not None]
+    
     def _update_ufo(self) -> None:
         if self.ufo is not None:
             self.ufo.update()
@@ -735,6 +1119,20 @@ class SpaceInvaders(BaseGame):
     def _handle_collisions(self) -> float:
         assert self.ship is not None
         reward = 0.0
+        
+        # Player bullets vs shields
+        for bullet in self.player_bullets:
+            if not bullet.alive:
+                continue
+            for shield in self.shields:
+                if shield.check_collision(bullet.rect):
+                    bullet.alive = False
+                    # Small particle effect when hitting shield
+                    self._spawn_explosion(
+                        int(bullet.x), int(bullet.y),
+                        self.config.SI_COLOR_SHIELD, count=5
+                    )
+                    break
         
         # Player bullets vs aliens
         for bullet in self.player_bullets:
@@ -753,8 +1151,15 @@ class SpaceInvaders(BaseGame):
                     bullet.alive = False
                     alien.alive = False
                     self._aliens_remaining -= 1
+                    self.total_aliens_killed += 1
                     self._alien_states[idx] = 0.0
-                    self.score += 10 + alien.alien_type * 10
+                    
+                    # Authentic arcade scoring:
+                    # Type 0 (squid, top row): 30 points
+                    # Type 1 (crab, middle rows): 20 points
+                    # Type 2 (octopus, bottom rows): 10 points
+                    points = 30 - alien.alien_type * 10
+                    self.score += points
                     reward += self.config.SI_REWARD_ALIEN_HIT
                     
                     # Visual effects
@@ -762,10 +1167,19 @@ class SpaceInvaders(BaseGame):
                         alien_rect.centerx, alien_rect.centery, 
                         alien.color, count=20
                     )
+                    
+                    # Score popup
+                    if not self.headless:
+                        self.score_popups.append(ScorePopup(
+                            alien_rect.centerx, alien_rect.centery,
+                            points, alien.color
+                        ))
+                    
                     self.screen_shake = 3
                     self.flash_alpha = 30
                     
-                    self.alien_speed = self.config.SI_ALIEN_SPEED_X * (1 + (self._num_aliens - self._aliens_remaining) * 0.02)
+                    # Speed up as aliens are destroyed (classic behavior)
+                    self.alien_speed = self.alien_base_speed * (1 + (self._num_aliens - self._aliens_remaining) * 0.015)
                     break
         
         # Player bullets vs UFO
@@ -780,31 +1194,75 @@ class SpaceInvaders(BaseGame):
                         self.ufo.color, count=30
                     )
                     self.ufo.alive = False
-                    self.score += self.config.SI_UFO_POINTS
+                    
+                    # Random UFO points like original arcade (50, 100, 150, or 300)
+                    ufo_points = random.choice([50, 100, 100, 150, 150, 300])
+                    self.score += ufo_points
                     reward += self.config.SI_REWARD_UFO_HIT
+                    
+                    # Score popup for UFO
+                    if not self.headless:
+                        self.score_popups.append(ScorePopup(
+                            self.ufo.rect.centerx, self.ufo.rect.centery,
+                            ufo_points, (255, 255, 100)  # Yellow for UFO
+                        ))
+                    
                     self.screen_shake = 8
                     self.flash_alpha = 60
                     self.ufo = None
                     break
         
-        # Alien bullets vs player
+        # Alien bullets vs shields
         for bullet in self.alien_bullets:
             if not bullet.alive:
                 continue
-            if bullet.rect.colliderect(self.ship.rect):
-                bullet.alive = False
-                self._spawn_explosion(
-                    self.ship.rect.centerx, self.ship.rect.centery,
-                    (255, 100, 100), count=25
-                )
-                self.lives -= 1
-                reward += self.config.SI_REWARD_PLAYER_DEATH
-                self.screen_shake = 10
-                self.flash_alpha = 80
-                
-                if self.lives <= 0:
-                    self.game_over = True
-                break
+            for shield in self.shields:
+                if shield.check_collision(bullet.rect):
+                    bullet.alive = False
+                    self._spawn_explosion(
+                        int(bullet.x), int(bullet.y),
+                        (255, 100, 50), count=5
+                    )
+                    break
+        
+        # Alien bullets vs player (skip if invincible)
+        if not self.player_invincible:
+            for bullet in self.alien_bullets:
+                if not bullet.alive:
+                    continue
+                if bullet.rect.colliderect(self.ship.rect):
+                    bullet.alive = False
+                    
+                    # Big death explosion
+                    self._spawn_player_death_explosion()
+                    
+                    self.lives -= 1
+                    reward += self.config.SI_REWARD_PLAYER_DEATH
+                    self.screen_shake = 15
+                    self.flash_alpha = 120
+                    
+                    if self.lives <= 0:
+                        self.game_over = True
+                    else:
+                        # Grant invincibility after death
+                        self.player_invincible = True
+                        self.invincibility_timer = self.invincibility_duration
+                    break
+        
+        # Aliens colliding with shields (destroy shield blocks)
+        for alien in self.aliens:
+            if not alien.alive:
+                continue
+            alien_rect = pygame.Rect(
+                alien.x + self.alien_x_offset,
+                alien.y,
+                alien.width,
+                alien.height
+            )
+            for shield in self.shields:
+                for block in shield.blocks:
+                    if block.alive and alien_rect.colliderect(block.rect):
+                        block.alive = False  # Aliens destroy shields on contact
         
         return reward
     
@@ -835,11 +1293,36 @@ class SpaceInvaders(BaseGame):
         self._state_array[idx] = (self.alien_direction + 1) * 0.5
         idx += 1
         
+        # Nearest alien bullet Y (danger from above)
         if self.alien_bullets:
             nearest_y = max(b.y for b in self.alien_bullets if b.alive) if any(b.alive for b in self.alien_bullets) else 0
             self._state_array[idx] = nearest_y * self._inv_height
         else:
             self._state_array[idx] = 0.0
+        idx += 1
+        
+        # Lowest alien Y position (how close invasion is)
+        lowest_alien_y = 0
+        for alien in self.aliens:
+            if alien.alive:
+                lowest_alien_y = max(lowest_alien_y, alien.y + alien.height)
+        self._state_array[idx] = lowest_alien_y * self._inv_height
+        idx += 1
+        
+        # Nearest alien bullet X relative to ship (dodge indicator)
+        if self.alien_bullets:
+            ship_center = self.ship.x + self.ship.width // 2
+            nearest_bullet = min(
+                (b for b in self.alien_bullets if b.alive),
+                key=lambda b: abs(b.x - ship_center),
+                default=None
+            )
+            if nearest_bullet:
+                self._state_array[idx] = (nearest_bullet.x - ship_center) * self._inv_width + 0.5
+            else:
+                self._state_array[idx] = 0.5  # Centered = no threat
+        else:
+            self._state_array[idx] = 0.5
         
         return self._state_array.copy()
     
@@ -849,7 +1332,9 @@ class SpaceInvaders(BaseGame):
             'lives': self.lives,
             'aliens_remaining': self._aliens_remaining,
             'won': self.won,
-            'level': self.level
+            'level': self.level,
+            'total_aliens_killed': self.total_aliens_killed,
+            'bricks': self.total_aliens_killed,  # Compatibility with training metrics
         }
     
     def render(self, screen: pygame.Surface) -> None:
@@ -869,17 +1354,28 @@ class SpaceInvaders(BaseGame):
         for star in self.stars:
             star.draw(screen, self._time)
         
+        # Draw the ground base that the player is defending
+        self._draw_ground_base(screen)
+        
         # Draw particles
         for particle in self.particles:
             particle.draw(screen)
         
-        # Draw aliens with shake offset
+        # Draw shields/bunkers
+        for shield in self.shields:
+            shield.draw(screen)
+        
+        # Draw aliens with shake offset and pulse effect
+        # Pulse intensity increases as fewer aliens remain (like the audio in original)
+        pulse_intensity = 0.15 * (1 - self._aliens_remaining / self._num_aliens)
+        pulse_offset = math.sin(self.alien_pulse_phase * math.pi * 2) * pulse_intensity * 3
+        
         for alien in self.aliens:
             if alien.alive:
                 original_x = alien.x
-                alien.x += int(self.alien_x_offset) + shake_x
                 original_y = alien.y
-                alien.y += shake_y
+                alien.x += int(self.alien_x_offset) + shake_x
+                alien.y += shake_y + int(pulse_offset)
                 alien.draw(screen, self._time)
                 alien.x = original_x
                 alien.y = original_y
@@ -902,12 +1398,20 @@ class SpaceInvaders(BaseGame):
             bullet.x -= shake_x
             bullet.y -= shake_y
         
-        # Draw ship with shake
+        # Draw ship with shake (flash when invincible)
         original_ship_x = self.ship.x
         original_ship_y = self.ship.y
         self.ship.x += shake_x
         self.ship.y += shake_y
-        self.ship.draw(screen, self._time)
+        
+        # Invincibility flashing effect
+        if self.player_invincible:
+            # Flash on/off rapidly
+            if int(self._time * 15) % 2 == 0:
+                self.ship.draw(screen, self._time)
+        else:
+            self.ship.draw(screen, self._time)
+        
         self.ship.x = original_ship_x
         self.ship.y = original_ship_y
         
@@ -919,6 +1423,10 @@ class SpaceInvaders(BaseGame):
         if self._crt_vignette:
             screen.blit(self._crt_vignette, (0, 0))
         
+        # Draw score popups
+        for popup in self.score_popups:
+            popup.draw(screen)
+        
         # Flash effect
         if self.flash_alpha > 0:
             flash_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
@@ -927,13 +1435,75 @@ class SpaceInvaders(BaseGame):
         
         # Draw HUD (not affected by shake)
         self._draw_hud(screen)
+        
+        # Draw wave announcement (on top of everything)
+        if self.wave_announcement is not None:
+            self.wave_announcement.draw(screen)
+    
+    def _draw_ground_base(self, screen: pygame.Surface) -> None:
+        """Draw the ground base that the player is defending."""
+        # Main ground line
+        ground_color = (0, 180, 80)
+        pygame.draw.rect(screen, ground_color, (0, self.ground_y, self.width, 3))
+        
+        # Glow effect on ground line
+        glow_surface = pygame.Surface((self.width, 10), pygame.SRCALPHA)
+        for i in range(5):
+            alpha = 40 - i * 8
+            pygame.draw.rect(glow_surface, (*ground_color, alpha), (0, i, self.width, 1))
+        screen.blit(glow_surface, (0, self.ground_y - 5))
+        
+        # City/base silhouette at the bottom
+        base_color = (0, 60, 30)
+        highlight_color = (0, 100, 50)
+        
+        # Draw stylized buildings/structures
+        buildings = [
+            # (x_offset_ratio, width, height)
+            (0.05, 30, 15),
+            (0.12, 20, 10),
+            (0.18, 40, 20),
+            (0.28, 25, 12),
+            (0.35, 35, 18),
+            (0.45, 15, 8),
+            (0.52, 45, 22),
+            (0.62, 20, 14),
+            (0.70, 30, 16),
+            (0.78, 25, 10),
+            (0.85, 35, 18),
+            (0.92, 20, 12),
+        ]
+        
+        for x_ratio, bwidth, bheight in buildings:
+            bx = int(self.width * x_ratio)
+            by = self.ground_y + 3
+            
+            # Building body
+            pygame.draw.rect(screen, base_color, (bx, by, bwidth, bheight))
+            
+            # Building top highlight
+            pygame.draw.rect(screen, highlight_color, (bx, by, bwidth, 2))
+            
+            # Window lights (flickering)
+            if bheight > 10:
+                for wy in range(by + 4, by + bheight - 2, 4):
+                    for wx in range(bx + 3, bx + bwidth - 3, 6):
+                        if random.random() > 0.3:  # 70% of windows lit
+                            flicker = 0.7 + 0.3 * math.sin(self._time * 5 + wx * 0.1)
+                            window_color = (
+                                int(255 * flicker),
+                                int(200 * flicker),
+                                int(50 * flicker)
+                            )
+                            pygame.draw.rect(screen, window_color, (wx, wy, 2, 2))
     
     def _draw_hud(self, screen: pygame.Surface) -> None:
         """Draw heads-up display with retro style."""
         # Use a pixelated font effect
         font = pygame.font.Font(None, 36)
+        small_font = pygame.font.Font(None, 28)
         
-        # Score with glow
+        # Score with glow (left side)
         score_text = f"SCORE: {self.score}"
         # Glow
         glow_surf = font.render(score_text, True, (0, 150, 50))
@@ -942,28 +1512,47 @@ class SpaceInvaders(BaseGame):
         text_surf = font.render(score_text, True, (0, 255, 100))
         screen.blit(text_surf, (10, 10))
         
-        # Lives with glow
-        lives_text = f"LIVES: {self.lives}"
+        # Lives with ship icons (right side)
+        lives_x = self.width - 140
+        lives_text = "LIVES:"
         glow_surf = font.render(lives_text, True, (0, 150, 50))
-        screen.blit(glow_surf, (self.width - 122, 12))
+        screen.blit(glow_surf, (lives_x + 2, 12))
         text_surf = font.render(lives_text, True, (0, 255, 100))
-        screen.blit(text_surf, (self.width - 120, 10))
+        screen.blit(text_surf, (lives_x, 10))
         
-        # Level indicator
-        level_text = f"LEVEL {self.level}"
-        level_surf = font.render(level_text, True, (100, 200, 100))
+        # Draw ship icons for lives
+        for i in range(self.lives):
+            ship_x = lives_x + 80 + i * 20
+            ship_y = 18
+            # Mini ship shape
+            points = [
+                (ship_x, ship_y - 6),
+                (ship_x - 8, ship_y + 6),
+                (ship_x + 8, ship_y + 6),
+            ]
+            pygame.draw.polygon(screen, (0, 255, 100), points)
+        
+        # Level indicator (center, prominent)
+        level_text = f"WAVE {self.level}"
+        # Glow effect
+        glow_surf = font.render(level_text, True, (150, 100, 0))
+        glow_rect = glow_surf.get_rect(centerx=self.width // 2 + 1, top=11)
+        screen.blit(glow_surf, glow_rect)
+        # Main text in gold/yellow
+        level_surf = font.render(level_text, True, (255, 200, 50))
         level_rect = level_surf.get_rect(centerx=self.width // 2, top=10)
         screen.blit(level_surf, level_rect)
         
-        # Game over / Victory message
+        # Aliens killed counter (below score)
+        kills_text = f"KILLS: {self.total_aliens_killed}"
+        kills_surf = small_font.render(kills_text, True, (150, 150, 150))
+        screen.blit(kills_surf, (10, 38))
+        
+        # Game over message
         if self.game_over:
             big_font = pygame.font.Font(None, 72)
-            if self.won:
-                msg = "VICTORY!"
-                color = (0, 255, 100)
-            else:
-                msg = "GAME OVER"
-                color = (255, 50, 50)
+            msg = "GAME OVER"
+            color = (255, 50, 50)
             
             # Shadow
             shadow = big_font.render(msg, True, (0, 0, 0))
@@ -979,12 +1568,24 @@ class SpaceInvaders(BaseGame):
             text_rect = text.get_rect(center=(self.width // 2, self.height // 2))
             screen.blit(text, text_rect)
             
-            # Final score
+            # Final stats
             score_font = pygame.font.Font(None, 36)
-            score_msg = f"Final Score: {self.score}"
-            score_surf = score_font.render(score_msg, True, (200, 200, 200))
-            score_rect = score_surf.get_rect(center=(self.width // 2, self.height // 2 + 50))
+            stats_y = self.height // 2 + 50
+            
+            final_score = f"Final Score: {self.score}"
+            score_surf = score_font.render(final_score, True, (200, 200, 200))
+            score_rect = score_surf.get_rect(center=(self.width // 2, stats_y))
             screen.blit(score_surf, score_rect)
+            
+            wave_reached = f"Waves Completed: {self.level - 1}"
+            wave_surf = small_font.render(wave_reached, True, (150, 150, 150))
+            wave_rect = wave_surf.get_rect(center=(self.width // 2, stats_y + 30))
+            screen.blit(wave_surf, wave_rect)
+            
+            kills_final = f"Total Kills: {self.total_aliens_killed}"
+            kills_surf = small_font.render(kills_final, True, (150, 150, 150))
+            kills_rect = kills_surf.get_rect(center=(self.width // 2, stats_y + 55))
+            screen.blit(kills_surf, kills_rect)
     
     def close(self) -> None:
         pass
