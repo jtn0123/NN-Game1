@@ -166,7 +166,11 @@ class GameApp:
         )
         
         # Load model if specified, or auto-load most recent save
-        self._initial_model_path = self._resolve_model_path(args.model)
+        self._initial_model_path = self._resolve_model_path(
+            args.model, 
+            state_size=self.game.state_size,
+            action_size=self.game.action_size
+        )
         
         # Create visualizations - positioned relative to the fixed game size
         self.nn_visualizer = NeuralNetVisualizer(
@@ -253,38 +257,47 @@ class GameApp:
             if self.web_dashboard:
                 self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(self._initial_model_path)}", "success")
     
-    def _resolve_model_path(self, explicit_path: Optional[str]) -> Optional[str]:
+    def _resolve_model_path(self, explicit_path: Optional[str], state_size: int, action_size: int) -> Optional[str]:
         """
         Resolve which model to load on startup.
         
         Priority:
-        1. Explicitly specified --model path
-        2. Most recently modified .pth file in models directory
+        1. Explicitly specified --model path (if compatible)
+        2. Most recently modified .pth file in game-specific directory
         
         Args:
             explicit_path: Path from --model argument, or None
+            state_size: Expected state size for compatibility check
+            action_size: Expected action size for compatibility check
             
         Returns:
-            Path to model file, or None if no model to load
+            Path to model file, or None if no model found
         """
-        # If explicit path specified and exists, use it
-        if explicit_path and os.path.exists(explicit_path):
-            return explicit_path
+        from src.ai.agent import Agent
         
-        # Search for models in game-specific directory first, then legacy directory
-        search_dirs = [self.config.GAME_MODEL_DIR, self.config.MODEL_DIR]
+        # If explicit path specified, check compatibility
+        if explicit_path and os.path.exists(explicit_path):
+            info = Agent.inspect_model(explicit_path)
+            if info and info.get('state_size') == state_size and info.get('action_size') == action_size:
+                return explicit_path
+            else:
+                print(f"⚠️  Specified model incompatible: {os.path.basename(explicit_path)}")
+                print(f"   Expected: state_size={state_size}, action_size={action_size}")
+                if info:
+                    print(f"   Model has: state_size={info.get('state_size')}, action_size={info.get('action_size')}")
+                return None
+        
+        # Only auto-load from game-specific directory (e.g., models/space_invaders/)
+        model_dir = self.config.GAME_MODEL_DIR
+        if not os.path.exists(model_dir):
+            return None
         
         model_files = []
-        for model_dir in search_dirs:
-            if not os.path.exists(model_dir):
-                continue
-            
-            # Find all .pth files in this directory
-            for f in os.listdir(model_dir):
-                if f.endswith('.pth'):
-                    filepath = os.path.join(model_dir, f)
-                    mtime = os.path.getmtime(filepath)
-                    model_files.append((filepath, mtime))
+        for f in os.listdir(model_dir):
+            if f.endswith('.pth'):
+                filepath = os.path.join(model_dir, f)
+                mtime = os.path.getmtime(filepath)
+                model_files.append((filepath, mtime))
         
         if not model_files:
             return None
@@ -292,7 +305,6 @@ class GameApp:
         # Sort by modification time, newest first
         model_files.sort(key=lambda x: x[1], reverse=True)
         
-        # Return the most recent file
         most_recent = model_files[0][0]
         print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
         return most_recent
@@ -396,6 +408,12 @@ class GameApp:
         """Load a model from file and restore training history."""
         try:
             metadata, training_history = self.agent.load(filepath, quiet=True)
+            
+            # If load returned None, model is incompatible (architecture mismatch)
+            if metadata is None and training_history is None:
+                if self.web_dashboard:
+                    self.web_dashboard.log(f"⚠️  Model incompatible: {os.path.basename(filepath)} - starting fresh training", "warning")
+                return  # Skip restoration, start fresh
             
             # Restore training history if available
             if training_history and len(training_history.scores) > 0:
@@ -1445,8 +1463,8 @@ class HeadlessTrainer:
         )
         
         # Load model if specified (headless mode - just restore agent state)
-        if args.model and os.path.exists(args.model):
-            self.agent.load(args.model)  # Returns tuple, we ignore history in headless
+        # Note: Compatibility check happens in _resolve_model_path, so we skip explicit load here
+        # and let _resolve_model_path handle it to avoid duplicate loading
         
         # Create game-specific model directory
         os.makedirs(config.GAME_MODEL_DIR, exist_ok=True)
@@ -1466,7 +1484,11 @@ class HeadlessTrainer:
         self.last_target_update_step = 0
         
         # Auto-load most recent model if no explicit model specified
-        initial_model_path = self._resolve_model_path(args.model)
+        initial_model_path = self._resolve_model_path(
+            args.model,
+            state_size=self.game.state_size,
+            action_size=self.game.action_size
+        )
         if initial_model_path:
             metadata, _ = self.agent.load(initial_model_path)
             if metadata:
@@ -1486,36 +1508,47 @@ class HeadlessTrainer:
             if initial_model_path:
                 self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(initial_model_path)}", "success")
     
-    def _resolve_model_path(self, explicit_path: Optional[str]) -> Optional[str]:
+    def _resolve_model_path(self, explicit_path: Optional[str], state_size: int, action_size: int) -> Optional[str]:
         """
         Resolve which model to load on startup.
         
         Priority:
-        1. Explicitly specified --model path
-        2. Most recent .pth file in game-specific model directory
-        3. Fallback to legacy models directory for backwards compatibility
+        1. Explicitly specified --model path (if compatible)
+        2. Most recently modified .pth file in game-specific directory
         
+        Args:
+            explicit_path: Path from --model argument, or None
+            state_size: Expected state size for compatibility check
+            action_size: Expected action size for compatibility check
+            
         Returns:
-            Path to model file, or None if no model to load
+            Path to model file, or None if no model found
         """
-        # If explicit path specified and exists, use it
-        if explicit_path and os.path.exists(explicit_path):
-            return explicit_path
+        from src.ai.agent import Agent
         
-        # Search for models in game-specific directory first, then legacy directory
-        search_dirs = [self.config.GAME_MODEL_DIR, self.config.MODEL_DIR]
+        # If explicit path specified, check compatibility
+        if explicit_path and os.path.exists(explicit_path):
+            info = Agent.inspect_model(explicit_path)
+            if info and info.get('state_size') == state_size and info.get('action_size') == action_size:
+                return explicit_path
+            else:
+                print(f"⚠️  Specified model incompatible: {os.path.basename(explicit_path)}")
+                print(f"   Expected: state_size={state_size}, action_size={action_size}")
+                if info:
+                    print(f"   Model has: state_size={info.get('state_size')}, action_size={info.get('action_size')}")
+                return None
+        
+        # Only auto-load from game-specific directory (e.g., models/space_invaders/)
+        model_dir = self.config.GAME_MODEL_DIR
+        if not os.path.exists(model_dir):
+            return None
         
         model_files = []
-        for model_dir in search_dirs:
-            if not os.path.exists(model_dir):
-                continue
-            
-            # Find all .pth files in this directory
-            for f in os.listdir(model_dir):
-                if f.endswith('.pth'):
-                    filepath = os.path.join(model_dir, f)
-                    mtime = os.path.getmtime(filepath)
-                    model_files.append((filepath, mtime))
+        for f in os.listdir(model_dir):
+            if f.endswith('.pth'):
+                filepath = os.path.join(model_dir, f)
+                mtime = os.path.getmtime(filepath)
+                model_files.append((filepath, mtime))
         
         if not model_files:
             return None
@@ -1523,7 +1556,6 @@ class HeadlessTrainer:
         # Sort by modification time, newest first
         model_files.sort(key=lambda x: x[1], reverse=True)
         
-        # Return the most recent file
         most_recent = model_files[0][0]
         print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
         return most_recent
@@ -1597,6 +1629,12 @@ class HeadlessTrainer:
         """Load a model from file and sync history to dashboard."""
         try:
             metadata, training_history = self.agent.load(filepath)
+            
+            # If load returned None, model is incompatible (architecture mismatch)
+            if metadata is None and training_history is None:
+                if self.web_dashboard:
+                    self.web_dashboard.log(f"⚠️  Model incompatible: {os.path.basename(filepath)} - starting fresh training", "warning")
+                return  # Skip restoration, start fresh
             
             # Restore tracking state from metadata
             if metadata:
