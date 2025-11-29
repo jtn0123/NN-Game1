@@ -491,13 +491,22 @@ class GameApp:
         if self.web_dashboard:
             self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
         
-        # Save the model
-        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown")
+        # Save the model and verify it completed
+        save_success = self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown")
         
-        if self.web_dashboard:
-            self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
+        if save_success:
+            if self.web_dashboard:
+                self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
+            print("\n👋 Save & Quit requested. Model saved. Exiting...")
+        else:
+            if self.web_dashboard:
+                self.web_dashboard.log("⚠️ Save may have failed. Shutting down...", "warning")
+            print("\n⚠️ Save & Quit requested. Save may have failed. Exiting...")
         
-        print("\n👋 Save & Quit requested. Model saved. Exiting...")
+        # Flush output buffers to ensure messages are written
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
         
         # Give time for the save event to propagate to clients
         time.sleep(0.5)
@@ -2221,13 +2230,22 @@ class HeadlessTrainer:
         if self.web_dashboard:
             self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
 
-        # Save the model
-        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown")
+        # Save the model and verify it completed
+        save_success = self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown")
 
-        if self.web_dashboard:
-            self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
+        if save_success:
+            if self.web_dashboard:
+                self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
+            print("\n👋 Save & Quit requested. Model saved. Exiting...")
+        else:
+            if self.web_dashboard:
+                self.web_dashboard.log("⚠️ Save may have failed. Shutting down...", "warning")
+            print("\n⚠️ Save & Quit requested. Save may have failed. Exiting...")
 
-        print("\n👋 Save & Quit requested. Model saved. Exiting...")
+        # Flush output buffers to ensure messages are written
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         # Give time for the save event to propagate to clients
         import time
@@ -2574,9 +2592,9 @@ class HeadlessTrainer:
                     if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
                         self._save_model(f"{self.config.GAME_NAME}_ep{self.current_episode}.pth", save_reason="periodic")
             
-            # Decay epsilon once per episode that completed this step
-            # (moved outside loop to avoid decaying multiple times when multiple envs finish)
-            for _ in range(int(np.sum(dones))):
+            # Decay epsilon once per step if any episodes completed
+            # (NOT per environment - that would decay too fast with many parallel envs)
+            if np.any(dones):
                 self.agent.decay_epsilon(self.current_episode)
                 self.agent.step_scheduler()  # Step learning rate scheduler
             

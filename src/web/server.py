@@ -871,6 +871,12 @@ class WebDashboard:
             if not os.path.exists(full_path):
                 return jsonify({'error': 'Model not found'}), 404
             
+            # Security: Reject symlinks to prevent symlink-based attacks
+            # Even though realpath resolves them and the containment check catches external targets,
+            # it's safer to explicitly reject symlinks
+            if os.path.islink(os.path.join(legacy_model_dir, filepath)):
+                return jsonify({'error': 'Cannot delete symbolic links'}), 403
+            
             # Ensure it's a .pth file
             if not full_path.endswith('.pth'):
                 return jsonify({'error': 'Invalid file type'}), 400
@@ -1062,6 +1068,12 @@ class WebDashboard:
         def broadcast_nn_update(nn_data: Dict[str, Any]):
             self.socketio.emit('nn_update', nn_data)
         
+        # Clear any existing callbacks before registering (prevents duplication)
+        self.publisher._on_update_callbacks.clear()
+        self.publisher._on_log_callbacks.clear()
+        self.publisher._on_save_callbacks.clear()
+        self.publisher._on_nn_update_callbacks.clear()
+        
         self.publisher.on_update(broadcast_update)
         self.publisher.on_log(broadcast_log)
         self.publisher.on_save(broadcast_save)
@@ -1118,9 +1130,16 @@ class WebDashboard:
         self._server_thread.start()
     
     def stop(self) -> None:
-        """Stop the web server."""
+        """Stop the web server and release the port."""
         self._running = False
         self.publisher.set_running(False)
+        
+        # Try to stop the SocketIO server (releases the port)
+        try:
+            if hasattr(self.socketio, 'stop'):
+                self.socketio.stop()
+        except Exception:
+            pass  # Best effort - daemon thread will die with process anyway
     
     def emit_metrics(self, **kwargs) -> None:
         """Convenience method to update and emit metrics."""
