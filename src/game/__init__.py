@@ -17,7 +17,7 @@ Game Registry:
 
 from typing import Dict, List, Type, Optional, Any
 from .breakout import Breakout
-from .space_invaders import SpaceInvaders
+from .space_invaders import SpaceInvaders, VecSpaceInvaders
 from .base_game import BaseGame
 from .particles import ParticleSystem, TrailRenderer
 from .menu import GameMenu
@@ -131,8 +131,9 @@ __all__ = [
     # Classes
     'Breakout',
     'SpaceInvaders',
-    'BaseGame', 
-    'ParticleSystem', 
+    'VecSpaceInvaders',
+    'BaseGame',
+    'ParticleSystem',
     'TrailRenderer',
     'GameMenu',
     # Registry functions

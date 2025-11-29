@@ -73,6 +73,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import Config
 from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
 from src.game.breakout import Breakout, VecBreakout
+from src.game.space_invaders import VecSpaceInvaders
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
 from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
@@ -1619,14 +1620,17 @@ class HeadlessTrainer:
             sys.exit(1)
         
         # Type annotations for game and vec_env
-        self.vec_env: Optional[VecBreakout] = None
+        self.vec_env: Optional[Union[VecBreakout, VecSpaceInvaders]] = None
         self.game: BaseGame
-        
+
         if self.num_envs > 1:
             # Create vectorized environment for parallel game execution
-            # TODO: Add VecEnv support for other games
             if config.GAME_NAME == 'breakout':
                 self.vec_env = VecBreakout(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == 'space_invaders':
+                self.vec_env = VecSpaceInvaders(self.num_envs, config, headless=True)
                 self.game = self.vec_env.envs[0]  # Reference for state/action size
                 print(f"🎮 Vectorized: {self.num_envs} parallel environments")
             else:

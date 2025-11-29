@@ -1067,10 +1067,25 @@ class WebDashboard:
         
         self._running = True
         self.publisher.set_running(True)
-        
-        # Suppress Flask/werkzeug logging BEFORE starting server
+
+        # Suppress Flask/werkzeug logging COMPLETELY
         import logging
-        logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+        # Custom filter to suppress successful HTTP requests (200, 304 status codes)
+        class RequestFilter(logging.Filter):
+            def filter(self, record):
+                # Filter out successful requests to reduce terminal clutter
+                message = record.getMessage()
+                if '" 200 -' in message or '" 304 -' in message:
+                    return False
+                return True
+
+        # Apply aggressive logging suppression
+        werkzeug_log = logging.getLogger('werkzeug')
+        werkzeug_log.setLevel(logging.CRITICAL)  # Only critical errors
+        werkzeug_log.disabled = True  # Completely disable
+        werkzeug_log.addFilter(RequestFilter())  # Filter successful requests as backup
+
         logging.getLogger('engineio').setLevel(logging.ERROR)
         logging.getLogger('socketio').setLevel(logging.ERROR)
         
@@ -1084,7 +1099,8 @@ class WebDashboard:
                 port=self.port,
                 debug=False,
                 use_reloader=False,
-                log_output=False
+                log_output=False,
+                allow_unsafe_werkzeug=True
             )
         
         self._server_thread = threading.Thread(target=run_server, daemon=True)
