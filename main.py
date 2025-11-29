@@ -704,7 +704,11 @@ class GameApp:
             self.config.LEARN_EVERY = 8
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 2
-        
+        elif mode == 'ultra':
+            self.config.LEARN_EVERY = 16
+            self.config.BATCH_SIZE = 256
+            self.config.GRADIENT_STEPS = 4
+
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
             self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
@@ -1739,6 +1743,7 @@ class HeadlessTrainer:
         self.web_dashboard.on_config_change_callback = self._apply_config
         self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
         self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(game, self.args)
+        self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
         # Speed control doesn't apply to headless (no frame timing)
         self.web_dashboard.on_speed_callback = lambda x: None
     
@@ -1755,7 +1760,10 @@ class HeadlessTrainer:
             torch_compiled=torch_compiled,
             target_episodes=self.config.MAX_EPISODES
         )
-        
+
+        # ADD: Set number of parallel environments
+        self.web_dashboard.publisher.state.num_envs = self.num_envs
+
         # Set performance mode based on turbo flag
         if self.args.turbo:
             self.web_dashboard.publisher.set_performance_mode('turbo')
@@ -2103,7 +2111,11 @@ class HeadlessTrainer:
             self.config.LEARN_EVERY = 8
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 2
-        
+        elif mode == 'ultra':
+            self.config.LEARN_EVERY = 16
+            self.config.BATCH_SIZE = 256
+            self.config.GRADIENT_STEPS = 4
+
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
             self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
@@ -2114,7 +2126,29 @@ class HeadlessTrainer:
                 "action"
             )
         print(f"⚡ Performance mode: {mode.upper()}")
-    
+
+    def _save_and_quit(self) -> None:
+        """Save the model and exit the application gracefully."""
+        if self.web_dashboard:
+            self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
+
+        # Save the model
+        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown")
+
+        if self.web_dashboard:
+            self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
+
+        print("\n👋 Save & Quit requested. Model saved. Exiting...")
+
+        # Give time for the save event to propagate to clients
+        import time
+        time.sleep(0.5)
+
+        # Exit gracefully
+        self.running = False
+        import sys
+        sys.exit(0)
+
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
         # Dispatch to vectorized training if using multiple environments

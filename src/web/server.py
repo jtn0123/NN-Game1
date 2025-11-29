@@ -109,8 +109,10 @@ class TrainingState:
     # Training time tracking
     training_start_time: float = 0.0
     target_episodes: int = 0  # 0 = unlimited
-    # Performance mode: 'normal', 'fast', 'turbo'
+    # Performance mode: 'normal', 'fast', 'turbo', 'ultra'
     performance_mode: str = "normal"
+    # Number of parallel environments
+    num_envs: int = 1
 
 
 @dataclass
@@ -638,6 +640,7 @@ class WebDashboard:
         self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
         self.on_switch_game_callback: Optional[Callable[[str], None]] = None
+        self.on_save_and_quit_callback: Optional[Callable[[], None]] = None
     
     def _register_routes(self) -> None:
         """Register Flask routes."""
@@ -671,6 +674,7 @@ class WebDashboard:
                 'learn_every': self.config.LEARN_EVERY,
                 'gradient_steps': self.config.GRADIENT_STEPS,
                 'device': str(self.config.DEVICE),
+                'vec_envs': self.publisher.state.num_envs,
                 # Game settings
                 'game_name': self.config.GAME_NAME,
             })
@@ -987,6 +991,9 @@ class WebDashboard:
                 game_name = data.get('game')
                 if game_name and self.on_switch_game_callback:
                     self.on_switch_game_callback(game_name)
+            elif action == 'save_and_quit':
+                if self.on_save_and_quit_callback:
+                    self.on_save_and_quit_callback()
                     # Notify all clients about the game switch
                     self.socketio.emit('game_switched', {
                         'game': game_name,

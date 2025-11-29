@@ -231,8 +231,12 @@
                                 <span class="info-label">Explore / Exploit</span>
                                 <span class="info-value" id="info-actions">0 / 0</span>
                             </div>
+                            <div class="info-row" data-tooltip="Number of parallel game environments running. More environments = faster training throughput.">
+                                <span class="info-label">🎮 Parallel Envs</span>
+                                <span class="info-value" id="info-vec-envs">1</span>
+                            </div>
                         </div>
-                        
+
                         <!-- Memory -->
                         <div class="info-section memory-section">
                             <div class="info-row memory-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
@@ -281,6 +285,9 @@
                             <button class="mode-btn turbo" id="mode-turbo" onclick="setPerformanceMode('turbo')" data-tooltip="Learn every 8 steps + 2 gradient updates. Maximum training speed. ~5000 steps/sec on M4">
                                 🚀 Turbo
                             </button>
+                            <button class="mode-btn ultra" id="mode-ultra" onclick="setPerformanceMode('ultra')" data-tooltip="Learn every 16 steps + 4 gradient updates + batch 256. Extreme throughput. ~8000+ steps/sec">
+                                ⚡ Ultra
+                            </button>
                         </div>
                     </div>
                     
@@ -299,6 +306,9 @@
                         </button>
                         <button class="control-btn fresh" onclick="startFresh()" data-tooltip="Start completely fresh - resets the neural network, clears all training memory, and resets all progress. Saved models on disk are preserved. Keyboard: Ctrl+Shift+R" data-tooltip-position="bottom">
                             🆕 Start Fresh
+                        </button>
+                        <button class="control-btn quit" onclick="saveAndQuit()" data-tooltip="Save current progress and exit the training application" data-tooltip-position="bottom">
+                            🚪 Save & Quit
                         </button>
                     </div>
                     
@@ -414,8 +424,15 @@
                                 <label for="setting-grad-steps">Gradient Steps</label>
                                 <input type="number" id="setting-grad-steps" value="1" step="1" min="1" max="8">
                             </div>
+                            <div class="setting-row vec-envs-row" data-tooltip="Number of parallel game environments. Higher = faster training but requires more memory. Requires restart to apply changes.">
+                                <label for="setting-vec-envs">Parallel Envs</label>
+                                <div class="vec-envs-control">
+                                    <input type="number" id="setting-vec-envs" value="1" min="1" max="32" step="1">
+                                    <span class="restart-badge" id="vec-envs-restart-badge">Restart required</span>
+                                </div>
+                            </div>
                         </div>
-                        
+
                         <button class="apply-btn" onclick="applySettings()">Apply Changes</button>
                     </div>
                 </div>

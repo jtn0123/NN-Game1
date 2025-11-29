@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
     loadGames();
     loadGameStats();
+    initVecEnvsHandler();
 });
 
 /**
@@ -491,9 +492,15 @@ function updateDashboard(data) {
     }
     document.getElementById('info-qvalue').textContent = state.avg_q_value.toFixed(2);
     document.getElementById('info-target').textContent = state.target_updates.toLocaleString();
-    document.getElementById('info-actions').textContent = 
+    document.getElementById('info-actions').textContent =
         `${state.exploration_actions.toLocaleString()} / ${state.exploitation_actions.toLocaleString()}`;
-    
+
+    // Update vec-envs display
+    const vecEnvsEl = document.getElementById('info-vec-envs');
+    if (vecEnvsEl && state.num_envs) {
+        vecEnvsEl.textContent = state.num_envs;
+    }
+
     // Update steps/sec (new performance metric)
     const stepsPerSec = state.steps_per_second || 0;
     document.getElementById('info-steps-sec').textContent = stepsPerSec.toLocaleString(undefined, {maximumFractionDigits: 0});
@@ -871,6 +878,72 @@ function startFresh() {
 }
 
 /**
+ * Save model and quit the application
+ */
+function saveAndQuit() {
+    const confirmed = confirm(
+        '🚪 Save & Quit\n\n' +
+        'This will:\n' +
+        '• Save your current training progress\n' +
+        '• Shut down the training server\n\n' +
+        'Continue?'
+    );
+
+    if (!confirmed) {
+        addConsoleLog('Save & Quit cancelled', 'info');
+        return;
+    }
+
+    // Update button to show saving state
+    const btn = document.querySelector('.control-btn.quit');
+    if (btn) {
+        const originalText = btn.textContent;
+        btn.textContent = '⏳ Saving...';
+        btn.classList.add('quitting');
+        btn.disabled = true;
+    }
+
+    socket.emit('control', { action: 'save_and_quit' });
+    addConsoleLog('💾 Saving and shutting down...', 'warning');
+
+    // Show shutdown message after a delay
+    setTimeout(() => {
+        showShutdownOverlay();
+    }, 1000);
+}
+
+/**
+ * Show shutdown overlay when server is stopping
+ */
+function showShutdownOverlay() {
+    const overlay = document.createElement('div');
+    overlay.id = 'shutdown-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(10, 10, 15, 0.95);
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'JetBrains Mono', monospace;
+    `;
+
+    overlay.innerHTML = `
+        <div style="font-size: 4rem; margin-bottom: 20px;">👋</div>
+        <h2 style="color: #4caf50; margin: 0 0 15px 0; font-size: 1.5rem;">Training Saved & Stopped</h2>
+        <p style="color: #7a7e8c; margin: 0;">Your progress has been saved. You can close this tab.</p>
+        <p style="color: #5a5e72; margin: 15px 0 0 0; font-size: 0.85rem;">To resume: python main.py --headless --web</p>
+    `;
+
+    document.body.appendChild(overlay);
+}
+
+/**
  * Update game speed with snapping to preset values
  */
 function updateSpeed(value) {
@@ -1231,7 +1304,8 @@ function setPerformanceMode(mode) {
     const modeNames = {
         'normal': 'Normal (learn every step)',
         'fast': 'Fast (learn every 4 steps)',
-        'turbo': 'Turbo (learn every 8, batch 128, 2 grad steps)'
+        'turbo': 'Turbo (learn every 8, batch 128, 2 grad steps)',
+        'ultra': 'Ultra (learn every 16, batch 256, 4 grad steps)'
     };
     addConsoleLog(`Performance mode: ${modeNames[mode]}`, 'action');
 }
@@ -1241,7 +1315,7 @@ function setPerformanceMode(mode) {
  */
 function syncSettingsFromMode(mode) {
     let learnEvery, batchSize, gradientSteps;
-    
+
     if (mode === 'normal') {
         learnEvery = 1;
         batchSize = 128;
@@ -1255,6 +1329,10 @@ function syncSettingsFromMode(mode) {
         learnEvery = 8;
         batchSize = 128;
         gradientSteps = 2;
+    } else if (mode === 'ultra') {
+        learnEvery = 16;
+        batchSize = 256;
+        gradientSteps = 4;
     }
     
     // Update the settings inputs
@@ -1390,6 +1468,15 @@ function updateLearnEveryLabel(value) {
  * Apply settings changes (enhanced)
  */
 function applySettings() {
+    // Check if vec-envs changed (requires restart)
+    const vecEnvsInput = document.getElementById('setting-vec-envs');
+    const newVecEnvs = parseInt(vecEnvsInput?.value || '1', 10);
+
+    if (newVecEnvs !== originalVecEnvs) {
+        showVecEnvsRestartCommand();
+        // Don't return - still apply other settings
+    }
+
     const config = {
         learning_rate: parseFloat(document.getElementById('setting-lr').value),
         epsilon: parseFloat(document.getElementById('setting-epsilon').value),
@@ -1410,6 +1497,54 @@ function applySettings() {
     setTimeout(() => {
         btn.textContent = originalText;
     }, 1500);
+}
+
+// Track original vec-envs value
+let originalVecEnvs = 1;
+
+/**
+ * Initialize vec-envs input handler
+ */
+function initVecEnvsHandler() {
+    const vecEnvsInput = document.getElementById('setting-vec-envs');
+    const restartBadge = document.getElementById('vec-envs-restart-badge');
+    const settingRow = vecEnvsInput?.closest('.setting-row');
+
+    if (!vecEnvsInput) return;
+
+    vecEnvsInput.addEventListener('input', () => {
+        const newValue = parseInt(vecEnvsInput.value, 10);
+        const hasChanged = newValue !== originalVecEnvs;
+
+        if (settingRow) {
+            settingRow.classList.toggle('changed', hasChanged);
+        }
+
+        if (hasChanged && restartBadge) {
+            restartBadge.classList.add('visible');
+        } else if (restartBadge) {
+            restartBadge.classList.remove('visible');
+        }
+    });
+}
+
+/**
+ * Show restart command for vec-envs change
+ */
+function showVecEnvsRestartCommand() {
+    const vecEnvsInput = document.getElementById('setting-vec-envs');
+    const newValue = parseInt(vecEnvsInput?.value || '1', 10);
+
+    if (newValue === originalVecEnvs) {
+        addConsoleLog('No change to parallel environments', 'info');
+        return;
+    }
+
+    const command = `python main.py --headless --turbo --web --vec-envs ${newValue}`;
+
+    // Show modal with restart command
+    showRestartBanner('parallel environments change', command);
+    addConsoleLog(`⚡ To use ${newValue} parallel environments, restart with: ${command}`, 'warning');
 }
 
 /**
@@ -1433,7 +1568,13 @@ function loadConfig() {
             if (data.gradient_steps) {
                 document.getElementById('setting-grad-steps').value = data.gradient_steps;
             }
-            
+
+            // Vec-envs setting
+            if (data.vec_envs) {
+                originalVecEnvs = data.vec_envs;
+                document.getElementById('setting-vec-envs').value = originalVecEnvs;
+            }
+
             // Update system status from config
             if (data.device) {
                 updateSystemStatus({ device: data.device, torch_compiled: false });

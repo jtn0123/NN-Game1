@@ -886,6 +886,23 @@ body {
     box-shadow: 0 4px 16px rgba(244, 67, 54, 0.15);
 }
 
+.control-btn.quit {
+    border-color: rgba(156, 39, 176, 0.5);
+    background: linear-gradient(145deg, rgba(156, 39, 176, 0.08) 0%, var(--bg-secondary) 100%);
+}
+
+.control-btn.quit:hover {
+    background: linear-gradient(145deg, rgba(156, 39, 176, 0.15) 0%, var(--bg-secondary) 100%);
+    border-color: #9c27b0;
+    box-shadow: 0 4px 16px rgba(156, 39, 176, 0.15);
+}
+
+.control-btn.quit.quitting {
+    background: linear-gradient(145deg, #9c27b0 0%, #7b1fa2 100%);
+    border-color: #9c27b0;
+    color: white;
+}
+
 /* Speed Control */
 .speed-control {
     padding-top: 12px;
@@ -1490,6 +1507,37 @@ body {
     z-index: 100;
 }
 
+/* Vec-Envs Control */
+.vec-envs-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.vec-envs-control input {
+    width: 70px;
+}
+
+.restart-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    background: rgba(255, 152, 0, 0.15);
+    border: 1px solid rgba(255, 152, 0, 0.3);
+    border-radius: 4px;
+    color: #ff9800;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.restart-badge.visible {
+    opacity: 1;
+}
+
+.vec-envs-row.changed .restart-badge {
+    opacity: 1;
+}
+
 /* Gauge card tooltip */
 .gauge-card[data-tooltip]::before {
     left: auto;
@@ -1642,6 +1690,23 @@ body {
     font-weight: 600;
     box-shadow: 0 4px 18px rgba(255, 193, 7, 0.45);
     animation: turbo-glow 1.2s ease-in-out infinite;
+}
+
+.mode-btn.ultra {
+    border-color: rgba(233, 30, 99, 0.4);
+}
+
+.mode-btn.ultra:hover {
+    background: rgba(233, 30, 99, 0.1);
+    border-color: #e91e63;
+    color: #e91e63;
+}
+
+.mode-btn.ultra.active {
+    background: linear-gradient(145deg, #e91e63 0%, #c2185b 100%);
+    border-color: #e91e63;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 @keyframes turbo-glow {
