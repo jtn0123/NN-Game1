@@ -35,6 +35,11 @@ import io
 import numpy as np
 
 try:
+    # Suppress werkzeug logging BEFORE importing Flask
+    import logging
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+    logging.getLogger('werkzeug').disabled = True
+    
     from flask import Flask, render_template, jsonify, request
     from flask_socketio import SocketIO, emit
     FLASK_AVAILABLE = True
@@ -1149,26 +1154,39 @@ class WebDashboard:
         self._running = True
         self.publisher.set_running(True)
 
-        # Suppress Flask/werkzeug logging COMPLETELY
+        # Suppress Flask/werkzeug logging COMPLETELY - do this BEFORE starting server
         import logging
-
-        # Custom filter to suppress successful HTTP requests (200, 304 status codes)
-        class RequestFilter(logging.Filter):
-            def filter(self, record):
-                # Filter out successful requests to reduce terminal clutter
-                message = record.getMessage()
-                if '" 200 -' in message or '" 304 -' in message:
-                    return False
-                return True
-
-        # Apply aggressive logging suppression
+        import sys
+        
+        # Disable werkzeug request logging completely
         werkzeug_log = logging.getLogger('werkzeug')
-        werkzeug_log.setLevel(logging.CRITICAL)  # Only critical errors
-        werkzeug_log.disabled = True  # Completely disable
-        werkzeug_log.addFilter(RequestFilter())  # Filter successful requests as backup
-
+        werkzeug_log.setLevel(logging.ERROR)
+        werkzeug_log.disabled = True
+        
+        # Also suppress Flask's internal logger
+        flask_log = logging.getLogger('flask.app')
+        flask_log.setLevel(logging.ERROR)
+        
+        # Suppress socketio and engineio loggers
         logging.getLogger('engineio').setLevel(logging.ERROR)
         logging.getLogger('socketio').setLevel(logging.ERROR)
+        logging.getLogger('engineio.server').setLevel(logging.ERROR)
+        logging.getLogger('socketio.server').setLevel(logging.ERROR)
+        
+        # Redirect werkzeug's output stream to devnull
+        # This catches cases where werkzeug bypasses the logging system
+        class NullWriter:
+            def write(self, *args, **kwargs):
+                pass
+            def flush(self, *args, **kwargs):
+                pass
+        
+        # Disable Flask's click CLI echo (used by werkzeug for request logging)
+        try:
+            import click
+            click.echo = lambda *args, **kwargs: None
+        except ImportError:
+            pass
         
         def run_server():
             print(f"\n🌐 Web Dashboard running at http://localhost:{self.port}")

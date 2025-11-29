@@ -2393,6 +2393,14 @@ class HeadlessTrainer:
             current_time = time.time()
             elapsed_since_report = current_time - last_report_time
             
+            # Handle fresh start: if current_episode was reset (e.g., by _start_fresh)
+            if self.current_episode < episode:
+                episode = self.current_episode
+                last_logged_episode = -1  # Reset so logging can resume
+                start_episode = 0
+                last_report_time = current_time
+                steps_since_report = 0
+            
             # Log every LOG_EVERY episodes OR if REPORT_INTERVAL_SECONDS has passed since last log
             # Only log if this is a new episode (prevent duplicate logs)
             should_log_by_episode = (episode - last_logged_episode) >= config.LOG_EVERY
@@ -2405,12 +2413,18 @@ class HeadlessTrainer:
                 eps_per_hour = (episode - start_episode) / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 
-                print(f"Ep {episode:5d} | "
+                progress_msg = (f"Ep {episode:5d} | "
                       f"Score: {info['score']:4d} | "
                       f"Avg: {avg_score:6.1f} | "
                       f"ε: {self.agent.epsilon:.3f} | "
                       f"⚡ {steps_per_sec:,.0f} steps/s | "
                       f"📊 {eps_per_hour:,.0f} ep/hr")
+                
+                print(progress_msg)
+                
+                # Also log to web dashboard console
+                if self.web_dashboard:
+                    self.web_dashboard.log(progress_msg, "metric")
                 
                 last_logged_episode = episode
                 last_report_time = current_time
@@ -2614,6 +2628,14 @@ class HeadlessTrainer:
             # Check if we should log: either LOG_EVERY episodes completed OR time interval passed
             current_time = time.time()
             elapsed_since_report = current_time - last_report_time
+            
+            # Handle fresh start: if current_episode < last_logged_episode, a reset occurred
+            if last_logged_episode > self.current_episode:
+                last_logged_episode = -1  # Reset so logging can resume
+                last_report_time = current_time
+                steps_since_report = 0
+                episodes_completed = 0  # Reset episodes count for accurate ep/hr
+            
             should_log_by_episode = (self.current_episode - last_logged_episode) >= config.LOG_EVERY
             should_log_by_time = elapsed_since_report >= config.REPORT_INTERVAL_SECONDS
             
@@ -2624,12 +2646,18 @@ class HeadlessTrainer:
                 eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 
-                print(f"Ep {self.current_episode:5d} | "
+                progress_msg = (f"Ep {self.current_episode:5d} | "
                       f"Score: {last_score:4d} | "
                       f"Avg: {avg_score:6.1f} | "
                       f"ε: {self.agent.epsilon:.3f} | "
                       f"⚡ {steps_per_sec:,.0f} steps/s | "
                       f"📊 {eps_per_hour:,.0f} ep/hr")
+                
+                print(progress_msg)
+                
+                # Also log to web dashboard console
+                if self.web_dashboard:
+                    self.web_dashboard.log(progress_msg, "metric")
                 
                 last_logged_episode = self.current_episode
                 last_report_time = current_time

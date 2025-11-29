@@ -205,8 +205,8 @@ class Config:
     # Learning rate - How big of steps to take during optimization
     # Too high: unstable training, loss explodes
     # Too low: very slow learning
-    # 0.0003 provides faster initial learning for Space Invaders
-    LEARNING_RATE: float = 0.0003
+    # EXPERIMENT 2: Reduced from 0.0003 to test if high LR causes forgetting
+    LEARNING_RATE: float = 0.0001
     
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
@@ -284,17 +284,15 @@ class Config:
     # =========================================================================
     
     # Starting exploration rate (1.0 = 100% random)
-    # With USE_NOISY_NETWORKS=True: Use small epsilon (0.05-0.1) as fallback
-    # NoisyNets handle primary exploration, epsilon provides backup diversity
-    EPSILON_START: float = 0.1
+    # EXPERIMENT 3: Higher epsilon for pure epsilon-greedy (no NoisyNets)
+    EPSILON_START: float = 0.5
     
-    # Minimum exploration rate (0.02 = 2% random to escape local optima)
-    # Keep small epsilon even with NoisyNets to prevent policy collapse
+    # Minimum exploration rate
     EPSILON_END: float = 0.02
 
     # Decay rate per episode (higher = slower decay)
-    # EPSILON_DECAY = 0.9995 means epsilon *= 0.9995 after each episode (slower decay)
-    EPSILON_DECAY: float = 0.9995
+    # EXPERIMENT 3: Faster decay (0.995) for pure epsilon-greedy
+    EPSILON_DECAY: float = 0.995
 
     # Exploration decay strategy: 'exponential', 'linear', 'cosine'
     EXPLORATION_STRATEGY: str = 'exponential'
@@ -359,8 +357,8 @@ class Config:
     # =========================================================================
 
     # Enable NoisyNet (learnable parameter noise for exploration)
-    # Combined with small epsilon-greedy for hybrid exploration
-    USE_NOISY_NETWORKS: bool = True
+    # EXPERIMENT 3: Disabled to test pure epsilon-greedy exploration
+    USE_NOISY_NETWORKS: bool = False
 
     # Standard deviation for noise initialization
     # Higher values = more initial exploration (0.5 standard, 0.7 for more exploration)
