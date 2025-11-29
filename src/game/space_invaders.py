@@ -821,6 +821,7 @@ class SpaceInvaders(BaseGame):
         self._shoot_cooldown = 0
         self._shots_fired = 0
         self._shots_hit = 0
+        self._action_history.clear()
         self.screen_shake = 0
         self.flash_alpha = 0
 

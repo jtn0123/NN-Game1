@@ -752,6 +752,17 @@ function resetEpisode() {
 }
 
 /**
+ * Start fresh training - reset agent and clear all training state
+ */
+function startFresh() {
+    if (!confirm('Start fresh training?\n\nThis will:\n• Reset the neural network to initial state\n• Clear all training memory\n• Reset all progress (episodes, scores, etc.)\n\nThis action cannot be undone. Continue?')) {
+        return;
+    }
+    socket.emit('control', { action: 'start_fresh' });
+    addConsoleLog('Starting fresh training...', 'warning');
+}
+
+/**
  * Update game speed with snapping to preset values
  */
 function updateSpeed(value) {
@@ -923,33 +934,38 @@ function showLoadModal() {
                 const reasonBadge = reason ? `<span class="reason-badge ${safeReason}">${safeReason}</span>` : '';
                 
                 return `
-                    <div class="model-item" onclick="loadModel('${safePathForJs}')">
-                        <div class="model-header">
-                            <div class="model-name">
-                                📁 ${safeName}
-                                ${reasonBadge}
+                    <div class="model-item">
+                        <div class="model-item-content" onclick="loadModel('${safePathForJs}')">
+                            <div class="model-header">
+                                <div class="model-name">
+                                    📁 ${safeName}
+                                    ${reasonBadge}
+                                </div>
+                                <span class="model-size">${size}</span>
                             </div>
-                            <span class="model-size">${size}</span>
+                            <div class="model-stats">
+                                <div class="model-stat">
+                                    <span class="model-stat-label">Episode</span>
+                                    <span class="model-stat-value">${episodeStr}</span>
+                                </div>
+                                <div class="model-stat">
+                                    <span class="model-stat-label">Best</span>
+                                    <span class="model-stat-value">${bestScore}</span>
+                                </div>
+                                <div class="model-stat">
+                                    <span class="model-stat-label">Avg(100)</span>
+                                    <span class="model-stat-value">${avgScore}</span>
+                                </div>
+                                <div class="model-stat">
+                                    <span class="model-stat-label">Epsilon</span>
+                                    <span class="model-stat-value">${epsilon}</span>
+                                </div>
+                            </div>
+                            <div class="model-date">${safeModifiedStr}</div>
                         </div>
-                        <div class="model-stats">
-                            <div class="model-stat">
-                                <span class="model-stat-label">Episode</span>
-                                <span class="model-stat-value">${episodeStr}</span>
-                            </div>
-                            <div class="model-stat">
-                                <span class="model-stat-label">Best</span>
-                                <span class="model-stat-value">${bestScore}</span>
-                            </div>
-                            <div class="model-stat">
-                                <span class="model-stat-label">Avg(100)</span>
-                                <span class="model-stat-value">${avgScore}</span>
-                            </div>
-                            <div class="model-stat">
-                                <span class="model-stat-label">Epsilon</span>
-                                <span class="model-stat-value">${epsilon}</span>
-                            </div>
-                        </div>
-                        <div class="model-date">${safeModifiedStr}</div>
+                        <button class="model-delete-btn" onclick="event.stopPropagation(); deleteModel('${safePathForJs}', '${safeName}')" title="Delete this model">
+                            🗑️
+                        </button>
                     </div>
                 `;
             }).join('');
@@ -975,6 +991,38 @@ function loadModel(path) {
     socket.emit('control', { action: 'load_model', path: path });
     hideLoadModal();
     addConsoleLog(`Loading model: ${path.split('/').pop()}`, 'action');
+}
+
+/**
+ * Delete a model file
+ */
+function deleteModel(path, name) {
+    if (!confirm(`Are you sure you want to delete "${name}"?\n\nThis action cannot be undone.`)) {
+        return;
+    }
+    
+    // Encode path for URL (handle special characters)
+    const encodedPath = encodeURIComponent(path);
+    
+    fetchWithTimeout(`/api/models/${encodedPath}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            addConsoleLog(`🗑️ Deleted model: ${name}`, 'action');
+            // Refresh the model list
+            showLoadModal();
+        } else {
+            addConsoleLog(`❌ Failed to delete model: ${data.error || 'Unknown error'}`, 'error');
+        }
+    })
+    .catch(err => {
+        addConsoleLog(`❌ Error deleting model: ${err.message}`, 'error');
+    });
 }
 
 // Close modal on outside click (click on backdrop, not content)
@@ -1601,7 +1649,7 @@ function showRestartBanner(game, command) {
             <code id="restart-command" style="color: #64b5f6; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; word-break: break-all;">${escapeHtml(command)}</code>
         </div>
         <div style="display: flex; gap: 12px; justify-content: center;">
-            <button onclick="copyRestartCommand()" style="
+            <button onclick="copyRestartCommand(event)" style="
                 background: #4caf50;
                 border: none;
                 color: white;

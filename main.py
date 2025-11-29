@@ -238,6 +238,7 @@ class GameApp:
             self.web_dashboard.on_save_as_callback = self._save_model_as
             self.web_dashboard.on_speed_callback = self._set_speed
             self.web_dashboard.on_reset_callback = self._reset_episode
+            self.web_dashboard.on_start_fresh_callback = self._start_fresh
             self.web_dashboard.on_load_model_callback = self._load_model
             self.web_dashboard.on_config_change_callback = self._apply_config
             self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
@@ -402,6 +403,59 @@ class GameApp:
         if self.web_dashboard:
             self.web_dashboard.log("🔄 Episode reset", "action")
         print("🔄 Episode reset")
+    
+    def _start_fresh(self) -> None:
+        """Start fresh training - reset agent, clear memory, reset all training state."""
+        from src.ai.agent import Agent
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("🔄 Starting fresh training - resetting agent and clearing memory", "warning")
+        
+        # Create a new agent (fresh neural network)
+        self.agent = Agent(
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=self.config
+        )
+        
+        # Clear replay buffer
+        self.agent.memory.clear()
+        
+        # Reset all training state
+        self.episode = 0
+        self.total_reward = 0.0
+        self.steps = 0
+        self.exploration_actions = 0
+        self.exploitation_actions = 0
+        self.target_updates = 0
+        self.last_target_update_step = 0
+        self.training_start_time = time.time()
+        self.best_score_ever = 0
+        
+        # Clear training history
+        self.recent_scores.clear()
+        self.training_history_scores.clear()
+        self.training_history_rewards.clear()
+        self.training_history_steps.clear()
+        self.training_history_epsilons.clear()
+        self.training_history_bricks.clear()
+        self.training_history_wins.clear()
+        
+        # Reset game state
+        self.state = self.game.reset()
+        self.selected_action = None
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared", "success")
+            # Update dashboard with reset state
+            self.web_dashboard.publisher.state.episode = 0
+            self.web_dashboard.publisher.state.score = 0
+            self.web_dashboard.publisher.state.best_score = 0
+            self.web_dashboard.publisher.state.total_steps = 0
+            self.web_dashboard.publisher.state.epsilon = self.config.EPSILON_START
+            self.web_dashboard.publisher.state.memory_size = 0
+        
+        print("✅ Fresh training started - agent reset, memory cleared")
     
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
@@ -1653,6 +1707,7 @@ class HeadlessTrainer:
         self.web_dashboard.on_save_callback = lambda: self._save_model(f"{self.config.GAME_NAME}_web_save.pth", save_reason="manual")
         self.web_dashboard.on_save_as_callback = self._save_model_as
         self.web_dashboard.on_reset_callback = self._reset_episode
+        self.web_dashboard.on_start_fresh_callback = self._start_fresh
         self.web_dashboard.on_load_model_callback = self._load_model
         self.web_dashboard.on_config_change_callback = self._apply_config
         self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
@@ -1708,6 +1763,47 @@ class HeadlessTrainer:
         if self.web_dashboard:
             self.web_dashboard.log("🔄 Episode will reset at next boundary", "action")
         print("🔄 Episode reset requested")
+    
+    def _start_fresh(self) -> None:
+        """Start fresh training - reset agent, clear memory, reset all training state."""
+        from src.ai.agent import Agent
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("🔄 Starting fresh training - resetting agent and clearing memory", "warning")
+        
+        # Create a new agent (fresh neural network)
+        self.agent = Agent(
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=self.config
+        )
+        
+        # Clear replay buffer
+        self.agent.memory.clear()
+        
+        # Reset all training state
+        self.current_episode = 0
+        self.best_score = 0
+        self.scores.clear()
+        self.wins.clear()
+        self.total_steps = 0
+        self.training_start_time = time.time()
+        self.exploration_actions = 0
+        self.exploitation_actions = 0
+        self.target_updates = 0
+        self.last_target_update_step = 0
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("✅ Fresh training started - agent reset, memory cleared", "success")
+            # Update dashboard with reset state
+            self.web_dashboard.publisher.state.episode = 0
+            self.web_dashboard.publisher.state.score = 0
+            self.web_dashboard.publisher.state.best_score = 0
+            self.web_dashboard.publisher.state.total_steps = 0
+            self.web_dashboard.publisher.state.epsilon = self.config.EPSILON_START
+            self.web_dashboard.publisher.state.memory_size = 0
+        
+        print("✅ Fresh training started - agent reset, memory cleared")
     
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and sync history to dashboard."""

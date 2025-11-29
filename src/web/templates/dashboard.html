@@ -291,11 +291,14 @@
                         <button class="control-btn save" onclick="saveModel()" data-tooltip="Save current neural network weights to file. Keyboard: Ctrl+S" data-tooltip-position="bottom">
                             💾 Save
                         </button>
-                        <button class="control-btn reset" onclick="resetEpisode()" data-tooltip="End current episode and start fresh. Useful if AI gets stuck. Keyboard: Ctrl+R" data-tooltip-position="bottom">
-                            🔄 Reset
+                        <button class="control-btn reset" onclick="resetEpisode()" data-tooltip="Reset current episode only - ends the current game and starts a new one. Does not reset training progress. Keyboard: Ctrl+R" data-tooltip-position="bottom">
+                            🔄 Reset Episode
                         </button>
                         <button class="control-btn load" onclick="showLoadModal()" data-tooltip="Load a previously saved model to continue training or evaluate performance." data-tooltip-position="bottom">
                             📂 Load
+                        </button>
+                        <button class="control-btn fresh" onclick="startFresh()" data-tooltip="Start completely fresh - resets the neural network, clears all training memory, and resets all progress. Use this to start over from scratch." data-tooltip-position="bottom">
+                            🆕 Start Fresh
                         </button>
                     </div>
                     

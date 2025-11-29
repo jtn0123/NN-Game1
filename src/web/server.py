@@ -584,6 +584,7 @@ class WebDashboard:
         self.on_save_as_callback: Optional[Callable[[str], None]] = None
         self.on_speed_callback: Optional[Callable[[float], None]] = None
         self.on_reset_callback: Optional[Callable[[], None]] = None
+        self.on_start_fresh_callback: Optional[Callable[[], None]] = None
         self.on_load_model_callback: Optional[Callable[[str], None]] = None
         self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
@@ -771,6 +772,61 @@ class WebDashboard:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
+        @self.app.route('/api/models/<path:filepath>', methods=['DELETE'])
+        def api_delete_model(filepath):
+            """Delete a model file.
+            
+            Security: Validates that the path is within the model directory
+            to prevent path traversal attacks.
+            """
+            import os
+            
+            # Security: ensure path is within model directory
+            # Check both game-specific and legacy model directories
+            game_model_dir = os.path.realpath(self.config.GAME_MODEL_DIR)
+            legacy_model_dir = os.path.realpath(self.config.MODEL_DIR)
+            full_path = os.path.realpath(filepath)
+            
+            # Check if path is within either allowed directory
+            is_valid = False
+            try:
+                # Check game-specific directory
+                common_game = os.path.commonpath([game_model_dir, full_path])
+                if common_game == game_model_dir:
+                    is_valid = True
+            except ValueError:
+                pass
+            
+            try:
+                # Check legacy directory
+                common_legacy = os.path.commonpath([legacy_model_dir, full_path])
+                if common_legacy == legacy_model_dir:
+                    is_valid = True
+            except ValueError:
+                pass
+            
+            if not is_valid:
+                return jsonify({'error': 'Invalid path - model must be in model directory'}), 403
+            
+            if not os.path.exists(full_path):
+                return jsonify({'error': 'Model not found'}), 404
+            
+            # Ensure it's a .pth file
+            if not full_path.endswith('.pth'):
+                return jsonify({'error': 'Invalid file type'}), 400
+            
+            try:
+                filename = os.path.basename(full_path)
+                os.remove(full_path)
+                self.publisher.log(f"🗑️ Deleted model: {filename}", level="action")
+                return jsonify({
+                    'success': True,
+                    'message': f'Model {filename} deleted successfully',
+                    'filename': filename
+                })
+            except Exception as e:
+                return jsonify({'error': f'Failed to delete model: {str(e)}'}), 500
+        
         @self.app.route('/api/save-status')
         def api_save_status():
             """Get last save information."""
@@ -861,6 +917,9 @@ class WebDashboard:
             elif action == 'reset':
                 if self.on_reset_callback:
                     self.on_reset_callback()
+            elif action == 'start_fresh':
+                if self.on_start_fresh_callback:
+                    self.on_start_fresh_callback()
             elif action == 'load_model':
                 model_path = data.get('path')
                 if model_path and self.on_load_model_callback:
