@@ -491,6 +491,7 @@ class WebDashboard:
         self.on_load_model_callback: Optional[Callable[[str], None]] = None
         self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
+        self.on_switch_game_callback: Optional[Callable[[str], None]] = None
     
     def _register_routes(self) -> None:
         """Register Flask routes."""
@@ -520,6 +521,33 @@ class WebDashboard:
                 'learn_every': self.config.LEARN_EVERY,
                 'gradient_steps': self.config.GRADIENT_STEPS,
                 'device': str(self.config.DEVICE),
+                # Game settings
+                'game_name': self.config.GAME_NAME,
+            })
+        
+        @self.app.route('/api/games')
+        def api_games():
+            """List all available games with their metadata."""
+            from src.game import list_games, get_game_info
+            
+            games = []
+            for game_id in list_games():
+                info = get_game_info(game_id)
+                if info:
+                    games.append({
+                        'id': game_id,
+                        'name': info.get('name', game_id.title()),
+                        'description': info.get('description', ''),
+                        'actions': info.get('actions', []),
+                        'difficulty': info.get('difficulty', 'Unknown'),
+                        'icon': info.get('icon', '🎮'),
+                        'color': info.get('color', (100, 100, 100)),
+                        'is_current': game_id == self.config.GAME_NAME,
+                    })
+            
+            return jsonify({
+                'games': games,
+                'current_game': self.config.GAME_NAME
             })
         
         @self.app.route('/api/screenshot')
@@ -536,20 +564,40 @@ class WebDashboard:
         
         @self.app.route('/api/models')
         def api_models():
-            """List available model files with metadata."""
+            """List available model files with metadata.
+            
+            Searches both game-specific directory and legacy models directory.
+            """
             import os
             import torch
             from datetime import datetime
             
-            model_dir = self.config.MODEL_DIR
+            # Search both game-specific and legacy directories
+            search_dirs = [
+                (self.config.GAME_MODEL_DIR, self.config.GAME_NAME),
+                (self.config.MODEL_DIR, 'legacy')
+            ]
+            
             models = []
-            if os.path.exists(model_dir):
+            seen_paths = set()  # Avoid duplicates
+            
+            for model_dir, source in search_dirs:
+                if not os.path.exists(model_dir):
+                    continue
+                    
                 for f in os.listdir(model_dir):
                     if f.endswith('.pth'):
                         path = os.path.join(model_dir, f)
+                        
+                        # Skip if we've already seen this file
+                        if path in seen_paths:
+                            continue
+                        seen_paths.add(path)
+                        
                         model_info = {
                             'name': f,
                             'path': path,
+                            'source': source,  # Which directory it came from
                             'size': os.path.getsize(path),
                             'modified': os.path.getmtime(path),
                             'modified_str': datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d %H:%M'),
@@ -569,8 +617,9 @@ class WebDashboard:
                             pass
                         
                         models.append(model_info)
+            
             models.sort(key=lambda x: x['modified'], reverse=True)
-            return jsonify({'models': models})
+            return jsonify({'models': models, 'current_game': self.config.GAME_NAME})
         
         @self.app.route('/api/model-info/<path:filepath>')
         def api_model_info(filepath):
@@ -621,6 +670,55 @@ class WebDashboard:
         def api_save_status():
             """Get last save information."""
             return jsonify(self.publisher.get_save_status())
+        
+        @self.app.route('/api/game-stats')
+        def api_game_stats():
+            """Get training statistics for all games (for comparison panel)."""
+            import os
+            import torch
+            from src.game import list_games, get_game_info
+            
+            stats = {}
+            for game_id in list_games():
+                game_info = get_game_info(game_id)
+                game_model_dir = os.path.join(self.config.MODEL_DIR, game_id)
+                
+                game_stats = {
+                    'name': game_info.get('name', game_id.title()) if game_info else game_id.title(),
+                    'icon': game_info.get('icon', '🎮') if game_info else '🎮',
+                    'color': game_info.get('color', (100, 100, 100)) if game_info else (100, 100, 100),
+                    'best_score': 0,
+                    'total_episodes': 0,
+                    'total_training_time': 0,
+                    'model_count': 0,
+                    'best_model': None,
+                }
+                
+                # Scan models for this game
+                if os.path.exists(game_model_dir):
+                    for f in os.listdir(game_model_dir):
+                        if f.endswith('.pth'):
+                            game_stats['model_count'] += 1
+                            path = os.path.join(game_model_dir, f)
+                            try:
+                                checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+                                if 'metadata' in checkpoint:
+                                    meta = checkpoint['metadata']
+                                    if meta.get('best_score', 0) > game_stats['best_score']:
+                                        game_stats['best_score'] = meta['best_score']
+                                        game_stats['best_model'] = f
+                                    if meta.get('episode', 0) > game_stats['total_episodes']:
+                                        game_stats['total_episodes'] = meta['episode']
+                                    game_stats['total_training_time'] += meta.get('total_training_time_seconds', 0)
+                            except Exception:
+                                pass
+                
+                stats[game_id] = game_stats
+            
+            return jsonify({
+                'stats': stats,
+                'current_game': self.config.GAME_NAME
+            })
     
     def _register_socket_events(self) -> None:
         """Register SocketIO events."""
@@ -668,6 +766,15 @@ class WebDashboard:
                 if self.on_performance_mode_callback:
                     self.on_performance_mode_callback(mode)
                 self.publisher.set_performance_mode(mode)
+            elif action == 'switch_game':
+                game_name = data.get('game')
+                if game_name and self.on_switch_game_callback:
+                    self.on_switch_game_callback(game_name)
+                    # Notify all clients about the game switch
+                    self.socketio.emit('game_switched', {
+                        'game': game_name,
+                        'message': f'Switching to {game_name}...'
+                    })
         
         @self.socketio.on('clear_logs')
         def handle_clear_logs():

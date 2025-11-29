@@ -71,6 +71,7 @@ from typing import Optional, Callable, Any, Type
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
+from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
 from src.game.breakout import Breakout, VecBreakout
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
@@ -120,7 +121,11 @@ class GameApp:
         
         # Initialize Pygame
         pygame.init()
-        pygame.display.set_caption("🧠 Neural Network AI - Atari Breakout")
+        
+        # Get game info for display
+        game_info = get_game_info(config.GAME_NAME)
+        game_display_name = game_info['name'] if game_info else config.GAME_NAME.title()
+        pygame.display.set_caption(f"🧠 Neural Network AI - {game_display_name}")
         
         # Calculate window size
         # Layout: Game (800x600) | Neural Network Viz (300) | padding
@@ -145,8 +150,13 @@ class GameApp:
         )
         self.clock = pygame.time.Clock()
         
-        # Create game
-        self.game = Breakout(config)
+        # Create game from registry
+        GameClass = get_game(config.GAME_NAME)
+        if GameClass is None:
+            print(f"❌ Unknown game: {config.GAME_NAME}")
+            print(f"   Available games: {', '.join(list_games())}")
+            sys.exit(1)
+        self.game = GameClass(config)
         
         # Create AI agent
         self.agent = Agent(
@@ -221,7 +231,7 @@ class GameApp:
         if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
             self.web_dashboard.on_pause_callback = self._toggle_pause
-            self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth", save_reason="manual")
+            self.web_dashboard.on_save_callback = lambda: self._save_model(f"{config.GAME_NAME}_web_save.pth", save_reason="manual")
             self.web_dashboard.on_save_as_callback = self._save_model_as
             self.web_dashboard.on_speed_callback = self._set_speed
             self.web_dashboard.on_reset_callback = self._reset_episode
@@ -260,18 +270,20 @@ class GameApp:
         if explicit_path and os.path.exists(explicit_path):
             return explicit_path
         
-        # Otherwise, find most recent save in models directory
-        model_dir = self.config.MODEL_DIR
-        if not os.path.exists(model_dir):
-            return None
+        # Search for models in game-specific directory first, then legacy directory
+        search_dirs = [self.config.GAME_MODEL_DIR, self.config.MODEL_DIR]
         
-        # Find all .pth files
         model_files = []
-        for f in os.listdir(model_dir):
-            if f.endswith('.pth'):
-                filepath = os.path.join(model_dir, f)
-                mtime = os.path.getmtime(filepath)
-                model_files.append((filepath, mtime))
+        for model_dir in search_dirs:
+            if not os.path.exists(model_dir):
+                continue
+            
+            # Find all .pth files in this directory
+            for f in os.listdir(model_dir):
+                if f.endswith('.pth'):
+                    filepath = os.path.join(model_dir, f)
+                    mtime = os.path.getmtime(filepath)
+                    model_files.append((filepath, mtime))
         
         if not model_files:
             return None
@@ -942,16 +954,16 @@ class GameApp:
                         
                         # Save checkpoint
                         if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
-                            self._save_model(f"breakout_ep{self.episode}.pth", save_reason="periodic")
+                            self._save_model(f"{self.config.GAME_NAME}_ep{self.episode}.pth", save_reason="periodic")
                             if self.web_dashboard:
                                 self.web_dashboard.log(
-                                    f"💾 Checkpoint saved: breakout_ep{self.episode}.pth",
+                                    f"💾 Checkpoint saved: {self.config.GAME_NAME}_ep{self.episode}.pth",
                                     "success"
                                 )
                         
                         if info['score'] > self.best_score_ever:
                             self.best_score_ever = info['score']
-                            self._save_model("breakout_best.pth", save_reason="best", quiet=True)
+                            self._save_model(f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True)
                             if self.web_dashboard:
                                 avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
                                 self.web_dashboard.log(
@@ -1002,7 +1014,7 @@ class GameApp:
                     self.clock.tick(60)
         
         # Training complete
-        self._save_model("breakout_final.pth", save_reason="final")
+        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")
         if self.web_dashboard:
             self.web_dashboard.log("🎉 Training complete!", "success", {
                 'total_episodes': self.episode,
@@ -1147,16 +1159,16 @@ class GameApp:
             
             # Save checkpoints
             if episode % self.config.SAVE_EVERY == 0 and episode > 0:
-                self._save_model(f"breakout_ep{episode}.pth")
+                self._save_model(f"{self.config.GAME_NAME}_ep{episode}.pth")
             
             if info['score'] > best_score:
                 best_score = info['score']
-                self._save_model("breakout_best.pth", quiet=True)
+                self._save_model(f"{self.config.GAME_NAME}_best.pth", quiet=True)
             
             # Increment episode counter
             episode += 1
         
-        self._save_model("breakout_final.pth")
+        self._save_model(f"{self.config.GAME_NAME}_final.pth")
         
         total_time = time.time() - start_time
         print("\n" + "=" * 60)
@@ -1192,9 +1204,9 @@ class GameApp:
                     self._toggle_pause()
                 
                 elif event.key == pygame.K_s:
-                    self._save_model("breakout_manual_save.pth", save_reason="manual")
+                    self._save_model(f"{self.config.GAME_NAME}_manual_save.pth", save_reason="manual")
                     if self.web_dashboard:
-                        self.web_dashboard.log("💾 Manual save: breakout_manual_save.pth", "success")
+                        self.web_dashboard.log(f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success")
                 
                 elif event.key == pygame.K_r:
                     self._reset_episode()
@@ -1282,7 +1294,9 @@ class GameApp:
         Returns:
             True if save succeeded, False otherwise
         """
-        filepath = os.path.join(self.config.MODEL_DIR, filename)
+        # Ensure game-specific model directory exists
+        os.makedirs(self.config.GAME_MODEL_DIR, exist_ok=True)
+        filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
         
         # Calculate metrics for metadata
         avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
@@ -1397,15 +1411,30 @@ class HeadlessTrainer:
         # Vectorized environment support
         self.num_envs = getattr(args, 'vec_envs', 1)
         
+        # Get game class from registry
+        GameClass = get_game(config.GAME_NAME)
+        if GameClass is None:
+            print(f"❌ Unknown game: {config.GAME_NAME}")
+            print(f"   Available games: {', '.join(list_games())}")
+            sys.exit(1)
+        
         if self.num_envs > 1:
             # Create vectorized environment for parallel game execution
-            self.vec_env = VecBreakout(self.num_envs, config, headless=True)
-            self.game = self.vec_env.envs[0]  # Reference for state/action size
-            print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            # TODO: Add VecEnv support for other games
+            if config.GAME_NAME == 'breakout':
+                self.vec_env = VecBreakout(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            else:
+                print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
+                print(f"   Falling back to single environment")
+                self.vec_env = None
+                self.game = GameClass(config, headless=True)
+                self.num_envs = 1
         else:
             # Single game mode (original behavior)
             self.vec_env = None
-            self.game = Breakout(config, headless=True)
+            self.game = GameClass(config, headless=True)
         
         # Create AI agent
         self.agent = Agent(
@@ -1418,8 +1447,8 @@ class HeadlessTrainer:
         if args.model and os.path.exists(args.model):
             self.agent.load(args.model)  # Returns tuple, we ignore history in headless
         
-        # Create model directory
-        os.makedirs(config.MODEL_DIR, exist_ok=True)
+        # Create game-specific model directory
+        os.makedirs(config.GAME_MODEL_DIR, exist_ok=True)
         
         # Tracking for loaded model info
         self.best_score = 0
@@ -1462,7 +1491,8 @@ class HeadlessTrainer:
         
         Priority:
         1. Explicitly specified --model path
-        2. Most recent .pth file in models directory
+        2. Most recent .pth file in game-specific model directory
+        3. Fallback to legacy models directory for backwards compatibility
         
         Returns:
             Path to model file, or None if no model to load
@@ -1471,18 +1501,20 @@ class HeadlessTrainer:
         if explicit_path and os.path.exists(explicit_path):
             return explicit_path
         
-        # Otherwise, find most recent save in models directory
-        model_dir = self.config.MODEL_DIR
-        if not os.path.exists(model_dir):
-            return None
+        # Search for models in game-specific directory first, then legacy directory
+        search_dirs = [self.config.GAME_MODEL_DIR, self.config.MODEL_DIR]
         
-        # Find all .pth files
         model_files = []
-        for f in os.listdir(model_dir):
-            if f.endswith('.pth'):
-                filepath = os.path.join(model_dir, f)
-                mtime = os.path.getmtime(filepath)
-                model_files.append((filepath, mtime))
+        for model_dir in search_dirs:
+            if not os.path.exists(model_dir):
+                continue
+            
+            # Find all .pth files in this directory
+            for f in os.listdir(model_dir):
+                if f.endswith('.pth'):
+                    filepath = os.path.join(model_dir, f)
+                    mtime = os.path.getmtime(filepath)
+                    model_files.append((filepath, mtime))
         
         if not model_files:
             return None
@@ -1501,7 +1533,7 @@ class HeadlessTrainer:
             return
         
         self.web_dashboard.on_pause_callback = self._toggle_pause
-        self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth", save_reason="manual")
+        self.web_dashboard.on_save_callback = lambda: self._save_model(f"{self.config.GAME_NAME}_web_save.pth", save_reason="manual")
         self.web_dashboard.on_save_as_callback = self._save_model_as
         self.web_dashboard.on_reset_callback = self._reset_episode
         self.web_dashboard.on_load_model_callback = self._load_model
@@ -1894,7 +1926,7 @@ class HeadlessTrainer:
             # Save checkpoints
             if info['score'] > self.best_score:
                 self.best_score = info['score']
-                self._save_model("breakout_best.pth", save_reason="best", quiet=True)
+                self._save_model(f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True)
                 if self.web_dashboard:
                     self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
             
@@ -1905,7 +1937,7 @@ class HeadlessTrainer:
             episode += 1
         
         # Final save
-        self._save_model("breakout_final.pth", save_reason="final")
+        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")
         
         # Summary
         total_time = time.time() - self.training_start_time
@@ -2011,7 +2043,7 @@ class HeadlessTrainer:
                     # Track best score
                     if score > self.best_score:
                         self.best_score = score
-                        self._save_model("breakout_best.pth", save_reason="best", quiet=True)
+                        self._save_model(f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True)
                         if self.web_dashboard:
                             self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
                     
@@ -2068,7 +2100,7 @@ class HeadlessTrainer:
                     
                     # Save checkpoints
                     if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
-                        self._save_model(f"breakout_ep{self.current_episode}.pth", save_reason="periodic")
+                        self._save_model(f"{self.config.GAME_NAME}_ep{self.current_episode}.pth", save_reason="periodic")
             
             # Update states for next iteration (already auto-reset in VecBreakout)
             states = next_states.copy()
@@ -2095,7 +2127,7 @@ class HeadlessTrainer:
                     steps_since_report = 0
         
         # Final save
-        self._save_model("breakout_final.pth", save_reason="final")
+        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")
         
         # Summary
         total_time = time.time() - self.training_start_time
@@ -2127,7 +2159,9 @@ class HeadlessTrainer:
         Returns:
             True if save succeeded, False otherwise
         """
-        filepath = os.path.join(self.config.MODEL_DIR, filename)
+        # Ensure game-specific model directory exists
+        os.makedirs(self.config.GAME_MODEL_DIR, exist_ok=True)
+        filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
         
         # Calculate metrics for metadata
         avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
@@ -2160,12 +2194,17 @@ class HeadlessTrainer:
 
 def parse_args():
     """Parse command line arguments."""
+    # Import game registry for --game choices
+    from src.game import list_games
+    available_games = list_games()
+    
     parser = argparse.ArgumentParser(
-        description="Neural Network Game AI - Train an AI to play Atari Breakout",
+        description="Neural Network Game AI - Train an AI to play arcade games",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
-    python main.py                           # Train with visualization
+    python main.py                           # Train Breakout with visualization
+    python main.py --game space_invaders    # Train Space Invaders
     python main.py --headless                # Headless training (no pygame)
     python main.py --headless --turbo        # TURBO: ~4x faster training
     python main.py --headless --turbo --web  # TURBO + web dashboard (~5000 steps/sec!)
@@ -2173,6 +2212,8 @@ Examples:
     python main.py --play --model best.pth   # Watch trained agent play
     python main.py --human                   # Play the game yourself
     python main.py --episodes 5000 --lr 0.001  # Custom parameters
+
+Available Games: {', '.join(available_games)}
         """
     )
     
@@ -2197,6 +2238,17 @@ Examples:
     mode_group.add_argument(
         '--list-models', action='store_true',
         help='List all saved models with their metadata'
+    )
+    
+    # Game selection
+    parser.add_argument(
+        '--game', type=str, default='breakout',
+        choices=available_games,
+        help=f'Game to train/play (default: breakout). Available: {", ".join(available_games)}'
+    )
+    parser.add_argument(
+        '--menu', action='store_true',
+        help='Show game selection menu on launch (interactive game picker)'
     )
     
     # Model options
@@ -2380,6 +2432,32 @@ def main():
     # Load config
     config = Config()
     
+    # Show game selection menu if requested
+    if hasattr(args, 'menu') and args.menu:
+        pygame.init()
+        menu_screen = pygame.display.set_mode((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
+        pygame.display.set_caption("🧠 Neural Network AI - Game Selection")
+        menu_clock = pygame.time.Clock()
+        
+        menu = GameMenu(config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
+        selected_game = menu.run(menu_screen, menu_clock)
+        
+        if selected_game is None:
+            print("No game selected. Exiting.")
+            pygame.quit()
+            return
+        
+        args.game = selected_game
+        pygame.quit()  # Quit and reinitialize for proper game window
+        print(f"🎮 Selected: {selected_game}")
+    
+    # Set game from CLI argument
+    if hasattr(args, 'game') and args.game:
+        config.GAME_NAME = args.game
+        game_info = get_game_info(args.game)
+        if game_info:
+            print(f"🎮 Game: {game_info['icon']} {game_info['name']}")
+    
     # Force CPU if specified (faster for small models on M4)
     if hasattr(args, 'cpu') and args.cpu:
         config.FORCE_CPU = True
@@ -2399,7 +2477,7 @@ def main():
             trainer.train()
         except KeyboardInterrupt:
             print("\n\n⛔ Training interrupted by user")
-            trainer._save_model("breakout_interrupted.pth", save_reason="interrupted")
+            trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
         return
     
     # Apply CLI overrides to config for visualized mode
@@ -2434,7 +2512,7 @@ def main():
             app.run_training()
     except KeyboardInterrupt:
         print("\n\n⛔ Training interrupted by user")
-        app._save_model("breakout_interrupted.pth", save_reason="interrupted")
+        app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
         if app.web_dashboard:
             app.web_dashboard.log("⛔ Training interrupted by user", "warning")
     finally:

@@ -31,12 +31,24 @@ class Config:
     """
     
     # =========================================================================
-    # GAME SETTINGS
+    # GAME SELECTION
     # =========================================================================
     
-    # Screen dimensions
+    # Current game to play/train
+    # Options: 'breakout', 'space_invaders'
+    GAME_NAME: str = 'breakout'
+    
+    # =========================================================================
+    # SCREEN SETTINGS
+    # =========================================================================
+    
+    # Screen dimensions (shared across all games)
     SCREEN_WIDTH: int = 800
     SCREEN_HEIGHT: int = 600
+    
+    # =========================================================================
+    # BREAKOUT SETTINGS
+    # =========================================================================
     
     # Breakout-specific
     PADDLE_WIDTH: int = 100
@@ -57,6 +69,67 @@ class Config:
     # Game mechanics
     LIVES: int = 3
     FPS: int = 60
+    
+    # =========================================================================
+    # SPACE INVADERS SETTINGS
+    # =========================================================================
+    
+    # Grid of aliens
+    SI_ALIEN_ROWS: int = 5
+    SI_ALIEN_COLS: int = 11
+    SI_ALIEN_WIDTH: int = 40
+    SI_ALIEN_HEIGHT: int = 30
+    SI_ALIEN_PADDING: int = 10
+    SI_ALIEN_OFFSET_TOP: int = 80
+    SI_ALIEN_OFFSET_LEFT: int = 60
+    
+    # Alien movement
+    SI_ALIEN_SPEED_X: float = 2.0
+    SI_ALIEN_SPEED_Y: int = 20  # Drop distance when hitting edge
+    SI_ALIEN_SPEED_MULTIPLIER: float = 1.05  # Speed increase per destroyed row
+    
+    # Player ship
+    SI_SHIP_WIDTH: int = 50
+    SI_SHIP_HEIGHT: int = 30
+    SI_SHIP_SPEED: int = 6
+    SI_SHIP_Y_OFFSET: int = 50  # Distance from bottom
+    
+    # Bullets
+    SI_BULLET_WIDTH: int = 4
+    SI_BULLET_HEIGHT: int = 15
+    SI_BULLET_SPEED: int = 10
+    SI_MAX_PLAYER_BULLETS: int = 3
+    SI_ALIEN_SHOOT_CHANCE: float = 0.002  # Per alien per frame
+    SI_ALIEN_BULLET_SPEED: int = 5
+    
+    # UFO bonus
+    SI_UFO_CHANCE: float = 0.001  # Per frame when no UFO exists
+    SI_UFO_SPEED: int = 3
+    SI_UFO_POINTS: int = 100
+    
+    # Shields/barriers (optional - can be disabled)
+    SI_SHIELDS_ENABLED: bool = True
+    SI_SHIELD_COUNT: int = 4
+    SI_SHIELD_WIDTH: int = 60
+    SI_SHIELD_HEIGHT: int = 40
+    
+    # Space Invaders rewards
+    SI_REWARD_ALIEN_HIT: float = 1.0
+    SI_REWARD_UFO_HIT: float = 5.0
+    SI_REWARD_PLAYER_DEATH: float = -10.0
+    SI_REWARD_LEVEL_CLEAR: float = 50.0
+    SI_REWARD_SHOOT: float = -0.01  # Small penalty to discourage spam
+    SI_REWARD_STEP: float = 0.0
+    
+    # Space Invaders colors (CRT phosphor aesthetic)
+    SI_COLOR_BACKGROUND: Tuple[int, int, int] = (0, 5, 0)  # Near black with green tint
+    SI_COLOR_SHIP: Tuple[int, int, int] = (0, 255, 100)  # Bright green
+    SI_COLOR_BULLET: Tuple[int, int, int] = (0, 255, 200)  # Cyan
+    SI_COLOR_ALIEN_1: Tuple[int, int, int] = (255, 0, 100)  # Magenta
+    SI_COLOR_ALIEN_2: Tuple[int, int, int] = (0, 255, 150)  # Green
+    SI_COLOR_ALIEN_3: Tuple[int, int, int] = (100, 200, 255)  # Cyan
+    SI_COLOR_UFO: Tuple[int, int, int] = (255, 50, 50)  # Red
+    SI_COLOR_SHIELD: Tuple[int, int, int] = (0, 200, 100)  # Green
     
     # =========================================================================
     # NEURAL NETWORK ARCHITECTURE
@@ -302,6 +375,12 @@ class Config:
     # Paths
     MODEL_DIR: str = 'models'
     LOG_DIR: str = 'logs'
+    
+    @property
+    def GAME_MODEL_DIR(self) -> str:
+        """Get game-specific model directory (e.g., 'models/breakout/')."""
+        import os
+        return os.path.join(self.MODEL_DIR, self.GAME_NAME)
     
     # Random seed for reproducibility (None for random)
     SEED: Optional[int] = None

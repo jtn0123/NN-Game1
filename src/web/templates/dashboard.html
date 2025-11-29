@@ -17,7 +17,12 @@
         <header class="header">
             <div class="header-left">
                 <h1>🧠 Neural Network AI</h1>
-                <span class="subtitle">Breakout Training Dashboard</span>
+                <div class="game-selector" data-tooltip="Select which game to train" data-tooltip-position="bottom">
+                    <select id="game-select" onchange="switchGame(this.value)">
+                        <option value="breakout">🧱 Breakout</option>
+                    </select>
+                    <span class="subtitle" id="game-subtitle">Training Dashboard</span>
+                </div>
             </div>
             <div class="header-right">
                 <div class="system-status">
@@ -339,6 +344,20 @@
                         </div>
                         
                         <button class="apply-btn" onclick="applySettings()">Apply Changes</button>
+                    </div>
+                </div>
+
+                <!-- Game Comparison Panel -->
+                <div class="comparison-card collapsed" id="comparison-card">
+                    <div class="card-header clickable" onclick="toggleComparison()">
+                        <h3>📊 Game Comparison</h3>
+                        <span class="collapse-icon" id="comparison-icon">▼</span>
+                    </div>
+                    <div class="comparison-content" id="comparison-content">
+                        <div class="comparison-grid" id="comparison-grid">
+                            <div class="loading">Loading game stats...</div>
+                        </div>
+                        <button class="refresh-btn" onclick="refreshGameStats()">↻ Refresh</button>
                     </div>
                 </div>
             </div>

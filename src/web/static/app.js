@@ -50,6 +50,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateFooterTime();
     setInterval(updateFooterTime, 1000);
     loadConfig();
+    loadGames();
+    loadGameStats();
 });
 
 /**
@@ -302,6 +304,17 @@ function connectSocket() {
             flashSaveIndicator();
         } catch (err) {
             console.error('Error processing save event:', err);
+        }
+    });
+    
+    socket.on('game_switched', (data) => {
+        try {
+            addConsoleLog(data.message, 'success');
+            // Reload games to update UI
+            loadGames();
+            loadGameStats();
+        } catch (err) {
+            console.error('Error processing game switch:', err);
         }
     });
 }
@@ -1257,3 +1270,157 @@ setInterval(() => {
         })
         .catch(() => {});  // Silently ignore errors for periodic updates
 }, 10000);  // Update every 10 seconds
+
+// ============================================================
+// GAME SELECTION FUNCTIONS
+// ============================================================
+
+/**
+ * Load available games and populate the dropdown
+ */
+function loadGames() {
+    fetchWithTimeout('/api/games')
+        .then(response => response.json())
+        .then(data => {
+            const select = document.getElementById('game-select');
+            if (!select) return;
+            
+            // Clear existing options
+            select.innerHTML = '';
+            
+            // Add games
+            data.games.forEach(game => {
+                const option = document.createElement('option');
+                option.value = game.id;
+                option.textContent = `${game.icon} ${game.name}`;
+                if (game.is_current) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+            
+            // Update subtitle
+            const subtitle = document.getElementById('game-subtitle');
+            if (subtitle && data.current_game) {
+                const currentGame = data.games.find(g => g.id === data.current_game);
+                if (currentGame) {
+                    subtitle.textContent = `${currentGame.name} Training Dashboard`;
+                }
+            }
+        })
+        .catch(err => {
+            console.error('Failed to load games:', err);
+        });
+}
+
+/**
+ * Switch to a different game
+ */
+function switchGame(gameId) {
+    if (!gameId) return;
+    
+    // Confirm with user
+    const confirmed = confirm(`Switch to ${gameId}? This will restart training with the selected game.`);
+    if (!confirmed) {
+        // Reset dropdown to current game
+        loadGames();
+        return;
+    }
+    
+    // Send switch command
+    socket.emit('control', { action: 'switch_game', game: gameId });
+    addConsoleLog(`Switching to ${gameId}...`, 'action');
+}
+
+// ============================================================
+// GAME COMPARISON FUNCTIONS
+// ============================================================
+
+/**
+ * Toggle comparison panel
+ */
+function toggleComparison() {
+    const card = document.getElementById('comparison-card');
+    const icon = document.getElementById('comparison-icon');
+    
+    if (!card) return;
+    
+    card.classList.toggle('collapsed');
+    if (icon) {
+        icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
+    }
+    
+    // Load stats when opening
+    if (!card.classList.contains('collapsed')) {
+        loadGameStats();
+    }
+}
+
+/**
+ * Load game statistics for comparison
+ */
+function loadGameStats() {
+    const grid = document.getElementById('comparison-grid');
+    if (!grid) return;
+    
+    fetchWithTimeout('/api/game-stats')
+        .then(response => response.json())
+        .then(data => {
+            const stats = data.stats;
+            const currentGame = data.current_game;
+            
+            // Find max score for bar scaling
+            let maxScore = 0;
+            for (const gameId in stats) {
+                if (stats[gameId].best_score > maxScore) {
+                    maxScore = stats[gameId].best_score;
+                }
+            }
+            maxScore = maxScore || 1; // Avoid division by zero
+            
+            // Build comparison items
+            let html = '';
+            for (const gameId in stats) {
+                const game = stats[gameId];
+                const isCurrent = gameId === currentGame;
+                const barWidth = (game.best_score / maxScore) * 100;
+                const colorRgb = `rgb(${game.color[0]}, ${game.color[1]}, ${game.color[2]})`;
+                
+                // Format training time
+                let timeStr = 'No training';
+                if (game.total_training_time > 0) {
+                    const hours = Math.floor(game.total_training_time / 3600);
+                    const mins = Math.floor((game.total_training_time % 3600) / 60);
+                    timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+                }
+                
+                html += `
+                    <div class="comparison-item ${isCurrent ? 'current' : ''}">
+                        <div class="comparison-icon">${game.icon}</div>
+                        <div class="comparison-info">
+                            <div class="comparison-name">${game.name} ${isCurrent ? '(current)' : ''}</div>
+                            <div class="comparison-stats">
+                                Best: ${game.best_score} | Episodes: ${game.total_episodes.toLocaleString()} | Time: ${timeStr}
+                            </div>
+                            <div class="comparison-bar">
+                                <div class="comparison-bar-fill" style="width: ${barWidth}%; background: ${colorRgb};"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            grid.innerHTML = html || '<div class="no-data">No game data available</div>';
+        })
+        .catch(err => {
+            console.error('Failed to load game stats:', err);
+            grid.innerHTML = '<div class="error">Failed to load game statistics</div>';
+        });
+}
+
+/**
+ * Refresh game stats
+ */
+function refreshGameStats() {
+    loadGameStats();
+}
