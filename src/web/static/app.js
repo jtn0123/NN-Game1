@@ -1313,7 +1313,7 @@ function setPerformanceMode(mode) {
         'normal': 'Normal (learn every step)',
         'fast': 'Fast (learn every 4 steps)',
         'turbo': 'Turbo (learn every 8, batch 128, 2 grad steps)',
-        'ultra': 'Ultra (learn every 16, batch 256, 4 grad steps)'
+        'ultra': 'Ultra (learn every 32, batch 128, 2 grad steps)'
     };
     addConsoleLog(`Performance mode: ${modeNames[mode]}`, 'action');
 }
@@ -1338,9 +1338,10 @@ function syncSettingsFromMode(mode) {
         batchSize = 128;
         gradientSteps = 2;
     } else if (mode === 'ultra') {
-        learnEvery = 16;
-        batchSize = 256;
-        gradientSteps = 4;
+        // Maximum throughput: 4x less learning than turbo
+        learnEvery = 32;
+        batchSize = 128;
+        gradientSteps = 2;
     }
     
     // Update the settings inputs
@@ -1580,7 +1581,10 @@ function loadConfig() {
             // Vec-envs setting
             if (data.vec_envs) {
                 originalVecEnvs = data.vec_envs;
-                document.getElementById('setting-vec-envs').value = originalVecEnvs;
+                const vecEnvsInput = document.getElementById('setting-vec-envs');
+                if (vecEnvsInput) {
+                    vecEnvsInput.value = originalVecEnvs;
+                }
             }
             
             // Initialize vec-envs handler AFTER originalVecEnvs is set from server

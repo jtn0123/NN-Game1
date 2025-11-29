@@ -502,10 +502,10 @@ class GameApp:
         # Give time for the save event to propagate to clients
         time.sleep(0.5)
         
-        # Exit gracefully
+        # Exit gracefully - use os._exit() because this is called from SocketIO thread
         self.running = False
         pygame.quit()
-        sys.exit(0)
+        os._exit(0)  # Terminates process from any thread
     
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
@@ -728,9 +728,11 @@ class GameApp:
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 2
         elif mode == 'ultra':
-            self.config.LEARN_EVERY = 16
-            self.config.BATCH_SIZE = 256
-            self.config.GRADIENT_STEPS = 4
+            # Maximum throughput: less frequent learning, same batch size as turbo
+            # learn_every=32 means learning 4x less often than turbo
+            self.config.LEARN_EVERY = 32
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 2
 
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
@@ -2139,9 +2141,11 @@ class HeadlessTrainer:
             self.config.BATCH_SIZE = 128
             self.config.GRADIENT_STEPS = 2
         elif mode == 'ultra':
-            self.config.LEARN_EVERY = 16
-            self.config.BATCH_SIZE = 256
-            self.config.GRADIENT_STEPS = 4
+            # Maximum throughput: less frequent learning, same batch size as turbo
+            # learn_every=32 means learning 4x less often than turbo
+            self.config.LEARN_EVERY = 32
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 2
 
         if self.web_dashboard:
             self.web_dashboard.publisher.set_performance_mode(mode)
@@ -2171,10 +2175,10 @@ class HeadlessTrainer:
         import time
         time.sleep(0.5)
 
-        # Exit gracefully
+        # Exit gracefully - use os._exit() because this is called from SocketIO thread
         self.running = False
-        import sys
-        sys.exit(0)
+        import os
+        os._exit(0)  # Terminates process from any thread
 
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
