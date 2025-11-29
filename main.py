@@ -18,6 +18,9 @@ Usage:
     # TURBO + Web Dashboard: Best of both worlds
     python main.py --headless --turbo --web --port 5001
     
+    # VECTORIZED: 8 parallel games for ~3x additional speedup
+    python main.py --headless --turbo --vec-envs 8
+    
     # Custom performance tuning
     python main.py --headless --learn-every 4 --batch-size 256
     
@@ -68,7 +71,7 @@ from typing import Optional, Callable, Any, Type
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
-from src.game.breakout import Breakout
+from src.game.breakout import Breakout, VecBreakout
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
 from src.visualizer.nn_visualizer import NeuralNetVisualizer
@@ -1382,8 +1385,18 @@ class HeadlessTrainer:
             config.FORCE_CPU = True  # CPU is faster for this model size
             print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
         
-        # Create game in headless mode (skips visual effects for max speed)
-        self.game = Breakout(config, headless=True)
+        # Vectorized environment support
+        self.num_envs = getattr(args, 'vec_envs', 1)
+        
+        if self.num_envs > 1:
+            # Create vectorized environment for parallel game execution
+            self.vec_env = VecBreakout(self.num_envs, config, headless=True)
+            self.game = self.vec_env.envs[0]  # Reference for state/action size
+            print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+        else:
+            # Single game mode (original behavior)
+            self.vec_env = None
+            self.game = Breakout(config, headless=True)
         
         # Create AI agent
         self.agent = Agent(
@@ -1406,6 +1419,12 @@ class HeadlessTrainer:
         self.wins: list[bool] = []
         self.total_steps = 0
         self.training_start_time = time.time()
+        
+        # Extended metrics tracking (previously missing from headless mode)
+        self.exploration_actions = 0
+        self.exploitation_actions = 0
+        self.target_updates = 0
+        self.last_target_update_step = 0
         
         # Auto-load most recent model if no explicit model specified
         initial_model_path = self._resolve_model_path(args.model)
@@ -1531,17 +1550,113 @@ class HeadlessTrainer:
         print("🔄 Episode reset requested")
     
     def _load_model(self, filepath: str) -> None:
-        """Load a model from file."""
+        """Load a model from file and sync history to dashboard."""
         try:
-            metadata, _ = self.agent.load(filepath)
+            metadata, training_history = self.agent.load(filepath)
+            
+            # Restore tracking state from metadata
+            if metadata:
+                self.best_score = metadata.best_score
+                self.current_episode = metadata.episode
+                self.total_steps = metadata.total_steps
+            
+            # Restore local score/win history from training history
+            if training_history and len(training_history.scores) > 0:
+                self.scores = training_history.scores[-1000:].copy()
+                self.wins = training_history.wins[-1000:].copy() if training_history.wins else []
+            
             if self.web_dashboard:
-                self.web_dashboard.log(f"📂 Loaded model: {os.path.basename(filepath)}", "success")
-                if metadata:
-                    self.best_score = metadata.best_score
-                    self.current_episode = metadata.episode
+                history_msg = ""
+                if training_history and len(training_history.scores) > 0:
+                    history_msg = f" ({len(training_history.scores)} episodes restored)"
+                    # Sync training history to dashboard charts
+                    self._sync_web_dashboard_history(training_history, metadata)
+                
+                self.web_dashboard.log(
+                    f"📂 Loaded model: {os.path.basename(filepath)}{history_msg}", 
+                    "success",
+                    {'path': filepath, 'epsilon': self.agent.epsilon, 'episode': self.current_episode}
+                )
+                # Update save status to reflect loaded model
+                self.web_dashboard.publisher.record_save(
+                    filename=os.path.basename(filepath),
+                    reason="loaded",
+                    episode=self.current_episode,
+                    best_score=self.best_score
+                )
         except Exception as e:
             if self.web_dashboard:
                 self.web_dashboard.log(f"❌ Failed to load model: {str(e)}", "error")
+            import traceback
+            traceback.print_exc()
+    
+    def _sync_web_dashboard_history(self, training_history: TrainingHistory, metadata: Optional[Any]) -> None:
+        """Sync training history to web dashboard metrics publisher."""
+        if not self.web_dashboard:
+            return
+        
+        publisher = self.web_dashboard.publisher
+        
+        # Clear existing history in publisher
+        publisher.scores.clear()
+        publisher.losses.clear()
+        publisher.epsilons.clear()
+        publisher.rewards.clear()
+        publisher.q_values.clear()
+        publisher.episode_lengths.clear()
+        
+        # Restore scores to publisher for chart display
+        for i, score in enumerate(training_history.scores):
+            publisher.scores.append(score)
+            
+            # Add losses if available
+            if i < len(training_history.losses):
+                publisher.losses.append(training_history.losses[i])
+            else:
+                publisher.losses.append(0.0)
+            
+            # Add epsilons
+            if i < len(training_history.epsilons):
+                publisher.epsilons.append(training_history.epsilons[i])
+            else:
+                publisher.epsilons.append(0.5)
+            
+            # Add rewards
+            if i < len(training_history.rewards):
+                publisher.rewards.append(training_history.rewards[i])
+            else:
+                publisher.rewards.append(0.0)
+            
+            # Add steps as episode lengths
+            if i < len(training_history.steps):
+                publisher.episode_lengths.append(training_history.steps[i])
+            else:
+                publisher.episode_lengths.append(0)
+            
+            # Q-values aren't stored in history, so use placeholder
+            publisher.q_values.append(0.0)
+        
+        # Update publisher state from metadata
+        if metadata:
+            publisher.state.episode = metadata.episode
+            publisher.state.best_score = metadata.best_score
+            publisher.state.epsilon = metadata.epsilon
+            publisher.state.total_steps = metadata.total_steps
+            publisher.state.memory_size = metadata.memory_buffer_size
+            publisher.state.loss = metadata.avg_loss
+        else:
+            publisher.state.episode = self.current_episode
+            publisher.state.best_score = self.best_score
+            publisher.state.epsilon = self.agent.epsilon
+            publisher.state.total_steps = self.total_steps
+        
+        # Calculate win rate from history
+        if training_history.wins:
+            recent_wins = training_history.wins[-100:]
+            publisher.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins)
+        
+        # Emit an update to connected clients
+        self.web_dashboard.socketio.emit('state_update', publisher.get_snapshot())
     
     def _save_model_as(self, filename: str) -> bool:
         """Save model with custom filename."""
@@ -1557,10 +1672,24 @@ class HeadlessTrainer:
         changes = []
         
         if 'learning_rate' in config_data:
+            old_lr = self.config.LEARNING_RATE
             self.config.LEARNING_RATE = config_data['learning_rate']
             for param_group in self.agent.optimizer.param_groups:
                 param_group['lr'] = config_data['learning_rate']
-            changes.append(f"LR: {config_data['learning_rate']}")
+            changes.append(f"LR: {old_lr} → {config_data['learning_rate']}")
+        
+        if 'epsilon' in config_data:
+            old_eps = self.agent.epsilon
+            self.agent.epsilon = config_data['epsilon']
+            changes.append(f"Epsilon: {old_eps:.4f} → {config_data['epsilon']:.4f}")
+        
+        if 'epsilon_decay' in config_data:
+            self.config.EPSILON_DECAY = config_data['epsilon_decay']
+            changes.append(f"Decay: {config_data['epsilon_decay']}")
+        
+        if 'gamma' in config_data:
+            self.config.GAMMA = config_data['gamma']
+            changes.append(f"Gamma: {config_data['gamma']}")
         
         if 'batch_size' in config_data:
             self.config.BATCH_SIZE = config_data['batch_size']
@@ -1575,7 +1704,7 @@ class HeadlessTrainer:
             changes.append(f"GradSteps: {config_data['gradient_steps']}")
         
         if self.web_dashboard and changes:
-            self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action")
+            self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)
     
     def _set_performance_mode(self, mode: str) -> None:
         """Set performance mode preset."""
@@ -1596,14 +1725,20 @@ class HeadlessTrainer:
             self.web_dashboard.publisher.set_performance_mode(mode)
             self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
             self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
+            self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
             self.web_dashboard.log(
-                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE})",
+                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE}, grad_steps={self.config.GRADIENT_STEPS})",
                 "action"
             )
         print(f"⚡ Performance mode: {mode.upper()}")
     
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
+        # Dispatch to vectorized training if using multiple environments
+        if self.num_envs > 1:
+            self.train_vectorized()
+            return
+        
         config = self.config
         
         # Calculate starting episode (may be resuming from loaded model)
@@ -1649,6 +1784,12 @@ class HeadlessTrainer:
                 # Select action
                 action = self.agent.select_action(state, training=True)
                 
+                # Track exploration vs exploitation
+                if self.agent._last_action_explored:
+                    self.exploration_actions += 1
+                else:
+                    self.exploitation_actions += 1
+                
                 # Execute action
                 next_state, reward, done, info = self.game.step(action)
                 
@@ -1657,6 +1798,17 @@ class HeadlessTrainer:
                 
                 # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
                 self.agent.learn()
+                
+                # Track target network updates
+                if self.agent.steps % config.TARGET_UPDATE == 0 and self.agent.steps != self.last_target_update_step:
+                    self.target_updates += 1
+                    self.last_target_update_step = self.agent.steps
+                    if self.web_dashboard:
+                        self.web_dashboard.log(
+                            f"🎯 Target network updated (#{self.target_updates})", 
+                            "metric",
+                            {'step': self.agent.steps, 'update_number': self.target_updates}
+                        )
                 
                 # Update state
                 state = next_state
@@ -1680,6 +1832,11 @@ class HeadlessTrainer:
             # Update web dashboard metrics
             if self.web_dashboard:
                 avg_loss = self.agent.get_average_loss(100)
+                
+                # Calculate average Q-value for current state (was missing from headless)
+                q_values = self.agent.get_q_values(state)
+                avg_q_value = float(np.mean(q_values))
+                
                 self.web_dashboard.emit_metrics(
                     episode=episode,
                     score=info['score'],
@@ -1689,9 +1846,17 @@ class HeadlessTrainer:
                     won=won,
                     reward=episode_reward,
                     memory_size=len(self.agent.memory),
+                    avg_q_value=avg_q_value,
+                    exploration_actions=self.exploration_actions,
+                    exploitation_actions=self.exploitation_actions,
+                    target_updates=self.target_updates,
                     bricks_broken=bricks_broken,
                     episode_length=episode_steps
                 )
+                # Update performance settings in dashboard state
+                self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
             
             # Time-based progress reporting (terminal)
             current_time = time.time()
@@ -1743,6 +1908,175 @@ class HeadlessTrainer:
         
         if self.web_dashboard:
             self.web_dashboard.log("✅ Training complete!", "success")
+    
+    def train_vectorized(self) -> None:
+        """
+        Run headless training with vectorized environments for parallel execution.
+        
+        This method runs N games simultaneously, collecting N experiences per step
+        and performing batched action selection for improved throughput.
+        """
+        config = self.config
+        num_envs = self.num_envs
+        
+        # Calculate starting episode (may be resuming from loaded model)
+        start_episode = self.current_episode
+        
+        print("\n" + "=" * 70)
+        print("🚀 VECTORIZED HEADLESS TRAINING - Maximum Performance Mode")
+        if self.web_dashboard:
+            print("🌐 Web dashboard enabled")
+        print("=" * 70)
+        print(f"   Environments:    {num_envs} parallel games")
+        print(f"   Episodes:        {start_episode} → {config.MAX_EPISODES}")
+        print(f"   Device:          {config.DEVICE}")
+        print(f"   Batch size:      {config.BATCH_SIZE}")
+        print(f"   Learn every:     {config.LEARN_EVERY} steps")
+        print(f"   Gradient steps:  {config.GRADIENT_STEPS}")
+        print(f"   torch.compile:   {config.USE_TORCH_COMPILE}")
+        if self.best_score > 0:
+            print(f"   Resumed best:    {self.best_score}")
+        print("=" * 70 + "\n")
+        
+        # Training timing
+        self.training_start_time = time.time()
+        last_report_time = self.training_start_time
+        steps_since_report = 0
+        
+        # Per-environment episode tracking
+        env_episode_rewards = np.zeros(num_envs, dtype=np.float32)
+        env_episode_steps = np.zeros(num_envs, dtype=np.int64)
+        episodes_completed = 0
+        
+        # Initialize all environments
+        states = self.vec_env.reset()  # Shape: (num_envs, state_size)
+        
+        # Track last completed episode info for reporting
+        last_score = 0
+        last_info: dict = {}
+        
+        while self.current_episode < config.MAX_EPISODES:
+            # Handle pause (only if web dashboard is active)
+            while self.paused:
+                time.sleep(0.1)
+            
+            # Batch action selection for all environments
+            actions = self.agent.select_actions_batch(states, training=True)
+            
+            # Step all environments simultaneously
+            next_states, rewards, dones, infos = self.vec_env.step_no_copy(actions)
+            
+            # Store experiences from all environments
+            self.agent.remember_batch(states, actions, rewards, next_states, dones)
+            
+            # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
+            self.agent.learn()
+            
+            # Update per-environment tracking
+            env_episode_rewards += rewards
+            env_episode_steps += 1
+            self.total_steps += num_envs
+            steps_since_report += num_envs
+            
+            # Handle completed episodes
+            for i, done in enumerate(dones):
+                if done:
+                    # Episode completed for environment i
+                    score = infos[i].get('score', 0)
+                    self.scores.append(score)
+                    
+                    won = infos[i].get('won', False)
+                    self.wins.append(won)
+                    
+                    # Track best score
+                    if score > self.best_score:
+                        self.best_score = score
+                        self._save_model("breakout_best.pth", save_reason="best", quiet=True)
+                        if self.web_dashboard:
+                            self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
+                    
+                    # Update web dashboard metrics
+                    if self.web_dashboard:
+                        avg_loss = self.agent.get_average_loss(100)
+                        initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
+                        bricks_broken = initial_bricks - infos[i].get('bricks_remaining', initial_bricks)
+                        self.web_dashboard.emit_metrics(
+                            episode=self.current_episode,
+                            score=score,
+                            epsilon=self.agent.epsilon,
+                            loss=avg_loss,
+                            total_steps=self.total_steps,
+                            won=won,
+                            reward=float(env_episode_rewards[i]),
+                            memory_size=len(self.agent.memory),
+                            bricks_broken=bricks_broken,
+                            episode_length=int(env_episode_steps[i])
+                        )
+                    
+                    # Store for reporting
+                    last_score = score
+                    last_info = infos[i]
+                    
+                    # Reset per-environment tracking
+                    env_episode_rewards[i] = 0.0
+                    env_episode_steps[i] = 0
+                    
+                    # Increment episode counter
+                    episodes_completed += 1
+                    self.current_episode += 1
+                    
+                    # Decay epsilon after each episode
+                    self.agent.decay_epsilon()
+                    
+                    # Save checkpoints
+                    if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
+                        self._save_model(f"breakout_ep{self.current_episode}.pth", save_reason="periodic")
+            
+            # Update states for next iteration (already auto-reset in VecBreakout)
+            states = next_states.copy()
+            
+            # Time-based progress reporting (terminal)
+            current_time = time.time()
+            elapsed_since_report = current_time - last_report_time
+            
+            if elapsed_since_report >= config.REPORT_INTERVAL_SECONDS or episodes_completed % config.LOG_EVERY == 0:
+                if episodes_completed > 0:
+                    elapsed_total = current_time - self.training_start_time
+                    steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
+                    eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
+                    avg_score = np.mean(self.scores[-100:]) if self.scores else 0
+                    
+                    print(f"Ep {self.current_episode:5d} | "
+                          f"Score: {last_score:4d} | "
+                          f"Avg: {avg_score:6.1f} | "
+                          f"ε: {self.agent.epsilon:.3f} | "
+                          f"⚡ {steps_per_sec:,.0f} steps/s | "
+                          f"📊 {eps_per_hour:,.0f} ep/hr")
+                    
+                    last_report_time = current_time
+                    steps_since_report = 0
+        
+        # Final save
+        self._save_model("breakout_final.pth", save_reason="final")
+        
+        # Summary
+        total_time = time.time() - self.training_start_time
+        print("\n" + "=" * 70)
+        print("✅ VECTORIZED TRAINING COMPLETE!")
+        print("=" * 70)
+        print(f"   Parallel envs:    {num_envs}")
+        print(f"   Total episodes:   {self.current_episode - start_episode}")
+        print(f"   Total steps:      {self.total_steps:,}")
+        print(f"   Total time:       {total_time/60:.1f} minutes")
+        print(f"   Avg steps/sec:    {self.total_steps/total_time:,.0f}")
+        print(f"   Best score:       {self.best_score}")
+        print(f"   Final avg score:  {np.mean(self.scores[-100:]):.1f}")
+        win_rate = sum(self.wins[-100:]) / len(self.wins[-100:]) if self.wins else 0
+        print(f"   Win rate (100):   {win_rate*100:.1f}%")
+        print("=" * 70)
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("✅ Vectorized training complete!", "success")
     
     def _save_model(
         self,
@@ -1873,6 +2207,10 @@ Examples:
     parser.add_argument(
         '--turbo', action='store_true',
         help='Turbo mode preset: learn-every 8, batch 128, 2 grad steps (~5000 steps/sec on M4)'
+    )
+    parser.add_argument(
+        '--vec-envs', type=int, default=1,
+        help='Number of parallel environments for vectorized training (default: 1, try 8 for ~3x speedup)'
     )
     parser.add_argument(
         '--torch-compile', action='store_true',

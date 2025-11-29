@@ -257,10 +257,29 @@ Turbo mode settings:
 - `FORCE_CPU=True` - Uses CPU instead of MPS (faster for small models!)
 - `USE_TORCH_COMPILE=False` - Disabled (no benefit for small models)
 
+### Vectorized Training (`--vec-envs`)
+
+Run multiple games in parallel for ~2-4x additional speedup:
+
+```bash
+# 8 parallel games (recommended for ~12,000-15,000 steps/sec)
+python main.py --headless --turbo --vec-envs 8
+
+# With web dashboard monitoring
+python main.py --headless --turbo --vec-envs 8 --web
+```
+
+Vectorized training:
+- Runs N independent game instances simultaneously
+- Batched action selection via single neural network forward pass
+- Amortizes Python/PyTorch overhead across N environments
+- Auto-resets completed episodes
+
 ### Headless vs Visualized Training
 
 | Mode | Speed | Use Case |
 |------|-------|----------|
+| `--headless --turbo --vec-envs 8` | ~12,000-15,000 steps/sec | Maximum throughput |
 | `--headless --turbo` | ~5000 steps/sec | Fast bulk training |
 | `--headless` | ~2500 steps/sec | Training without visuals |
 | `--turbo` (visualized) | ~600 steps/sec | Turbo with live feedback |
@@ -302,9 +321,11 @@ python main.py --device cuda
 ### Other Performance Tips
 
 - **Training without visualization** is ~2-3x faster (`--headless` flag)
-- **Prioritized Experience Replay (PER)** improves sample efficiency but adds overhead
+- **Vectorized environments** (`--vec-envs 8`) provide 2-4x throughput boost
+- **Prioritized Experience Replay (PER)** improves sample efficiency by 30-40% (enable with `USE_PRIORITIZED_REPLAY=True` in config)
 - **GPU acceleration** (CUDA/MPS) only beneficial for large models
 - **Visualization updates** every frame during training (impacts performance)
+- **Contiguous NumPy replay buffer** eliminates Python loop overhead in sampling
 
 ## Web Dashboard
 

@@ -410,14 +410,16 @@ function updateDashboard(data) {
         }
     }
 
-    // Update charts
-    updateCharts(history);
+    // Update charts - pass current episode for accurate labels
+    updateCharts(history, state.episode);
 }
 
 /**
  * Update charts with history data
+ * @param {Object} history - History data with scores, losses, q_values arrays
+ * @param {number} currentEpisode - The actual current episode number
  */
-function updateCharts(history) {
+function updateCharts(history, currentEpisode) {
     const maxPoints = 200;
     const scores = history.scores.slice(-maxPoints);
     const losses = history.losses.slice(-maxPoints);
@@ -426,9 +428,11 @@ function updateCharts(history) {
     // Calculate running average
     const avgScores = calculateRunningAverage(scores, 20);
     
-    // Generate labels
-    const startEp = Math.max(0, history.scores.length - maxPoints);
-    const labels = scores.map((_, i) => startEp + i);
+    // Generate labels based on actual current episode, not history length
+    // This correctly handles the case where history.scores.length is capped at 500
+    // but the actual episode number continues beyond that
+    const startEp = Math.max(0, currentEpisode - scores.length);
+    const labels = scores.map((_, i) => startEp + i + 1);
 
     // Update score chart
     scoreChart.data.labels = labels;
@@ -858,7 +862,9 @@ function fetchInitialData() {
     fetchWithTimeout('/api/status')
         .then(response => response.json())
         .then(data => {
-            updateDashboard(data);
+            if (data && data.state && data.history) {
+                updateDashboard(data);
+            }
         })
         .catch(err => {
             if (err.name !== 'AbortError') {

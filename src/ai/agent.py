@@ -37,7 +37,7 @@ import os
 import time
 
 from .network import DQN, DuelingDQN
-from .replay_buffer import ReplayBuffer
+from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
 
 import sys
 sys.path.append('../..')
@@ -195,8 +195,20 @@ class Agent:
             lr=self.config.LEARNING_RATE
         )
         
-        # Replay buffer
-        self.memory = ReplayBuffer(capacity=self.config.MEMORY_SIZE)
+        # Replay buffer - use PER if enabled
+        self._use_per = getattr(self.config, 'USE_PRIORITIZED_REPLAY', False)
+        if self._use_per:
+            self.memory = PrioritizedReplayBuffer(
+                capacity=self.config.MEMORY_SIZE,
+                state_size=state_size,
+                alpha=getattr(self.config, 'PER_ALPHA', 0.6),
+                beta_start=getattr(self.config, 'PER_BETA_START', 0.4),
+                beta_end=1.0,
+                beta_frames=getattr(self.config, 'PER_BETA_FRAMES', 100000)
+            )
+            print("✓ Prioritized Experience Replay enabled")
+        else:
+            self.memory = ReplayBuffer(capacity=self.config.MEMORY_SIZE, state_size=state_size)
         
         # Exploration
         self.epsilon = self.config.EPSILON_START
@@ -272,6 +284,72 @@ class Agent:
             self._state_tensor.copy_(torch.from_numpy(state.reshape(1, -1)))
             q_values = self.policy_net(self._state_tensor)
             return q_values.argmax(dim=1).item()
+    
+    def select_actions_batch(self, states: np.ndarray, training: bool = True) -> np.ndarray:
+        """
+        Select actions for a batch of states using epsilon-greedy policy.
+        
+        This is optimized for vectorized environments, performing a single
+        forward pass for all states.
+        
+        Args:
+            states: Batch of game states, shape (batch_size, state_size)
+            training: If True, use epsilon-greedy; if False, use greedy
+            
+        Returns:
+            Array of selected action indices, shape (batch_size,)
+        """
+        batch_size = states.shape[0]
+        actions = np.empty(batch_size, dtype=np.int64)
+        
+        if training:
+            # Determine which states get random actions (exploration)
+            explore_mask = np.random.random(batch_size) < self.epsilon
+            num_explore = explore_mask.sum()
+            
+            if num_explore > 0:
+                # Random actions for exploring states
+                actions[explore_mask] = np.random.randint(0, self.action_size, size=num_explore)
+            
+            if num_explore < batch_size:
+                # Exploitation: best Q-value actions for non-exploring states
+                exploit_mask = ~explore_mask
+                exploit_states = states[exploit_mask]
+                
+                with torch.inference_mode():
+                    states_tensor = torch.from_numpy(exploit_states).to(self.device)
+                    q_values = self.policy_net(states_tensor)
+                    best_actions = q_values.argmax(dim=1).cpu().numpy()
+                    actions[exploit_mask] = best_actions
+        else:
+            # Pure greedy: all actions from network
+            with torch.inference_mode():
+                states_tensor = torch.from_numpy(states).to(self.device)
+                q_values = self.policy_net(states_tensor)
+                actions = q_values.argmax(dim=1).cpu().numpy()
+        
+        return actions
+    
+    def remember_batch(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        dones: np.ndarray
+    ) -> None:
+        """
+        Store a batch of experiences in replay buffer.
+        
+        Args:
+            states: Batch of current states, shape (batch_size, state_size)
+            actions: Batch of actions taken, shape (batch_size,)
+            rewards: Batch of rewards received, shape (batch_size,)
+            next_states: Batch of next states, shape (batch_size, state_size)
+            dones: Batch of done flags, shape (batch_size,)
+        """
+        for i in range(len(states)):
+            self.memory.push(states[i], int(actions[i]), float(rewards[i]), next_states[i], bool(dones[i]))
     
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
         """
@@ -373,15 +451,26 @@ class Agent:
         
         This performs a single gradient update. The caller (learn()) is responsible
         for incrementing the steps counter and triggering target network updates.
+        
+        Supports both uniform and prioritized experience replay.
             
         Returns:
             Loss value if training occurred, None otherwise
         """
-        # Sample batch (no-copy is safe since we consume immediately)
         batch_size = self.config.BATCH_SIZE
-        states_np, actions_np, rewards_np, next_states_np, dones_np = self.memory.sample_no_copy(
-            batch_size
-        )
+        
+        # Sample batch - different path for PER vs uniform
+        if self._use_per:
+            # PER sampling returns indices and importance sampling weights
+            states_np, actions_np, rewards_np, next_states_np, dones_np, indices, weights_np = \
+                self.memory.sample_no_copy(batch_size)
+            weights = torch.from_numpy(weights_np).to(self.device)
+        else:
+            # Uniform sampling (no-copy is safe since we consume immediately)
+            states_np, actions_np, rewards_np, next_states_np, dones_np = \
+                self.memory.sample_no_copy(batch_size)
+            indices = None
+            weights = None
         
         # Resize pre-allocated tensors if batch size changed
         if batch_size != self._cached_batch_size:
@@ -417,10 +506,20 @@ class Agent:
         if self._use_mixed_precision:
             with torch.autocast(device_type=self._autocast_device, dtype=torch.float16):
                 current_q, target_q = self._compute_q_values(states, actions, rewards, next_states, dones)
-            # Compute loss in float32 for numerical stability (outside autocast)
-            loss = nn.SmoothL1Loss()(current_q.float(), target_q.float())
+            current_q = current_q.float()
+            target_q = target_q.float()
         else:
             current_q, target_q = self._compute_q_values(states, actions, rewards, next_states, dones)
+        
+        # Compute element-wise TD errors for PER priority updates
+        td_errors = (current_q - target_q).detach()
+        
+        # Compute loss with importance sampling weights if using PER
+        if self._use_per and weights is not None:
+            # Weighted element-wise loss
+            element_loss = nn.SmoothL1Loss(reduction='none')(current_q, target_q)
+            loss = (element_loss * weights).mean()
+        else:
             loss = nn.SmoothL1Loss()(current_q, target_q)
         
         # Optimize (outside autocast for numerical stability)
@@ -435,6 +534,10 @@ class Agent:
             )
         
         self.optimizer.step()
+        
+        # Update PER priorities with TD errors
+        if self._use_per and indices is not None:
+            self.memory.update_priorities(indices, td_errors.abs().cpu().numpy())
         
         # Store loss for metrics
         loss_value = loss.item()

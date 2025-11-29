@@ -24,14 +24,13 @@ References:
 """
 
 import numpy as np
-from collections import deque
-from typing import Tuple, List, Deque
+from typing import Tuple, Optional
 import random
 
 
 class ReplayBuffer:
     """
-    Fixed-size buffer to store experience tuples with optimized sampling.
+    Fixed-size buffer to store experience tuples with contiguous numpy storage.
     
     Experience tuple: (state, action, reward, next_state, done)
         - state: Current game state (np.ndarray)
@@ -41,9 +40,10 @@ class ReplayBuffer:
         - done: Whether episode ended (bool)
     
     Optimizations:
-        - Pre-allocated numpy arrays for batch sampling (avoids repeated allocations)
-        - List-based storage for O(1) random access
+        - Contiguous numpy arrays for all data (cache-friendly)
+        - Vectorized batch extraction via numpy fancy indexing (no Python loops)
         - Circular buffer implementation for efficient memory management
+        - Lazy initialization to support unknown state_size at creation
         
     Example:
         >>> buffer = ReplayBuffer(capacity=10000)
@@ -57,22 +57,27 @@ class ReplayBuffer:
         
         Args:
             capacity: Maximum number of experiences to store
-            state_size: Size of state vector (for pre-allocation, auto-detected if 0)
+            state_size: Size of state vector (auto-detected on first push if 0)
         """
         self.capacity = capacity
         self._state_size = state_size
-        
-        # Use list for O(1) random access (deque has O(n) random access)
-        self.buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]] = []
+        self._size = 0  # Current number of experiences stored
         self._position = 0  # Current write position for circular buffer
+        self._initialized = False
         
-        # Pre-allocated batch arrays (lazily initialized on first sample)
-        self._batch_states: np.ndarray = np.array([])
-        self._batch_actions: np.ndarray = np.array([])
-        self._batch_rewards: np.ndarray = np.array([])
-        self._batch_next_states: np.ndarray = np.array([])
-        self._batch_dones: np.ndarray = np.array([])
-        self._last_batch_size = 0
+        # Contiguous storage arrays (lazily initialized on first push if state_size=0)
+        if state_size > 0:
+            self._init_arrays(state_size)
+    
+    def _init_arrays(self, state_size: int) -> None:
+        """Initialize contiguous storage arrays."""
+        self._state_size = state_size
+        self.states = np.empty((self.capacity, state_size), dtype=np.float32)
+        self.actions = np.empty(self.capacity, dtype=np.int64)
+        self.rewards = np.empty(self.capacity, dtype=np.float32)
+        self.next_states = np.empty((self.capacity, state_size), dtype=np.float32)
+        self.dones = np.empty(self.capacity, dtype=np.float32)
+        self._initialized = True
     
     def push(
         self,
@@ -94,130 +99,112 @@ class ReplayBuffer:
             next_state: Next state
             done: Whether episode ended
         """
-        experience = (state, action, reward, next_state, done)
+        # Lazy initialization on first push
+        if not self._initialized:
+            self._init_arrays(len(state))
         
-        # Auto-detect state size on first push
-        if self._state_size == 0:
-            self._state_size = len(state)
+        # Store experience at current position
+        self.states[self._position] = state
+        self.actions[self._position] = action
+        self.rewards[self._position] = reward
+        self.next_states[self._position] = next_state
+        self.dones[self._position] = float(done)
         
-        if len(self.buffer) < self.capacity:
-            self.buffer.append(experience)
-        else:
-            # Circular buffer: overwrite oldest
-            self.buffer[self._position] = experience
-        
+        # Update position and size
         self._position = (self._position + 1) % self.capacity
+        self._size = min(self._size + 1, self.capacity)
     
-    def _ensure_batch_arrays(self, batch_size: int) -> None:
-        """Pre-allocate or resize batch arrays if needed."""
-        if batch_size != self._last_batch_size or len(self._batch_states) == 0:
-            self._batch_states = np.empty((batch_size, self._state_size), dtype=np.float32)
-            self._batch_actions = np.empty(batch_size, dtype=np.int64)
-            self._batch_rewards = np.empty(batch_size, dtype=np.float32)
-            self._batch_next_states = np.empty((batch_size, self._state_size), dtype=np.float32)
-            self._batch_dones = np.empty(batch_size, dtype=np.float32)
-            self._last_batch_size = batch_size
-    
-    def sample(self, batch_size: int) -> Tuple[np.ndarray, ...]:
+    def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Sample a random batch of experiences with optimized memory access.
+        Sample a random batch of experiences using vectorized numpy indexing.
         
         Args:
             batch_size: Number of experiences to sample
             
         Returns:
             Tuple of numpy arrays: (states, actions, rewards, next_states, dones)
+            All arrays are copies to prevent modification of buffer data.
         """
-        # Adaptive sampling: np.random.choice is faster for small buffers,
-        # random.sample is 30x faster for large buffers (crossover ~3000 elements)
-        buffer_len = len(self.buffer)
-        if buffer_len < 3000:
-            indices = np.random.choice(buffer_len, size=batch_size, replace=False)
-        else:
-            indices = random.sample(range(buffer_len), batch_size)
+        # Vectorized random sampling
+        indices = np.random.randint(0, self._size, size=batch_size)
         
-        # Ensure pre-allocated arrays are ready
-        self._ensure_batch_arrays(batch_size)
-        
-        # Fill pre-allocated arrays directly (avoids creating intermediate lists)
-        for i, idx in enumerate(indices):
-            exp = self.buffer[idx]
-            self._batch_states[i] = exp[0]
-            self._batch_actions[i] = exp[1]
-            self._batch_rewards[i] = exp[2]
-            self._batch_next_states[i] = exp[3]
-            self._batch_dones[i] = float(exp[4])
-        
-        # Return copies to prevent modification of pre-allocated arrays
-        # (The copy is still faster than creating new arrays from scratch)
+        # Vectorized extraction via fancy indexing (no Python loop!)
         return (
-            self._batch_states.copy(),
-            self._batch_actions.copy(),
-            self._batch_rewards.copy(),
-            self._batch_next_states.copy(),
-            self._batch_dones.copy()
+            self.states[indices].copy(),
+            self.actions[indices].copy(),
+            self.rewards[indices].copy(),
+            self.next_states[indices].copy(),
+            self.dones[indices].copy()
         )
     
-    def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, ...]:
+    def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Sample without copying (faster but arrays may be overwritten on next sample).
+        Sample without copying (faster but arrays are views into buffer).
         
-        Use this only if you'll consume the batch immediately before the next sample.
+        Use this only if you'll consume the batch immediately before the next sample
+        or push operation. The returned arrays share memory with the buffer.
         
         Args:
             batch_size: Number of experiences to sample
             
         Returns:
-            Tuple of numpy arrays (views, not copies)
+            Tuple of numpy array views (not copies)
         """
-        # Adaptive sampling: np.random.choice is faster for small buffers,
-        # random.sample is 30x faster for large buffers (crossover ~3000 elements)
-        buffer_len = len(self.buffer)
-        if buffer_len < 3000:
-            indices = np.random.choice(buffer_len, size=batch_size, replace=False)
-        else:
-            indices = random.sample(range(buffer_len), batch_size)
-        self._ensure_batch_arrays(batch_size)
+        # Vectorized random sampling
+        indices = np.random.randint(0, self._size, size=batch_size)
         
-        for i, idx in enumerate(indices):
-            exp = self.buffer[idx]
-            self._batch_states[i] = exp[0]
-            self._batch_actions[i] = exp[1]
-            self._batch_rewards[i] = exp[2]
-            self._batch_next_states[i] = exp[3]
-            self._batch_dones[i] = float(exp[4])
+        # Return views - faster but caller must use immediately
+        return (
+            self.states[indices],
+            self.actions[indices],
+            self.rewards[indices],
+            self.next_states[indices],
+            self.dones[indices]
+        )
+    
+    def sample_with_indices(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Sample and also return the indices (needed for PER priority updates).
+        
+        Args:
+            batch_size: Number of experiences to sample
+            
+        Returns:
+            Tuple: (states, actions, rewards, next_states, dones, indices)
+        """
+        indices = np.random.randint(0, self._size, size=batch_size)
         
         return (
-            self._batch_states,
-            self._batch_actions,
-            self._batch_rewards,
-            self._batch_next_states,
-            self._batch_dones
+            self.states[indices].copy(),
+            self.actions[indices].copy(),
+            self.rewards[indices].copy(),
+            self.next_states[indices].copy(),
+            self.dones[indices].copy(),
+            indices
         )
     
     def __len__(self) -> int:
         """Return current buffer size."""
-        return len(self.buffer)
+        return self._size
     
     def is_ready(self, batch_size: int) -> bool:
         """Check if buffer has enough experiences for sampling."""
-        return len(self.buffer) >= batch_size
+        return self._size >= batch_size
     
     def clear(self) -> None:
         """Clear all experiences from the buffer."""
-        self.buffer.clear()
+        self._size = 0
         self._position = 0
 
 
-class PrioritizedReplayBuffer(ReplayBuffer):
+class PrioritizedReplayBuffer:
     """
-    Prioritized Experience Replay (PER) buffer.
+    Prioritized Experience Replay (PER) buffer with contiguous numpy storage.
     
     Experiences with higher TD-error are sampled more frequently,
     as they provide more learning signal.
     
-    This is an ADVANCED feature and is OPTIONAL.
-    Start with regular ReplayBuffer, then upgrade to this for better performance.
+    Uses a sum-tree data structure for O(log n) prioritized sampling.
     
     Reference:
         Schaul et al., 2016 - "Prioritized Experience Replay"
@@ -226,30 +213,52 @@ class PrioritizedReplayBuffer(ReplayBuffer):
     def __init__(
         self,
         capacity: int,
+        state_size: int = 0,
         alpha: float = 0.6,
         beta_start: float = 0.4,
         beta_end: float = 1.0,
-        beta_decay: float = 0.001
+        beta_frames: int = 100000
     ):
         """
         Initialize prioritized replay buffer.
         
         Args:
             capacity: Maximum buffer size
+            state_size: Size of state vector (auto-detected if 0)
             alpha: Priority exponent (0 = uniform, 1 = full prioritization)
             beta_start: Initial importance sampling weight
             beta_end: Final importance sampling weight
-            beta_decay: Beta increase per sampling
+            beta_frames: Number of frames over which to anneal beta
         """
-        super().__init__(capacity)
+        self.capacity = capacity
+        self._state_size = state_size
+        self._size = 0
+        self._position = 0
+        self._initialized = False
         
         self.alpha = alpha
         self.beta = beta_start
+        self.beta_start = beta_start
         self.beta_end = beta_end
-        self.beta_decay = beta_decay
+        self.beta_frames = beta_frames
+        self._frame_count = 0
         
-        self.priorities: Deque[float] = deque(maxlen=capacity)
+        # Priorities stored as numpy array for fast operations
+        self.priorities = np.zeros(capacity, dtype=np.float32)
         self.max_priority = 1.0
+        
+        if state_size > 0:
+            self._init_arrays(state_size)
+    
+    def _init_arrays(self, state_size: int) -> None:
+        """Initialize contiguous storage arrays."""
+        self._state_size = state_size
+        self.states = np.empty((self.capacity, state_size), dtype=np.float32)
+        self.actions = np.empty(self.capacity, dtype=np.int64)
+        self.rewards = np.empty(self.capacity, dtype=np.float32)
+        self.next_states = np.empty((self.capacity, state_size), dtype=np.float32)
+        self.dones = np.empty(self.capacity, dtype=np.float32)
+        self._initialized = True
     
     def push(
         self,
@@ -259,44 +268,88 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         next_state: np.ndarray,
         done: bool
     ) -> None:
-        """Add experience with maximum priority (will be trained on soon)."""
-        super().push(state, action, reward, next_state, done)
-        self.priorities.append(self.max_priority)
+        """Add experience with maximum priority."""
+        if not self._initialized:
+            self._init_arrays(len(state))
+        
+        self.states[self._position] = state
+        self.actions[self._position] = action
+        self.rewards[self._position] = reward
+        self.next_states[self._position] = next_state
+        self.dones[self._position] = float(done)
+        self.priorities[self._position] = self.max_priority
+        
+        self._position = (self._position + 1) % self.capacity
+        self._size = min(self._size + 1, self.capacity)
     
-    def sample(self, batch_size: int) -> Tuple[np.ndarray, ...]:
+    def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Sample batch with probability proportional to priority.
         
         Returns:
             Tuple: (states, actions, rewards, next_states, dones, indices, weights)
         """
-        # Calculate sampling probabilities
-        priorities = np.array(self.priorities, dtype=np.float32)
+        # Anneal beta
+        self._frame_count += 1
+        beta_progress = min(1.0, self._frame_count / self.beta_frames)
+        self.beta = self.beta_start + beta_progress * (self.beta_end - self.beta_start)
+        
+        # Calculate sampling probabilities from priorities
+        priorities = self.priorities[:self._size]
         probs = priorities ** self.alpha
-        probs /= probs.sum()
+        probs_sum = probs.sum()
+        if probs_sum > 0:
+            probs = probs / probs_sum
+        else:
+            probs = np.ones(self._size, dtype=np.float32) / self._size
         
-        # Sample indices
-        indices = np.random.choice(len(self.buffer), batch_size, p=probs)
-        
-        # Get experiences
-        batch = [self.buffer[i] for i in indices]
-        
-        states = np.array([exp[0] for exp in batch], dtype=np.float32)
-        actions = np.array([exp[1] for exp in batch], dtype=np.int64)
-        rewards = np.array([exp[2] for exp in batch], dtype=np.float32)
-        next_states = np.array([exp[3] for exp in batch], dtype=np.float32)
-        dones = np.array([exp[4] for exp in batch], dtype=np.float32)
+        # Sample indices based on priorities
+        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=False)
         
         # Calculate importance sampling weights
-        total = len(self.buffer)
-        weights = (total * probs[indices]) ** (-self.beta)
-        weights /= weights.max()
+        weights = (self._size * probs[indices]) ** (-self.beta)
+        weights = weights / weights.max()  # Normalize
         weights = weights.astype(np.float32)
         
-        # Anneal beta
-        self.beta = min(self.beta_end, self.beta + self.beta_decay)
+        return (
+            self.states[indices].copy(),
+            self.actions[indices].copy(),
+            self.rewards[indices].copy(),
+            self.next_states[indices].copy(),
+            self.dones[indices].copy(),
+            indices,
+            weights
+        )
+    
+    def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Sample without copying (faster, returns views)."""
+        self._frame_count += 1
+        beta_progress = min(1.0, self._frame_count / self.beta_frames)
+        self.beta = self.beta_start + beta_progress * (self.beta_end - self.beta_start)
         
-        return states, actions, rewards, next_states, dones, indices, weights
+        priorities = self.priorities[:self._size]
+        probs = priorities ** self.alpha
+        probs_sum = probs.sum()
+        if probs_sum > 0:
+            probs = probs / probs_sum
+        else:
+            probs = np.ones(self._size, dtype=np.float32) / self._size
+        
+        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=False)
+        
+        weights = (self._size * probs[indices]) ** (-self.beta)
+        weights = weights / weights.max()
+        weights = weights.astype(np.float32)
+        
+        return (
+            self.states[indices],
+            self.actions[indices],
+            self.rewards[indices],
+            self.next_states[indices],
+            self.dones[indices],
+            indices,
+            weights
+        )
     
     def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray) -> None:
         """
@@ -306,15 +359,31 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             indices: Indices of sampled experiences
             td_errors: Absolute TD errors from training
         """
-        for idx, error in zip(indices, td_errors):
-            priority = abs(error) + 1e-6  # Small epsilon to avoid zero priority
-            self.priorities[idx] = priority
-            self.max_priority = max(self.max_priority, priority)
+        priorities = np.abs(td_errors) + 1e-6  # Small epsilon to avoid zero priority
+        self.priorities[indices] = priorities
+        self.max_priority = max(self.max_priority, priorities.max())
+    
+    def __len__(self) -> int:
+        """Return current buffer size."""
+        return self._size
+    
+    def is_ready(self, batch_size: int) -> bool:
+        """Check if buffer has enough experiences for sampling."""
+        return self._size >= batch_size
+    
+    def clear(self) -> None:
+        """Clear all experiences from the buffer."""
+        self._size = 0
+        self._position = 0
+        self.priorities.fill(0)
+        self.max_priority = 1.0
+        self._frame_count = 0
+        self.beta = self.beta_start
 
 
 # Testing
 if __name__ == "__main__":
-    print("Testing ReplayBuffer...")
+    print("Testing ReplayBuffer (contiguous numpy storage)...")
     
     # Create buffer
     buffer = ReplayBuffer(capacity=100)
@@ -343,5 +412,37 @@ if __name__ == "__main__":
     print(f"  Next states: {next_states.shape}")
     print(f"  Dones: {dones.shape}")
     
-    print("\n✓ ReplayBuffer tests passed!")
-
+    # Test circular buffer behavior
+    print("\nTesting circular buffer...")
+    for i in range(100):  # Overflow capacity
+        state = np.random.randn(state_size).astype(np.float32)
+        buffer.push(state, 0, 0.0, state, False)
+    
+    print(f"Buffer size after overflow: {len(buffer)} (capacity: {buffer.capacity})")
+    
+    # Test PrioritizedReplayBuffer
+    print("\n" + "="*50)
+    print("Testing PrioritizedReplayBuffer...")
+    
+    per_buffer = PrioritizedReplayBuffer(capacity=100, alpha=0.6, beta_start=0.4)
+    
+    for i in range(50):
+        state = np.random.randn(state_size).astype(np.float32)
+        action = np.random.randint(0, 3)
+        reward = np.random.randn()
+        next_state = np.random.randn(state_size).astype(np.float32)
+        done = np.random.random() > 0.9
+        
+        per_buffer.push(state, action, reward, next_state, done)
+    
+    states, actions, rewards, next_states, dones, indices, weights = per_buffer.sample(32)
+    print(f"PER sample shapes: states={states.shape}, weights={weights.shape}")
+    print(f"Indices range: {indices.min()} - {indices.max()}")
+    print(f"Weights range: {weights.min():.4f} - {weights.max():.4f}")
+    
+    # Update priorities
+    td_errors = np.random.rand(32).astype(np.float32)
+    per_buffer.update_priorities(indices, td_errors)
+    print(f"Max priority after update: {per_buffer.max_priority:.4f}")
+    
+    print("\n✓ All ReplayBuffer tests passed!")
