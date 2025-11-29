@@ -132,8 +132,8 @@ class Star:
     """A background star."""
     
     def __init__(self, x: int, y: int, speed: float, brightness: int):
-        self.x = x
-        self.y = y
+        self.x: float = float(x)
+        self.y: float = float(y)
         self.speed = speed
         self.brightness = brightness
         self.twinkle_phase = random.uniform(0, math.pi * 2)
@@ -141,16 +141,17 @@ class Star:
     def update(self, height: int) -> None:
         self.y += self.speed
         if self.y > height:
-            self.y = 0
-            self.x = random.randint(0, 800)
+            self.y = 0.0
+            self.x = float(random.randint(0, 800))
     
     def draw(self, screen: pygame.Surface, time: float) -> None:
         twinkle = 0.7 + 0.3 * math.sin(time * 3 + self.twinkle_phase)
         brightness = int(self.brightness * twinkle)
         # Slight green tint for CRT feel
-        color = (brightness - 20, brightness, brightness - 10)
-        color = tuple(max(0, min(255, c)) for c in color)
-        pygame.draw.circle(screen, color, (int(self.x), int(self.y)), 1)
+        r = max(0, min(255, brightness - 20))
+        g = max(0, min(255, brightness))
+        b = max(0, min(255, brightness - 10))
+        pygame.draw.circle(screen, (r, g, b), (int(self.x), int(self.y)), 1)
 
 
 class Bullet:
@@ -165,7 +166,7 @@ class Bullet:
         self.alive = True
         self.width = 3
         self.height = 12 if is_player else 10
-        self.trail = []  # Trail positions for effect
+        self.trail: List[Tuple[float, float]] = []  # Trail positions for effect
     
     @property
     def rect(self) -> pygame.Rect:
@@ -478,13 +479,13 @@ class SpaceInvaders(BaseGame):
         self._shoot_cooldown_max = 10
         
         # Create visual effects
+        self._scanline_surface: Optional[pygame.Surface] = None
+        self._crt_vignette: Optional[pygame.Surface] = None
+        
         if not headless:
             self._create_stars()
             self._scanline_surface = self._create_scanlines()
             self._crt_vignette = self._create_vignette()
-        else:
-            self._scanline_surface = None
-            self._crt_vignette = None
         
         self.reset()
     

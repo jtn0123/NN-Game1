@@ -438,7 +438,8 @@ class DuelingDQN(nn.Module):
         """
         weights = []
         for layer in self.feature_layers:
-            weights.append(layer.weight.detach().cpu().numpy())
+            if isinstance(layer, nn.Linear):
+                weights.append(layer.weight.detach().cpu().numpy())
         weights.append(self.value_hidden.weight.detach().cpu().numpy())
         weights.append(self.advantage_hidden.weight.detach().cpu().numpy())
         return weights

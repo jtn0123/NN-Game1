@@ -28,7 +28,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, Union
 from dataclasses import dataclass, asdict
 from collections import deque
 from datetime import datetime
@@ -151,6 +151,12 @@ class Agent:
         >>> loss = agent.learn()
     """
     
+    # Type annotations for instance variables
+    # Note: torch.compile() wraps the network but preserves the interface at runtime
+    policy_net: Union[DQN, DuelingDQN]
+    target_net: Union[DQN, DuelingDQN]
+    memory: Union[ReplayBuffer, PrioritizedReplayBuffer]
+    
     def __init__(
         self,
         state_size: int,
@@ -182,8 +188,9 @@ class Agent:
         if self.config.USE_TORCH_COMPILE and hasattr(torch, 'compile'):
             try:
                 compile_mode = getattr(self.config, 'TORCH_COMPILE_MODE', 'reduce-overhead')
-                self.policy_net = torch.compile(self.policy_net, mode=compile_mode)
-                self.target_net = torch.compile(self.target_net, mode=compile_mode)
+                # torch.compile() returns a wrapper that preserves the interface but changes the type
+                self.policy_net = torch.compile(self.policy_net, mode=compile_mode)  # type: ignore[assignment]
+                self.target_net = torch.compile(self.target_net, mode=compile_mode)  # type: ignore[assignment]
                 self._compiled = True
                 print(f"✓ torch.compile() enabled (mode={compile_mode})")
             except Exception as e:
@@ -191,7 +198,7 @@ class Agent:
         
         # Optimizer
         self.optimizer = optim.Adam(
-            self.policy_net.parameters(),
+            self.policy_net.parameters(),  # type: ignore[attr-defined]
             lr=self.config.LEARNING_RATE
         )
         
@@ -309,8 +316,9 @@ class Agent:
         
         if training:
             # Determine which states get random actions (exploration)
-            explore_mask = np.random.random(batch_size) < self.epsilon
-            num_explored = int(explore_mask.sum())
+            # Use np.less() for clearer typing than < operator
+            explore_mask = np.less(np.random.random(batch_size), self.epsilon)
+            num_explored = int(np.sum(explore_mask))
             num_exploited = batch_size - num_explored
             
             if num_explored > 0:
@@ -469,11 +477,13 @@ class Agent:
         # Sample batch - different path for PER vs uniform
         if self._use_per:
             # PER sampling returns indices and importance sampling weights
+            assert isinstance(self.memory, PrioritizedReplayBuffer)
             states_np, actions_np, rewards_np, next_states_np, dones_np, indices, weights_np = \
                 self.memory.sample_no_copy(batch_size)
             weights = torch.from_numpy(weights_np).to(self.device)
         else:
             # Uniform sampling (no-copy is safe since we consume immediately)
+            assert isinstance(self.memory, ReplayBuffer)
             states_np, actions_np, rewards_np, next_states_np, dones_np = \
                 self.memory.sample_no_copy(batch_size)
             indices = None
@@ -536,7 +546,7 @@ class Agent:
         # Gradient clipping for stability
         if self.config.GRAD_CLIP > 0:
             torch.nn.utils.clip_grad_norm_(
-                self.policy_net.parameters(),
+                self.policy_net.parameters(),  # type: ignore[attr-defined]
                 self.config.GRAD_CLIP
             )
         
@@ -544,6 +554,7 @@ class Agent:
         
         # Update PER priorities with TD errors
         if self._use_per and indices is not None:
+            assert isinstance(self.memory, PrioritizedReplayBuffer)
             self.memory.update_priorities(indices, td_errors.abs().cpu().numpy())
         
         # Store loss for metrics
@@ -596,8 +607,8 @@ class Agent:
         """
         tau = self.config.TARGET_TAU
         for target_param, policy_param in zip(
-            self.target_net.parameters(),
-            self.policy_net.parameters()
+            self.target_net.parameters(),  # type: ignore[attr-defined]
+            self.policy_net.parameters()  # type: ignore[attr-defined]
         ):
             target_param.data.copy_(
                 tau * policy_param.data + (1.0 - tau) * target_param.data
@@ -945,7 +956,7 @@ class Agent:
         Returns:
             List of model info dictionaries, sorted by modified time (newest first)
         """
-        models = []
+        models: List[Dict[str, Any]] = []
         
         if not os.path.exists(model_dir):
             return models

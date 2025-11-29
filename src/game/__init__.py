@@ -119,10 +119,12 @@ def get_all_game_info() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dictionary mapping game IDs to their info
     """
-    return {
-        game_id: get_game_info(game_id)
-        for game_id in GAME_REGISTRY.keys()
-    }
+    result: Dict[str, Dict[str, Any]] = {}
+    for game_id in GAME_REGISTRY.keys():
+        info = get_game_info(game_id)
+        if info is not None:
+            result[game_id] = info
+    return result
 
 
 __all__ = [
