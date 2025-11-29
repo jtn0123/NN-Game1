@@ -1595,6 +1595,8 @@ function loadConfig() {
             if (err.name !== 'AbortError') {
                 console.error('Config load error:', err);
             }
+            // Initialize vec-envs handler even on failure (uses default originalVecEnvs=1)
+            initVecEnvsHandler();
         });
     
     // Also fetch save status
