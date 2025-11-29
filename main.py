@@ -726,7 +726,8 @@ class GameApp:
         self.agent.epsilon = 0  # No exploration
         state = self.game.reset()
         episode_reward = 0.0
-        info: dict = {'score': 0, 'bricks_remaining': 50}  # Default info for paused state
+        total_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
+        info: dict = {'score': 0, 'bricks_remaining': total_bricks}  # Default info for paused state
         
         while self.running:
             self._handle_events()
@@ -746,7 +747,7 @@ class GameApp:
                     self.episode += 1
                     self.dashboard.update(
                         self.episode, info['score'], 0, 0,
-                        bricks_broken=50-info.get('bricks_remaining', 50)
+                        bricks_broken=total_bricks-info.get('bricks_remaining', total_bricks)
                     )
                 
                 self.selected_action = action
@@ -781,6 +782,7 @@ class GameApp:
         episode_steps = 0
         episode_start_time = time.time()
         episode_bricks_broken = 0
+        total_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
         info: dict = {}
         
         # Speed slider directly controls training intensity
@@ -872,7 +874,7 @@ class GameApp:
                             info['score'],
                             self.agent.epsilon,
                             self.agent.get_average_loss(100),
-                            bricks_broken=50-info.get('bricks_remaining', 50),
+                            bricks_broken=total_bricks-info.get('bricks_remaining', total_bricks),
                             won=info.get('won', False),
                             reward=episode_reward
                         )

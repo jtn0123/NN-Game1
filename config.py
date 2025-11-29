@@ -196,7 +196,8 @@ class Config:
     # =========================================================================
     
     # Enable prioritized replay (samples important experiences more often)
-    USE_PRIORITIZED_REPLAY: bool = True
+    # NOTE: Not yet implemented - setting has no effect. Left for future use.
+    USE_PRIORITIZED_REPLAY: bool = False
     
     # Priority exponent (0 = uniform sampling, 1 = full prioritization)
     PER_ALPHA: float = 0.6
