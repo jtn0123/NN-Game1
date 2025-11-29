@@ -327,7 +327,8 @@ class Config:
     # =========================================================================
 
     # Enable learning rate scheduler (reduces LR over time for fine-tuning)
-    USE_LR_SCHEDULER: bool = True
+    # EXPERIMENT: Disabled to test if it was causing training instability
+    USE_LR_SCHEDULER: bool = False
 
     # Scheduler type: 'cosine' (smooth decay) or 'step' (periodic drops)
     LR_SCHEDULER_TYPE: str = 'cosine'

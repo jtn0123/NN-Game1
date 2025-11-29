@@ -140,10 +140,10 @@ function initCharts() {
                     pinch: {
                         enabled: true
                     },
-                    mode: 'x',
-                    limits: {
-                        x: { min: 'original', max: 'original' }
-                    }
+                    mode: 'x'
+                },
+                limits: {
+                    x: { min: 'original', max: 'original', minRange: 10 }
                 }
             }
         },
@@ -214,13 +214,19 @@ function initCharts() {
     scoreChart.canvas.addEventListener('mousemove', (e) => {
         if (e.buttons === 1) { // Left mouse button held down
             userHasPanned.score = true;
+            updateScrollbarPosition('score', scoreChart);
         }
     });
     scoreChart.canvas.addEventListener('wheel', (e) => {
         if (e.ctrlKey || e.metaKey) {
             userHasPanned.score = true;
+            setTimeout(() => updateScrollbarPosition('score', scoreChart), 10);
         }
     });
+    // Update scrollbar after chart updates (from pan/zoom)
+    scoreChart.options.onResize = function() {
+        updateScrollbarPosition('score', scoreChart);
+    };
 
     // Loss Chart
     const lossCtx = document.getElementById('lossChart').getContext('2d');
@@ -351,9 +357,12 @@ function initCharts() {
 }
 
 /**
- * Initialize scrollbar functionality for loss and Q-value charts
+ * Initialize scrollbar functionality for all charts
  */
 function initializeChartScrollbars() {
+    // Setup score chart scrollbar
+    setupChartScrollbar('score', scoreChart);
+    
     // Setup loss chart scrollbar
     setupChartScrollbar('loss', lossChart);
     
@@ -391,22 +400,29 @@ function setupChartScrollbar(chartName, chart) {
         const trackRect = track.getBoundingClientRect();
         const clickX = e.clientX - trackRect.left;
         const trackWidth = trackRect.width;
+        const thumbWidth = thumb.offsetWidth || 30;
+        const availableWidth = Math.max(1, trackWidth - thumbWidth);
         
         const labels = fullHistory.labels || [];
         if (labels.length === 0) return;
         
-        const totalRange = labels[labels.length - 1] - labels[0];
+        const dataStart = labels[0];
+        const dataEnd = labels[labels.length - 1];
+        const totalRange = dataEnd - dataStart;
         const visibleWindow = getChartVisibleWindow(chart);
-        if (!visibleWindow) return;
+        if (!visibleWindow || totalRange === 0) return;
         
-        // Calculate position in data range
-        const clickPercent = Math.max(0, Math.min(1, clickX / trackWidth));
-        const targetCenter = labels[0] + totalRange * clickPercent;
+        // Calculate the scrollable range
+        const scrollableRange = Math.max(0, totalRange - visibleWindow);
         
-        // Set viewport centered on click position
-        const halfWindow = visibleWindow / 2;
-        const minX = Math.max(labels[0], targetCenter - halfWindow);
-        const maxX = Math.min(labels[labels.length - 1], targetCenter + halfWindow);
+        // Convert click position to scroll percent (centering the thumb at click point)
+        const targetThumbCenter = clickX - (thumbWidth / 2);
+        const scrollPercent = Math.max(0, Math.min(1, targetThumbCenter / availableWidth));
+        
+        // Calculate viewport bounds
+        const viewportStart = dataStart + (scrollableRange * scrollPercent);
+        const minX = Math.max(dataStart, viewportStart);
+        const maxX = Math.min(dataEnd, viewportStart + visibleWindow);
         
         updateChartViewport(chart, minX, maxX);
         userHasPanned[chartName] = true;
@@ -421,34 +437,44 @@ function setupChartScrollbar(chartName, chart) {
         
         const trackRect = track.getBoundingClientRect();
         const trackWidth = trackRect.width;
+        const thumbWidth = thumb.offsetWidth || 30;
+        const availableWidth = Math.max(1, trackWidth - thumbWidth);
         const deltaX = e.clientX - dragStartX;
-        const newLeft = Math.max(0, Math.min(trackWidth - thumb.offsetWidth, dragStartLeft + deltaX));
+        const newLeft = Math.max(0, Math.min(availableWidth, dragStartLeft + deltaX));
         
         const labels = fullHistory.labels || [];
         if (labels.length === 0) return;
         
-        const totalRange = labels[labels.length - 1] - labels[0];
+        const dataStart = labels[0];
+        const dataEnd = labels[labels.length - 1];
+        const totalRange = dataEnd - dataStart;
         const visibleWindow = getChartVisibleWindow(chart);
         if (!visibleWindow || totalRange === 0) return;
         
-        // Calculate position in data range
-        const thumbWidth = thumb.offsetWidth || 20;
-        const availableWidth = Math.max(1, trackWidth - thumbWidth);
-        const thumbPercent = Math.max(0, Math.min(1, newLeft / availableWidth));
-        const targetCenter = labels[0] + totalRange * thumbPercent;
+        // Calculate the scrollable range (total data range minus visible window)
+        const scrollableRange = Math.max(0, totalRange - visibleWindow);
         
-        // Set viewport centered on thumb position
-        const halfWindow = visibleWindow / 2;
-        const minX = Math.max(labels[0], targetCenter - halfWindow);
-        const maxX = Math.min(labels[labels.length - 1], targetCenter + halfWindow);
+        // Calculate the scroll position (0 to 1) based on thumb position
+        const scrollPercent = availableWidth > 0 ? newLeft / availableWidth : 0;
+        
+        // Calculate viewport bounds - start position based on scroll percent
+        const viewportStart = dataStart + (scrollableRange * scrollPercent);
+        const minX = Math.max(dataStart, viewportStart);
+        const maxX = Math.min(dataEnd, viewportStart + visibleWindow);
+        
+        // Update thumb position directly during drag (don't wait for chart update)
+        thumb.style.left = `${newLeft}px`;
         
         updateChartViewport(chart, minX, maxX);
         userHasPanned[chartName] = true;
-        updateScrollbarPosition(chartName, chart);
     };
     
     const handleMouseUp = () => {
-        scrollbarDragState[chartName] = false;
+        if (scrollbarDragState[chartName]) {
+            scrollbarDragState[chartName] = false;
+            // Sync scrollbar position with actual chart viewport after drag
+            updateScrollbarPosition(chartName, chart, true);
+        }
     };
     
     document.addEventListener('mousemove', handleMouseMove);
@@ -493,65 +519,109 @@ function getChartVisibleWindow(chart) {
 }
 
 /**
- * Update chart viewport
+ * Update chart viewport with bounds clamping
  */
 function updateChartViewport(chart, minX, maxX) {
     if (!chart || !chart.options || !chart.options.scales) return;
     
-    chart.options.scales.x.min = minX;
-    chart.options.scales.x.max = maxX;
+    const labels = fullHistory.labels || [];
+    if (labels.length === 0) return;
+    
+    const dataStart = labels[0];
+    const dataEnd = labels[labels.length - 1];
+    
+    // Clamp viewport to data bounds
+    let clampedMinX = Math.max(dataStart, minX);
+    let clampedMaxX = Math.min(dataEnd, maxX);
+    
+    // Ensure min is not greater than max
+    if (clampedMinX > clampedMaxX) {
+        clampedMinX = dataStart;
+        clampedMaxX = dataEnd;
+    }
+    
+    // Ensure viewport has some width (at least 1 unit or 1% of data range)
+    const minWidth = Math.max(1, (dataEnd - dataStart) * 0.01);
+    if (clampedMaxX - clampedMinX < minWidth) {
+        const center = (clampedMinX + clampedMaxX) / 2;
+        clampedMinX = Math.max(dataStart, center - minWidth / 2);
+        clampedMaxX = Math.min(dataEnd, center + minWidth / 2);
+    }
+    
+    chart.options.scales.x.min = clampedMinX;
+    chart.options.scales.x.max = clampedMaxX;
     chart.update('none');
 }
 
 /**
  * Update scrollbar position based on chart viewport
  */
-function updateScrollbarPosition(chartName, chart) {
-    // Don't update scrollbar while user is dragging it
-    if (scrollbarDragState[chartName]) return;
+function updateScrollbarPosition(chartName, chart, forceUpdate = false) {
+    // Don't update scrollbar while user is dragging it (unless forced)
+    if (scrollbarDragState[chartName] && !forceUpdate) return;
     
     const thumbId = `${chartName}-scrollbar-thumb`;
     const trackId = `${chartName}-scrollbar-track`;
+    const containerId = trackId.replace('-track', '-container');
     const thumb = document.getElementById(thumbId);
     const track = document.getElementById(trackId);
+    const container = track?.parentElement;
     
     if (!thumb || !track || !chart) return;
     
     const labels = fullHistory.labels || [];
     if (labels.length === 0) {
-        thumb.style.display = 'none';
+        // No data - hide scrollbar
+        if (container) container.style.display = 'none';
         return;
     }
     
-    thumb.style.display = 'block';
-    
     const totalRange = labels[labels.length - 1] - labels[0];
     if (totalRange === 0) {
-        thumb.style.width = '100%';
-        thumb.style.left = '0';
+        // Only one data point - hide scrollbar
+        if (container) container.style.display = 'none';
         return;
     }
     
     const minX = chart.scales?.x?.min;
     const maxX = chart.scales?.x?.max;
     
+    // Get actual visible window
+    let visibleWindow;
     if (minX === undefined || maxX === undefined) {
-        // Showing all data - scrollbar should span full width
-        thumb.style.width = '100%';
-        thumb.style.left = '0';
+        // Showing all data
+        visibleWindow = totalRange;
+    } else {
+        visibleWindow = maxX - minX;
+    }
+    
+    // Hide scrollbar if visible window covers all data (or more)
+    if (visibleWindow >= totalRange * 0.98) {
+        if (container) container.style.display = 'none';
         return;
     }
     
-    const visibleWindow = maxX - minX;
-    const windowCenter = (minX + maxX) / 2;
-    const dataStart = labels[0];
+    // Show scrollbar
+    if (container) container.style.display = 'block';
+    thumb.style.display = 'block';
     
     // Calculate thumb position and size
     const trackWidth = track.offsetWidth;
-    const visibleRatio = Math.min(1, Math.max(0, visibleWindow / totalRange)); // Clamp to [0, 1]
-    const thumbWidth = Math.max(20, visibleRatio * trackWidth);
-    const availableWidth = Math.max(1, trackWidth - thumbWidth); // Avoid division by zero
-    const positionRatio = Math.max(0, Math.min(1, (windowCenter - dataStart) / totalRange));
+    const visibleRatio = Math.min(1, Math.max(0, visibleWindow / totalRange));
+    const thumbWidth = Math.max(30, visibleRatio * trackWidth);
+    const availableWidth = Math.max(1, trackWidth - thumbWidth);
+    
+    // Calculate position based on viewport start position relative to data range
+    const dataStart = labels[0];
+    const dataEnd = labels[labels.length - 1];
+    const viewportStart = (minX !== undefined) ? Math.max(dataStart, Math.min(dataEnd, minX)) : dataStart;
+    const scrollableRange = totalRange - visibleWindow;
+    
+    let positionRatio = 0;
+    if (scrollableRange > 0) {
+        positionRatio = Math.max(0, Math.min(1, (viewportStart - dataStart) / scrollableRange));
+    }
+    
     const thumbPosition = positionRatio * availableWidth;
     
     thumb.style.width = `${thumbWidth}px`;
@@ -590,12 +660,15 @@ function resetChartView(chartName = 'all') {
         userHasPanned.score = false;
         userHasPanned.loss = false;
         userHasPanned.qvalue = false;
+        updateScrollbarPosition('score', scoreChart);
         updateScrollbarPosition('loss', lossChart);
         updateScrollbarPosition('qvalue', qvalueChart);
     } else if (charts[chartName]) {
         resetChart(charts[chartName]);
         userHasPanned[chartName] = false;
-        if (chartName === 'loss') {
+        if (chartName === 'score') {
+            updateScrollbarPosition('score', scoreChart);
+        } else if (chartName === 'loss') {
             updateScrollbarPosition('loss', lossChart);
         } else if (chartName === 'qvalue') {
             updateScrollbarPosition('qvalue', qvalueChart);
@@ -911,6 +984,7 @@ let userHasPanned = {
 
 // Track scrollbar drag state
 let scrollbarDragState = {
+    score: false,
     loss: false,
     qvalue: false
 };
@@ -1006,21 +1080,27 @@ function updateCharts(history, currentEpisode) {
             qvalueChart.options.scales.x.max = labels[maxX - 1];
         }
     } else if (scoreXRange && userHasPanned.score && scoreChart && scoreChart.options && scoreChart.options.scales) {
-        // Maintain user's pan position for score chart
-        scoreChart.options.scales.x.min = scoreXRange.min;
-        scoreChart.options.scales.x.max = scoreXRange.max;
+        // Maintain user's pan position for score chart (clamped to data bounds)
+        const dataStart = labels[0];
+        const dataEnd = labels[labels.length - 1];
+        scoreChart.options.scales.x.min = Math.max(dataStart, Math.min(dataEnd, scoreXRange.min));
+        scoreChart.options.scales.x.max = Math.max(dataStart, Math.min(dataEnd, scoreXRange.max));
     }
     
     if (lossXRange && userHasPanned.loss && lossChart && lossChart.options && lossChart.options.scales) {
-        // Maintain user's pan position for loss chart
-        lossChart.options.scales.x.min = lossXRange.min;
-        lossChart.options.scales.x.max = lossXRange.max;
+        // Maintain user's pan position for loss chart (clamped to data bounds)
+        const dataStart = labels[0];
+        const dataEnd = labels[labels.length - 1];
+        lossChart.options.scales.x.min = Math.max(dataStart, Math.min(dataEnd, lossXRange.min));
+        lossChart.options.scales.x.max = Math.max(dataStart, Math.min(dataEnd, lossXRange.max));
     }
     
     if (qvalueXRange && userHasPanned.qvalue && qvalueChart && qvalueChart.options && qvalueChart.options.scales) {
-        // Maintain user's pan position for Q-value chart
-        qvalueChart.options.scales.x.min = qvalueXRange.min;
-        qvalueChart.options.scales.x.max = qvalueXRange.max;
+        // Maintain user's pan position for Q-value chart (clamped to data bounds)
+        const dataStart = labels[0];
+        const dataEnd = labels[labels.length - 1];
+        qvalueChart.options.scales.x.min = Math.max(dataStart, Math.min(dataEnd, qvalueXRange.min));
+        qvalueChart.options.scales.x.max = Math.max(dataStart, Math.min(dataEnd, qvalueXRange.max));
     }
     
     // If no panning and small dataset, show all
@@ -1047,6 +1127,7 @@ function updateCharts(history, currentEpisode) {
     }
     
     // Update scrollbar positions
+    updateScrollbarPosition('score', scoreChart);
     updateScrollbarPosition('loss', lossChart);
     updateScrollbarPosition('qvalue', qvalueChart);
     

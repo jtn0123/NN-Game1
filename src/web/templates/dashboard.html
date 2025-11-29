@@ -50,11 +50,16 @@
                                 <span class="legend-item score" data-tooltip="Raw score for each episode">● Score</span>
                                 <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes - better shows overall trend">● Average</span>
                             </div>
-                            <button class="chart-reset-btn" onclick="resetChartView('score')" title="Reset view to latest episodes">↻ Reset View</button>
+                            <button class="chart-reset-btn" onclick="resetChartView('score')" title="Reset view to latest episodes">↻</button>
                         </div>
                     </div>
                     <div class="chart-container">
                         <canvas id="scoreChart"></canvas>
+                    </div>
+                    <div class="chart-scrollbar-container">
+                        <div class="chart-scrollbar-track" id="score-scrollbar-track">
+                            <div class="chart-scrollbar-thumb" id="score-scrollbar-thumb"></div>
+                        </div>
                     </div>
                 </div>
 
