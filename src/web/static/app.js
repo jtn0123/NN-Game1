@@ -816,11 +816,58 @@ function resetEpisode() {
  * Start fresh training - reset agent and clear all training state
  */
 function startFresh() {
-    if (!confirm('Start fresh training?\n\nThis will:\n• Reset the neural network to initial state\n• Clear all training memory\n• Reset all progress (episodes, scores, etc.)\n\nThis action cannot be undone. Continue?')) {
+    // First, ask if they want to save current progress
+    const saveFirst = confirm(
+        '⚠️ Start Fresh Training\n\n' +
+        'Would you like to SAVE your current progress first?\n\n' +
+        'Click OK to save before resetting\n' +
+        'Click Cancel to skip saving'
+    );
+    
+    // Now confirm the fresh start
+    const confirmReset = confirm(
+        '🔄 Confirm Fresh Start\n\n' +
+        'This will:\n' +
+        '• Reset the neural network to random weights\n' +
+        '• Clear all training memory (replay buffer)\n' +
+        '• Reset episode count, scores, and charts to 0\n' +
+        '• Clear console logs\n\n' +
+        '✓ Saved models on disk will NOT be deleted\n' +
+        '✓ You can load them later from the Load menu\n\n' +
+        'Continue with fresh start?'
+    );
+    
+    if (!confirmReset) {
+        addConsoleLog('Fresh start cancelled', 'info');
         return;
     }
-    socket.emit('control', { action: 'start_fresh' });
-    addConsoleLog('Starting fresh training...', 'warning');
+    
+    // Update button to show loading state
+    const btn = document.querySelector('.control-btn.fresh');
+    if (btn) {
+        const originalText = btn.textContent;
+        btn.textContent = '⏳ Resetting...';
+        btn.disabled = true;
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }, 2000);
+    }
+    
+    if (saveFirst) {
+        // Save current model first, then reset after a short delay
+        socket.emit('control', { action: 'save' });
+        addConsoleLog('💾 Saving current progress before reset...', 'action');
+        
+        // Wait for save to complete before resetting
+        setTimeout(() => {
+            socket.emit('control', { action: 'start_fresh' });
+            addConsoleLog('🔄 Starting fresh training...', 'warning');
+        }, 500);
+    } else {
+        socket.emit('control', { action: 'start_fresh' });
+        addConsoleLog('🔄 Starting fresh training...', 'warning');
+    }
 }
 
 /**
@@ -1143,8 +1190,12 @@ document.addEventListener('keydown', (e) => {
             }
             break;
         case 'r':
-            // Require Ctrl/Cmd+R to prevent accidental resets
-            if (e.ctrlKey || e.metaKey) {
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                // Ctrl/Cmd+Shift+R = Start Fresh (destructive, needs extra modifier)
+                e.preventDefault();
+                startFresh();
+            } else if (e.ctrlKey || e.metaKey) {
+                // Ctrl/Cmd+R = Reset Episode
                 e.preventDefault(); // Prevent browser refresh
                 resetEpisode();
             }

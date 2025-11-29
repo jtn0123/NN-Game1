@@ -27,6 +27,7 @@ References:
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import _LRScheduler
 import numpy as np
 from typing import Optional, Tuple, List, Dict, Any, Union
 from dataclasses import dataclass, asdict
@@ -203,12 +204,12 @@ class Agent:
         )
 
         # Learning rate scheduler
-        self.scheduler = None
+        self.scheduler: Optional[_LRScheduler] = None
         if getattr(self.config, 'USE_LR_SCHEDULER', False):
             scheduler_type = getattr(self.config, 'LR_SCHEDULER_TYPE', 'cosine')
             if scheduler_type == 'cosine':
                 from torch.optim.lr_scheduler import CosineAnnealingLR
-                self.scheduler = CosineAnnealingLR(
+                self.scheduler = CosineAnnealingLR(  # type: ignore[assignment]
                     self.optimizer,
                     T_max=2000,
                     eta_min=getattr(self.config, 'LR_MIN', 1e-5)
@@ -218,7 +219,7 @@ class Agent:
                 from torch.optim.lr_scheduler import StepLR
                 step_size = getattr(self.config, 'LR_SCHEDULER_STEP', 500)
                 gamma = getattr(self.config, 'LR_SCHEDULER_GAMMA', 0.5)
-                self.scheduler = StepLR(
+                self.scheduler = StepLR(  # type: ignore[assignment]
                     self.optimizer,
                     step_size=step_size,
                     gamma=gamma
@@ -326,7 +327,7 @@ class Agent:
 
         # Reset noise for NoisyNet exploration (only in training mode)
         if training and hasattr(self.policy_net, 'reset_noise'):
-            self.policy_net.reset_noise()
+            self.policy_net.reset_noise()  # type: ignore[operator]
 
         # Set network to eval mode if not training (for NoisyNet and other layers)
         was_training = self.policy_net.training
@@ -529,8 +530,8 @@ class Agent:
         """
         # Reset noise for NoisyNet exploration
         if hasattr(self.policy_net, 'reset_noise'):
-            self.policy_net.reset_noise()
-            self.target_net.reset_noise()
+            self.policy_net.reset_noise()  # type: ignore[operator]
+            self.target_net.reset_noise()  # type: ignore[operator]
 
         batch_size = self.config.BATCH_SIZE
         
@@ -681,19 +682,20 @@ class Agent:
                 tau * policy_param.data + (1.0 - tau) * target_param.data
             )
     
-    def decay_epsilon(self, episode: int = 0) -> None:
+    def decay_epsilon(self, episode: int = float('inf')) -> None:  # type: ignore[assignment]
         """Decay exploration rate.
-        
+
         Args:
             episode: Current episode number. Epsilon only decays after
                      EPSILON_WARMUP episodes to allow buffer to fill.
+                     Defaults to infinity to bypass warmup (backward compatible).
         """
         warmup = getattr(self.config, 'EPSILON_WARMUP', 0)
-        
-        # Skip decay during warmup period
+
+        # Skip decay during warmup period (only if episode is explicitly provided)
         if episode < warmup:
             return
-        
+
         self.epsilon = max(
             self.config.EPSILON_END,
             self.epsilon * self.config.EPSILON_DECAY

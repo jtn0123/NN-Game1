@@ -90,8 +90,8 @@ class NoisyLinear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with noisy weights during training."""
         if self.training:
-            weight = self.weight_mu + self.weight_sigma * self.weight_epsilon
-            bias = self.bias_mu + self.bias_sigma * self.bias_epsilon
+            weight = self.weight_mu + self.weight_sigma * self.weight_epsilon  # type: ignore[operator]
+            bias = self.bias_mu + self.bias_sigma * self.bias_epsilon  # type: ignore[operator]
         else:
             # Use mean parameters during evaluation (no noise)
             weight = self.weight_mu
@@ -383,8 +383,8 @@ class DuelingDQN(nn.Module):
             self.value_output = NoisyLinear(stream_hidden_size, 1, noisy_std)
             self.advantage_output = NoisyLinear(stream_hidden_size, self.action_size, noisy_std)
         else:
-            self.value_output = nn.Linear(stream_hidden_size, 1)
-            self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)
+            self.value_output = nn.Linear(stream_hidden_size, 1)  # type: ignore[assignment]
+            self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)  # type: ignore[assignment]
         
         # For compatibility with DQN interface, create a layers list
         self.layers = nn.ModuleList(list(self.feature_layers) + [

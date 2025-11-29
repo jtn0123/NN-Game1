@@ -815,6 +815,17 @@ body {
     transform: translateY(0);
 }
 
+.control-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.control-btn:disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
+
 .control-btn.pause {
     border-color: rgba(255, 193, 7, 0.5);
     background: linear-gradient(145deg, rgba(255, 193, 7, 0.08) 0%, var(--bg-secondary) 100%);

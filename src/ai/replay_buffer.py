@@ -24,7 +24,7 @@ References:
 """
 
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 import random
 
 
@@ -450,7 +450,7 @@ class NStepReplayBuffer(ReplayBuffer):
         self.gamma = gamma
 
         # Temporary buffer to accumulate N-step trajectories
-        self._n_step_buffer = []
+        self._n_step_buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]] = []
 
     def push(self, state, action, reward, next_state, done):
         """
