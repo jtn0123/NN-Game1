@@ -139,6 +139,36 @@ class TrainingConfig:
     gradient_steps: int = 1
 
 
+@dataclass
+class NNVisualizationData:
+    """Neural network visualization data for web streaming."""
+    # Layer structure info
+    layer_info: List[Dict[str, Any]] = field(default_factory=list)
+    # Activations per layer (normalized values)
+    activations: Dict[str, List[float]] = field(default_factory=dict)
+    # Q-values for current state
+    q_values: List[float] = field(default_factory=list)
+    # Selected action index
+    selected_action: int = 0
+    # Sampled weights for connections (list of weight matrices as nested lists)
+    weights: List[List[List[float]]] = field(default_factory=list)
+    # Current step count
+    step: int = 0
+    # Action labels
+    action_labels: List[str] = field(default_factory=lambda: ["LEFT", "STAY", "RIGHT"])
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'layer_info': self.layer_info,
+            'activations': self.activations,
+            'q_values': self.q_values,
+            'selected_action': self.selected_action,
+            'weights': self.weights,
+            'step': self.step,
+            'action_labels': self.action_labels
+        }
+
+
 class MetricsPublisher:
     """
     Collects and publishes training metrics.
@@ -181,6 +211,12 @@ class MetricsPublisher:
         self._step_samples: Deque[Tuple[float, int]] = deque(maxlen=50)
         self._last_steps_per_sec: float = 0.0
         self._steps_window_seconds: float = 3.0  # Calculate rate over last 3 seconds
+        
+        # Neural network visualization data
+        self._nn_data = NNVisualizationData()
+        self._on_nn_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._last_nn_update_time: float = 0.0
+        self._nn_update_interval: float = 0.1  # 10 FPS throttle
     
     def update(
         self,
@@ -424,6 +460,61 @@ class MetricsPublisher:
     def on_save(self, callback) -> None:
         """Register a callback for save events."""
         self._on_save_callbacks.append(callback)
+    
+    def update_nn_visualization(
+        self,
+        layer_info: List[Dict[str, Any]],
+        activations: Dict[str, List[float]],
+        q_values: List[float],
+        selected_action: int,
+        weights: List[List[List[float]]],
+        step: int,
+        action_labels: Optional[List[str]] = None
+    ) -> None:
+        """
+        Update neural network visualization data.
+        
+        This method is throttled to ~10 FPS to prevent overwhelming the network.
+        
+        Args:
+            layer_info: List of layer info dicts with 'name', 'neurons', 'type'
+            activations: Dict mapping layer keys to lists of activation values
+            q_values: Q-values for each action
+            selected_action: Currently selected action index
+            weights: Sampled weight matrices
+            step: Current training step
+            action_labels: Labels for each action
+        """
+        current_time = time.time()
+        
+        # Throttle updates to ~10 FPS
+        if current_time - self._last_nn_update_time < self._nn_update_interval:
+            return
+        
+        self._last_nn_update_time = current_time
+        
+        # Update stored data
+        self._nn_data.layer_info = layer_info
+        self._nn_data.activations = activations
+        self._nn_data.q_values = q_values
+        self._nn_data.selected_action = selected_action
+        self._nn_data.weights = weights
+        self._nn_data.step = step
+        if action_labels:
+            self._nn_data.action_labels = action_labels
+        
+        # Notify callbacks
+        nn_dict = self._nn_data.to_dict()
+        for callback in self._on_nn_update_callbacks:
+            callback(nn_dict)
+    
+    def get_nn_visualization(self) -> Dict[str, Any]:
+        """Get current neural network visualization data."""
+        return self._nn_data.to_dict()
+    
+    def on_nn_update(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """Register a callback for neural network visualization updates."""
+        self._on_nn_update_callbacks.append(callback)
 
 
 class WebDashboard:
@@ -562,6 +653,11 @@ class WebDashboard:
             if screenshot:
                 return jsonify({'image': screenshot})
             return jsonify({'image': None})
+        
+        @self.app.route('/api/nn-visualization')
+        def api_nn_visualization():
+            """Get current neural network visualization data."""
+            return jsonify(self.publisher.get_nn_visualization())
         
         @self.app.route('/api/logs')
         def api_logs():
@@ -735,6 +831,10 @@ class WebDashboard:
             emit('state_update', self.publisher.get_snapshot())
             # Send recent logs
             emit('console_logs', {'logs': self.publisher.get_console_logs(100)})
+            # Send current NN visualization data if available
+            nn_data = self.publisher.get_nn_visualization()
+            if nn_data.get('layer_info'):
+                emit('nn_update', nn_data)
         
         @self.socketio.on('control')
         def handle_control(data):
@@ -839,9 +939,13 @@ class WebDashboard:
         def broadcast_save(save_info: Dict[str, Any]):
             self.socketio.emit('save_event', save_info)
         
+        def broadcast_nn_update(nn_data: Dict[str, Any]):
+            self.socketio.emit('nn_update', nn_data)
+        
         self.publisher.on_update(broadcast_update)
         self.publisher.on_log(broadcast_log)
         self.publisher.on_save(broadcast_save)
+        self.publisher.on_nn_update(broadcast_nn_update)
     
     def start(self) -> None:
         """Start the web server in a background thread."""
@@ -900,6 +1004,41 @@ class WebDashboard:
     def capture_screenshot(self, surface) -> None:
         """Capture and store a game screenshot."""
         self.publisher.set_screenshot(surface)
+    
+    def emit_nn_visualization(
+        self,
+        layer_info: List[Dict[str, Any]],
+        activations: Dict[str, List[float]],
+        q_values: List[float],
+        selected_action: int,
+        weights: List[List[List[float]]],
+        step: int,
+        action_labels: Optional[List[str]] = None
+    ) -> None:
+        """
+        Emit neural network visualization data to connected clients.
+        
+        This is a convenience method that updates the publisher's NN data.
+        The update is throttled to ~10 FPS internally.
+        
+        Args:
+            layer_info: List of layer info dicts with 'name', 'neurons', 'type'
+            activations: Dict mapping layer keys to lists of activation values
+            q_values: Q-values for each action
+            selected_action: Currently selected action index
+            weights: Sampled weight matrices as nested lists
+            step: Current training step
+            action_labels: Labels for each action (e.g., ["LEFT", "STAY", "RIGHT"])
+        """
+        self.publisher.update_nn_visualization(
+            layer_info=layer_info,
+            activations=activations,
+            q_values=q_values,
+            selected_action=selected_action,
+            weights=weights,
+            step=step,
+            action_labels=action_labels
+        )
 
 
 # Create templates directory structure

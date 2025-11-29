@@ -1865,3 +1865,189 @@ body {
     text-align: right;
     margin-top: 8px;
 }
+
+/* ============================================================
+   NEURAL NETWORK VISUALIZATION PANEL
+   ============================================================ */
+
+.nn-viz-card {
+    background: var(--bg-card);
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+    transition: max-height 0.3s ease, padding 0.3s ease;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.nn-viz-card.collapsed .nn-viz-content {
+    display: none;
+}
+
+.nn-viz-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nn-viz-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.nn-viz-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nn-viz-status {
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    color: var(--accent-success);
+    animation: nn-pulse 2s ease-in-out infinite;
+}
+
+@keyframes nn-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.nn-viz-toggle {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-main);
+}
+
+.nn-viz-toggle:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+}
+
+.nn-viz-toggle.paused {
+    border-color: var(--accent-warning);
+    color: var(--accent-warning);
+}
+
+.nn-viz-content {
+    margin-top: 16px;
+}
+
+.nn-canvas-container {
+    position: relative;
+    width: 100%;
+    height: 380px;
+    background: linear-gradient(135deg, #0c0c18 0%, #121220 100%);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(100, 181, 246, 0.2);
+}
+
+#nn-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.nn-viz-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.nn-viz-placeholder .placeholder-icon {
+    font-size: 3rem;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.nn-viz-placeholder .placeholder-text {
+    font-size: 0.9rem;
+}
+
+.nn-viz-placeholder .placeholder-hint {
+    font-size: 0.75rem;
+    margin-top: 8px;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+/* NN Visualization Legend */
+.nn-viz-legend {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.nn-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.nn-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.nn-legend-dot.positive {
+    background: #f5426c;
+}
+
+.nn-legend-dot.negative {
+    background: #4287f5;
+}
+
+.nn-legend-dot.neutral {
+    background: #282837;
+    border: 1px solid #505a6e;
+}
+
+.nn-legend-line {
+    width: 20px;
+    height: 3px;
+    border-radius: 2px;
+}
+
+.nn-legend-line.strong {
+    background: #ff6229;
+}
+
+.nn-legend-line.weak {
+    background: #2962ff;
+}
+
+/* Responsive adjustments for NN panel */
+@media (max-width: 1400px) {
+    .nn-canvas-container {
+        height: 320px;
+    }
+}
+
+@media (max-width: 768px) {
+    .nn-canvas-container {
+        height: 280px;
+    }
+    
+    .nn-viz-legend {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+}
