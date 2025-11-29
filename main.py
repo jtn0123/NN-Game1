@@ -1976,7 +1976,7 @@ class HeadlessTrainer:
                     self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
             
             if episode % config.SAVE_EVERY == 0 and episode > 0:
-                self._save_model(f"breakout_ep{episode}.pth", save_reason="periodic")
+                self._save_model(f"{self.config.GAME_NAME}_ep{episode}.pth", save_reason="periodic")
             
             # Increment episode counter (was implicit in for loop, now explicit for while loop)
             episode += 1
