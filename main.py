@@ -976,9 +976,9 @@ class GameApp:
                         # Episode complete
                         episode_duration = time.time() - episode_start_time
                         
-                        # Decay epsilon
+                        # Decay epsilon (pass episode for warmup check)
                         old_epsilon = self.agent.epsilon
-                        self.agent.decay_epsilon()
+                        self.agent.decay_epsilon(self.episode)
                         self.agent.step_scheduler()  # Step learning rate scheduler
 
                         # Calculate average Q-value for current state
@@ -1232,7 +1232,7 @@ class GameApp:
                 total_steps += 1
                 steps_since_report += 1
             
-            self.agent.decay_epsilon()
+            self.agent.decay_epsilon(episode)
             self.agent.step_scheduler()  # Step learning rate scheduler
             scores.append(info['score'])
             
@@ -2204,7 +2204,7 @@ class HeadlessTrainer:
                 steps_since_report += 1
             
             # Episode complete
-            self.agent.decay_epsilon()
+            self.agent.decay_epsilon(episode)
             self.agent.step_scheduler()  # Step learning rate scheduler
             self.scores.append(info['score'])
             
@@ -2453,7 +2453,7 @@ class HeadlessTrainer:
             # Decay epsilon once per episode that completed this step
             # (moved outside loop to avoid decaying multiple times when multiple envs finish)
             for _ in range(int(np.sum(dones))):
-                self.agent.decay_epsilon()
+                self.agent.decay_epsilon(self.current_episode)
                 self.agent.step_scheduler()  # Step learning rate scheduler
             
             # Update states for next iteration (already auto-reset in VecBreakout)

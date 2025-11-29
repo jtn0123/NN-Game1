@@ -227,9 +227,10 @@ class Agent:
 
         # Replay buffer - prioritize N-step > PER > basic
         use_n_step = getattr(self.config, 'USE_N_STEP_RETURNS', False)
+        self._use_per = False  # Default to False, set True only if using PER
 
         if use_n_step:
-            self._use_per = False  # N-step buffer doesn't support PER currently
+            # N-step buffer doesn't support PER currently
             from src.ai.replay_buffer import NStepReplayBuffer
             n_steps = getattr(self.config, 'N_STEP_SIZE', 3)
             self.memory = NStepReplayBuffer(
@@ -239,10 +240,9 @@ class Agent:
                 gamma=self.config.GAMMA
             )
             print(f"✓ N-step returns enabled (n={n_steps})")
-        else:
-            self._use_per = getattr(self.config, 'USE_PRIORITIZED_REPLAY', False)
-
-        if not use_n_step and self._use_per:
+        elif getattr(self.config, 'USE_PRIORITIZED_REPLAY', False):
+            # Prioritized Experience Replay
+            self._use_per = True
             self.memory = PrioritizedReplayBuffer(
                 capacity=self.config.MEMORY_SIZE,
                 state_size=state_size,
@@ -253,6 +253,7 @@ class Agent:
             )
             print("✓ Prioritized Experience Replay enabled")
         else:
+            # Basic uniform replay buffer
             self.memory = ReplayBuffer(capacity=self.config.MEMORY_SIZE, state_size=state_size)
         
         # Exploration
@@ -680,8 +681,19 @@ class Agent:
                 tau * policy_param.data + (1.0 - tau) * target_param.data
             )
     
-    def decay_epsilon(self) -> None:
-        """Decay exploration rate."""
+    def decay_epsilon(self, episode: int = 0) -> None:
+        """Decay exploration rate.
+        
+        Args:
+            episode: Current episode number. Epsilon only decays after
+                     EPSILON_WARMUP episodes to allow buffer to fill.
+        """
+        warmup = getattr(self.config, 'EPSILON_WARMUP', 0)
+        
+        # Skip decay during warmup period
+        if episode < warmup:
+            return
+        
         self.epsilon = max(
             self.config.EPSILON_END,
             self.epsilon * self.config.EPSILON_DECAY
