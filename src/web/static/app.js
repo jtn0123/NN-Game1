@@ -369,7 +369,7 @@ function updateDashboard(data) {
     const timeSinceLastChange = Date.now() - lastSpeedChangeTime;
     if (timeSinceLastChange > SPEED_UPDATE_DEBOUNCE) {
         // Only sync from server if user hasn't touched it recently
-        const sliderValue = parseInt(speedSlider.value);
+        const sliderValue = parseInt(speedSlider.value, 10);
         const serverValue = Math.round(state.game_speed);
         // Use tolerance for comparison
         if (Math.abs(sliderValue - serverValue) > 2) {
@@ -673,6 +673,8 @@ function refreshScreenshot() {
  * Start polling for screenshots
  */
 function startScreenshotPolling() {
+    // Fetch immediately on page load, then poll every 2 seconds
+    refreshScreenshot();
     setInterval(refreshScreenshot, 2000);
 }
 
@@ -730,14 +732,21 @@ function showLoadModal() {
                 // Format episode and best score
                 const episodeStr = typeof episode === 'number' ? episode.toLocaleString() : episode;
                 
-                // Reason badge
-                const reasonBadge = reason ? `<span class="reason-badge ${reason}">${reason}</span>` : '';
+                // Escape model name and path to prevent XSS
+                const safeName = escapeHtml(model.name);
+                // For onclick, escape backslashes and single quotes for JS string context
+                const safePathForJs = model.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const safeModifiedStr = escapeHtml(model.modified_str || '');
+                
+                // Reason badge (reason is from our own metadata, but escape anyway)
+                const safeReason = escapeHtml(reason);
+                const reasonBadge = reason ? `<span class="reason-badge ${safeReason}">${safeReason}</span>` : '';
                 
                 return `
-                    <div class="model-item" onclick="loadModel('${model.path}')">
+                    <div class="model-item" onclick="loadModel('${safePathForJs}')">
                         <div class="model-header">
                             <div class="model-name">
-                                📁 ${model.name}
+                                📁 ${safeName}
                                 ${reasonBadge}
                             </div>
                             <span class="model-size">${size}</span>
@@ -760,7 +769,7 @@ function showLoadModal() {
                                 <span class="model-stat-value">${epsilon}</span>
                             </div>
                         </div>
-                        <div class="model-date">${model.modified_str || ''}</div>
+                        <div class="model-date">${safeModifiedStr}</div>
                     </div>
                 `;
             }).join('');
