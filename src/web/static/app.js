@@ -274,13 +274,19 @@ function initCharts() {
     lossChart.canvas.addEventListener('mousemove', (e) => {
         if (e.buttons === 1) { // Left mouse button held down
             userHasPanned.loss = true;
+            updateScrollbarPosition('loss', lossChart);
         }
     });
     lossChart.canvas.addEventListener('wheel', (e) => {
         if (e.ctrlKey || e.metaKey) {
             userHasPanned.loss = true;
+            setTimeout(() => updateScrollbarPosition('loss', lossChart), 10);
         }
     });
+    // Update scrollbar after chart updates (from pan/zoom)
+    lossChart.options.onResize = function() {
+        updateScrollbarPosition('loss', lossChart);
+    };
 
     // Q-Value Chart
     const qvalueCtx = document.getElementById('qvalueChart').getContext('2d');
@@ -326,13 +332,230 @@ function initCharts() {
     qvalueChart.canvas.addEventListener('mousemove', (e) => {
         if (e.buttons === 1) { // Left mouse button held down
             userHasPanned.qvalue = true;
+            updateScrollbarPosition('qvalue', qvalueChart);
         }
     });
     qvalueChart.canvas.addEventListener('wheel', (e) => {
         if (e.ctrlKey || e.metaKey) {
             userHasPanned.qvalue = true;
+            setTimeout(() => updateScrollbarPosition('qvalue', qvalueChart), 10);
         }
     });
+    // Update scrollbar after chart updates (from pan/zoom)
+    qvalueChart.options.onResize = function() {
+        updateScrollbarPosition('qvalue', qvalueChart);
+    };
+    
+    // Initialize scrollbars
+    initializeChartScrollbars();
+}
+
+/**
+ * Initialize scrollbar functionality for loss and Q-value charts
+ */
+function initializeChartScrollbars() {
+    // Setup loss chart scrollbar
+    setupChartScrollbar('loss', lossChart);
+    
+    // Setup Q-value chart scrollbar
+    setupChartScrollbar('qvalue', qvalueChart);
+}
+
+/**
+ * Setup scrollbar for a specific chart
+ */
+function setupChartScrollbar(chartName, chart) {
+    const thumbId = `${chartName}-scrollbar-thumb`;
+    const trackId = `${chartName}-scrollbar-track`;
+    const thumb = document.getElementById(thumbId);
+    const track = document.getElementById(trackId);
+    
+    if (!thumb || !track || !chart) return;
+    
+    let dragStartX = 0;
+    let dragStartLeft = 0;
+    
+    // Mouse down on thumb
+    thumb.addEventListener('mousedown', (e) => {
+        scrollbarDragState[chartName] = true;
+        dragStartX = e.clientX;
+        dragStartLeft = thumb.offsetLeft;
+        e.preventDefault();
+        e.stopPropagation();
+    });
+    
+    // Mouse down on track (click to jump)
+    track.addEventListener('mousedown', (e) => {
+        if (e.target === thumb) return; // Ignore if clicking on thumb
+        
+        const trackRect = track.getBoundingClientRect();
+        const clickX = e.clientX - trackRect.left;
+        const trackWidth = trackRect.width;
+        
+        const labels = fullHistory.labels || [];
+        if (labels.length === 0) return;
+        
+        const totalRange = labels[labels.length - 1] - labels[0];
+        const visibleWindow = getChartVisibleWindow(chart);
+        if (!visibleWindow) return;
+        
+        // Calculate position in data range
+        const clickPercent = Math.max(0, Math.min(1, clickX / trackWidth));
+        const targetCenter = labels[0] + totalRange * clickPercent;
+        
+        // Set viewport centered on click position
+        const halfWindow = visibleWindow / 2;
+        const minX = Math.max(labels[0], targetCenter - halfWindow);
+        const maxX = Math.min(labels[labels.length - 1], targetCenter + halfWindow);
+        
+        updateChartViewport(chart, minX, maxX);
+        userHasPanned[chartName] = true;
+        updateScrollbarPosition(chartName, chart);
+        
+        e.preventDefault();
+    });
+    
+    // Mouse move (dragging) - use a single document listener per chart
+    const handleMouseMove = (e) => {
+        if (!scrollbarDragState[chartName]) return;
+        
+        const trackRect = track.getBoundingClientRect();
+        const trackWidth = trackRect.width;
+        const deltaX = e.clientX - dragStartX;
+        const newLeft = Math.max(0, Math.min(trackWidth - thumb.offsetWidth, dragStartLeft + deltaX));
+        
+        const labels = fullHistory.labels || [];
+        if (labels.length === 0) return;
+        
+        const totalRange = labels[labels.length - 1] - labels[0];
+        const visibleWindow = getChartVisibleWindow(chart);
+        if (!visibleWindow || totalRange === 0) return;
+        
+        // Calculate position in data range
+        const thumbWidth = thumb.offsetWidth || 20;
+        const availableWidth = Math.max(1, trackWidth - thumbWidth);
+        const thumbPercent = Math.max(0, Math.min(1, newLeft / availableWidth));
+        const targetCenter = labels[0] + totalRange * thumbPercent;
+        
+        // Set viewport centered on thumb position
+        const halfWindow = visibleWindow / 2;
+        const minX = Math.max(labels[0], targetCenter - halfWindow);
+        const maxX = Math.min(labels[labels.length - 1], targetCenter + halfWindow);
+        
+        updateChartViewport(chart, minX, maxX);
+        userHasPanned[chartName] = true;
+        updateScrollbarPosition(chartName, chart);
+    };
+    
+    const handleMouseUp = () => {
+        scrollbarDragState[chartName] = false;
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    // Store cleanup function (for potential future use)
+    thumb._cleanup = () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    // Update scrollbar when chart is panned/zoomed
+    chart.canvas.addEventListener('mousemove', () => {
+        if (scrollbarDragState[chartName]) return; // Don't update while dragging
+        updateScrollbarPosition(chartName, chart);
+    });
+    
+    chart.canvas.addEventListener('wheel', () => {
+        if (scrollbarDragState[chartName]) return;
+        setTimeout(() => updateScrollbarPosition(chartName, chart), 10);
+    });
+}
+
+/**
+ * Get the visible window size for a chart
+ */
+function getChartVisibleWindow(chart) {
+    if (!chart || !chart.scales || !chart.scales.x) return null;
+    
+    const labels = fullHistory.labels || [];
+    if (labels.length === 0) return null;
+    
+    const minX = chart.scales.x.min;
+    const maxX = chart.scales.x.max;
+    
+    if (minX === undefined || maxX === undefined) {
+        // Showing all data
+        return labels[labels.length - 1] - labels[0];
+    }
+    
+    return maxX - minX;
+}
+
+/**
+ * Update chart viewport
+ */
+function updateChartViewport(chart, minX, maxX) {
+    if (!chart || !chart.options || !chart.options.scales) return;
+    
+    chart.options.scales.x.min = minX;
+    chart.options.scales.x.max = maxX;
+    chart.update('none');
+}
+
+/**
+ * Update scrollbar position based on chart viewport
+ */
+function updateScrollbarPosition(chartName, chart) {
+    // Don't update scrollbar while user is dragging it
+    if (scrollbarDragState[chartName]) return;
+    
+    const thumbId = `${chartName}-scrollbar-thumb`;
+    const trackId = `${chartName}-scrollbar-track`;
+    const thumb = document.getElementById(thumbId);
+    const track = document.getElementById(trackId);
+    
+    if (!thumb || !track || !chart) return;
+    
+    const labels = fullHistory.labels || [];
+    if (labels.length === 0) {
+        thumb.style.display = 'none';
+        return;
+    }
+    
+    thumb.style.display = 'block';
+    
+    const totalRange = labels[labels.length - 1] - labels[0];
+    if (totalRange === 0) {
+        thumb.style.width = '100%';
+        thumb.style.left = '0';
+        return;
+    }
+    
+    const minX = chart.scales?.x?.min;
+    const maxX = chart.scales?.x?.max;
+    
+    if (minX === undefined || maxX === undefined) {
+        // Showing all data - scrollbar should span full width
+        thumb.style.width = '100%';
+        thumb.style.left = '0';
+        return;
+    }
+    
+    const visibleWindow = maxX - minX;
+    const windowCenter = (minX + maxX) / 2;
+    const dataStart = labels[0];
+    
+    // Calculate thumb position and size
+    const trackWidth = track.offsetWidth;
+    const visibleRatio = Math.min(1, Math.max(0, visibleWindow / totalRange)); // Clamp to [0, 1]
+    const thumbWidth = Math.max(20, visibleRatio * trackWidth);
+    const availableWidth = Math.max(1, trackWidth - thumbWidth); // Avoid division by zero
+    const positionRatio = Math.max(0, Math.min(1, (windowCenter - dataStart) / totalRange));
+    const thumbPosition = positionRatio * availableWidth;
+    
+    thumb.style.width = `${thumbWidth}px`;
+    thumb.style.left = `${Math.max(0, Math.min(trackWidth - thumbWidth, thumbPosition))}px`;
 }
 
 /**
@@ -367,9 +590,16 @@ function resetChartView(chartName = 'all') {
         userHasPanned.score = false;
         userHasPanned.loss = false;
         userHasPanned.qvalue = false;
+        updateScrollbarPosition('loss', lossChart);
+        updateScrollbarPosition('qvalue', qvalueChart);
     } else if (charts[chartName]) {
         resetChart(charts[chartName]);
         userHasPanned[chartName] = false;
+        if (chartName === 'loss') {
+            updateScrollbarPosition('loss', lossChart);
+        } else if (chartName === 'qvalue') {
+            updateScrollbarPosition('qvalue', qvalueChart);
+        }
     }
 }
 
@@ -679,6 +909,12 @@ let userHasPanned = {
     qvalue: false
 };
 
+// Track scrollbar drag state
+let scrollbarDragState = {
+    loss: false,
+    qvalue: false
+};
+
 /**
  * Update charts with history data
  * @param {Object} history - History data with scores, losses, q_values arrays
@@ -810,6 +1046,10 @@ function updateCharts(history, currentEpisode) {
         qvalueChart.update('none');
     }
     
+    // Update scrollbar positions
+    updateScrollbarPosition('loss', lossChart);
+    updateScrollbarPosition('qvalue', qvalueChart);
+    
     // Detect if user pans (reset auto-scroll flag)
     // We'll add event listeners for this
 }
@@ -869,10 +1109,13 @@ function renderConsoleLogs() {
     // Keep only last 100 visible logs for performance
     const visibleLogs = filteredLogs.slice(-100);
 
-    // Incremental update: only append new logs since last render
+    // Always do full rebuild when filtering (simpler and more reliable)
+    // Incremental updates only work well for 'all' filter
+    const shouldDoIncremental = currentLogFilter === 'all' && lastRenderedLogCount > 0;
     const newLogsCount = visibleLogs.length - lastRenderedLogCount;
-    if (newLogsCount > 0 && lastRenderedLogCount > 0 && currentLogFilter === 'all') {
-        // Append only new logs (only when not filtering)
+    
+    if (shouldDoIncremental && newLogsCount > 0) {
+        // Append only new logs (only when showing all logs)
         const newLogs = visibleLogs.slice(-newLogsCount);
         const fragment = document.createDocumentFragment();
         newLogs.forEach(log => {
@@ -893,6 +1136,7 @@ function renderConsoleLogs() {
         while (container.children.length > 100) {
             container.removeChild(container.firstChild);
         }
+        lastRenderedLogCount = visibleLogs.length;
     } else {
         // Full rebuild (first render, filter change, or log trimmed)
         container.innerHTML = visibleLogs.map(log => {
@@ -909,10 +1153,8 @@ function renderConsoleLogs() {
                 </div>
             `;
         }).join('');
-        lastRenderedLogCount = 0;  // Reset on full rebuild
+        lastRenderedLogCount = visibleLogs.length;
     }
-
-    lastRenderedLogCount = visibleLogs.length;
 
     // Auto-scroll to bottom
     const consoleContainer = document.getElementById('console-container');
@@ -930,6 +1172,8 @@ function setLogFilter(filter) {
         btn.classList.toggle('active', btn.dataset.filter === filter);
     });
 
+    // Reset render count when filter changes to force full rebuild
+    lastRenderedLogCount = 0;
     renderConsoleLogs();
 }
 
@@ -947,12 +1191,8 @@ function clearLogs() {
  * Copy all console logs to clipboard
  */
 function copyLogsToClipboard() {
-    // Check if we're copying metrics - if so, use structured format
-    if (currentLogFilter === 'metric' || currentLogFilter === 'all') {
-        copyLogsStructured();
-    } else {
-        copyLogsSimple();
-    }
+    // Always use simple format for now - just copy the filtered logs
+    copyLogsSimple();
 }
 
 /**

@@ -69,6 +69,11 @@
                         <div class="chart-container small">
                             <canvas id="lossChart"></canvas>
                         </div>
+                        <div class="chart-scrollbar-container">
+                            <div class="chart-scrollbar-track" id="loss-scrollbar-track">
+                                <div class="chart-scrollbar-thumb" id="loss-scrollbar-thumb"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Q-Value Chart -->
@@ -79,6 +84,11 @@
                         </div>
                         <div class="chart-container small">
                             <canvas id="qvalueChart"></canvas>
+                        </div>
+                        <div class="chart-scrollbar-container">
+                            <div class="chart-scrollbar-track" id="qvalue-scrollbar-track">
+                                <div class="chart-scrollbar-thumb" id="qvalue-scrollbar-thumb"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -133,8 +143,7 @@
                                 <button class="filter-btn" data-filter="action" onclick="setLogFilter('action')">Actions</button>
                                 <button class="filter-btn" data-filter="warning" onclick="setLogFilter('warning')">Warnings</button>
                             </div>
-                            <button class="copy-btn" onclick="copyLogsToClipboard()" title="Copy logs to clipboard (structured format for metrics)">📋 Copy</button>
-                            <button class="export-btn" onclick="exportMetrics()" title="Export current metrics in structured format for models">📊 Export Metrics</button>
+                            <button class="copy-btn" onclick="copyLogsToClipboard()" title="Copy logs to clipboard">📋 Copy</button>
                             <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
                         </div>
                     </div>
