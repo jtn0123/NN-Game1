@@ -127,20 +127,30 @@ class GameApp:
         game_display_name = game_info['name'] if game_info else config.GAME_NAME.title()
         pygame.display.set_caption(f"🧠 Neural Network AI - {game_display_name}")
         
+        # Check if NN visualization is disabled
+        self.show_nn_viz = not getattr(args, 'no_nn_viz', False)
+        
         # Calculate window size
         # Layout: Game (800x600) | Neural Network Viz (300) | padding
         # The game always renders at its fixed size in the top-left
         self.game_width = config.SCREEN_WIDTH   # 800 - for reference
         self.game_height = config.SCREEN_HEIGHT  # 600 - for reference
-        self.viz_width = 320
+        self.viz_width = 320 if self.show_nn_viz else 0
         self.dashboard_height = 190
         
         # Window size to fit all components
-        self.window_width = config.SCREEN_WIDTH + self.viz_width + 25
+        if self.show_nn_viz:
+            self.window_width = config.SCREEN_WIDTH + self.viz_width + 25
+        else:
+            # Game-only mode: just game + small margin
+            self.window_width = config.SCREEN_WIDTH + 20
         self.window_height = config.SCREEN_HEIGHT + self.dashboard_height + 25
         
-        # Minimum window dimensions (must fit game + minimal viz/dashboard)
-        self.min_window_width = config.SCREEN_WIDTH + 300
+        # Minimum window dimensions
+        if self.show_nn_viz:
+            self.min_window_width = config.SCREEN_WIDTH + 300
+        else:
+            self.min_window_width = config.SCREEN_WIDTH + 10
         self.min_window_height = config.SCREEN_HEIGHT + 160
         
         # Create resizable window
@@ -174,13 +184,15 @@ class GameApp:
         )
         
         # Create visualizations - positioned relative to the fixed game size
-        self.nn_visualizer = NeuralNetVisualizer(
-            config=config,
-            x=config.SCREEN_WIDTH + 15,  # Right of game
-            y=10,
-            width=self.viz_width,
-            height=config.SCREEN_HEIGHT - 20  # Same height as game area
-        )
+        self.nn_visualizer: Optional[NeuralNetVisualizer] = None
+        if self.show_nn_viz:
+            self.nn_visualizer = NeuralNetVisualizer(
+                config=config,
+                x=config.SCREEN_WIDTH + 15,  # Right of game
+                y=10,
+                width=self.viz_width,
+                height=config.SCREEN_HEIGHT - 20  # Same height as game area
+            )
         
         self.dashboard = Dashboard(
             config=config,
@@ -665,15 +677,16 @@ class GameApp:
         self.game_width = game_render_width
         self.game_height = game_render_height
         
-        # Update neural network visualizer position and size
-        # Position it to the right of the game with some margin
-        self.nn_visualizer.x = game_render_width + 15
-        self.nn_visualizer.y = 10
-        self.nn_visualizer.width = self.viz_width
-        self.nn_visualizer.height = game_render_height - 20  # Same height as game
-        # Clear cached positions so they get recalculated
-        self.nn_visualizer._cached_positions = None
-        self.nn_visualizer._cached_layer_info = None
+        # Update neural network visualizer position and size (if enabled)
+        if self.nn_visualizer is not None:
+            # Position it to the right of the game with some margin
+            self.nn_visualizer.x = game_render_width + 15
+            self.nn_visualizer.y = 10
+            self.nn_visualizer.width = self.viz_width
+            self.nn_visualizer.height = game_render_height - 20  # Same height as game
+            # Clear cached positions so they get recalculated
+            self.nn_visualizer._cached_positions = None
+            self.nn_visualizer._cached_layer_info = None
         
         # Update dashboard position and size
         # Position it below the game spanning the full width
@@ -1261,13 +1274,14 @@ class GameApp:
         # Render game
         self.game.render(self.screen)
         
-        # Render neural network visualization
-        self.nn_visualizer.render(
-            self.screen,
-            self.agent,
-            state,
-            selected_action=action
-        )
+        # Render neural network visualization (if enabled)
+        if self.nn_visualizer is not None:
+            self.nn_visualizer.render(
+                self.screen,
+                self.agent,
+                state,
+                selected_action=action
+            )
         
         # Render dashboard
         self.dashboard.render(self.screen)
@@ -1276,6 +1290,10 @@ class GameApp:
         self.frame_count += 1
         if self.web_dashboard and self.frame_count % 10 == 0:
             self.web_dashboard.capture_screenshot(self.screen)
+        
+        # Emit NN visualization data to web dashboard (throttled by server)
+        if self.web_dashboard:
+            self._emit_nn_visualization(state, action)
         
         # Render pause indicator (centered on the game area)
         if self.paused:
@@ -1302,6 +1320,73 @@ class GameApp:
             self.screen.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
         
         pygame.display.flip()
+    
+    def _emit_nn_visualization(self, state: np.ndarray, selected_action: int) -> None:
+        """
+        Extract and emit neural network visualization data to web dashboard.
+        
+        Args:
+            state: Current game state
+            selected_action: Currently selected action
+        """
+        if not self.web_dashboard:
+            return
+        
+        try:
+            # Enable activation capture temporarily
+            self.agent.policy_net.capture_activations = True
+            
+            # Get layer info
+            layer_info = self.agent.policy_net.get_layer_info()
+            
+            # Get Q-values (this forward pass captures activations)
+            q_values = self.agent.get_q_values(state)
+            
+            # Get activations
+            raw_activations = self.agent.policy_net.get_activations()
+            
+            # Get weights (sampled for performance)
+            raw_weights = self.agent.policy_net.get_weights()
+            
+            # Disable activation capture
+            self.agent.policy_net.capture_activations = False
+            
+            # Format activations for JSON (convert numpy arrays to lists, limit neurons)
+            max_neurons = 15  # Match the pygame visualizer limit
+            activations: dict[str, list[float]] = {}
+            for key, act in raw_activations.items():
+                if len(act.shape) > 1:
+                    act = act[0]  # Take first batch item
+                # Normalize and limit to max_neurons
+                act_list = act[:max_neurons].tolist()
+                activations[key] = act_list
+            
+            # Format weights for JSON (sample connections for performance)
+            weights: list[list[list[float]]] = []
+            for i, w in enumerate(raw_weights):
+                if w is not None:
+                    # Sample weights: take first 15 rows and first 15 columns
+                    sampled_w = w[:min(15, w.shape[0]), :min(15, w.shape[1])]
+                    weights.append(sampled_w.tolist())
+            
+            # Get action labels from game if available
+            action_labels = ["LEFT", "STAY", "RIGHT"]  # Default for Breakout
+            if hasattr(self.game, 'get_action_labels'):
+                action_labels = self.game.get_action_labels()
+            
+            # Emit to web dashboard (throttling handled by publisher)
+            self.web_dashboard.emit_nn_visualization(
+                layer_info=layer_info,
+                activations=activations,
+                q_values=q_values.tolist(),
+                selected_action=selected_action,
+                weights=weights,
+                step=self.agent.steps,
+                action_labels=action_labels
+            )
+        except Exception as e:
+            # Don't crash training on visualization errors
+            pass
     
     def _save_model(
         self,
@@ -1750,6 +1835,73 @@ class HeadlessTrainer:
             self.web_dashboard.log(f"💾 Saved as: {filename}", "success")
         return success
     
+    def _emit_nn_visualization(self, state: np.ndarray, selected_action: int) -> None:
+        """
+        Extract and emit neural network visualization data to web dashboard.
+        
+        Args:
+            state: Current game state
+            selected_action: Currently selected action
+        """
+        if not self.web_dashboard:
+            return
+        
+        try:
+            # Enable activation capture temporarily
+            self.agent.policy_net.capture_activations = True
+            
+            # Get layer info
+            layer_info = self.agent.policy_net.get_layer_info()
+            
+            # Get Q-values (this forward pass captures activations)
+            q_values = self.agent.get_q_values(state)
+            
+            # Get activations
+            raw_activations = self.agent.policy_net.get_activations()
+            
+            # Get weights (sampled for performance)
+            raw_weights = self.agent.policy_net.get_weights()
+            
+            # Disable activation capture
+            self.agent.policy_net.capture_activations = False
+            
+            # Format activations for JSON (convert numpy arrays to lists, limit neurons)
+            max_neurons = 15  # Match the pygame visualizer limit
+            activations: dict[str, list[float]] = {}
+            for key, act in raw_activations.items():
+                if len(act.shape) > 1:
+                    act = act[0]  # Take first batch item
+                # Normalize and limit to max_neurons
+                act_list = act[:max_neurons].tolist()
+                activations[key] = act_list
+            
+            # Format weights for JSON (sample connections for performance)
+            weights: list[list[list[float]]] = []
+            for i, w in enumerate(raw_weights):
+                if w is not None:
+                    # Sample weights: take first 15 rows and first 15 columns
+                    sampled_w = w[:min(15, w.shape[0]), :min(15, w.shape[1])]
+                    weights.append(sampled_w.tolist())
+            
+            # Get action labels from game if available
+            action_labels = ["LEFT", "STAY", "RIGHT"]  # Default for Breakout
+            if hasattr(self.game, 'get_action_labels'):
+                action_labels = self.game.get_action_labels()
+            
+            # Emit to web dashboard (throttling handled by publisher)
+            self.web_dashboard.emit_nn_visualization(
+                layer_info=layer_info,
+                activations=activations,
+                q_values=q_values.tolist(),
+                selected_action=selected_action,
+                weights=weights,
+                step=self.agent.steps,
+                action_labels=action_labels
+            )
+        except Exception as e:
+            # Don't crash training on visualization errors
+            pass
+    
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
         changes = []
@@ -1917,32 +2069,35 @@ class HeadlessTrainer:
             
             # Update web dashboard metrics
             if self.web_dashboard:
-                avg_loss = self.agent.get_average_loss(100)
-                
-                # Calculate average Q-value for current state (was missing from headless)
-                q_values = self.agent.get_q_values(state)
-                avg_q_value = float(np.mean(q_values))
-                
-                self.web_dashboard.emit_metrics(
-                    episode=episode,
-                    score=info['score'],
-                    epsilon=self.agent.epsilon,
-                    loss=avg_loss,
-                    total_steps=self.total_steps,
-                    won=won,
-                    reward=episode_reward,
-                    memory_size=len(self.agent.memory),
-                    avg_q_value=avg_q_value,
-                    exploration_actions=self.exploration_actions,
-                    exploitation_actions=self.exploitation_actions,
-                    target_updates=self.target_updates,
-                    bricks_broken=bricks_broken,
-                    episode_length=episode_steps
-                )
-                # Update performance settings in dashboard state
-                self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                    avg_loss = self.agent.get_average_loss(100)
+                    
+                    # Calculate average Q-value for current state (was missing from headless)
+                    q_values = self.agent.get_q_values(state)
+                    avg_q_value = float(np.mean(q_values))
+                    
+                    self.web_dashboard.emit_metrics(
+                        episode=episode,
+                        score=info['score'],
+                        epsilon=self.agent.epsilon,
+                        loss=avg_loss,
+                        total_steps=self.total_steps,
+                        won=won,
+                        reward=episode_reward,
+                        memory_size=len(self.agent.memory),
+                        avg_q_value=avg_q_value,
+                        exploration_actions=self.exploration_actions,
+                        exploitation_actions=self.exploitation_actions,
+                        target_updates=self.target_updates,
+                        bricks_broken=bricks_broken,
+                        episode_length=episode_steps
+                    )
+                    # Update performance settings in dashboard state
+                    self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                    self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                    self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                    
+                    # Emit NN visualization data (throttled by server to ~10 FPS)
+                    self._emit_nn_visualization(state, action)
             
             # Time-based progress reporting (terminal)
             current_time = time.time()
@@ -2126,6 +2281,9 @@ class HeadlessTrainer:
                         self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
                         self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                         self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                        
+                        # Emit NN visualization data (throttled by server to ~10 FPS)
+                        self._emit_nn_visualization(states[i], actions[i])
                     
                     # Store for reporting
                     last_score = score
@@ -2325,6 +2483,12 @@ Available Games: {', '.join(available_games)}
     parser.add_argument(
         '--port', type=int, default=5000,
         help='Port for web dashboard (default: 5000)'
+    )
+    
+    # Visualization options
+    parser.add_argument(
+        '--no-nn-viz', action='store_true',
+        help='Disable neural network visualization in pygame (game-only mode, smaller window)'
     )
     
     # Performance tuning
