@@ -75,8 +75,7 @@ from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
 from src.game.breakout import Breakout, VecBreakout
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
-from src.visualizer.nn_visualizer import NeuralNetVisualizer
-from src.visualizer.dashboard import Dashboard
+from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
 
 # Optional web dashboard
 WEB_AVAILABLE: bool
@@ -127,31 +126,18 @@ class GameApp:
         game_display_name = game_info['name'] if game_info else config.GAME_NAME.title()
         pygame.display.set_caption(f"🧠 Neural Network AI - {game_display_name}")
         
-        # Check if NN visualization is disabled
-        self.show_nn_viz = not getattr(args, 'no_nn_viz', False)
-        
         # Calculate window size
-        # Layout: Game (800x600) | Neural Network Viz (300) | padding
-        # The game always renders at its fixed size in the top-left
+        # Layout: Game only - all training info is on the web dashboard
         self.game_width = config.SCREEN_WIDTH   # 800 - for reference
         self.game_height = config.SCREEN_HEIGHT  # 600 - for reference
-        self.viz_width = 320 if self.show_nn_viz else 0
-        self.dashboard_height = 190
         
-        # Window size to fit all components
-        if self.show_nn_viz:
-            self.window_width = config.SCREEN_WIDTH + self.viz_width + 25
-        else:
-            # Game-only mode: just game + small margin
-            self.window_width = config.SCREEN_WIDTH + 20
-        self.window_height = config.SCREEN_HEIGHT + self.dashboard_height + 25
+        # Window size: game only (training stats and NN viz are on web dashboard)
+        self.window_width = config.SCREEN_WIDTH + 20
+        self.window_height = config.SCREEN_HEIGHT + 20
         
         # Minimum window dimensions
-        if self.show_nn_viz:
-            self.min_window_width = config.SCREEN_WIDTH + 300
-        else:
-            self.min_window_width = config.SCREEN_WIDTH + 10
-        self.min_window_height = config.SCREEN_HEIGHT + 160
+        self.min_window_width = config.SCREEN_WIDTH + 10
+        self.min_window_height = config.SCREEN_HEIGHT + 10
         
         # Create resizable window
         self.screen = pygame.display.set_mode(
@@ -183,23 +169,10 @@ class GameApp:
             action_size=self.game.action_size
         )
         
-        # Create visualizations - positioned relative to the fixed game size
-        self.nn_visualizer: Optional[NeuralNetVisualizer] = None
-        if self.show_nn_viz:
-            self.nn_visualizer = NeuralNetVisualizer(
-                config=config,
-                x=config.SCREEN_WIDTH + 15,  # Right of game
-                y=10,
-                width=self.viz_width,
-                height=config.SCREEN_HEIGHT - 20  # Same height as game area
-            )
-        
+        # Create dashboard for internal tracking (rendering moved to web dashboard)
         self.dashboard = Dashboard(
             config=config,
-            x=10,
-            y=config.SCREEN_HEIGHT + 15,  # Below game
-            width=self.window_width - 20,
-            height=self.dashboard_height
+            x=0, y=0, width=400, height=100  # Position doesn't matter, not rendered
         )
         
         # Training state
@@ -659,41 +632,9 @@ class GameApp:
         
         # The game has a FIXED render size (config.SCREEN_WIDTH x config.SCREEN_HEIGHT)
         # We position other elements around it
-        game_render_width = self.config.SCREEN_WIDTH   # 800
-        game_render_height = self.config.SCREEN_HEIGHT  # 600
-        
-        # Calculate available space for visualizer (to the right of game)
-        # and dashboard (below game)
-        available_viz_width = new_width - game_render_width - 30  # 30 for margins
-        available_dashboard_height = new_height - game_render_height - 30
-        
-        # Viz width: use available space but cap it
-        self.viz_width = max(280, min(450, available_viz_width))
-        
-        # Dashboard height: use available space but cap it  
-        self.dashboard_height = max(150, min(300, available_dashboard_height))
-        
-        # Game display area stays fixed
-        self.game_width = game_render_width
-        self.game_height = game_render_height
-        
-        # Update neural network visualizer position and size (if enabled)
-        if self.nn_visualizer is not None:
-            # Position it to the right of the game with some margin
-            self.nn_visualizer.x = game_render_width + 15
-            self.nn_visualizer.y = 10
-            self.nn_visualizer.width = self.viz_width
-            self.nn_visualizer.height = game_render_height - 20  # Same height as game
-            # Clear cached positions so they get recalculated
-            self.nn_visualizer._cached_positions = None
-            self.nn_visualizer._cached_layer_info = None
-        
-        # Update dashboard position and size
-        # Position it below the game spanning the full width
-        self.dashboard.x = 10
-        self.dashboard.y = game_render_height + 15
-        self.dashboard.width = new_width - 20
-        self.dashboard.height = self.dashboard_height
+        # Game display area stays fixed (training stats and NN viz are on web dashboard)
+        self.game_width = self.config.SCREEN_WIDTH   # 800
+        self.game_height = self.config.SCREEN_HEIGHT  # 600
     
     # Speed presets for clean stepping
     SPEED_PRESETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000]
@@ -1271,20 +1212,8 @@ class GameApp:
         # Clear screen
         self.screen.fill((10, 10, 15))
         
-        # Render game
+        # Render game only (training stats and NN viz are on web dashboard)
         self.game.render(self.screen)
-        
-        # Render neural network visualization (if enabled)
-        if self.nn_visualizer is not None:
-            self.nn_visualizer.render(
-                self.screen,
-                self.agent,
-                state,
-                selected_action=action
-            )
-        
-        # Render dashboard
-        self.dashboard.render(self.screen)
         
         # Capture screenshot for web dashboard (every 10 frames for responsive updates)
         self.frame_count += 1
@@ -2483,12 +2412,6 @@ Available Games: {', '.join(available_games)}
     parser.add_argument(
         '--port', type=int, default=5000,
         help='Port for web dashboard (default: 5000)'
-    )
-    
-    # Visualization options
-    parser.add_argument(
-        '--no-nn-viz', action='store_true',
-        help='Disable neural network visualization in pygame (game-only mode, smaller window)'
     )
     
     # Performance tuning

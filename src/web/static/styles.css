@@ -1944,7 +1944,7 @@ body {
 .nn-canvas-container {
     position: relative;
     width: 100%;
-    height: 380px;
+    height: 320px;
     background: linear-gradient(135deg, #0c0c18 0%, #121220 100%);
     border-radius: 8px;
     overflow: hidden;
@@ -2037,13 +2037,19 @@ body {
 /* Responsive adjustments for NN panel */
 @media (max-width: 1400px) {
     .nn-canvas-container {
-        height: 320px;
+        height: 280px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .nn-canvas-container {
+        height: 260px;
     }
 }
 
 @media (max-width: 768px) {
     .nn-canvas-container {
-        height: 280px;
+        height: 240px;
     }
     
     .nn-viz-legend {

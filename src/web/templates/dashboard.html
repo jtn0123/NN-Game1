@@ -77,6 +77,44 @@
                     </div>
                 </div>
 
+                <!-- Neural Network Visualization -->
+                <div class="nn-viz-card" id="nn-viz-card" data-tooltip="Real-time visualization of the neural network's internal state. Shows how neurons activate and how information flows through the network as it makes decisions." data-tooltip-position="right">
+                    <div class="card-header clickable" onclick="toggleNNPanel()">
+                        <div class="nn-viz-header-left">
+                            <h3>🧠 Neural Network</h3>
+                            <span class="nn-viz-status" id="nn-viz-status">● LIVE</span>
+                        </div>
+                        <div class="nn-viz-header-right">
+                            <button class="nn-viz-toggle" onclick="event.stopPropagation(); toggleNNVisualization()">⏸️</button>
+                            <span class="collapse-icon" id="nn-viz-icon">▲</span>
+                        </div>
+                    </div>
+                    <div class="nn-viz-content" id="nn-viz-content">
+                        <div class="nn-canvas-container">
+                            <canvas id="nn-canvas"></canvas>
+                            <div class="nn-viz-placeholder" id="nn-viz-placeholder">
+                                <div class="placeholder-icon">🧠</div>
+                                <div class="placeholder-text">Waiting for network data...</div>
+                                <div class="placeholder-hint">Data will appear when training starts</div>
+                            </div>
+                        </div>
+                        <div class="nn-viz-legend">
+                            <div class="nn-legend-item">
+                                <span class="nn-legend-dot positive"></span>
+                                <span>Positive</span>
+                            </div>
+                            <div class="nn-legend-item">
+                                <span class="nn-legend-dot neutral"></span>
+                                <span>Neutral</span>
+                            </div>
+                            <div class="nn-legend-item">
+                                <span class="nn-legend-dot negative"></span>
+                                <span>Negative</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Console Log -->
                 <div class="console-card">
                     <div class="card-header">
@@ -203,44 +241,6 @@
                         <img id="game-preview" src="" alt="Game Preview">
                         <div class="preview-placeholder" id="preview-placeholder">
                             No preview available
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Neural Network Visualization -->
-                <div class="nn-viz-card" id="nn-viz-card" data-tooltip="Real-time visualization of the neural network's internal state. Shows how neurons activate and how information flows through the network as it makes decisions." data-tooltip-position="left">
-                    <div class="card-header clickable" onclick="toggleNNPanel()">
-                        <div class="nn-viz-header-left">
-                            <h3>🧠 Neural Network</h3>
-                            <span class="nn-viz-status" id="nn-viz-status">● LIVE</span>
-                        </div>
-                        <div class="nn-viz-header-right">
-                            <button class="nn-viz-toggle" onclick="event.stopPropagation(); toggleNNVisualization()">⏸️</button>
-                            <span class="collapse-icon" id="nn-viz-icon">▲</span>
-                        </div>
-                    </div>
-                    <div class="nn-viz-content" id="nn-viz-content">
-                        <div class="nn-canvas-container">
-                            <canvas id="nn-canvas"></canvas>
-                            <div class="nn-viz-placeholder" id="nn-viz-placeholder">
-                                <div class="placeholder-icon">🧠</div>
-                                <div class="placeholder-text">Waiting for network data...</div>
-                                <div class="placeholder-hint">Data will appear when training starts</div>
-                            </div>
-                        </div>
-                        <div class="nn-viz-legend">
-                            <div class="nn-legend-item">
-                                <span class="nn-legend-dot positive"></span>
-                                <span>Positive</span>
-                            </div>
-                            <div class="nn-legend-item">
-                                <span class="nn-legend-dot neutral"></span>
-                                <span>Neutral</span>
-                            </div>
-                            <div class="nn-legend-item">
-                                <span class="nn-legend-dot negative"></span>
-                                <span>Negative</span>
-                            </div>
                         </div>
                     </div>
                 </div>
