@@ -188,6 +188,9 @@ class Breakout(BaseGame):
         # For reward shaping (tracking ball)
         self._prev_distance_to_target: float = 0.0
         
+        # Cached predicted landing x (avoid redundant computation)
+        self._cached_predicted_x: float = 0.0
+        
         # Visual effects (skip in headless mode for performance)
         if not headless:
             self.particles = ParticleSystem(max_particles=500)
@@ -251,6 +254,9 @@ class Breakout(BaseGame):
         if not self.headless:
             self.particles.clear()
             self.ball_trail.clear()
+        
+        # Initialize cached predicted landing for get_state()
+        self._cached_predicted_x = self._predict_landing_x()
         
         return self.get_state()
     
@@ -327,12 +333,15 @@ class Breakout(BaseGame):
         # Handle collisions
         reward += self._handle_collisions()
         
+        # Cache predicted landing position (computed once, used for reward shaping AND get_state)
+        # This saves one _predict_landing_x() call per step (~3x → 2x calls)
+        self._cached_predicted_x = self._predict_landing_x()
+        
         # Dense reward shaping: reward for moving toward predicted landing
         # Only apply when ball is moving toward paddle (dy > 0)
         if self.ball.dy > 0 and not self.game_over:
             new_paddle_center = self.paddle.x + self.paddle.width / 2
-            new_predicted_x = self._predict_landing_x()
-            curr_distance = abs(new_predicted_x - new_paddle_center)
+            curr_distance = abs(self._cached_predicted_x - new_paddle_center)
             
             # Reward for reducing distance to target
             if curr_distance < prev_distance:
@@ -533,8 +542,8 @@ class Breakout(BaseGame):
         relative_x = (self.ball.x - paddle_center) / self.width + 0.5
         relative_x = np.clip(relative_x, 0.0, 1.0)
         
-        # NEW: Predicted landing position
-        predicted_x = self._predict_landing_x()
+        # Use cached predicted landing position (computed in step() to avoid redundant calls)
+        predicted_x = self._cached_predicted_x
         predicted_landing = predicted_x / self.width
         
         # NEW: Distance from paddle center to predicted landing
