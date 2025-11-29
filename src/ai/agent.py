@@ -813,8 +813,10 @@ class Agent:
         # If architecture doesn't match, cannot load this model
         if saved_state_size != self.state_size or saved_action_size != self.action_size:
             if not quiet:
-                print(f"⚠️  Model incompatible: State size mismatch (saved: {saved_state_size}, current: {self.state_size})")
-                print(f"⚠️  Model incompatible: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})")
+                if saved_state_size != self.state_size:
+                    print(f"⚠️  Model incompatible: State size mismatch (saved: {saved_state_size}, current: {self.state_size})")
+                if saved_action_size != self.action_size:
+                    print(f"⚠️  Model incompatible: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})")
                 print(f"❌ Cannot load model - architecture mismatch. Starting fresh training.")
             return None, None
         

@@ -2139,12 +2139,14 @@ class HeadlessTrainer:
                     episodes_completed += 1
                     self.current_episode += 1
                     
-                    # Decay epsilon after each episode
-                    self.agent.decay_epsilon()
-                    
                     # Save checkpoints
                     if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
                         self._save_model(f"{self.config.GAME_NAME}_ep{self.current_episode}.pth", save_reason="periodic")
+            
+            # Decay epsilon once per episode that completed this step
+            # (moved outside loop to avoid decaying multiple times when multiple envs finish)
+            for _ in range(int(np.sum(dones))):
+                self.agent.decay_epsilon()
             
             # Update states for next iteration (already auto-reset in VecBreakout)
             states = next_states.copy()
