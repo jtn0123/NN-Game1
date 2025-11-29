@@ -2095,7 +2095,7 @@ body {
 .nn-canvas-container {
     position: relative;
     width: 100%;
-    height: 300px;
+    height: 420px;
     background: 
         radial-gradient(ellipse at 20% 30%, rgba(100, 181, 246, 0.05) 0%, transparent 50%),
         radial-gradient(ellipse at 80% 70%, rgba(171, 71, 188, 0.05) 0%, transparent 50%),
@@ -2196,19 +2196,19 @@ body {
 /* Responsive adjustments for NN panel */
 @media (max-width: 1400px) {
     .nn-canvas-container {
-        height: 260px;
+        height: 380px;
     }
 }
 
 @media (max-width: 1200px) {
     .nn-canvas-container {
-        height: 240px;
+        height: 340px;
     }
 }
 
 @media (max-width: 768px) {
     .nn-canvas-container {
-        height: 220px;
+        height: 280px;
     }
     
     .nn-viz-legend {

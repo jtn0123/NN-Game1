@@ -957,12 +957,13 @@ class WebDashboard:
         self._running = True
         self.publisher.set_running(True)
         
+        # Suppress Flask/werkzeug logging BEFORE starting server
+        import logging
+        logging.getLogger('werkzeug').setLevel(logging.ERROR)
+        logging.getLogger('engineio').setLevel(logging.ERROR)
+        logging.getLogger('socketio').setLevel(logging.ERROR)
+        
         def run_server():
-            # Suppress Flask logging
-            import logging
-            log = logging.getLogger('werkzeug')
-            log.setLevel(logging.ERROR)
-            
             print(f"\n🌐 Web Dashboard running at http://localhost:{self.port}")
             print("   Open in browser to view training progress\n")
             
