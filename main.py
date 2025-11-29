@@ -817,8 +817,8 @@ class GameApp:
                     action = self.agent.select_action(state, training=True)
                     self.selected_action = action
                     
-                    # Track exploration vs exploitation
-                    if np.random.random() < self.agent.epsilon:
+                    # Track exploration vs exploitation (using actual selection, not separate RNG)
+                    if self.agent._last_action_explored:
                         self.exploration_actions += 1
                     else:
                         self.exploitation_actions += 1

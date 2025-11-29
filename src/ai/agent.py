@@ -228,6 +228,9 @@ class Agent:
         # Training metrics (bounded to prevent memory growth during long training)
         self.losses: deque[float] = deque(maxlen=10000)
         
+        # Track whether last action was exploration (for accurate metrics)
+        self._last_action_explored: bool = False
+        
         # Pre-allocated tensors for action selection (avoids tensor creation per step)
         self._state_tensor = torch.empty((1, state_size), dtype=torch.float32, device=self.device)
         
@@ -250,12 +253,18 @@ class Agent:
             
         Returns:
             Selected action index
+            
+        Note:
+            After calling this method, check `agent._last_action_explored` to
+            determine if the action was exploration (random) or exploitation (greedy).
         """
         if training and random.random() < self.epsilon:
             # Exploration: random action
+            self._last_action_explored = True
             return random.randrange(self.action_size)
         
         # Exploitation: best Q-value action
+        self._last_action_explored = False
         # Use inference_mode() for better performance than no_grad()
         with torch.inference_mode():
             # Reuse pre-allocated tensor to avoid allocation overhead
