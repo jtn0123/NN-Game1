@@ -442,7 +442,7 @@ class WebDashboard:
         >>> dashboard.stop()
     """
     
-    def __init__(self, config: Optional[Config] = None, port: int = 5000, host: str = '0.0.0.0'):
+    def __init__(self, config: Optional[Config] = None, port: int = 5000, host: str = '0.0.0.0', launcher_mode: bool = False):
         """
         Initialize the web dashboard.
         
@@ -450,6 +450,7 @@ class WebDashboard:
             config: Configuration object
             port: Port to run the server on
             host: Host address (0.0.0.0 for all interfaces)
+            launcher_mode: If True, show game selection instead of training dashboard
         """
         if not FLASK_AVAILABLE:
             raise RuntimeError("Flask is not installed. Run: pip install flask flask-socketio eventlet")
@@ -457,6 +458,9 @@ class WebDashboard:
         self.config = config or Config()
         self.port = port
         self.host = host
+        self.launcher_mode = launcher_mode
+        self.on_game_selected_callback: Optional[Callable[[str], None]] = None
+        self.on_restart_with_game_callback: Optional[Callable[[str], None]] = None
         
         # Metrics publisher
         self.publisher = MetricsPublisher()
@@ -498,6 +502,8 @@ class WebDashboard:
         
         @self.app.route('/')
         def index():
+            if self.launcher_mode:
+                return render_template('launcher.html')
             return render_template('dashboard.html')
         
         @self.app.route('/api/status')
@@ -775,6 +781,48 @@ class WebDashboard:
                         'game': game_name,
                         'message': f'Switching to {game_name}...'
                     })
+            elif action == 'stop_for_game_switch':
+                game_name = data.get('game')
+                # Log the switch request
+                self.publisher.log(
+                    f"🔄 Game switch requested: {game_name}",
+                    level="warning"
+                )
+                self.publisher.log(
+                    f"💾 Saving current progress before stopping...",
+                    level="info"
+                )
+                # Trigger save then stop
+                if self.on_save_callback:
+                    self.on_save_callback()
+                # Notify client with next command
+                self.socketio.emit('stop_for_switch', {
+                    'game': game_name,
+                    'command': f'python main.py --game {game_name} --headless --turbo --web'
+                })
+            elif action == 'select_game':
+                # Launcher mode: user selected a game to start
+                game_name = data.get('game')
+                if game_name and self.on_game_selected_callback:
+                    emit('game_starting', {
+                        'game': game_name,
+                        'message': f'Starting {game_name}...'
+                    })
+                    self.on_game_selected_callback(game_name)
+            elif action == 'restart_with_game':
+                # Training mode: restart with a different game
+                game_name = data.get('game')
+                if game_name and self.on_restart_with_game_callback:
+                    self.publisher.log(f"🔄 Switching to {game_name}...", level="warning")
+                    # Save first
+                    if self.on_save_callback:
+                        self.on_save_callback()
+                    emit('restarting', {
+                        'game': game_name,
+                        'message': f'Restarting with {game_name}...'
+                    })
+                    # Trigger restart (will replace process)
+                    self.on_restart_with_game_callback(game_name)
         
         @self.socketio.on('clear_logs')
         def handle_clear_logs():

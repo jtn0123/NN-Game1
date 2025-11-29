@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧠 Neural Network AI - Game Launcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-card: #12121a;
+            --accent-blue: #00d4ff;
+            --accent-green: #00ff88;
+            --accent-purple: #a855f7;
+            --text-primary: #e4e6f0;
+            --text-secondary: #7a7e8c;
+            --glow-blue: 0 0 20px rgba(0, 212, 255, 0.3);
+            --glow-green: 0 0 20px rgba(0, 255, 136, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Mono', monospace;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Animated background */
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: grid-move 20s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes grid-move {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(50px, 50px); }
+        }
+
+        .container {
+            position: relative;
+            z-index: 10;
+            text-align: center;
+            padding: 40px;
+        }
+
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: var(--glow-blue);
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-bottom: 50px;
+        }
+
+        .games-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .game-card {
+            background: var(--bg-card);
+            border: 2px solid rgba(0, 212, 255, 0.2);
+            border-radius: 16px;
+            padding: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .game-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .game-card:hover {
+            border-color: var(--accent-blue);
+            transform: translateY(-5px);
+            box-shadow: var(--glow-blue);
+        }
+
+        .game-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .game-card.selected {
+            border-color: var(--accent-green);
+            box-shadow: var(--glow-green);
+        }
+
+        .game-icon {
+            font-size: 4rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .game-name {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        .game-desc {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        .game-stats {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .game-stats span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .stat-label {
+            color: var(--accent-blue);
+        }
+
+        .start-btn {
+            margin-top: 50px;
+            padding: 15px 50px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+            border: none;
+            border-radius: 30px;
+            color: var(--bg-dark);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .start-btn.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .start-btn.active:hover {
+            transform: scale(1.05);
+            box-shadow: var(--glow-green);
+        }
+
+        .start-btn.loading {
+            pointer-events: none;
+        }
+
+        .start-btn.loading::after {
+            content: '...';
+            animation: dots 1s steps(3, end) infinite;
+        }
+
+        @keyframes dots {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+        }
+
+        .status-msg {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: var(--accent-green);
+            min-height: 25px;
+        }
+
+        .difficulty {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .difficulty.easy { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
+        .difficulty.medium { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
+        .difficulty.hard { background: rgba(255, 152, 0, 0.2); color: #ff9800; }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    
+    <div class="container">
+        <h1>🧠 NEURAL NETWORK AI</h1>
+        <p class="subtitle">Select a game to train your AI</p>
+        
+        <div class="games-grid" id="games-grid">
+            <!-- Games loaded dynamically -->
+        </div>
+        
+        <button class="start-btn" id="start-btn" onclick="startGame()">
+            SELECT A GAME
+        </button>
+        
+        <div class="status-msg" id="status-msg"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        let selectedGame = null;
+
+        // Load available games
+        fetch('/api/games')
+            .then(res => res.json())
+            .then(data => {
+                const grid = document.getElementById('games-grid');
+                grid.innerHTML = '';
+                
+                data.games.forEach(game => {
+                    const card = document.createElement('div');
+                    card.className = 'game-card';
+                    card.onclick = () => selectGame(game.id, card);
+                    
+                    // Determine difficulty class
+                    let diffClass = 'medium';
+                    if (game.difficulty.toLowerCase().includes('easy')) diffClass = 'easy';
+                    if (game.difficulty.toLowerCase().includes('hard')) diffClass = 'hard';
+                    
+                    card.innerHTML = `
+                        <span class="game-icon">${game.icon}</span>
+                        <div class="game-name">${game.name}</div>
+                        <div class="game-desc">${game.description}</div>
+                        <span class="difficulty ${diffClass}">${game.difficulty}</span>
+                        <div class="game-stats">
+                            <span><span class="stat-label">States:</span> ${game.state_size}</span>
+                            <span><span class="stat-label">Actions:</span> ${game.action_size}</span>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            });
+
+        function selectGame(gameId, card) {
+            // Remove selection from other cards
+            document.querySelectorAll('.game-card').forEach(c => c.classList.remove('selected'));
+            
+            // Select this card
+            card.classList.add('selected');
+            selectedGame = gameId;
+            
+            // Enable start button
+            const btn = document.getElementById('start-btn');
+            btn.textContent = `START ${gameId.toUpperCase().replace('_', ' ')}`;
+            btn.classList.add('active');
+        }
+
+        function startGame() {
+            if (!selectedGame) return;
+            
+            const btn = document.getElementById('start-btn');
+            btn.textContent = 'LAUNCHING';
+            btn.classList.add('loading');
+            
+            document.getElementById('status-msg').textContent = `Initializing ${selectedGame}...`;
+            
+            // Send game selection to server
+            socket.emit('control', { action: 'select_game', game: selectedGame });
+        }
+
+        socket.on('game_starting', (data) => {
+            document.getElementById('status-msg').textContent = data.message;
+        });
+
+        socket.on('connect', () => {
+            console.log('Connected to launcher');
+        });
+    </script>
+</body>
+</html>
+

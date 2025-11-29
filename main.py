@@ -238,6 +238,7 @@ class GameApp:
             self.web_dashboard.on_load_model_callback = self._load_model
             self.web_dashboard.on_config_change_callback = self._apply_config
             self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
+            self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(game, args)
             self.web_dashboard.start()
             
             # Send system info to dashboard
@@ -1539,6 +1540,7 @@ class HeadlessTrainer:
         self.web_dashboard.on_load_model_callback = self._load_model
         self.web_dashboard.on_config_change_callback = self._apply_config
         self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
+        self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(game, self.args)
         # Speed control doesn't apply to headless (no frame timing)
         self.web_dashboard.on_speed_callback = lambda x: None
     
@@ -2242,9 +2244,9 @@ Available Games: {', '.join(available_games)}
     
     # Game selection
     parser.add_argument(
-        '--game', type=str, default='breakout',
+        '--game', type=str, default=None,
         choices=available_games,
-        help=f'Game to train/play (default: breakout). Available: {", ".join(available_games)}'
+        help=f'Game to train/play. If not specified, shows game selection. Available: {", ".join(available_games)}'
     )
     parser.add_argument(
         '--menu', action='store_true',
@@ -2415,6 +2417,131 @@ def list_models(model_dir: str = 'models') -> None:
     print(f"\nUse --inspect <path> to see detailed info about a specific model.\n")
 
 
+def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
+    """Restart the current process with a different game.
+    
+    This uses os.execv to replace the current process with a new one
+    running the specified game. All other arguments are preserved.
+    """
+    import subprocess
+    import sys
+    
+    # Build new command preserving current args
+    new_args = [sys.executable, sys.argv[0]]
+    new_args.extend(['--game', game_name])
+    
+    if args.headless:
+        new_args.append('--headless')
+    if args.web:
+        new_args.extend(['--web', '--port', str(args.port)])
+    if hasattr(args, 'turbo') and args.turbo:
+        new_args.append('--turbo')
+    if hasattr(args, 'vec_envs') and args.vec_envs and args.vec_envs > 1:
+        new_args.extend(['--vec-envs', str(args.vec_envs)])
+    if args.episodes:
+        new_args.extend(['--episodes', str(args.episodes)])
+    if hasattr(args, 'cpu') and args.cpu:
+        new_args.append('--cpu')
+    
+    print(f"\n🔄 Restarting with {game_name}...")
+    print(f"🚀 Command: {' '.join(new_args)}\n")
+    
+    # Small delay so web client can receive the message
+    import time
+    time.sleep(0.5)
+    
+    # Replace current process
+    os.execv(sys.executable, new_args)
+
+
+def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
+    """Run web-based game launcher mode.
+    
+    This mode starts a web server without any training, allowing the user
+    to select a game from the browser. When a game is selected, this process
+    restarts itself with the chosen game.
+    """
+    import subprocess
+    import sys
+    import signal
+    import threading
+    
+    try:
+        from src.web.server import WebDashboard
+    except ImportError:
+        print("❌ Web dashboard requires Flask. Install with:")
+        print("   pip install flask flask-socketio eventlet")
+        return
+    
+    print("\n" + "=" * 60)
+    print("🎮 NEURAL NETWORK AI - GAME LAUNCHER")
+    print("=" * 60)
+    print(f"\n🌐 Open http://localhost:{args.port} to select a game\n")
+    
+    # Track if we should restart with a new game
+    restart_game = None
+    restart_event = threading.Event()
+    
+    def on_game_selected(game_name: str) -> None:
+        """Called when user selects a game from web UI."""
+        nonlocal restart_game
+        restart_game = game_name
+        restart_event.set()
+    
+    # Create web dashboard in launcher mode
+    dashboard = WebDashboard(config, port=args.port, launcher_mode=True)
+    dashboard.on_game_selected_callback = on_game_selected
+    
+    # Start web server in background thread
+    server_thread = threading.Thread(
+        target=lambda: dashboard.socketio.run(
+            dashboard.app,
+            host='0.0.0.0',
+            port=args.port,
+            debug=False,
+            use_reloader=False,
+            log_output=False,
+            allow_unsafe_werkzeug=True
+        ),
+        daemon=True
+    )
+    server_thread.start()
+    
+    print("⏳ Waiting for game selection from web UI...")
+    print("   Press Ctrl+C to exit\n")
+    
+    try:
+        # Wait for game selection or keyboard interrupt
+        while not restart_event.is_set():
+            restart_event.wait(timeout=0.5)
+    except KeyboardInterrupt:
+        print("\n\n👋 Launcher closed by user")
+        return
+    
+    if restart_game:
+        print(f"\n🎮 Starting {restart_game}...")
+        
+        # Build new command with game selected
+        new_args = [sys.executable, sys.argv[0]]
+        new_args.extend(['--game', restart_game])
+        new_args.append('--headless')
+        if args.web:
+            new_args.extend(['--web', '--port', str(args.port)])
+        if args.turbo:
+            new_args.append('--turbo')
+        if hasattr(args, 'vec_envs') and args.vec_envs > 1:
+            new_args.extend(['--vec-envs', str(args.vec_envs)])
+        if args.episodes:
+            new_args.extend(['--episodes', str(args.episodes)])
+        if args.model:
+            new_args.extend(['--model', args.model])
+        
+        print(f"🚀 Launching: {' '.join(new_args)}\n")
+        
+        # Replace current process with new one
+        os.execv(sys.executable, new_args)
+
+
 def main():
     """Main entry point."""
     args = parse_args()
@@ -2432,8 +2559,10 @@ def main():
     # Load config
     config = Config()
     
-    # Show game selection menu if requested
-    if hasattr(args, 'menu') and args.menu:
+    # Show game selection menu if requested OR if no game specified (visual mode only)
+    show_menu = (hasattr(args, 'menu') and args.menu) or (args.game is None and not args.headless)
+    
+    if show_menu:
         pygame.init()
         menu_screen = pygame.display.set_mode((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
         pygame.display.set_caption("🧠 Neural Network AI - Game Selection")
@@ -2472,6 +2601,17 @@ def main():
     
     # Handle headless mode separately (no pygame)
     if args.headless:
+        # If no game specified and web mode, run in launcher mode
+        if args.game is None and args.web:
+            run_web_launcher(config, args)
+            return
+        
+        # If no game specified and no web, require a game choice
+        if args.game is None:
+            print("❌ No game specified. Use --game <name> or add --web for game selection UI.")
+            print(f"   Available games: {', '.join(list_games())}")
+            return
+        
         trainer = HeadlessTrainer(config, args)
         try:
             trainer.train()

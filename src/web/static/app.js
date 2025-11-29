@@ -317,6 +317,26 @@ function connectSocket() {
             console.error('Error processing game switch:', err);
         }
     });
+    
+    socket.on('stop_for_switch', (data) => {
+        try {
+            addConsoleLog(`✅ Progress saved. Restart with: ${data.command}`, 'success');
+            // Show prominent message
+            showRestartBanner(data.game, data.command);
+        } catch (err) {
+            console.error('Error processing stop for switch:', err);
+        }
+    });
+    
+    socket.on('restarting', (data) => {
+        try {
+            addConsoleLog(`🔄 ${data.message}`, 'warning');
+            // Show restarting overlay
+            showRestartingOverlay(data.game);
+        } catch (err) {
+            console.error('Error processing restart:', err);
+        }
+    });
 }
 
 /**
@@ -1285,6 +1305,9 @@ function loadGames() {
             const select = document.getElementById('game-select');
             if (!select) return;
             
+            // Store current game for switch detection
+            select.dataset.currentGame = data.current_game;
+            
             // Clear existing options
             select.innerHTML = '';
             
@@ -1319,17 +1342,31 @@ function loadGames() {
 function switchGame(gameId) {
     if (!gameId) return;
     
-    // Confirm with user
-    const confirmed = confirm(`Switch to ${gameId}? This will restart training with the selected game.`);
-    if (!confirmed) {
-        // Reset dropdown to current game
-        loadGames();
+    // Get current game from dropdown's data
+    const select = document.getElementById('game-select');
+    const currentGame = select ? select.dataset.currentGame : 'breakout';
+    
+    // If same game, do nothing
+    if (gameId === currentGame) {
         return;
     }
     
-    // Send switch command
-    socket.emit('control', { action: 'switch_game', game: gameId });
-    addConsoleLog(`Switching to ${gameId}...`, 'action');
+    // Confirm switch
+    const confirmed = confirm(
+        `Switch to ${gameId.replace('_', ' ').toUpperCase()}?\n\n` +
+        `This will save your current progress and restart with the new game.`
+    );
+    
+    if (confirmed) {
+        addConsoleLog(`🔄 Switching to ${gameId}...`, 'warning');
+        addConsoleLog(`💾 Saving current progress...`, 'info');
+        
+        // Request game switch - server will save and restart
+        socket.emit('control', { action: 'restart_with_game', game: gameId });
+    } else {
+        // Reset dropdown to current game
+        loadGames();
+    }
 }
 
 // ============================================================
@@ -1423,4 +1460,154 @@ function loadGameStats() {
  */
 function refreshGameStats() {
     loadGameStats();
+}
+
+/**
+ * Show a restart banner for game switching
+ */
+function showRestartBanner(game, command) {
+    // Create banner element
+    const banner = document.createElement('div');
+    banner.id = 'restart-banner';
+    banner.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 2px solid #4caf50;
+        border-radius: 16px;
+        padding: 30px 40px;
+        z-index: 10000;
+        text-align: center;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        max-width: 500px;
+    `;
+    
+    banner.innerHTML = `
+        <h2 style="color: #4caf50; margin: 0 0 15px 0; font-size: 1.5rem;">🔄 Ready to Switch Games</h2>
+        <p style="color: #e4e6f0; margin: 0 0 20px 0;">Progress has been saved. Restart with the new game:</p>
+        <div style="background: #0d0e12; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+            <code id="restart-command" style="color: #64b5f6; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; word-break: break-all;">${escapeHtml(command)}</code>
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+            <button onclick="copyRestartCommand()" style="
+                background: #4caf50;
+                border: none;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+            ">📋 Copy Command</button>
+            <button onclick="closeRestartBanner()" style="
+                background: #2a2e3d;
+                border: 1px solid #3a3e4d;
+                color: #e4e6f0;
+                padding: 10px 20px;
+                border-radius: 8px;
+                cursor: pointer;
+            ">Close</button>
+        </div>
+    `;
+    
+    // Add overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'restart-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.7);
+        z-index: 9999;
+    `;
+    overlay.onclick = closeRestartBanner;
+    
+    document.body.appendChild(overlay);
+    document.body.appendChild(banner);
+}
+
+/**
+ * Copy restart command to clipboard
+ */
+function copyRestartCommand() {
+    const command = document.getElementById('restart-command');
+    if (command) {
+        navigator.clipboard.writeText(command.textContent).then(() => {
+            const btn = event.target;
+            btn.textContent = '✓ Copied!';
+            setTimeout(() => {
+                btn.textContent = '📋 Copy Command';
+            }, 2000);
+        });
+    }
+}
+
+/**
+ * Close restart banner
+ */
+function closeRestartBanner() {
+    const banner = document.getElementById('restart-banner');
+    const overlay = document.getElementById('restart-overlay');
+    if (banner) banner.remove();
+    if (overlay) overlay.remove();
+}
+
+/**
+ * Show restarting overlay while process restarts
+ */
+function showRestartingOverlay(game) {
+    const overlay = document.createElement('div');
+    overlay.id = 'restarting-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(10, 10, 15, 0.95);
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'JetBrains Mono', monospace;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="font-size: 4rem; margin-bottom: 20px; animation: pulse 1s ease-in-out infinite;">🔄</div>
+        <h2 style="color: #00d4ff; margin: 0 0 15px 0; font-size: 1.5rem;">Restarting with ${game.replace('_', ' ').toUpperCase()}</h2>
+        <p style="color: #7a7e8c; margin: 0;">Please wait while the server restarts...</p>
+        <p style="color: #5a5e72; margin: 15px 0 0 0; font-size: 0.85rem;">Page will auto-refresh when ready</p>
+        <style>
+            @keyframes pulse {
+                0%, 100% { transform: scale(1); opacity: 1; }
+                50% { transform: scale(1.1); opacity: 0.8; }
+            }
+        </style>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Start checking if server is back up
+    setTimeout(checkServerAndReload, 2000);
+}
+
+/**
+ * Check if server is back up and reload
+ */
+function checkServerAndReload() {
+    fetch('/api/status')
+        .then(response => {
+            if (response.ok) {
+                location.reload();
+            } else {
+                setTimeout(checkServerAndReload, 1000);
+            }
+        })
+        .catch(() => {
+            setTimeout(checkServerAndReload, 1000);
+        });
 }
