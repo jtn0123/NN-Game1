@@ -682,18 +682,18 @@ class Agent:
                 tau * policy_param.data + (1.0 - tau) * target_param.data
             )
     
-    def decay_epsilon(self, episode: int = float('inf')) -> None:  # type: ignore[assignment]
+    def decay_epsilon(self, episode: Optional[int] = None) -> None:
         """Decay exploration rate.
 
         Args:
             episode: Current episode number. Epsilon only decays after
                      EPSILON_WARMUP episodes to allow buffer to fill.
-                     Defaults to infinity to bypass warmup (backward compatible).
+                     If None, bypasses warmup check (backward compatible).
         """
         warmup = getattr(self.config, 'EPSILON_WARMUP', 0)
 
         # Skip decay during warmup period (only if episode is explicitly provided)
-        if episode < warmup:
+        if episode is not None and episode < warmup:
             return
 
         self.epsilon = max(

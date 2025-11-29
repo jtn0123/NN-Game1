@@ -787,9 +787,10 @@ class WebDashboard:
             from datetime import datetime
             
             # Security: ensure path is within model directory
-            # Use realpath to resolve symlinks, preventing symlink attacks
+            # Always join with model_dir first to prevent absolute path injection
             model_dir = os.path.realpath(self.config.MODEL_DIR)
-            full_path = os.path.realpath(filepath)
+            # Join filepath with model_dir, then resolve to prevent traversal
+            full_path = os.path.realpath(os.path.join(model_dir, filepath))
             # Use os.path.commonpath to properly check containment
             # This prevents path traversal attacks like /models_evil/file.pth
             try:
@@ -838,7 +839,8 @@ class WebDashboard:
             # Check both game-specific and legacy model directories
             game_model_dir = os.path.realpath(self.config.GAME_MODEL_DIR)
             legacy_model_dir = os.path.realpath(self.config.MODEL_DIR)
-            full_path = os.path.realpath(filepath)
+            # Join filepath with model_dir first to prevent absolute path injection
+            full_path = os.path.realpath(os.path.join(legacy_model_dir, filepath))
             
             # Check if path is within either allowed directory
             is_valid = False

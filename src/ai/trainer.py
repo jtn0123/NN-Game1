@@ -274,12 +274,12 @@ class Trainer:
             if stats.score > best_score:
                 best_score = stats.score
                 self.agent.save(
-                    os.path.join(self.config.MODEL_DIR, 'breakout_best.pth')
+                    os.path.join(self.config.MODEL_DIR, f'{self.config.GAME_NAME}_best.pth')
                 )
             
             if episode % self.config.SAVE_EVERY == 0 and episode > 0:
                 self.agent.save(
-                    os.path.join(self.config.MODEL_DIR, f'breakout_ep{episode}.pth')
+                    os.path.join(self.config.MODEL_DIR, f'{self.config.GAME_NAME}_ep{episode}.pth')
                 )
             
             # Progress callback
@@ -288,7 +288,7 @@ class Trainer:
         
         # Final save
         self.agent.save(
-            os.path.join(self.config.MODEL_DIR, 'breakout_final.pth')
+            os.path.join(self.config.MODEL_DIR, f'{self.config.GAME_NAME}_final.pth')
         )
         
         print("\n" + "=" * 60)

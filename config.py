@@ -144,12 +144,27 @@ class Config:
     
     @property
     def STATE_SIZE(self) -> int:
-        """Calculate input layer size based on game state representation."""
-        ball_info = 4        # x, y, dx, dy
-        paddle_info = 1      # x position
-        tracking_info = 3    # relative_x, predicted_landing, distance_to_target
-        brick_info = self.BRICK_ROWS * self.BRICK_COLS  # binary brick states
-        return ball_info + paddle_info + tracking_info + brick_info
+        """Calculate input layer size based on game state representation.
+        
+        NOTE: This is a legacy property used only for standalone tests.
+        In production, use game.state_size instead, which is calculated
+        dynamically by each game class.
+        """
+        if self.GAME_NAME == 'breakout':
+            ball_info = 4        # x, y, dx, dy
+            paddle_info = 1      # x position
+            tracking_info = 3    # relative_x, predicted_landing, distance_to_target
+            brick_info = self.BRICK_ROWS * self.BRICK_COLS  # binary brick states
+            return ball_info + paddle_info + tracking_info + brick_info
+        elif self.GAME_NAME == 'space_invaders':
+            # Space Invaders has dynamic state size based on aliens/bullets
+            # This is an approximation - use game.state_size in production
+            max_player_bullets = 3
+            num_aliens = 55  # 5 rows * 11 cols
+            return 1 + max_player_bullets * 2 + num_aliens + 5 + 7
+        else:
+            # Default fallback
+            return 128
     
     # Action space
     ACTION_SIZE: int = 3      # LEFT, STAY, RIGHT
@@ -439,6 +454,8 @@ class Config:
         assert 0 < self.GAMMA <= 1, "Gamma must be in (0, 1]"
         assert self.BATCH_SIZE > 0, "Batch size must be positive"
         assert self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end"
+        assert self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1"
+        assert self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1"
 
 
 # Global config instance for easy importing
