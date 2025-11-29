@@ -1101,7 +1101,9 @@ class GameApp:
         last_report_time = start_time
         steps_since_report = 0
         
-        for episode in range(self.config.MAX_EPISODES):
+        # MAX_EPISODES == 0 means unlimited (train until manually stopped)
+        episode = 0
+        while self.config.MAX_EPISODES == 0 or episode < self.config.MAX_EPISODES:
             done = False
             state = self.game.reset()
             episode_reward = 0.0
@@ -1150,6 +1152,9 @@ class GameApp:
             if info['score'] > best_score:
                 best_score = info['score']
                 self._save_model("breakout_best.pth", quiet=True)
+            
+            # Increment episode counter
+            episode += 1
         
         self._save_model("breakout_final.pth")
         
@@ -1770,7 +1775,9 @@ class HeadlessTrainer:
         last_report_time = self.training_start_time
         steps_since_report = 0
         
-        for episode in range(start_episode, config.MAX_EPISODES):
+        # MAX_EPISODES == 0 means unlimited (train until manually stopped)
+        episode = start_episode
+        while config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES:
             self.current_episode = episode
             
             # Handle pause (only if web dashboard is active)
@@ -1893,6 +1900,9 @@ class HeadlessTrainer:
             
             if episode % config.SAVE_EVERY == 0 and episode > 0:
                 self._save_model(f"breakout_ep{episode}.pth", save_reason="periodic")
+            
+            # Increment episode counter (was implicit in for loop, now explicit for while loop)
+            episode += 1
         
         # Final save
         self._save_model("breakout_final.pth", save_reason="final")
