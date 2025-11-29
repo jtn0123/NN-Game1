@@ -221,7 +221,8 @@ class Config:
     
     # Replay buffer capacity
     # Larger = more diverse experiences but more memory
-    MEMORY_SIZE: int = 100_000
+    # 500k experiences ≈ 40MB - retains ~5x more history
+    MEMORY_SIZE: int = 500_000
     
     # Minimum experiences before training starts
     MEMORY_MIN: int = 1000
@@ -284,15 +285,14 @@ class Config:
     # =========================================================================
     
     # Starting exploration rate (1.0 = 100% random)
-    # EXPERIMENT 3: Higher epsilon for pure epsilon-greedy (no NoisyNets)
-    EPSILON_START: float = 0.5
+    # With NoisyNets: small epsilon as fallback exploration
+    EPSILON_START: float = 0.1
     
     # Minimum exploration rate
     EPSILON_END: float = 0.02
 
     # Decay rate per episode (higher = slower decay)
-    # EXPERIMENT 3: Faster decay (0.995) for pure epsilon-greedy
-    EPSILON_DECAY: float = 0.995
+    EPSILON_DECAY: float = 0.9995
 
     # Exploration decay strategy: 'exponential', 'linear', 'cosine'
     EXPLORATION_STRATEGY: str = 'exponential'
@@ -357,8 +357,8 @@ class Config:
     # =========================================================================
 
     # Enable NoisyNet (learnable parameter noise for exploration)
-    # EXPERIMENT 3: Disabled to test pure epsilon-greedy exploration
-    USE_NOISY_NETWORKS: bool = False
+    # NoisyNets + hybrid epsilon-greedy (Exp 2 showed best stability)
+    USE_NOISY_NETWORKS: bool = True
 
     # Standard deviation for noise initialization
     # Higher values = more initial exploration (0.5 standard, 0.7 for more exploration)

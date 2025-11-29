@@ -44,11 +44,12 @@
                 <!-- Score Chart -->
                 <div class="chart-card">
                     <div class="card-header">
-                        <h2 data-tooltip="Shows score per episode over time. Green line = individual episode scores. Yellow dashed = 20-episode moving average. Upward trend indicates learning progress. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="right">📊 Training Progress</h2>
+                        <h2 data-tooltip="Shows score per episode over time. Green = raw scores. Yellow dashed = 20-ep moving average. Pink stepped = BEST average so far (can only go UP - shows if hitting new peaks!). Click and drag to pan. Ctrl+Scroll to zoom." data-tooltip-position="right">📊 Training Progress</h2>
                         <div class="chart-header-controls">
                             <div class="chart-legend">
                                 <span class="legend-item score" data-tooltip="Raw score for each episode">● Score</span>
-                                <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes - better shows overall trend">● Average</span>
+                                <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes">● Average</span>
+                                <span class="legend-item best" data-tooltip="Best average so far - can only go UP! If this is flat, you're oscillating. If rising, you're improving.">● Best Avg</span>
                             </div>
                             <button class="chart-reset-btn" onclick="resetChartView('score')" title="Reset view to latest episodes">↻</button>
                         </div>
@@ -263,7 +264,7 @@
                             <div class="info-row memory-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
                                 <span class="info-label">🧠 Replay Memory</span>
                                 <div class="memory-display">
-                                    <span class="info-value" id="info-memory">0 / 100k</span>
+                                    <span class="info-value" id="info-memory">0 / 0</span>
                                     <div class="memory-bar">
                                         <div class="memory-bar-fill" id="memory-bar-fill"></div>
                                     </div>

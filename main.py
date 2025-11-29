@@ -1706,6 +1706,11 @@ class HeadlessTrainer:
         self.current_episode = 0
         self.scores: list[int] = []
         self.wins: list[bool] = []
+        self.levels: list[int] = []  # Track level reached per episode
+        self.q_values: list[float] = []  # Track Q-values for chart persistence
+        self.losses: list[float] = []  # Track losses for chart persistence
+        self.epsilons: list[float] = []  # Track epsilon for chart persistence
+        self.rewards: list[float] = []  # Track rewards for chart persistence
         self.total_steps = 0
         self.training_start_time = time.time()
         
@@ -1738,6 +1743,8 @@ class HeadlessTrainer:
             self._log_startup_info()
             if initial_model_path:
                 self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(initial_model_path)}", "success")
+                # Sync history to dashboard NOW that dashboard is ready
+                self._sync_history_to_dashboard_after_load(initial_model_path)
         elif hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
             self._setup_web_callbacks()
@@ -1746,6 +1753,35 @@ class HeadlessTrainer:
             self._log_startup_info()
             if initial_model_path:
                 self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(initial_model_path)}", "success")
+                # Sync history to dashboard NOW that dashboard is ready
+                self._sync_history_to_dashboard_after_load(initial_model_path)
+    
+    def _sync_history_to_dashboard_after_load(self, filepath: str) -> None:
+        """
+        Load training history from checkpoint and sync to dashboard.
+        
+        This is called AFTER the web dashboard is initialized, since the initial
+        _load_model happens before the dashboard exists.
+        """
+        if not self.web_dashboard:
+            return
+        
+        try:
+            import torch
+            checkpoint = torch.load(filepath, map_location=self.config.DEVICE, weights_only=False)
+            
+            if 'training_history' in checkpoint:
+                training_history = TrainingHistory.from_dict(checkpoint['training_history'])
+                metadata = None
+                if 'metadata' in checkpoint:
+                    from src.ai.agent import SaveMetadata
+                    metadata = SaveMetadata.from_dict(checkpoint['metadata'])
+                
+                if len(training_history.scores) > 0:
+                    self._sync_web_dashboard_history(training_history, metadata)
+                    print(f"📊 Dashboard charts restored ({len(training_history.scores)} episodes)")
+        except Exception as e:
+            print(f"⚠️ Could not restore dashboard history: {e}")
     
     def _resolve_model_path(self, explicit_path: Optional[str], state_size: int, action_size: int) -> Optional[str]:
         """
@@ -1895,6 +1931,14 @@ class HeadlessTrainer:
         self.best_score = 0
         self.scores.clear()
         self.wins.clear()
+        self.levels.clear()
+        self.q_values.clear()
+        self.losses.clear()
+        self.epsilons.clear()
+        self.rewards.clear()
+        self.exploration_actions = 0
+        self.exploitation_actions = 0
+        self.target_updates = 0
         self.total_steps = 0
         self.training_start_time = time.time()
         self.exploration_actions = 0
@@ -1955,10 +1999,21 @@ class HeadlessTrainer:
                 self.current_episode = metadata.episode
                 self.total_steps = metadata.total_steps
             
-            # Restore local score/win history from training history
+            # Restore local score/win history from training history (no limit - keep full history)
             if training_history and len(training_history.scores) > 0:
-                self.scores = training_history.scores[-1000:].copy()
-                self.wins = training_history.wins[-1000:].copy() if training_history.wins else []
+                self.scores = training_history.scores.copy()
+                self.wins = training_history.wins.copy() if training_history.wins else []
+                self.q_values = training_history.q_values.copy() if training_history.q_values else []
+                self.losses = training_history.losses.copy() if training_history.losses else []
+                self.epsilons = training_history.epsilons.copy() if training_history.epsilons else []
+                self.rewards = training_history.rewards.copy() if training_history.rewards else []
+                
+                # Restore dashboard counters
+                self.exploration_actions = training_history.exploration_actions
+                self.exploitation_actions = training_history.exploitation_actions
+                self.target_updates = training_history.target_updates
+                if training_history.best_score > self.best_score:
+                    self.best_score = training_history.best_score
             
             if self.web_dashboard:
                 history_msg = ""
@@ -2028,8 +2083,11 @@ class HeadlessTrainer:
             else:
                 publisher.episode_lengths.append(0)
             
-            # Q-values aren't stored in history, so use placeholder
-            publisher.q_values.append(0.0)
+            # Add Q-values (now stored in history)
+            if i < len(training_history.q_values):
+                publisher.q_values.append(training_history.q_values[i])
+            else:
+                publisher.q_values.append(0.0)
         
         # Update publisher state from metadata
         if metadata:
@@ -2044,6 +2102,11 @@ class HeadlessTrainer:
             publisher.state.best_score = self.best_score
             publisher.state.epsilon = self.agent.epsilon
             publisher.state.total_steps = self.total_steps
+        
+        # Restore dashboard counters from training history
+        publisher.state.exploration_actions = training_history.exploration_actions
+        publisher.state.exploitation_actions = training_history.exploitation_actions
+        publisher.state.target_updates = training_history.target_updates
         
         # Calculate win rate from history
         if training_history.wins:
@@ -2552,6 +2615,18 @@ class HeadlessTrainer:
                     won = infos[i].get('won', False)
                     self.wins.append(won)
                     
+                    level = infos[i].get('level', 1)
+                    self.levels.append(level)
+                    
+                    # Track metrics for persistence (used by save)
+                    avg_loss = self.agent.get_average_loss(100)
+                    q_values_arr = self.agent.get_q_values(states[i])
+                    avg_q_value = float(np.mean(q_values_arr))
+                    self.q_values.append(avg_q_value)
+                    self.losses.append(avg_loss)
+                    self.epsilons.append(self.agent.epsilon)
+                    self.rewards.append(float(env_episode_rewards[i]))
+                    
                     # Track best score
                     if score > self.best_score:
                         self.best_score = score
@@ -2559,20 +2634,15 @@ class HeadlessTrainer:
                         if self.web_dashboard:
                             self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
                     
+                    # Track target updates (for persistence, independent of dashboard)
+                    if self.agent.steps > self.last_target_update_step + config.TARGET_UPDATE:
+                        self.target_updates += 1
+                        self.last_target_update_step = self.agent.steps
+                    
                     # Update web dashboard metrics
                     if self.web_dashboard:
-                        avg_loss = self.agent.get_average_loss(100)
                         initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
                         bricks_broken = initial_bricks - infos[i].get('bricks_remaining', initial_bricks)
-                        
-                        # Calculate Q-values from a representative state
-                        q_values = self.agent.get_q_values(states[i])
-                        avg_q_value = float(np.mean(q_values))
-                        
-                        # Track target updates
-                        if self.agent.steps > self.last_target_update_step + config.TARGET_UPDATE:
-                            self.target_updates += 1
-                            self.last_target_update_step = self.agent.steps
                         
                         self.web_dashboard.emit_metrics(
                             episode=self.current_episode,
@@ -2646,9 +2716,13 @@ class HeadlessTrainer:
                 eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 
+                # Get level reached from last completed episode
+                level_reached = last_info.get('level', 1) if last_info else 1
+                
                 progress_msg = (f"Ep {self.current_episode:5d} | "
                       f"Score: {last_score:4d} | "
                       f"Avg: {avg_score:6.1f} | "
+                      f"Lv: {level_reached} | "
                       f"ε: {self.agent.epsilon:.3f} | "
                       f"⚡ {steps_per_sec:,.0f} steps/s | "
                       f"📊 {eps_per_hour:,.0f} ep/hr")
@@ -2690,9 +2764,16 @@ class HeadlessTrainer:
         self,
         filename: str,
         save_reason: str = "manual",
-        quiet: bool = False
+        quiet: bool = False,
+        save_replay_buffer: bool = True
     ) -> bool:
         """Save the current model with rich metadata.
+        
+        Args:
+            filename: Name of file to save
+            save_reason: Why this save is happening
+            quiet: Suppress output if True
+            save_replay_buffer: Include replay buffer for cross-session persistence
         
         Returns:
             True if save succeeded, False otherwise
@@ -2705,6 +2786,25 @@ class HeadlessTrainer:
         avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
         recent_wins = self.wins[-100:]
         win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0.0
+        max_level = max(self.levels[-100:]) if self.levels else 1
+        
+        # Build training history for dashboard restoration
+        # Keep last 100000 episodes for full chart history
+        history_limit = 100000
+        training_history = TrainingHistory(
+            scores=self.scores[-history_limit:],
+            rewards=self.rewards[-history_limit:],
+            steps=[],  # Not tracked per-episode in vectorized mode
+            epsilons=self.epsilons[-history_limit:],
+            bricks=[],  # Not tracked in Space Invaders
+            wins=self.wins[-history_limit:],
+            losses=self.losses[-history_limit:],
+            q_values=self.q_values[-history_limit:],
+            exploration_actions=self.exploration_actions,
+            exploitation_actions=self.exploitation_actions,
+            target_updates=self.target_updates,
+            best_score=self.best_score
+        )
         
         result = self.agent.save(
             filepath=filepath,
@@ -2713,7 +2813,10 @@ class HeadlessTrainer:
             best_score=self.best_score,
             avg_score_last_100=float(avg_score),
             win_rate=win_rate,
+            max_level=max_level,
             training_start_time=self.training_start_time,
+            training_history=training_history,
+            save_replay_buffer=save_replay_buffer,
             quiet=quiet
         )
         

@@ -156,7 +156,8 @@ function initCharts() {
                     color: '#5a5e72',
                     maxTicksLimit: 20
                 },
-                type: 'linear'
+                type: 'linear',
+                min: 1
             },
             y: {
                 grid: {
@@ -204,6 +205,20 @@ function initCharts() {
                     pointHoverBorderWidth: 2,
                     borderWidth: 3,
                     borderDash: [5, 5]
+                },
+                {
+                    label: 'Best Avg',
+                    data: [],
+                    borderColor: '#e91e63',
+                    backgroundColor: 'transparent',
+                    tension: 0,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointHoverBackgroundColor: '#e91e63',
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
+                    borderWidth: 2,
+                    stepped: 'before'
                 }
             ]
         },
@@ -530,13 +545,13 @@ function updateChartViewport(chart, minX, maxX) {
     const dataStart = labels[0];
     const dataEnd = labels[labels.length - 1];
     
-    // Clamp viewport to data bounds
-    let clampedMinX = Math.max(dataStart, minX);
+    // Clamp viewport to data bounds, ensuring minimum of 1
+    let clampedMinX = Math.max(1, Math.max(dataStart, minX));
     let clampedMaxX = Math.min(dataEnd, maxX);
     
     // Ensure min is not greater than max
     if (clampedMinX > clampedMaxX) {
-        clampedMinX = dataStart;
+        clampedMinX = Math.max(1, dataStart);
         clampedMaxX = dataEnd;
     }
     
@@ -544,7 +559,7 @@ function updateChartViewport(chart, minX, maxX) {
     const minWidth = Math.max(1, (dataEnd - dataStart) * 0.01);
     if (clampedMaxX - clampedMinX < minWidth) {
         const center = (clampedMinX + clampedMaxX) / 2;
-        clampedMinX = Math.max(dataStart, center - minWidth / 2);
+        clampedMinX = Math.max(1, Math.max(dataStart, center - minWidth / 2));
         clampedMaxX = Math.min(dataEnd, center + minWidth / 2);
     }
     
@@ -648,7 +663,7 @@ function resetChartView(chartName = 'all') {
     
     const resetChart = (chart) => {
         if (!chart || !chart.options || !chart.options.scales) return;
-        chart.options.scales.x.min = labels[minX];
+        chart.options.scales.x.min = Math.max(1, labels[minX]);
         chart.options.scales.x.max = labels[maxX - 1];
         chart.update('none');
     };
@@ -720,6 +735,7 @@ function connectSocket() {
                 scoreChart.data.labels = [];
                 scoreChart.data.datasets[0].data = [];
                 scoreChart.data.datasets[1].data = [];
+                scoreChart.data.datasets[2].data = [];
                 scoreChart.update('none');
             }
             if (lossChart) {
@@ -754,7 +770,8 @@ function connectSocket() {
             document.getElementById('info-qvalue').textContent = '0.00';
             document.getElementById('info-target').textContent = '0';
             document.getElementById('info-actions').textContent = '0 / 0';
-            document.getElementById('info-memory').textContent = '0 / 100k';
+            // Memory will be updated from state when connected
+            document.getElementById('info-memory').textContent = '0 / 0';
             document.getElementById('info-steps-sec').textContent = '0';
             
             // Reset memory bar
@@ -1013,6 +1030,9 @@ function updateCharts(history, currentEpisode) {
     // Calculate running average for all scores
     const avgScores = calculateRunningAverage(allScores, 20);
     
+    // Calculate running maximum of averages (peak tracker - can only go UP)
+    const bestAvgScores = calculateRunningMax(avgScores);
+    
     // Get current viewport ranges for each chart (to maintain user's pan position)
     let scoreXRange = null;
     let lossXRange = null;
@@ -1045,6 +1065,7 @@ function updateCharts(history, currentEpisode) {
     scoreChart.data.labels = labels;
     scoreChart.data.datasets[0].data = allScores;
     scoreChart.data.datasets[1].data = avgScores;
+    scoreChart.data.datasets[2].data = bestAvgScores;
     
     // Update loss chart with all data
     const validLosses = allLosses.map(l => Math.max(l, 0.0001));
@@ -1068,53 +1089,53 @@ function updateCharts(history, currentEpisode) {
         const maxX = allScores.length;
         
         if (scoreChart && scoreChart.options && scoreChart.options.scales) {
-            scoreChart.options.scales.x.min = labels[minX];
+            scoreChart.options.scales.x.min = Math.max(1, labels[minX]);
             scoreChart.options.scales.x.max = labels[maxX - 1];
         }
         if (lossChart && lossChart.options && lossChart.options.scales) {
-            lossChart.options.scales.x.min = labels[minX];
+            lossChart.options.scales.x.min = Math.max(1, labels[minX]);
             lossChart.options.scales.x.max = labels[maxX - 1];
         }
         if (qvalueChart && qvalueChart.options && qvalueChart.options.scales && allQValues.length > 0) {
-            qvalueChart.options.scales.x.min = labels[minX];
+            qvalueChart.options.scales.x.min = Math.max(1, labels[minX]);
             qvalueChart.options.scales.x.max = labels[maxX - 1];
         }
     } else if (scoreXRange && userHasPanned.score && scoreChart && scoreChart.options && scoreChart.options.scales) {
         // Maintain user's pan position for score chart (clamped to data bounds)
-        const dataStart = labels[0];
-        const dataEnd = labels[labels.length - 1];
-        scoreChart.options.scales.x.min = Math.max(dataStart, Math.min(dataEnd, scoreXRange.min));
+        const dataStart = labels.length > 0 ? labels[0] : 1;
+        const dataEnd = labels.length > 0 ? labels[labels.length - 1] : 1;
+        scoreChart.options.scales.x.min = Math.max(1, Math.max(dataStart, Math.min(dataEnd, scoreXRange.min)));
         scoreChart.options.scales.x.max = Math.max(dataStart, Math.min(dataEnd, scoreXRange.max));
     }
     
     if (lossXRange && userHasPanned.loss && lossChart && lossChart.options && lossChart.options.scales) {
         // Maintain user's pan position for loss chart (clamped to data bounds)
-        const dataStart = labels[0];
-        const dataEnd = labels[labels.length - 1];
-        lossChart.options.scales.x.min = Math.max(dataStart, Math.min(dataEnd, lossXRange.min));
+        const dataStart = labels.length > 0 ? labels[0] : 1;
+        const dataEnd = labels.length > 0 ? labels[labels.length - 1] : 1;
+        lossChart.options.scales.x.min = Math.max(1, Math.max(dataStart, Math.min(dataEnd, lossXRange.min)));
         lossChart.options.scales.x.max = Math.max(dataStart, Math.min(dataEnd, lossXRange.max));
     }
     
     if (qvalueXRange && userHasPanned.qvalue && qvalueChart && qvalueChart.options && qvalueChart.options.scales) {
         // Maintain user's pan position for Q-value chart (clamped to data bounds)
-        const dataStart = labels[0];
-        const dataEnd = labels[labels.length - 1];
-        qvalueChart.options.scales.x.min = Math.max(dataStart, Math.min(dataEnd, qvalueXRange.min));
+        const dataStart = labels.length > 0 ? labels[0] : 1;
+        const dataEnd = labels.length > 0 ? labels[labels.length - 1] : 1;
+        qvalueChart.options.scales.x.min = Math.max(1, Math.max(dataStart, Math.min(dataEnd, qvalueXRange.min)));
         qvalueChart.options.scales.x.max = Math.max(dataStart, Math.min(dataEnd, qvalueXRange.max));
     }
     
-    // If no panning and small dataset, show all
+    // If no panning and small dataset, show all (but still enforce min of 1)
     if (allScores.length > 0 && allScores.length <= visibleWindow) {
         if (scoreChart && scoreChart.options && scoreChart.options.scales) {
-            scoreChart.options.scales.x.min = undefined;
+            scoreChart.options.scales.x.min = labels.length > 0 ? Math.max(1, labels[0]) : 1;
             scoreChart.options.scales.x.max = undefined;
         }
         if (lossChart && lossChart.options && lossChart.options.scales) {
-            lossChart.options.scales.x.min = undefined;
+            lossChart.options.scales.x.min = labels.length > 0 ? Math.max(1, labels[0]) : 1;
             lossChart.options.scales.x.max = undefined;
         }
         if (qvalueChart && qvalueChart.options && qvalueChart.options.scales && allQValues.length > 0) {
-            qvalueChart.options.scales.x.min = undefined;
+            qvalueChart.options.scales.x.min = labels.length > 0 ? Math.max(1, labels[0]) : 1;
             qvalueChart.options.scales.x.max = undefined;
         }
     }
@@ -1145,6 +1166,20 @@ function calculateRunningAverage(data, window) {
         const slice = data.slice(start, i + 1);
         const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
         result.push(avg);
+    }
+    return result;
+}
+
+/**
+ * Calculate running maximum (peak tracker)
+ * This line can only go UP - shows if we're hitting new peaks
+ */
+function calculateRunningMax(data) {
+    const result = [];
+    let runningMax = -Infinity;
+    for (let i = 0; i < data.length; i++) {
+        runningMax = Math.max(runningMax, data[i]);
+        result.push(runningMax);
     }
     return result;
 }

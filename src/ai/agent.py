@@ -64,6 +64,13 @@ class TrainingHistory:
     
     # Running averages (computed, not stored per-episode)
     losses: List[float]  # Recent losses for averaging
+    q_values: List[float]  # Average Q-values per episode for chart
+    
+    # Dashboard state metrics (cumulative counters)
+    exploration_actions: int = 0
+    exploitation_actions: int = 0
+    target_updates: int = 0
+    best_score: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -78,7 +85,12 @@ class TrainingHistory:
             epsilons=data.get('epsilons', []),
             bricks=data.get('bricks', []),
             wins=data.get('wins', []),
-            losses=data.get('losses', [])
+            losses=data.get('losses', []),
+            q_values=data.get('q_values', []),
+            exploration_actions=data.get('exploration_actions', 0),
+            exploitation_actions=data.get('exploitation_actions', 0),
+            target_updates=data.get('target_updates', 0),
+            best_score=data.get('best_score', 0)
         )
     
     @classmethod
@@ -86,7 +98,9 @@ class TrainingHistory:
         """Create empty history."""
         return cls(
             scores=[], rewards=[], steps=[], 
-            epsilons=[], bricks=[], wins=[], losses=[]
+            epsilons=[], bricks=[], wins=[], losses=[],
+            q_values=[], exploration_actions=0, exploitation_actions=0,
+            target_updates=0, best_score=0
         )
 
 
@@ -748,8 +762,10 @@ class Agent:
         best_score: int = 0,
         avg_score_last_100: float = 0.0,
         win_rate: float = 0.0,
+        max_level: int = 1,
         training_start_time: Optional[float] = None,
         training_history: Optional['TrainingHistory'] = None,
+        save_replay_buffer: bool = False,
         quiet: bool = False
     ) -> Optional[SaveMetadata]:
         """
@@ -764,6 +780,7 @@ class Agent:
             win_rate: Win rate over last 100 episodes
             training_start_time: Unix timestamp when training started (for calculating total time)
             training_history: Training history for dashboard restoration (scores, rewards, etc.)
+            save_replay_buffer: If True, save the replay buffer for cross-session persistence
             quiet: If True, suppress most output
             
         Returns:
@@ -829,6 +846,13 @@ class Agent:
         if training_history is not None:
             checkpoint['training_history'] = training_history.to_dict()
         
+        # Optionally save replay buffer for cross-session persistence
+        if save_replay_buffer and len(self.memory) > 0:
+            checkpoint['replay_buffer'] = self.memory.save_to_dict()
+            if not quiet:
+                buffer_size_mb = (len(self.memory) * self.state_size * 8 * 2) / (1024 * 1024)  # Rough estimate
+                print(f"💾 Saving replay buffer ({len(self.memory):,} experiences, ~{buffer_size_mb:.1f}MB)")
+        
         try:
             torch.save(checkpoint, filepath)
             
@@ -854,7 +878,7 @@ class Agent:
                 
                 print(f"\n{reason_emoji} Model Saved: {os.path.basename(filepath)}")
                 print(f"   Episode: {episode:,} | Steps: {self.steps:,} | ε: {self.epsilon:.4f}")
-                print(f"   Best Score: {best_score} | Avg(100): {avg_score_last_100:.1f} | Win Rate: {win_rate*100:.1f}%")
+                print(f"   Best Score: {best_score} | Avg(100): {avg_score_last_100:.1f} | Win Rate: {win_rate*100:.1f}% | Max Lv: {max_level}")
                 print(f"   Size: {size_mb:.2f} MB | Reason: {save_reason}")
                 if total_time > 0:
                     hours = int(total_time // 3600)
@@ -976,6 +1000,15 @@ class Agent:
             except Exception:
                 pass  # Old format without training history
         
+        # Load replay buffer if available (for cross-session persistence)
+        replay_buffer_loaded = False
+        if 'replay_buffer' in checkpoint:
+            try:
+                replay_buffer_loaded = self.memory.load_from_dict(checkpoint['replay_buffer'])
+            except Exception as e:
+                if not quiet:
+                    print(f"⚠️ Could not restore replay buffer: {e}")
+        
         if not quiet:
             file_size = os.path.getsize(filepath)
             size_mb = file_size / (1024 * 1024)
@@ -1021,6 +1054,12 @@ class Agent:
                 print(f"   Training History: {len(training_history.scores)} episodes restored")
             else:
                 print(f"   Training History: Not available (older save format)")
+            
+            # Report replay buffer status
+            if replay_buffer_loaded:
+                print(f"   Replay Buffer: {len(self.memory):,} experiences restored")
+            else:
+                print(f"   Replay Buffer: Starting fresh (not saved or incompatible)")
             
             print(f"{'='*60}\n")
         

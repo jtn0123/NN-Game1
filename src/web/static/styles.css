@@ -268,6 +268,7 @@ body {
 
 .legend-item.score { color: var(--accent-success); }
 .legend-item.avg { color: var(--accent-warning); }
+.legend-item.best { color: #e91e63; }
 
 .chart-container {
     height: 280px;

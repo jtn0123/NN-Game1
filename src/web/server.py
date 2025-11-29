@@ -214,12 +214,15 @@ class MetricsPublisher:
     them to connected clients.
     """
     
-    def __init__(self, history_length: int = 500):
+    def __init__(self, history_length: int = 100000):
+        # Keep 100000 episodes of history for full chart scrolling
+        # Memory usage: ~100000 * 50 bytes = ~5MB (still negligible)
         self.history_length = history_length
         self.state = TrainingState()
         self.save_status = SaveStatus()
 
-        # Metric history
+        # Metric history - no maxlen means unlimited (we manage via save/load)
+        # Using large maxlen to keep full training history visible in charts
         self.scores: Deque[int] = deque(maxlen=history_length)
         self.losses: Deque[float] = deque(maxlen=history_length)
         self.epsilons: Deque[float] = deque(maxlen=history_length)
@@ -666,6 +669,8 @@ class WebDashboard:
         
         # Metrics publisher
         self.publisher = MetricsPublisher()
+        # Set memory capacity from config
+        self.publisher.state.memory_capacity = self.config.MEMORY_SIZE
         
         # Flask app setup - use absolute paths relative to this module
         base_dir = os.path.dirname(__file__)

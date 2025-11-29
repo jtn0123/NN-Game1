@@ -228,6 +228,86 @@ class ReplayBuffer:
         """Clear all experiences from the buffer."""
         self._size = 0
         self._position = 0
+    
+    def save_to_dict(self) -> dict:
+        """
+        Save replay buffer contents to a dictionary for persistence.
+        
+        Only saves the populated portion to reduce file size.
+        For a 500k buffer at ~80 state size, full buffer would be ~330MB.
+        
+        Returns:
+            Dictionary containing buffer state
+        """
+        if not self._initialized or self._size == 0:
+            return {
+                'initialized': False,
+                'size': 0,
+                'position': 0,
+                'capacity': self.capacity,
+                'state_size': self._state_size
+            }
+        
+        # Only save populated portion (up to _size experiences)
+        return {
+            'initialized': True,
+            'size': self._size,
+            'position': self._position,
+            'capacity': self.capacity,
+            'state_size': self._state_size,
+            'states': self.states[:self._size].copy(),
+            'actions': self.actions[:self._size].copy(),
+            'rewards': self.rewards[:self._size].copy(),
+            'next_states': self.next_states[:self._size].copy(),
+            'dones': self.dones[:self._size].copy()
+        }
+    
+    def load_from_dict(self, data: dict) -> bool:
+        """
+        Restore replay buffer contents from a saved dictionary.
+        
+        Args:
+            data: Dictionary from save_to_dict()
+            
+        Returns:
+            True if successfully loaded, False otherwise
+        """
+        if not data.get('initialized', False) or data.get('size', 0) == 0:
+            return False
+        
+        saved_size = data['size']
+        saved_state_size = data['state_size']
+        
+        # Initialize arrays if needed
+        if not self._initialized:
+            self._init_arrays(saved_state_size)
+        elif self._state_size != saved_state_size:
+            print(f"⚠️ Replay buffer state size mismatch (saved: {saved_state_size}, current: {self._state_size})")
+            return False
+        
+        # Restore data - handle case where saved buffer is larger than current capacity
+        load_size = min(saved_size, self.capacity)
+        
+        # Copy data (taking the most recent if buffer was larger)
+        if saved_size <= self.capacity:
+            self.states[:load_size] = data['states'][:load_size]
+            self.actions[:load_size] = data['actions'][:load_size]
+            self.rewards[:load_size] = data['rewards'][:load_size]
+            self.next_states[:load_size] = data['next_states'][:load_size]
+            self.dones[:load_size] = data['dones'][:load_size]
+        else:
+            # Saved buffer is larger - take most recent experiences
+            offset = saved_size - self.capacity
+            self.states[:load_size] = data['states'][offset:offset + load_size]
+            self.actions[:load_size] = data['actions'][offset:offset + load_size]
+            self.rewards[:load_size] = data['rewards'][offset:offset + load_size]
+            self.next_states[:load_size] = data['next_states'][offset:offset + load_size]
+            self.dones[:load_size] = data['dones'][offset:offset + load_size]
+        
+        self._size = load_size
+        self._position = load_size % self.capacity
+        
+        return True
 
 
 class PrioritizedReplayBuffer:
@@ -413,6 +493,30 @@ class PrioritizedReplayBuffer:
         self._position = 0
         self.priorities.fill(0)
         self.max_priority = 1.0
+    
+    def save_to_dict(self) -> dict:
+        """Save prioritized replay buffer with priorities."""
+        base_dict = super().save_to_dict()
+        if base_dict.get('initialized', False) and self._size > 0:
+            base_dict['priorities'] = self.priorities[:self._size].copy()
+            base_dict['max_priority'] = self.max_priority
+        return base_dict
+    
+    def load_from_dict(self, data: dict) -> bool:
+        """Restore prioritized replay buffer with priorities."""
+        if not super().load_from_dict(data):
+            return False
+        
+        if 'priorities' in data:
+            load_size = min(len(data['priorities']), self.capacity)
+            if len(data['priorities']) <= self.capacity:
+                self.priorities[:load_size] = data['priorities'][:load_size]
+            else:
+                offset = len(data['priorities']) - self.capacity
+                self.priorities[:load_size] = data['priorities'][offset:offset + load_size]
+            self.max_priority = data.get('max_priority', 1.0)
+        
+        return True
         self._frame_count = 0
         self.beta = self.beta_start
 
