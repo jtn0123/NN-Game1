@@ -12,8 +12,11 @@ Usage:
     # Train without visualization (faster)
     python main.py --headless
     
-    # TURBO MODE: Maximum speed training (~4x faster)
+    # TURBO MODE: Maximum speed training (~5000 steps/sec on M4!)
     python main.py --headless --turbo --episodes 5000
+    
+    # TURBO + Web Dashboard: Best of both worlds
+    python main.py --headless --turbo --web --port 5001
     
     # Custom performance tuning
     python main.py --headless --learn-every 4 --batch-size 256
@@ -1337,9 +1340,11 @@ class HeadlessTrainer:
         - No visualization overhead
         - Optimized training loop with configurable learning frequency
         - Progress reporting via terminal
+        - Optional web dashboard for remote monitoring
     
     Usage:
         python main.py --headless --turbo --episodes 5000
+        python main.py --headless --turbo --web --port 5001  # With web dashboard
     """
     
     def __init__(self, config: Config, args: argparse.Namespace):
@@ -1393,39 +1398,254 @@ class HeadlessTrainer:
         
         # Create model directory
         os.makedirs(config.MODEL_DIR, exist_ok=True)
+        
+        # Tracking for loaded model info
+        self.best_score = 0
+        self.current_episode = 0
+        self.scores: list[int] = []
+        self.wins: list[bool] = []
+        self.total_steps = 0
+        self.training_start_time = time.time()
+        
+        # Auto-load most recent model if no explicit model specified
+        initial_model_path = self._resolve_model_path(args.model)
+        if initial_model_path:
+            metadata, _ = self.agent.load(initial_model_path)
+            if metadata:
+                self.best_score = metadata.best_score
+                self.current_episode = metadata.episode
+                self.total_steps = metadata.total_steps
+        
+        # Web dashboard (if enabled)
+        self.web_dashboard: Optional[Any] = None
+        self.paused = False
+        if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
+            self.web_dashboard = WebDashboard(config, port=args.port)
+            self._setup_web_callbacks()
+            self.web_dashboard.start()
+            self._send_system_info()
+            self._log_startup_info()
+            if initial_model_path:
+                self.web_dashboard.log(f"📂 Auto-loaded: {os.path.basename(initial_model_path)}", "success")
+    
+    def _resolve_model_path(self, explicit_path: Optional[str]) -> Optional[str]:
+        """
+        Resolve which model to load on startup.
+        
+        Priority:
+        1. Explicitly specified --model path
+        2. Most recent .pth file in models directory
+        
+        Returns:
+            Path to model file, or None if no model to load
+        """
+        # If explicit path specified and exists, use it
+        if explicit_path and os.path.exists(explicit_path):
+            return explicit_path
+        
+        # Otherwise, find most recent save in models directory
+        model_dir = self.config.MODEL_DIR
+        if not os.path.exists(model_dir):
+            return None
+        
+        # Find all .pth files
+        model_files = []
+        for f in os.listdir(model_dir):
+            if f.endswith('.pth'):
+                filepath = os.path.join(model_dir, f)
+                mtime = os.path.getmtime(filepath)
+                model_files.append((filepath, mtime))
+        
+        if not model_files:
+            return None
+        
+        # Sort by modification time, newest first
+        model_files.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return the most recent file
+        most_recent = model_files[0][0]
+        print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
+        return most_recent
+    
+    def _setup_web_callbacks(self) -> None:
+        """Set up web dashboard control callbacks."""
+        if not self.web_dashboard:
+            return
+        
+        self.web_dashboard.on_pause_callback = self._toggle_pause
+        self.web_dashboard.on_save_callback = lambda: self._save_model("breakout_web_save.pth", save_reason="manual")
+        self.web_dashboard.on_save_as_callback = self._save_model_as
+        self.web_dashboard.on_reset_callback = self._reset_episode
+        self.web_dashboard.on_load_model_callback = self._load_model
+        self.web_dashboard.on_config_change_callback = self._apply_config
+        self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
+        # Speed control doesn't apply to headless (no frame timing)
+        self.web_dashboard.on_speed_callback = lambda x: None
+    
+    def _send_system_info(self) -> None:
+        """Send system information to web dashboard."""
+        if not self.web_dashboard:
+            return
+        
+        torch_compiled = getattr(self.agent, '_compiled', False)
+        device_str = str(self.config.DEVICE)
+        
+        self.web_dashboard.publisher.set_system_info(
+            device=device_str,
+            torch_compiled=torch_compiled,
+            target_episodes=self.config.MAX_EPISODES
+        )
+        
+        # Set performance mode based on turbo flag
+        if self.args.turbo:
+            self.web_dashboard.publisher.set_performance_mode('turbo')
+        else:
+            self.web_dashboard.publisher.set_performance_mode('normal')
+    
+    def _log_startup_info(self) -> None:
+        """Log startup configuration to web dashboard."""
+        if not self.web_dashboard:
+            return
+        
+        self.web_dashboard.log("🚀 Headless training started", "success")
+        self.web_dashboard.log(f"Device: {self.config.DEVICE}", "info")
+        self.web_dashboard.log(f"State size: {self.game.state_size}, Action size: {self.game.action_size}", "info")
+        self.web_dashboard.log(f"Network: {self.config.HIDDEN_LAYERS}", "info")
+        self.web_dashboard.log(f"Learn every: {self.config.LEARN_EVERY}, Grad steps: {self.config.GRADIENT_STEPS}", "info")
+        self.web_dashboard.log(f"Batch size: {self.config.BATCH_SIZE}", "info")
+        self.web_dashboard.log(f"Target episodes: {self.config.MAX_EPISODES}", "info")
+    
+    def _toggle_pause(self) -> None:
+        """Toggle pause state."""
+        self.paused = not self.paused
+        if self.web_dashboard:
+            self.web_dashboard.publisher.set_paused(self.paused)
+            status = "⏸️ Training paused" if self.paused else "▶️ Training resumed"
+            self.web_dashboard.log(status, "action")
+        print("⏸️  Paused" if self.paused else "▶️  Resumed")
+    
+    def _reset_episode(self) -> None:
+        """Reset is handled at episode boundary in headless mode."""
+        if self.web_dashboard:
+            self.web_dashboard.log("🔄 Episode will reset at next boundary", "action")
+        print("🔄 Episode reset requested")
+    
+    def _load_model(self, filepath: str) -> None:
+        """Load a model from file."""
+        try:
+            metadata, _ = self.agent.load(filepath)
+            if self.web_dashboard:
+                self.web_dashboard.log(f"📂 Loaded model: {os.path.basename(filepath)}", "success")
+                if metadata:
+                    self.best_score = metadata.best_score
+                    self.current_episode = metadata.episode
+        except Exception as e:
+            if self.web_dashboard:
+                self.web_dashboard.log(f"❌ Failed to load model: {str(e)}", "error")
+    
+    def _save_model_as(self, filename: str) -> bool:
+        """Save model with custom filename."""
+        if not filename.endswith('.pth'):
+            filename += '.pth'
+        success = self._save_model(filename, save_reason="manual")
+        if success and self.web_dashboard:
+            self.web_dashboard.log(f"💾 Saved as: {filename}", "success")
+        return success
+    
+    def _apply_config(self, config_data: dict) -> None:
+        """Apply configuration changes from web dashboard."""
+        changes = []
+        
+        if 'learning_rate' in config_data:
+            self.config.LEARNING_RATE = config_data['learning_rate']
+            for param_group in self.agent.optimizer.param_groups:
+                param_group['lr'] = config_data['learning_rate']
+            changes.append(f"LR: {config_data['learning_rate']}")
+        
+        if 'batch_size' in config_data:
+            self.config.BATCH_SIZE = config_data['batch_size']
+            changes.append(f"Batch: {config_data['batch_size']}")
+        
+        if 'learn_every' in config_data:
+            self.config.LEARN_EVERY = config_data['learn_every']
+            changes.append(f"LearnEvery: {config_data['learn_every']}")
+        
+        if 'gradient_steps' in config_data:
+            self.config.GRADIENT_STEPS = config_data['gradient_steps']
+            changes.append(f"GradSteps: {config_data['gradient_steps']}")
+        
+        if self.web_dashboard and changes:
+            self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action")
+    
+    def _set_performance_mode(self, mode: str) -> None:
+        """Set performance mode preset."""
+        if mode == 'normal':
+            self.config.LEARN_EVERY = 1
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 1
+        elif mode == 'fast':
+            self.config.LEARN_EVERY = 4
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 1
+        elif mode == 'turbo':
+            self.config.LEARN_EVERY = 8
+            self.config.BATCH_SIZE = 128
+            self.config.GRADIENT_STEPS = 2
+        
+        if self.web_dashboard:
+            self.web_dashboard.publisher.set_performance_mode(mode)
+            self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
+            self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
+            self.web_dashboard.log(
+                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE})",
+                "action"
+            )
+        print(f"⚡ Performance mode: {mode.upper()}")
     
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
         config = self.config
         
+        # Calculate starting episode (may be resuming from loaded model)
+        start_episode = self.current_episode
+        
         print("\n" + "=" * 70)
         print("🚀 HEADLESS TRAINING - Maximum Performance Mode")
+        if self.web_dashboard:
+            print("🌐 Web dashboard enabled")
         print("=" * 70)
-        print(f"   Episodes:        {config.MAX_EPISODES}")
+        print(f"   Episodes:        {start_episode} → {config.MAX_EPISODES}")
         print(f"   Device:          {config.DEVICE}")
         print(f"   Batch size:      {config.BATCH_SIZE}")
         print(f"   Learn every:     {config.LEARN_EVERY} steps")
         print(f"   Gradient steps:  {config.GRADIENT_STEPS}")
         print(f"   torch.compile:   {config.USE_TORCH_COMPILE}")
+        if self.best_score > 0:
+            print(f"   Resumed best:    {self.best_score}")
         print("=" * 70 + "\n")
         
-        # Training state
-        self.scores: list[int] = []
-        self.total_steps = 0
+        # Training timing
         self.training_start_time = time.time()
         last_report_time = self.training_start_time
         steps_since_report = 0
-        self.best_score = 0
-        self.current_episode = 0
         
-        for episode in range(config.MAX_EPISODES):
+        for episode in range(start_episode, config.MAX_EPISODES):
             self.current_episode = episode
+            
+            # Handle pause (only if web dashboard is active)
+            while self.paused:
+                time.sleep(0.1)
+            
             state = self.game.reset()
             episode_reward = 0.0
             episode_steps = 0
             done = False
             
             while not done:
+                # Handle pause during episode
+                while self.paused:
+                    time.sleep(0.1)
+                
                 # Select action
                 action = self.agent.select_action(state, training=True)
                 
@@ -1449,14 +1669,38 @@ class HeadlessTrainer:
             self.agent.decay_epsilon()
             self.scores.append(info['score'])
             
-            # Time-based progress reporting
+            # Track wins (all bricks cleared)
+            won = info.get('won', False)
+            self.wins.append(won)
+            
+            # Calculate bricks broken
+            initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
+            bricks_broken = initial_bricks - info.get('bricks_remaining', initial_bricks)
+            
+            # Update web dashboard metrics
+            if self.web_dashboard:
+                avg_loss = self.agent.get_average_loss(100)
+                self.web_dashboard.emit_metrics(
+                    episode=episode,
+                    score=info['score'],
+                    epsilon=self.agent.epsilon,
+                    loss=avg_loss,
+                    total_steps=self.total_steps,
+                    won=won,
+                    reward=episode_reward,
+                    memory_size=len(self.agent.memory),
+                    bricks_broken=bricks_broken,
+                    episode_length=episode_steps
+                )
+            
+            # Time-based progress reporting (terminal)
             current_time = time.time()
             elapsed_since_report = current_time - last_report_time
             
             if elapsed_since_report >= config.REPORT_INTERVAL_SECONDS or episode % config.LOG_EVERY == 0:
                 elapsed_total = current_time - self.training_start_time
                 steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
-                eps_per_hour = episode / elapsed_total * 3600 if elapsed_total > 0 else 0
+                eps_per_hour = (episode - start_episode) / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 
                 print(f"Ep {episode:5d} | "
@@ -1473,6 +1717,8 @@ class HeadlessTrainer:
             if info['score'] > self.best_score:
                 self.best_score = info['score']
                 self._save_model("breakout_best.pth", save_reason="best", quiet=True)
+                if self.web_dashboard:
+                    self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
             
             if episode % config.SAVE_EVERY == 0 and episode > 0:
                 self._save_model(f"breakout_ep{episode}.pth", save_reason="periodic")
@@ -1485,13 +1731,18 @@ class HeadlessTrainer:
         print("\n" + "=" * 70)
         print("✅ TRAINING COMPLETE!")
         print("=" * 70)
-        print(f"   Total episodes:   {config.MAX_EPISODES}")
+        print(f"   Total episodes:   {config.MAX_EPISODES - start_episode}")
         print(f"   Total steps:      {self.total_steps:,}")
         print(f"   Total time:       {total_time/60:.1f} minutes")
         print(f"   Avg steps/sec:    {self.total_steps/total_time:,.0f}")
         print(f"   Best score:       {self.best_score}")
         print(f"   Final avg score:  {np.mean(self.scores[-100:]):.1f}")
+        win_rate = sum(self.wins[-100:]) / len(self.wins[-100:]) if self.wins else 0
+        print(f"   Win rate (100):   {win_rate*100:.1f}%")
         print("=" * 70)
+        
+        if self.web_dashboard:
+            self.web_dashboard.log("✅ Training complete!", "success")
     
     def _save_model(
         self,
@@ -1508,6 +1759,7 @@ class HeadlessTrainer:
         
         # Calculate metrics for metadata
         avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
+        win_rate = sum(self.wins[-100:]) / len(self.wins[-100:]) if self.wins else 0.0
         
         result = self.agent.save(
             filepath=filepath,
@@ -1515,10 +1767,21 @@ class HeadlessTrainer:
             episode=self.current_episode,
             best_score=self.best_score,
             avg_score_last_100=float(avg_score),
-            win_rate=0.0,  # Not tracked in headless mode
+            win_rate=win_rate,
             training_start_time=self.training_start_time,
             quiet=quiet
         )
+        
+        # Notify web dashboard about save
+        if result is not None and self.web_dashboard:
+            self.web_dashboard.publisher.record_save(
+                filename=filename,
+                reason=save_reason,
+                episode=self.current_episode,
+                best_score=self.best_score
+            )
+            if not quiet:
+                self.web_dashboard.log(f"💾 Saved: {filename} ({save_reason})", "success")
         
         return result is not None
 
@@ -1533,6 +1796,7 @@ Examples:
     python main.py                           # Train with visualization
     python main.py --headless                # Headless training (no pygame)
     python main.py --headless --turbo        # TURBO: ~4x faster training
+    python main.py --headless --turbo --web  # TURBO + web dashboard (~5000 steps/sec!)
     python main.py --headless --learn-every 4 --batch-size 256  # Custom tuning
     python main.py --play --model best.pth   # Watch trained agent play
     python main.py --human                   # Play the game yourself
