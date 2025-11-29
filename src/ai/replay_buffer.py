@@ -478,16 +478,18 @@ class NStepReplayBuffer(ReplayBuffer):
             state, action, _, _, _ = self._n_step_buffer[i]
 
             # Compute discounted N-step return from position i
+            # Track the actual final index (where we stopped, either at N steps or early termination)
             n_step_reward = 0.0
-            for j in range(i, n):
+            actual_final_idx = i  # Track where we actually end up
+            for j in range(i, min(i + self.n_steps, n)):
                 _, _, r, _, d = self._n_step_buffer[j]
                 n_step_reward += (self.gamma ** (j - i)) * r
+                actual_final_idx = j  # Update to current position
                 if d:
-                    break
+                    break  # Stop at terminal state
 
-            # The N-step next state is the final state in the trajectory
-            final_idx = min(i + self.n_steps - 1, n - 1)
-            _, _, _, n_step_next_state, n_step_done = self._n_step_buffer[final_idx]
+            # Use the actual final index to get the correct next state and done flag
+            _, _, _, n_step_next_state, n_step_done = self._n_step_buffer[actual_final_idx]
 
             # Store the N-step experience in the base buffer
             super().push(state, action, n_step_reward, n_step_next_state, n_step_done)

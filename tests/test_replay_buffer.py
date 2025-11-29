@@ -16,7 +16,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ai.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from src.ai.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, NStepReplayBuffer
 
 
 @pytest.fixture
@@ -370,6 +370,148 @@ class TestPrioritizedReplayBuffer:
         per_buffer.update_priorities(indices, td_errors)
         
         assert per_buffer.max_priority > initial_max
+
+
+class TestNStepReplayBuffer:
+    """Test N-step replay buffer."""
+    
+    @pytest.fixture
+    def n_step_buffer(self, state_size):
+        """Create an N-step replay buffer with n=3."""
+        return NStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.99
+        )
+    
+    def test_n_step_creates_successfully(self):
+        """N-step buffer should initialize without errors."""
+        buffer = NStepReplayBuffer(capacity=100, n_steps=3, gamma=0.99)
+        assert buffer is not None
+        assert buffer.n_steps == 3
+        assert buffer.gamma == 0.99
+    
+    def test_n_step_reward_accumulation(self, state_size):
+        """N-step buffer should correctly accumulate discounted rewards."""
+        buffer = NStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.5  # Simple gamma for easy calculation
+        )
+        
+        # Push 3 experiences with rewards 1, 2, 4 (no early termination)
+        for i, reward in enumerate([1.0, 2.0, 4.0]):
+            state = np.ones(state_size, dtype=np.float32) * i
+            next_state = np.ones(state_size, dtype=np.float32) * (i + 1)
+            done = (i == 2)  # Last one is terminal
+            buffer.push(state, 0, reward, next_state, done)
+        
+        # Expected accumulated reward for first state:
+        # 1.0 + 0.5*2.0 + 0.25*4.0 = 1.0 + 1.0 + 1.0 = 3.0
+        assert buffer.rewards[0] == 3.0
+    
+    def test_n_step_early_termination_uses_correct_state(self, state_size):
+        """When episode terminates early, buffer should use correct terminal state and done flag.
+        
+        This tests the fix for the bug where final_idx was calculated independently
+        of early termination, causing wrong next_state and done flag to be stored.
+        """
+        buffer = NStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=5,  # 5 steps but we'll terminate at step 2
+            gamma=0.9
+        )
+        
+        # Push experience 0: state=0, next_state=1, done=False
+        state0 = np.zeros(state_size, dtype=np.float32)
+        next_state0 = np.ones(state_size, dtype=np.float32)
+        buffer.push(state0, 0, 1.0, next_state0, False)
+        
+        # Push experience 1: state=1, next_state=2, done=True (TERMINAL)
+        state1 = np.ones(state_size, dtype=np.float32)
+        next_state1 = np.ones(state_size, dtype=np.float32) * 2  # Terminal state
+        buffer.push(state1, 1, 2.0, next_state1, True)  # Episode ends here!
+        
+        # Now the buffer should have been flushed with correct terminal info
+        # For the first experience (state0), since done=True at step 1,
+        # the next_state should be next_state1 (the terminal state) and done=True
+        
+        # Check that done flag is correctly set to True (episode terminated early)
+        assert buffer.dones[0] == 1.0, "First experience should have done=True due to early termination"
+        
+        # Check that next_state is the correct terminal state (next_state1, all 2s)
+        assert np.allclose(buffer.next_states[0], next_state1), \
+            "First experience should have next_state from terminal step, not final_idx"
+        
+        # The accumulated reward should be: 1.0 + 0.9 * 2.0 = 2.8
+        expected_reward = 1.0 + 0.9 * 2.0
+        assert np.isclose(buffer.rewards[0], expected_reward), \
+            f"Expected reward {expected_reward}, got {buffer.rewards[0]}"
+    
+    def test_n_step_no_early_termination(self, state_size):
+        """When no early termination, buffer should use N-th state correctly."""
+        buffer = NStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.9
+        )
+        
+        # Push 4 experiences without early termination until the end
+        states = []
+        for i in range(4):
+            state = np.ones(state_size, dtype=np.float32) * i
+            next_state = np.ones(state_size, dtype=np.float32) * (i + 1)
+            done = (i == 3)  # Only last one terminates
+            states.append((state, next_state))
+            buffer.push(state, i, float(i + 1), next_state, done)
+        
+        # For the first experience (state=0), with n_steps=3:
+        # It should look ahead 3 steps, so next_state should be from index 2 (0+3-1=2)
+        # next_state at index 2 is np.ones * 3
+        expected_next_state = np.ones(state_size, dtype=np.float32) * 3
+        assert np.allclose(buffer.next_states[0], expected_next_state), \
+            "Without early termination, should use N-th step's next_state"
+    
+    def test_n_step_multiple_episodes(self, state_size):
+        """Buffer should handle multiple episodes correctly."""
+        buffer = NStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.99
+        )
+        
+        # Episode 1: 2 steps then done
+        for i in range(2):
+            state = np.zeros(state_size, dtype=np.float32)
+            next_state = np.ones(state_size, dtype=np.float32)
+            done = (i == 1)
+            buffer.push(state, 0, 1.0, next_state, done)
+        
+        # Episode 2: 2 steps then done
+        for i in range(2):
+            state = np.ones(state_size, dtype=np.float32) * 5
+            next_state = np.ones(state_size, dtype=np.float32) * 6
+            done = (i == 1)
+            buffer.push(state, 0, 2.0, next_state, done)
+        
+        # Should have 4 experiences total (2 from each episode)
+        assert len(buffer) == 4
+    
+    def test_n_step_clear(self, n_step_buffer, sample_experience):
+        """Clear should empty both main buffer and n-step buffer."""
+        for _ in range(10):
+            state, action, reward, next_state, done = sample_experience()
+            n_step_buffer.push(state, action, reward, next_state, done)
+        
+        n_step_buffer.clear()
+        
+        assert len(n_step_buffer) == 0
+        assert len(n_step_buffer._n_step_buffer) == 0
 
 
 if __name__ == "__main__":
