@@ -185,53 +185,65 @@
                 <!-- Extended Training Info -->
                 <div class="info-card">
                     <div class="card-header">
-                        <h3>⚙️ Training Stats</h3>
+                        <h3>📊 Training Stats</h3>
+                        <span class="info-value status-badge training" id="info-status">Training</span>
                     </div>
                     <div class="info-grid">
-                        <div class="info-row" data-tooltip="How wrong the AI's predictions were. Lower = better. The neural network learns by minimizing this error between predicted and actual rewards.">
-                            <span class="info-label">Loss</span>
-                            <span class="info-value" id="info-loss">0.0000</span>
-                        </div>
-                        <div class="info-row" data-tooltip="Total individual actions taken across all episodes. Each paddle movement or 'stay' decision is one step.">
-                            <span class="info-label">Total Steps</span>
-                            <span class="info-value" id="info-steps">0</span>
-                        </div>
-                        <div class="info-row" data-tooltip="Episodes completed per second. Higher speeds = faster training.">
-                            <span class="info-label">Ep/s</span>
-                            <span class="info-value" id="info-eps">0.0</span>
-                        </div>
-                        <div class="info-row highlight-metric" data-tooltip="Training steps per second - the key performance metric. Higher = faster learning. Affected by learn_every setting and batch size.">
-                            <span class="info-label">⚡ Steps/s</span>
-                            <span class="info-value" id="info-steps-sec">0</span>
-                        </div>
-                        <div class="info-row" data-tooltip="Estimated time remaining. Shows '∞ Unlimited' when training indefinitely (use --episodes to set a target).">
-                            <span class="info-label">⏱️ ETA</span>
-                            <span class="info-value" id="info-eta">∞ Unlimited</span>
-                        </div>
-                        <div class="info-row memory-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
-                            <span class="info-label">Memory</span>
-                            <div class="memory-display">
-                                <span class="info-value" id="info-memory">0 / 100k</span>
-                                <div class="memory-bar">
-                                    <div class="memory-bar-fill" id="memory-bar-fill"></div>
-                                </div>
+                        <!-- Performance Section -->
+                        <div class="info-section">
+                            <div class="info-row highlight-metric" data-tooltip="Training steps per second - the key performance metric. Higher = faster learning. Affected by learn_every setting and batch size.">
+                                <span class="info-label">⚡ Steps/s</span>
+                                <span class="info-value" id="info-steps-sec">0</span>
+                            </div>
+                            <div class="info-row" data-tooltip="Episodes completed per second. Higher speeds = faster training.">
+                                <span class="info-label">📈 Ep/s</span>
+                                <span class="info-value" id="info-eps">0.0</span>
+                            </div>
+                            <div class="info-row" data-tooltip="Estimated time remaining. Shows '∞ Unlimited' when training indefinitely (use --episodes to set a target).">
+                                <span class="info-label">⏱️ ETA</span>
+                                <span class="info-value" id="info-eta">∞ Unlimited</span>
                             </div>
                         </div>
-                        <div class="info-row" data-tooltip="Average predicted future reward. Higher Q-values mean the AI expects better outcomes. Should increase during successful training as the AI learns which states lead to high scores.">
-                            <span class="info-label">Avg Q-Value</span>
-                            <span class="info-value" id="info-qvalue">0.00</span>
+                        
+                        <!-- Learning Metrics -->
+                        <div class="info-section">
+                            <div class="info-row" data-tooltip="How wrong the AI's predictions were. Lower = better. The neural network learns by minimizing this error between predicted and actual rewards.">
+                                <span class="info-label">Loss</span>
+                                <span class="info-value" id="info-loss">0.0000</span>
+                            </div>
+                            <div class="info-row" data-tooltip="Average predicted future reward. Higher Q-values mean the AI expects better outcomes. Should increase during successful training as the AI learns which states lead to high scores.">
+                                <span class="info-label">Avg Q-Value</span>
+                                <span class="info-value" id="info-qvalue">0.00</span>
+                            </div>
+                            <div class="info-row" data-tooltip="Total individual actions taken across all episodes. Each paddle movement or 'stay' decision is one step.">
+                                <span class="info-label">Total Steps</span>
+                                <span class="info-value" id="info-steps">0</span>
+                            </div>
                         </div>
-                        <div class="info-row" data-tooltip="How many times the 'target network' was synchronized with the main network. The target network provides stable learning targets and updates periodically to prevent oscillation.">
-                            <span class="info-label">Target Updates</span>
-                            <span class="info-value" id="info-target">0</span>
+                        
+                        <!-- Network State -->
+                        <div class="info-section">
+                            <div class="info-row" data-tooltip="How many times the 'target network' was synchronized with the main network. The target network provides stable learning targets and updates periodically to prevent oscillation.">
+                                <span class="info-label">Target Updates</span>
+                                <span class="info-value" id="info-target">0</span>
+                            </div>
+                            <div class="info-row" data-tooltip="Count of random actions (explore) vs. learned actions (exploit). Early training has more exploration; later training shifts toward exploitation.">
+                                <span class="info-label">Explore / Exploit</span>
+                                <span class="info-value" id="info-actions">0 / 0</span>
+                            </div>
                         </div>
-                        <div class="info-row" data-tooltip="Count of random actions (explore) vs. learned actions (exploit). Early training has more exploration; later training shifts toward exploitation.">
-                            <span class="info-label">Explore/Exploit</span>
-                            <span class="info-value" id="info-actions">0 / 0</span>
-                        </div>
-                        <div class="info-row status-row">
-                            <span class="info-label">Status</span>
-                            <span class="info-value status-badge training" id="info-status">Training</span>
+                        
+                        <!-- Memory -->
+                        <div class="info-section memory-section">
+                            <div class="info-row memory-row" data-tooltip="Replay buffer storing past experiences (state, action, reward, next_state). The AI samples random batches from memory to learn from, preventing forgetting old lessons.">
+                                <span class="info-label">🧠 Replay Memory</span>
+                                <div class="memory-display">
+                                    <span class="info-value" id="info-memory">0 / 100k</span>
+                                    <div class="memory-bar">
+                                        <div class="memory-bar-fill" id="memory-bar-fill"></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
