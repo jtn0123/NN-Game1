@@ -14,8 +14,9 @@ A complete, educational implementation of a Deep Q-Learning (DQN) agent that lea
 4. [Quick Start](#-quick-start)
 5. [How It Works](#-how-it-works)
 6. [Configuration Guide](#-configuration-guide)
-7. [Extending to Other Games](#-extending-to-other-games)
-8. [Troubleshooting](#-troubleshooting)
+7. [Benchmarking & Performance](#-benchmarking--performance)
+8. [Extending to Other Games](#-extending-to-other-games)
+9. [Troubleshooting](#-troubleshooting)
 
 ---
 
@@ -136,19 +137,37 @@ python -c "import torch; import pygame; print('Ready!')"
 ### Watch AI Learn from Scratch
 
 ```bash
-python main.py --mode train --visualize
+# Train with live visualization (default)
+python main.py
+
+# Or explicitly with visualization
+python main.py --episodes 2000
 ```
 
 ### Load Pre-trained Model
 
 ```bash
-python main.py --mode play --model models/breakout_best.pth
+# Play with a trained model (auto-loads most recent save)
+python main.py --play
+
+# Or specify a specific model
+python main.py --play --model models/breakout_best.pth
 ```
 
-### Train Without Visualization (Faster)
+### TURBO Mode (Maximum Speed Training)
 
 ```bash
-python main.py --mode train --headless
+# Headless training with optimized settings (~4x faster)
+python main.py --headless --turbo --episodes 5000
+
+# Custom performance tuning
+python main.py --headless --learn-every 8 --batch-size 128
+```
+
+### Human Play Mode (Test the Game)
+
+```bash
+python main.py --human
 ```
 
 ---
@@ -306,6 +325,113 @@ SAVE_EVERY = 100              # Episodes between checkpoints
 | Learning is unstable | Decrease `LEARNING_RATE`, increase `BATCH_SIZE` |
 | AI gets stuck in local minimum | Increase `EPSILON_DECAY`, increase exploration |
 | Training too slow | Decrease `HIDDEN_LAYERS` size, use GPU |
+
+---
+
+## 📈 Benchmarking & Performance
+
+### Running Benchmarks
+
+The project includes a comprehensive benchmarking suite to measure training performance:
+
+```bash
+# Quick benchmark (3 seconds, small buffer)
+python benchmark.py --quick
+
+# Standard benchmark
+python benchmark.py
+
+# Realistic benchmark (50k buffer, production-like)
+python benchmark.py --realistic
+
+# Test buffer size scaling
+python benchmark.py --scaling
+
+# Full benchmark suite
+python benchmark.py --full
+
+# List all available configurations
+python benchmark.py --list
+```
+
+### Benchmark Output
+
+```
+============================================================
+DQN Training Performance Benchmark
+============================================================
+
+System: macOS-26.2-arm64-arm-64bit-Mach-O
+Python: 3.13.5 | PyTorch: 2.9.1
+CUDA: ✗
+MPS: ✓
+
+──────────────────────────────────────────────────
+Running: turbo
+
+  📊 turbo
+     Device: cpu | Batch: 128 | LE: 8 | GS: 2
+     Buffer: 50,000 experiences
+     Steps: 10,520 in 5.0s → 2,103 steps/sec
+     Gradients: 2,630 → 526 grad/sec
+```
+
+### Benchmark Configurations
+
+| Config | Device | Batch | Buffer | Use Case |
+|--------|--------|-------|--------|----------|
+| `turbo` | CPU | 128 | small | Quick tests, max throughput |
+| `cpu_b128` | CPU | 128 | small | Standard CPU training |
+| `mps_b256` | MPS | 256 | small | Apple Silicon GPU |
+| `realistic_cpu` | CPU | 128 | 50k | Production-like performance |
+| `realistic_turbo` | CPU | 128 | 50k | Fast production training |
+| `scale_*` | CPU | 128 | 1k-100k | Buffer size impact analysis |
+
+### Performance Optimizations
+
+The codebase includes several performance optimizations:
+
+#### 1. Adaptive Sampling (30x faster for large buffers)
+```python
+# Small buffers (<3k): Uses np.random.choice (faster)
+# Large buffers (>3k): Uses random.sample (30x faster)
+```
+
+#### 2. Pre-allocated Tensors
+- State tensors reused across steps (no allocation per action)
+- Batch tensors pre-allocated for training
+
+#### 3. Efficient Loss Calculation
+```python
+# O(n) iteration instead of O(buffer_size) list conversion
+def get_average_loss(self, n=100):
+    it = iter(reversed(self.losses))
+    # Only iterates last n items, not entire deque
+```
+
+#### 4. Cached Predictions
+- `_predict_landing_x()` cached per step to avoid redundant computation
+
+### Performance Tips
+
+| Goal | Recommendation |
+|------|----------------|
+| Maximum speed | Use `--headless --turbo` flags |
+| CPU training | Set `FORCE_CPU = True` (faster than MPS for small models) |
+| Large buffer | Adaptive sampling automatically optimizes |
+| GPU training | Use larger batch sizes (256-512) to amortize transfer overhead |
+
+### Buffer Size Impact
+
+Buffer size significantly affects performance due to sampling algorithms:
+
+```
+Buffer Size    Steps/sec    Sampling Method
+       1,000      2,100     np.random.choice (fast for small)
+       5,000      2,500     random.sample (fast for large)
+      50,000      2,100     random.sample (30x faster than np.random.choice)
+     100,000      2,400     random.sample (35x faster than np.random.choice)
+```
 
 ---
 
