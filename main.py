@@ -1551,6 +1551,9 @@ class HeadlessTrainer:
         self.target_updates = 0
         self.last_target_update_step = 0
         
+        # Web dashboard (initialize early so _load_model can use it)
+        self.web_dashboard: Optional[Any] = None
+        
         # Auto-load most recent model if no explicit model specified
         initial_model_path = self._resolve_model_path(
             args.model,
@@ -1560,8 +1563,7 @@ class HeadlessTrainer:
         if initial_model_path:
             self._load_model(initial_model_path)
         
-        # Web dashboard (if enabled)
-        self.web_dashboard: Optional[Any] = None
+        # Setup web dashboard if enabled
         self.paused = False
         if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(config, port=args.port)
@@ -2600,11 +2602,12 @@ def list_models(model_dir: str = 'models') -> None:
 def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
     """Restart the current process with a different game.
     
-    This uses os.execv to replace the current process with a new one
-    running the specified game. All other arguments are preserved.
+    This spawns a new process with the specified game and exits the current one.
+    Using subprocess + exit instead of os.execv ensures proper port release.
     """
     import subprocess
     import sys
+    import time
     
     # Build new command preserving current args
     new_args = [sys.executable, sys.argv[0]]
@@ -2627,11 +2630,12 @@ def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
     print(f"🚀 Command: {' '.join(new_args)}\n")
     
     # Small delay so web client can receive the message
-    import time
     time.sleep(0.5)
     
-    # Replace current process
-    os.execv(sys.executable, new_args)
+    # Start new process and exit (releases port properly)
+    # Don't use start_new_session so Ctrl+C still works on the child
+    subprocess.Popen(new_args)
+    sys.exit(0)
 
 
 def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
@@ -2718,8 +2722,21 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
         
         print(f"🚀 Launching: {' '.join(new_args)}\n")
         
-        # Replace current process with new one
-        os.execv(sys.executable, new_args)
+        # Stop the dashboard publisher
+        try:
+            dashboard.stop()
+        except Exception:
+            pass
+        
+        # Use subprocess + exit instead of os.execv to cleanly release the port
+        # The daemon thread will die when we exit, releasing the socket
+        import time
+        time.sleep(0.5)  # Let client receive final message
+        
+        # Start new process and exit (releases port properly)
+        # Don't use start_new_session so Ctrl+C still works on the child
+        subprocess.Popen(new_args)
+        sys.exit(0)
 
 
 def main():
