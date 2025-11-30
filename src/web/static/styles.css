@@ -2624,9 +2624,518 @@ body {
     .nn-canvas-container {
         height: 280px;
     }
-    
+
     .nn-viz-legend {
         flex-wrap: wrap;
         gap: 12px;
+    }
+}
+
+/* ============================================================
+   PHASE 2: NEURON INSPECTION PANEL
+   ============================================================ */
+
+.neuron-inspection-panel {
+    position: fixed;
+    top: 50%;
+    right: 20px;
+    transform: translateY(-50%);
+    width: 320px;
+    max-height: 80vh;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-lg);
+    z-index: 500;
+    overflow-y: auto;
+    animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateY(-50%) translateX(40px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+}
+
+.neuron-inspection-panel[style*="display: none"] {
+    animation: slideOutRight 0.3s ease-out forwards;
+}
+
+@keyframes slideOutRight {
+    from {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-50%) translateX(40px);
+    }
+}
+
+/* Neuron Panel Header */
+.neuron-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background: linear-gradient(180deg, var(--bg-card) 0%, rgba(24, 27, 38, 0.95) 100%);
+    z-index: 501;
+}
+
+.neuron-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.neuron-header-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.neuron-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: all 0.2s;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.neuron-close-btn:hover {
+    color: var(--text-primary);
+    background: rgba(100, 181, 246, 0.1);
+}
+
+.neuron-close-btn:active {
+    transform: scale(0.95);
+}
+
+/* Neuron Panel Content */
+.neuron-content {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.neuron-stat-group {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--border-radius-sm);
+    padding: 12px;
+    border: 1px solid rgba(100, 181, 246, 0.1);
+}
+
+.neuron-stat-group-title {
+    font-size: 0.75rem;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: block;
+}
+
+.neuron-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 4px 0;
+    font-size: 0.85rem;
+}
+
+.neuron-stat-row:last-child {
+    margin-bottom: 0;
+}
+
+.neuron-stat-label {
+    color: var(--text-secondary);
+}
+
+.neuron-stat-value {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-weight: 500;
+}
+
+/* Activation Bar */
+.activation-bar-container {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(100, 181, 246, 0.15);
+}
+
+.activation-bar-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.activation-bar {
+    width: 100%;
+    height: 12px;
+    background: rgba(40, 40, 55, 0.8);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.activation-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+        var(--accent-primary) 0%,
+        var(--accent-cyan) 100%);
+    border-radius: 6px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 8px rgba(100, 181, 246, 0.4);
+    position: relative;
+}
+
+.activation-bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent);
+    border-radius: 6px 6px 0 0;
+}
+
+/* Weight Stats */
+.weight-stats-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.weight-stat {
+    background: rgba(100, 181, 246, 0.08);
+    border: 1px solid rgba(100, 181, 246, 0.2);
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+}
+
+.weight-stat-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 4px;
+}
+
+.weight-stat-value {
+    font-size: 0.85rem;
+    color: var(--accent-primary);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+/* Sparkline Container */
+.sparkline-container {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--border-radius-sm);
+    padding: 10px;
+    border: 1px solid rgba(100, 181, 246, 0.1);
+    margin-top: 8px;
+}
+
+.sparkline-title {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sparkline-canvas {
+    width: 100%;
+    height: 60px;
+    display: block;
+}
+
+/* Q-Value Contributions */
+.q-value-section {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--border-radius-sm);
+    padding: 12px;
+    border: 1px solid rgba(100, 181, 246, 0.1);
+}
+
+.q-value-section-title {
+    font-size: 0.75rem;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: block;
+}
+
+.q-value-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.q-value-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    background: rgba(100, 181, 246, 0.08);
+    border-radius: 6px;
+    border: 1px solid rgba(100, 181, 246, 0.15);
+    font-size: 0.85rem;
+}
+
+.q-value-action {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.q-value-contribution {
+    color: var(--accent-primary);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+.q-value-item.left {
+    border-left: 3px solid #ff6b9d;
+}
+
+.q-value-item.stay {
+    border-left: 3px solid #ffc107;
+}
+
+.q-value-item.right {
+    border-left: 3px solid #00bcd4;
+}
+
+/* Scrollbar styling for panel */
+.neuron-inspection-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.neuron-inspection-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.neuron-inspection-panel::-webkit-scrollbar-thumb {
+    background: rgba(100, 181, 246, 0.2);
+    border-radius: 3px;
+}
+
+.neuron-inspection-panel::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 181, 246, 0.4);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1400px) {
+    .neuron-inspection-panel {
+        width: 300px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .neuron-inspection-panel {
+        width: 280px;
+        right: 12px;
+        top: 40%;
+        max-height: 60vh;
+    }
+}
+
+@media (max-width: 768px) {
+    .neuron-inspection-panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        right: auto;
+        transform: translate(-50%, -50%);
+        width: 90%;
+        max-width: 320px;
+        max-height: 70vh;
+    }
+}
+
+/* ============================================================
+   PHASE 2: LAYER ANALYSIS PANEL
+   ============================================================ */
+
+.layer-analysis-panel {
+    position: fixed;
+    top: 50%;
+    left: 20px;
+    transform: translateY(-50%);
+    width: 320px;
+    max-height: 80vh;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-lg);
+    z-index: 500;
+    overflow-y: auto;
+    animation: slideInLeft 0.3s ease-out;
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateY(-50%) translateX(-40px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+}
+
+.layer-analysis-panel[style*="display: none"] {
+    animation: slideOutLeft 0.3s ease-out forwards;
+}
+
+@keyframes slideOutLeft {
+    from {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-50%) translateX(-40px);
+    }
+}
+
+/* Layer Panel Header */
+.layer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background: linear-gradient(180deg, var(--bg-card) 0%, rgba(24, 27, 38, 0.95) 100%);
+    z-index: 501;
+}
+
+.layer-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+/* Layer Panel Content */
+.layer-content {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.layer-stat-group {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--border-radius-sm);
+    padding: 12px;
+    border: 1px solid rgba(100, 181, 246, 0.1);
+}
+
+.layer-stat-group-title {
+    font-size: 0.75rem;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: block;
+}
+
+.layer-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 4px 0;
+    font-size: 0.85rem;
+}
+
+.layer-stat-row:last-child {
+    margin-bottom: 0;
+}
+
+.layer-stat-label {
+    color: var(--text-secondary);
+}
+
+.layer-stat-value {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-weight: 500;
+}
+
+/* Scrollbar styling for layer panel */
+.layer-analysis-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.layer-analysis-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.layer-analysis-panel::-webkit-scrollbar-thumb {
+    background: rgba(100, 181, 246, 0.2);
+    border-radius: 3px;
+}
+
+.layer-analysis-panel::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 181, 246, 0.4);
+}
+
+/* Responsive adjustments for layer panel */
+@media (max-width: 1400px) {
+    .layer-analysis-panel {
+        width: 300px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .layer-analysis-panel {
+        width: 280px;
+        left: 12px;
+        top: 40%;
+        max-height: 60vh;
+    }
+}
+
+@media (max-width: 768px) {
+    .layer-analysis-panel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        right: auto;
+        transform: translate(-50%, -50%);
+        width: 90%;
+        max-width: 320px;
+        max-height: 70vh;
     }
 }

@@ -3054,9 +3054,12 @@ class NeuralNetworkVisualizer {
         
         // Start animation loop
         this.startAnimation();
-        
+
         // Handle resize
         this.setupResize();
+
+        // Phase 2: Setup mouse handling for neuron inspection
+        this.setupMouseHandling();
     }
     
     setupResize() {
@@ -3073,12 +3076,343 @@ class NeuralNetworkVisualizer {
                 this.height = rect.height;
             }
         });
-        
+
         if (this.canvas.parentElement) {
             resizeObserver.observe(this.canvas.parentElement);
         }
     }
-    
+
+    // ===== Phase 2: Neuron Inspection =====
+
+    setupMouseHandling() {
+        // Phase 2: Set up click handlers for neuron and layer inspection
+        if (!this.canvas) return;
+
+        this.canvas.addEventListener('click', (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check if click is on a layer label
+            const layerClicked = this.findLayerLabelAtPosition(x, y);
+            if (layerClicked !== null) {
+                this.selectLayer(layerClicked);
+                return;
+            }
+
+            // Check if click is on a neuron
+            const neuronClicked = this.findNeuronAtPosition(x, y);
+            if (neuronClicked) {
+                this.selectNeuron(neuronClicked.layerIdx, neuronClicked.neuronIdx);
+            }
+        });
+    }
+
+    findNeuronAtPosition(clickX, clickY) {
+        // Phase 2: Find neuron at mouse position
+        if (!this.data || !this.width || !this.height) return null;
+
+        const layerPositions = this.calculateLayerPositions();
+        if (!layerPositions) return null;
+
+        const clickRadius = 12; // Larger than neuron for easier clicking
+
+        for (let layerIdx = 0; layerIdx < layerPositions.length; layerIdx++) {
+            const layer = layerPositions[layerIdx];
+            for (let neuronIdx = 0; neuronIdx < layer.positions.length; neuronIdx++) {
+                const pos = layer.positions[neuronIdx];
+                const dist = Math.sqrt((clickX - pos.x) ** 2 + (clickY - pos.y) ** 2);
+                if (dist < clickRadius) {
+                    return { layerIdx, neuronIdx };
+                }
+            }
+        }
+        return null;
+    }
+
+    selectNeuron(layerIdx, neuronIdx) {
+        // Phase 2: Load and display neuron inspection panel
+        // Fetch neuron details from backend
+        fetch(`/api/neuron/${layerIdx}/${neuronIdx}`)
+            .then(response => response.json())
+            .then(data => {
+                this.displayNeuronInspection(data);
+            })
+            .catch(err => console.error('Failed to load neuron details:', err));
+    }
+
+    displayNeuronInspection(neuronData) {
+        // Phase 2: Display neuron inspection panel
+        const panel = document.getElementById('neuron-inspection-panel');
+        if (!panel) {
+            console.warn('Neuron inspection panel not found');
+            return;
+        }
+
+        // Build HTML for neuron details
+        const html = `
+            <div class="neuron-header">
+                <h3>${neuronData.layer_name} - Neuron #${neuronData.neuron_idx}</h3>
+                <button class="close-btn" onclick="closeNeuronInspection()">×</button>
+            </div>
+
+            <div class="neuron-content">
+                <div class="stat-group">
+                    <h4>Activation</h4>
+                    <div class="stat-value">${neuronData.current_activation.toFixed(4)}</div>
+                    <div class="stat-bar">
+                        <div class="stat-fill" style="width: ${Math.abs(neuronData.current_activation) * 100}%"></div>
+                    </div>
+                </div>
+
+                <div class="stat-group">
+                    <h4>Incoming Weights (from layer ${neuronData.layer_idx - 1})</h4>
+                    ${neuronData.incoming_weight_stats ? `
+                        <div class="weight-stats">
+                            <div>Mean: ${neuronData.incoming_weight_stats.mean?.toFixed(4) || 'N/A'}</div>
+                            <div>Range: [${neuronData.incoming_weight_stats.min?.toFixed(4) || 'N/A'},
+                                         ${neuronData.incoming_weight_stats.max?.toFixed(4) || 'N/A'}]</div>
+                        </div>
+                    ` : '<div>No data</div>'}
+                </div>
+
+                <div class="stat-group">
+                    <h4>Outgoing Weights (to next layer)</h4>
+                    ${neuronData.outgoing_weight_stats ? `
+                        <div class="weight-stats">
+                            <div>Mean: ${neuronData.outgoing_weight_stats.mean?.toFixed(4) || 'N/A'}</div>
+                            <div>Range: [${neuronData.outgoing_weight_stats.min?.toFixed(4) || 'N/A'},
+                                         ${neuronData.outgoing_weight_stats.max?.toFixed(4) || 'N/A'}]</div>
+                        </div>
+                    ` : '<div>No data</div>'}
+                </div>
+
+                <div class="stat-group">
+                    <h4>Q-Value Contributions</h4>
+                    ${Object.entries(neuronData.q_value_contributions || {}).map(([action, contrib]) => `
+                        <div class="q-contrib">
+                            <span>${action}:</span>
+                            <span>${contrib.toFixed(4)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+
+                ${neuronData.activation_history?.length > 0 ? `
+                    <div class="stat-group">
+                        <h4>Recent Activation History (${neuronData.activation_history.length} samples)</h4>
+                        <div class="sparkline-container">
+                            <canvas id="neuron-sparkline" width="300" height="40"></canvas>
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        panel.innerHTML = html;
+        panel.style.display = 'block';
+
+        // Draw sparkline if data available
+        if (neuronData.activation_history && neuronData.activation_history.length > 0) {
+            this.drawSparkline(document.getElementById('neuron-sparkline'), neuronData.activation_history);
+        }
+    }
+
+    drawSparkline(canvas, data) {
+        // Phase 2: Draw activation history sparkline
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        const padding = 5;
+
+        ctx.clearRect(0, 0, width, height);
+
+        if (data.length < 2) {
+            ctx.fillStyle = '#999';
+            ctx.fillText('Insufficient data', 10, height / 2);
+            return;
+        }
+
+        // Find min/max for scaling
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+        const range = max - min || 1;
+
+        // Draw area under curve
+        ctx.fillStyle = 'rgba(100, 150, 255, 0.3)';
+        ctx.beginPath();
+        ctx.moveTo(padding, height - padding);
+
+        for (let i = 0; i < data.length; i++) {
+            const x = padding + (i / (data.length - 1)) * (width - 2 * padding);
+            const y = height - padding - ((data[i] - min) / range) * (height - 2 * padding);
+            if (i === 0) ctx.lineTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+
+        ctx.lineTo(width - padding, height - padding);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw line
+        ctx.strokeStyle = '#4287f5';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+
+        for (let i = 0; i < data.length; i++) {
+            const x = padding + (i / (data.length - 1)) * (width - 2 * padding);
+            const y = height - padding - ((data[i] - min) / range) * (height - 2 * padding);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+
+        ctx.stroke();
+    }
+
+    // ===== Phase 2: Layer Analysis =====
+
+    findLayerLabelAtPosition(clickX, clickY) {
+        // Phase 2: Find layer label at mouse position
+        if (!this.data || !this.data.layer_info) return null;
+
+        const layerPositions = this.calculateLayerPositions();
+        if (!layerPositions) return null;
+
+        const labelY = this.headerHeight + 5;
+        const clickRadius = 20; // Larger click area for labels
+
+        for (let i = 0; i < layerPositions.length; i++) {
+            const layerPos = layerPositions[i];
+            const distX = Math.abs(clickX - layerPos.x);
+            const distY = Math.abs(clickY - labelY);
+
+            // Check if click is within bounds of layer label
+            if (distX < clickRadius && distY < clickRadius) {
+                return i;
+            }
+        }
+        return null;
+    }
+
+    selectLayer(layerIdx) {
+        // Phase 2: Load and display layer analysis panel
+        // Fetch layer analysis from backend
+        fetch(`/api/layer/${layerIdx}`)
+            .then(response => response.json())
+            .then(data => {
+                this.displayLayerAnalysis(data);
+            })
+            .catch(err => console.error('Failed to load layer analysis:', err));
+    }
+
+    displayLayerAnalysis(layerData) {
+        // Phase 2: Display layer analysis panel
+        const panel = document.getElementById('layer-analysis-panel');
+        if (!panel) {
+            console.warn('Layer analysis panel not found');
+            return;
+        }
+
+        // Determine health status based on dead/saturated neurons
+        const deadPercent = layerData.dead_neuron_percent || 0;
+        const saturatedPercent = layerData.saturated_percent || 0;
+        let healthStatus = '✓ Healthy';
+        let healthColor = 'var(--accent-success)';
+
+        if (deadPercent > 10 || saturatedPercent > 50) {
+            healthStatus = '⚠ Warning';
+            healthColor = 'var(--accent-warning)';
+        }
+        if (deadPercent > 30 || saturatedPercent > 80) {
+            healthStatus = '✗ Critical';
+            healthColor = 'var(--accent-danger)';
+        }
+
+        // Build HTML for layer details
+        const html = `
+            <div class="layer-header">
+                <h3>${layerData.layer_name || `Layer ${layerData.layer_idx}`}</h3>
+                <button class="close-btn" onclick="closeLayerAnalysis()">×</button>
+            </div>
+
+            <div class="layer-content">
+                <!-- Health Status -->
+                <div class="layer-stat-group">
+                    <span class="layer-stat-group-title">Network Health</span>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Status:</span>
+                        <span class="layer-stat-value" style="color: ${healthColor}">${healthStatus}</span>
+                    </div>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Neurons:</span>
+                        <span class="layer-stat-value">${layerData.neuron_count || 0}</span>
+                    </div>
+                </div>
+
+                <!-- Activation Statistics -->
+                <div class="layer-stat-group">
+                    <span class="layer-stat-group-title">Activation Stats</span>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Mean:</span>
+                        <span class="layer-stat-value">${(layerData.avg_activation || 0).toFixed(4)}</span>
+                    </div>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Std Dev:</span>
+                        <span class="layer-stat-value">${(layerData.activation_std || 0).toFixed(4)}</span>
+                    </div>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Dead Neurons:</span>
+                        <span class="layer-stat-value" style="color: ${deadPercent > 10 ? 'var(--accent-warning)' : 'inherit'}">
+                            ${layerData.dead_neuron_count || 0} (${deadPercent.toFixed(1)}%)
+                        </span>
+                    </div>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Saturated:</span>
+                        <span class="layer-stat-value" style="color: ${saturatedPercent > 50 ? 'var(--accent-warning)' : 'inherit'}">
+                            ${layerData.saturated_neuron_count || 0} (${saturatedPercent.toFixed(1)}%)
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Weight Statistics -->
+                <div class="layer-stat-group">
+                    <span class="layer-stat-group-title">Weight Distribution</span>
+                    <div class="weight-stats-container">
+                        <div class="weight-stat">
+                            <div class="weight-stat-label">Mean</div>
+                            <div class="weight-stat-value">${(layerData.weight_mean || 0).toFixed(4)}</div>
+                        </div>
+                        <div class="weight-stat">
+                            <div class="weight-stat-label">Std</div>
+                            <div class="weight-stat-value">${(layerData.weight_std || 0).toFixed(4)}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gradient Statistics -->
+                <div class="layer-stat-group">
+                    <span class="layer-stat-group-title">Gradient Flow</span>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Mean Magnitude:</span>
+                        <span class="layer-stat-value">${(layerData.gradient_mean || 0).toFixed(6)}</span>
+                    </div>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Std Dev:</span>
+                        <span class="layer-stat-value">${(layerData.gradient_std || 0).toFixed(6)}</span>
+                    </div>
+                    <div class="layer-stat-row">
+                        <span class="layer-stat-label">Max Magnitude:</span>
+                        <span class="layer-stat-value">${(layerData.gradient_max_magnitude || 0).toFixed(6)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        panel.innerHTML = html;
+        panel.style.display = 'block';
+    }
+
     startAnimation() {
         const animate = (currentTime) => {
             // Phase 1.4: Adaptive render throttling
@@ -3719,11 +4053,30 @@ function updateNNVisualizerRenderRate(stepsPerSec) {
 function toggleNNPanel() {
     const card = document.getElementById('nn-viz-card');
     const icon = document.getElementById('nn-viz-icon');
-    
+
     if (!card) return;
-    
+
     card.classList.toggle('collapsed');
     if (icon) {
         icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
+    }
+}
+
+/**
+ * Phase 2: Close neuron inspection panel
+ */
+function closeNeuronInspection() {
+    const panel = document.getElementById('neuron-inspection-panel');
+    if (panel) {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+    }
+}
+
+function closeLayerAnalysis() {
+    const panel = document.getElementById('layer-analysis-panel');
+    if (panel) {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
     }
 }
