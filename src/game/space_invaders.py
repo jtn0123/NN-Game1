@@ -936,15 +936,20 @@ class SpaceInvaders(BaseGame):
         if self._shoot_cooldown > 0:
             self._shoot_cooldown -= 1
         
-        # Handle action
+        # Handle action with anti-passive rewards
         if action == 0:
             self.ship.move(-1, self.width)
+        elif action == 1:
+            # Penalty for doing nothing - discourages passive play
+            reward += self.config.SI_REWARD_STAY
         elif action == 2:
             self.ship.move(1, self.width)
         elif action == 3:
             if self._shoot_cooldown == 0 and len(self.player_bullets) < self._max_player_bullets:
                 self._fire_player_bullet()
                 self._shoot_cooldown = self._shoot_cooldown_max
+                # Reward for shooting - encourages aggression
+                reward += self.config.SI_REWARD_SHOOT
         
         # Update game objects
         self._update_bullets()

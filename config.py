@@ -119,10 +119,12 @@ class Config:
     SI_REWARD_UFO_HIT: float = 5.0  # UFO bonus
     SI_REWARD_PLAYER_DEATH: float = -2.5  # Death penalty (3 lives, so moderate penalty)
     SI_REWARD_LEVEL_CLEAR: float = 0.0  # Removed - score-based rewards only
-    # Time penalty: small negative reward per step to discourage defensive play
-    # This encourages aggressive alien-killing rather than just dodging forever
-    # -0.001 means ~5 penalty over 5000 steps (balanced against alien kills)
-    SI_REWARD_STEP: float = -0.001
+    
+    # Anti-passive rewards - CRITICAL for learning aggressive play
+    # Without these, model learns to stand still (death penalty >> step penalty)
+    SI_REWARD_STEP: float = -0.01  # 10x stronger time penalty (was -0.001)
+    SI_REWARD_SHOOT: float = 0.02  # Small reward for shooting (encourages aggression)
+    SI_REWARD_STAY: float = -0.02  # Penalty for doing nothing (action=1)
     
     # Win condition: Number of levels/waves to complete to win (0 = endless mode, no wins)
     SI_WIN_LEVELS: int = 10  # Complete 10 levels to win
@@ -190,8 +192,8 @@ class Config:
     
     # Hidden layer architecture
     # More neurons = more capacity but slower training
-    # [512, 256, 128] provides more capacity for complex patterns
-    HIDDEN_LAYERS: List[int] = field(default_factory=lambda: [512, 256, 128])
+    # [512, 512, 256, 128] - 4 layers, slightly more capacity than original
+    HIDDEN_LAYERS: List[int] = field(default_factory=lambda: [512, 512, 256, 128])
     
     # Activation function: 'relu', 'leaky_relu', 'tanh'
     ACTIVATION: str = 'relu'
