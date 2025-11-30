@@ -3020,6 +3020,7 @@ class NeuralNetworkVisualizer {
         this.avgRenderTime = 0;
         this.renderQueue = [];
         this.skipNextWeightDraw = false;  // Phase 1.3: Skip weights when empty
+        this.cachedWeights = null;  // Phase 1.3: Cache for weight data to handle selective transmission
 
         // Animation state
         this.pulsePhase = 0;
@@ -3454,7 +3455,13 @@ class NeuralNetworkVisualizer {
             return;
         }
         this.data = data;
-        
+
+        // Phase 1.3: Cache weights if provided (selective transmission)
+        // This ensures we have valid weight data even when backend sends empty arrays
+        if (data.weights && data.weights.length > 0) {
+            this.cachedWeights = data.weights;
+        }
+
         // Hide placeholder when we receive valid data
         const placeholder = document.getElementById('nn-viz-placeholder');
         if (placeholder) {
@@ -3622,9 +3629,14 @@ class NeuralNetworkVisualizer {
     
     drawConnections(layerPositions, activations) {
         const ctx = this.ctx;
-        const weights = this.data.weights || [];
 
-        // Phase 1.3: Skip weight drawing if weights array is empty (selective transmission)
+        // Phase 1.3: Use cached weights if current data doesn't have them
+        // This handles selective transmission where backend sends empty arrays every 100 steps
+        const weights = (this.data.weights && this.data.weights.length > 0)
+            ? this.data.weights
+            : this.cachedWeights;
+
+        // Only skip if we've never received weights
         if (!weights || weights.length === 0) {
             return;
         }
