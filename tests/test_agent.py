@@ -249,22 +249,26 @@ class TestLearning:
         # Should be at minimum, not below
         assert agent.epsilon == config.EPSILON_END
     
-    def test_epsilon_decay_skipped_with_noisy_nets(self, config):
-        """Epsilon should NOT decay when using NoisyNets (exploration handled internally)."""
+    def test_epsilon_decay_with_noisy_nets_hybrid(self, config):
+        """Epsilon SHOULD decay with NoisyNets for hybrid exploration (NoisyNets + epsilon-greedy fallback)."""
         config.USE_NOISY_NETWORKS = True
         config.EPSILON_START = 0.5  # Start at some value
-        
+        config.EPSILON_DECAY = 0.9995
+        config.EPSILON_END = 0.01
+
         agent = Agent(
             state_size=config.STATE_SIZE,
             action_size=config.ACTION_SIZE,
             config=config
         )
-        
+
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
-        
-        # Epsilon should remain unchanged when using NoisyNets
-        assert agent.epsilon == initial_epsilon
+
+        # Epsilon should decay even with NoisyNets (hybrid exploration approach)
+        # This provides fallback exploration if NoisyNet sigmas decay too aggressively
+        assert agent.epsilon < initial_epsilon
+        assert agent.epsilon == initial_epsilon * config.EPSILON_DECAY
 
 
 class TestQValues:

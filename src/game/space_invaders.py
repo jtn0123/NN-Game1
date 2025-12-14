@@ -1704,11 +1704,21 @@ class VecSpaceInvaders:
             self._dones[i] = done
             infos.append(info)
 
-            # Auto-reset environments that are done
+            # Reset internally but DON'T overwrite state array yet
             if done:
-                self._states[i] = env.reset()
+                env.reset()
 
-        return self._states.copy(), self._rewards.copy(), self._dones.copy(), infos
+        # Return terminal states for done episodes
+        states_to_return = self._states.copy()
+        rewards_to_return = self._rewards.copy()
+        dones_to_return = self._dones.copy()
+
+        # NOW update state array for next iteration
+        for i, done in enumerate(self._dones):
+            if done:
+                self._states[i] = self.envs[i].get_state()
+
+        return states_to_return, rewards_to_return, dones_to_return, infos
 
     def step_no_copy(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """

@@ -65,6 +65,8 @@ import argparse
 import sys
 import os
 import time
+from collections import deque
+from dataclasses import dataclass
 from typing import Optional, Callable, Any, Type, Union
 
 # Add project root to path
@@ -89,6 +91,17 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
     WebDashboard = None
+
+
+@dataclass
+class EpisodeMetrics:
+    """Metrics for a single training episode."""
+    score: int
+    reward: float
+    steps: int
+    epsilon: float
+    bricks_hit: int
+    won: bool
 
 
 class GameApp:
@@ -126,6 +139,8 @@ class GameApp:
         # Cache fonts to avoid recreating them every frame
         self._pause_font = pygame.font.Font(None, 72)
         self._speed_font = pygame.font.Font(None, 24)
+        self._help_font = pygame.font.Font(None, 28)
+        self._help_title_font = pygame.font.Font(None, 36)
 
         # Get game info for display
         game_info = get_game_info(config.GAME_NAME)
@@ -197,6 +212,7 @@ class GameApp:
         self.paused = False
         self.running = True
         self.game_speed = 1.0  # Speed multiplier
+        self.show_help_legend = False  # Toggle with H key
         
         # Extended training metrics
         self.exploration_actions = 0
@@ -208,17 +224,12 @@ class GameApp:
         # Training start time for total training time tracking
         self.training_start_time = time.time()
         
-        # Track recent scores for save metadata
-        self.recent_scores: list[int] = []
+        # Track recent scores for save metadata (bounded deque)
+        self.recent_scores: deque[int] = deque(maxlen=1000)
         self.best_score_ever = 0
-        
+
         # Full training history for save/restore (allows dashboard restoration)
-        self.training_history_scores: list[int] = []
-        self.training_history_rewards: list[float] = []
-        self.training_history_steps: list[int] = []
-        self.training_history_epsilons: list[float] = []
-        self.training_history_bricks: list[int] = []
-        self.training_history_wins: list[bool] = []
+        self.episode_history: deque[EpisodeMetrics] = deque(maxlen=100000)
         
         # Current state
         self.state = self.game.reset()
@@ -323,14 +334,18 @@ class GameApp:
                 training_history = TrainingHistory.from_dict(history_data)
                 
                 if len(training_history.scores) > 0:
-                    # Restore internal tracking
-                    self.training_history_scores = training_history.scores.copy()
-                    self.training_history_rewards = training_history.rewards.copy()
-                    self.training_history_steps = training_history.steps.copy()
-                    self.training_history_epsilons = training_history.epsilons.copy()
-                    self.training_history_bricks = training_history.bricks.copy()
-                    self.training_history_wins = training_history.wins.copy()
-                    self.recent_scores = training_history.scores[-1000:].copy()
+                    # Restore internal tracking from TrainingHistory
+                    self.episode_history.clear()
+                    for i in range(len(training_history.scores)):
+                        self.episode_history.append(EpisodeMetrics(
+                            score=training_history.scores[i],
+                            reward=training_history.rewards[i] if i < len(training_history.rewards) else 0.0,
+                            steps=training_history.steps[i] if i < len(training_history.steps) else 0,
+                            epsilon=training_history.epsilons[i] if i < len(training_history.epsilons) else 1.0,
+                            bricks_hit=training_history.bricks[i] if i < len(training_history.bricks) else 0,
+                            won=training_history.wins[i] if i < len(training_history.wins) else False,
+                        ))
+                    self.recent_scores = deque(training_history.scores[-1000:], maxlen=1000)
                     
                     # Restore dashboard with historical data
                     for i, score in enumerate(training_history.scores):
@@ -355,11 +370,11 @@ class GameApp:
             # Restore episode counter and best score from metadata
             if 'metadata' in checkpoint:
                 metadata = checkpoint['metadata']
-                self.episode = metadata.get('episode', len(self.training_history_scores))
+                self.episode = metadata.get('episode', len(self.episode_history))
                 self.best_score_ever = metadata.get('best_score', 0)
-            elif self.training_history_scores:
-                self.episode = len(self.training_history_scores)
-                self.best_score_ever = max(self.training_history_scores)
+            elif self.episode_history:
+                self.episode = len(self.episode_history)
+                self.best_score_ever = max(ep.score for ep in self.episode_history)
                 
         except Exception as e:
             print(f"⚠️ Could not restore training history: {e}")
@@ -440,12 +455,7 @@ class GameApp:
         
         # Clear training history
         self.recent_scores.clear()
-        self.training_history_scores.clear()
-        self.training_history_rewards.clear()
-        self.training_history_steps.clear()
-        self.training_history_epsilons.clear()
-        self.training_history_bricks.clear()
-        self.training_history_wins.clear()
+        self.episode_history.clear()
         
         # Reset game state
         self.state = self.game.reset()
@@ -530,13 +540,17 @@ class GameApp:
             
             # Restore training history if available
             if training_history and len(training_history.scores) > 0:
-                self.training_history_scores = training_history.scores.copy()
-                self.training_history_rewards = training_history.rewards.copy()
-                self.training_history_steps = training_history.steps.copy()
-                self.training_history_epsilons = training_history.epsilons.copy()
-                self.training_history_bricks = training_history.bricks.copy()
-                self.training_history_wins = training_history.wins.copy()
-                self.recent_scores = training_history.scores[-1000:].copy()
+                self.episode_history.clear()
+                for i in range(len(training_history.scores)):
+                    self.episode_history.append(EpisodeMetrics(
+                        score=training_history.scores[i],
+                        reward=training_history.rewards[i] if i < len(training_history.rewards) else 0.0,
+                        steps=training_history.steps[i] if i < len(training_history.steps) else 0,
+                        epsilon=training_history.epsilons[i] if i < len(training_history.epsilons) else 1.0,
+                        bricks_hit=training_history.bricks[i] if i < len(training_history.bricks) else 0,
+                        won=training_history.wins[i] if i < len(training_history.wins) else False,
+                    ))
+                self.recent_scores = deque(training_history.scores[-1000:], maxlen=1000)
                 
                 # Restore dashboard with historical data
                 for i, score in enumerate(training_history.scores):
@@ -824,7 +838,8 @@ class GameApp:
             self.game_offset_y = (self.window_height - scaled_height) // 2
     
     # Speed presets for clean stepping
-    SPEED_PRESETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000]
+    # Smoother geometric progression for speed control
+    SPEED_PRESETS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
     _last_logged_speed: float = 0.0  # Track last logged speed to avoid spam
     
     def _set_speed(self, speed: float, force_log: bool = False) -> None:
@@ -867,40 +882,77 @@ class GameApp:
     
     def run_human_mode(self) -> None:
         """Run in human play mode for testing the game."""
-        print("\n🎮 Human Play Mode")
-        if self.config.GAME_NAME == 'space_invaders':
-            print("   Use LEFT/RIGHT arrow keys to move")
-            print("   SPACE to shoot")
+        print("\n" + "=" * 60)
+        print("  HUMAN PLAY MODE")
+        print("=" * 60)
+
+        # Show game-specific controls
+        game_name = self.config.GAME_NAME
+        if game_name == 'space_invaders':
+            print("   LEFT/RIGHT arrows: Move ship")
+            print("   SPACE: Shoot")
+        elif game_name == 'breakout':
+            print("   LEFT/RIGHT arrows: Move paddle")
+        elif game_name == 'pong':
+            print("   UP/DOWN arrows (or W/S): Move paddle")
+        elif game_name == 'snake':
+            print("   Arrow keys (or WASD): Change direction")
+        elif game_name == 'asteroids':
+            print("   LEFT/RIGHT arrows: Rotate ship")
+            print("   UP arrow: Thrust")
+            print("   SPACE: Shoot")
+            print("   (Multiple keys can be pressed simultaneously)")
         else:
-            print("   Use LEFT/RIGHT arrow keys to move paddle")
-        print("   Press R to reset, Q to quit, F for fullscreen\n")
-        
+            print("   Use arrow keys to control")
+
+        print("\n   R: Reset game")
+        print("   Q/ESC: Quit")
+        print("   F: Toggle fullscreen")
+        print("=" * 60 + "\n")
+
+        # Enable controls display for games that support it
+        if hasattr(self.game, 'show_controls'):
+            self.game.show_controls = True
+
         state = self.game.reset()
-        
+
         while self.running:
             self._handle_events()
-            
-            # Get keyboard input
-            keys = pygame.key.get_pressed()
-            action = 1  # STAY / IDLE
-            if keys[pygame.K_LEFT]:
-                action = 0  # LEFT
-            elif keys[pygame.K_RIGHT]:
-                action = 2  # RIGHT
-            elif keys[pygame.K_SPACE] and self.config.GAME_NAME == 'space_invaders':
-                action = 3  # SHOOT (Space Invaders only)
-            
-            # Step game
-            state, reward, done, info = self.game.step(action)
-            
+
+            # Get keyboard input as dict for games that use get_human_action
+            pressed = pygame.key.get_pressed()
+            keys_dict = {key: pressed[key] for key in range(len(pressed))}
+
+            # Handle game-specific controls
+            if game_name == 'asteroids' and hasattr(self.game, 'step_human'):
+                # Asteroids supports simultaneous actions via step_human
+                state, reward, done, info = self.game.step_human(keys_dict)
+                action = self.game.get_human_action(keys_dict)  # For display purposes
+            elif hasattr(self.game, 'get_human_action'):
+                # Use game's built-in human action helper
+                action = self.game.get_human_action(keys_dict)
+                state, reward, done, info = self.game.step(action)
+            else:
+                # Fallback: generic control mapping
+                action = 1  # STAY / IDLE
+                if pressed[pygame.K_LEFT]:
+                    action = 0  # LEFT
+                elif pressed[pygame.K_RIGHT]:
+                    action = 2  # RIGHT
+                elif pressed[pygame.K_SPACE] and game_name == 'space_invaders':
+                    action = 3  # SHOOT
+                state, reward, done, info = self.game.step(action)
+
             if done:
-                print(f"   Game Over! Score: {info['score']}")
+                score = info.get('score', 0)
+                print(f"   Game Over! Score: {score}")
+                pygame.time.wait(1500)  # Brief pause before reset
                 state = self.game.reset()
-            
+
             # Render
             self._render_frame(state, action, info)
             self.clock.tick(self.config.FPS)
-        
+
         pygame.quit()
     
     def run_play_mode(self) -> None:
@@ -977,9 +1029,9 @@ class GameApp:
         # At 100x: 100 training steps per render (~6000 steps/sec)
         # At 1000x: 1000 training steps per render (~60000 steps/sec!)
         
-        # Track step time for performance logging
+        # Track step time for performance logging (bounded deque)
         avg_step_time = 0.001
-        step_time_samples: list[float] = []
+        step_time_samples: deque[float] = deque(maxlen=100)
         
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         while self.running and (self.config.MAX_EPISODES == 0 or self.episode < self.config.MAX_EPISODES):
@@ -1068,8 +1120,14 @@ class GameApp:
                             reward=episode_reward
                         )
                         
-                        # Update web dashboard if enabled
-                        if self.web_dashboard:
+                        # Update web dashboard if enabled (throttled to every 5 episodes for performance)
+                        # Always emit on: first 10 episodes, new best score, or every 5th episode
+                        is_new_best = info['score'] > self.best_score_ever
+                        should_emit = (
+                            self.web_dashboard and
+                            (self.episode <= 10 or is_new_best or self.episode % 5 == 0)
+                        )
+                        if should_emit:
                             self.web_dashboard.emit_metrics(
                                 episode=self.episode,
                                 score=info['score'],
@@ -1108,18 +1166,18 @@ class GameApp:
                                   f"Q: {avg_q_value:.1f} | "
                                   f"ε: {self.agent.epsilon:.3f}")
                         
-                        # Track scores for metadata
+                        # Track scores for metadata (deque auto-trims to maxlen=1000)
                         self.recent_scores.append(info['score'])
-                        if len(self.recent_scores) > 1000:
-                            self.recent_scores = self.recent_scores[-1000:]
-                        
+
                         # Track full training history for save/restore
-                        self.training_history_scores.append(info['score'])
-                        self.training_history_rewards.append(episode_reward)
-                        self.training_history_steps.append(episode_steps)
-                        self.training_history_epsilons.append(self.agent.epsilon)
-                        self.training_history_bricks.append(episode_bricks_broken)
-                        self.training_history_wins.append(info.get('won', False))
+                        self.episode_history.append(EpisodeMetrics(
+                            score=info['score'],
+                            reward=episode_reward,
+                            steps=episode_steps,
+                            epsilon=self.agent.epsilon,
+                            bricks_hit=episode_bricks_broken,
+                            won=info.get('won', False),
+                        ))
                         
                         # Save checkpoint (no replay buffer for periodic - saves disk space)
                         if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
@@ -1158,10 +1216,7 @@ class GameApp:
                 if steps_this_frame > 0:
                     frame_training_time = time.time() - training_start
                     measured_step_time = frame_training_time / steps_this_frame
-                    step_time_samples.append(measured_step_time)
-                    # Keep rolling average of last 100 samples
-                    if len(step_time_samples) > 100:
-                        step_time_samples.pop(0)
+                    step_time_samples.append(measured_step_time)  # deque auto-trims to maxlen=100
                     avg_step_time = sum(step_time_samples) / len(step_time_samples)
                     
                     # Log performance occasionally
@@ -1178,10 +1233,11 @@ class GameApp:
                 render_action = self.selected_action if self.selected_action is not None else 1
                 self._render_frame(state, render_action, info if info else {})
                 
-                # At speed 1x, throttle to 60 FPS for smooth real-time feel
-                # At higher speeds, no throttling - render ASAP after training batch
-                if self.game_speed <= 1:
-                    self.clock.tick(60)
+                # Cap frame rate to prevent GPU spikes
+                # At 1x: 60 FPS for smooth real-time feel
+                # At higher speeds: 120 FPS max to prevent GPU thrashing
+                target_fps = 60 if self.game_speed <= 1 else 120
+                self.clock.tick(target_fps)
         
         # Training complete
         self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")
@@ -1408,6 +1464,10 @@ class GameApp:
                         # Update layout to new screen size
                         display_info = pygame.display.Info()
                         self._update_layout(display_info.current_w, display_info.current_h)
+
+                elif event.key == pygame.K_h:
+                    # Toggle help legend
+                    self.show_help_legend = not self.show_help_legend
     
     def _render_frame(self, state: np.ndarray, action: int, info: dict) -> None:
         """Render one frame of the visualization with proper scaling."""
@@ -1417,28 +1477,108 @@ class GameApp:
         # Render game to the fixed-size game surface
         self.game.render(self.game_surface)
         
-        # Render pause indicator (centered on the game surface)
+        # Render pause indicator with context (centered on the game surface)
         if self.paused:
             game_center_x = self.config.SCREEN_WIDTH // 2
             game_center_y = self.config.SCREEN_HEIGHT // 2
 
-            text = self._pause_font.render("PAUSED", True, (255, 200, 50))
-            text_rect = text.get_rect(center=(game_center_x, game_center_y))
-            
-            # Background with semi-transparent fill using SRCALPHA surface
-            bg_rect = text_rect.inflate(40, 20)
+            # Build pause overlay content
+            title_text = self._pause_font.render("PAUSED", True, (255, 200, 50))
+            title_rect = title_text.get_rect(center=(game_center_x, game_center_y - 40))
+
+            # Context lines
+            context_lines = [
+                f"Episode: {self.episode}",
+                f"Best Score: {self.best_score_ever}",
+                f"Epsilon: {self.agent.epsilon:.3f}",
+                "Press P to resume"
+            ]
+            context_surfaces = [self._help_font.render(line, True, (200, 200, 200)) for line in context_lines]
+
+            # Calculate total height for background
+            total_height = title_rect.height + 20 + sum(s.get_height() + 5 for s in context_surfaces)
+            max_width = max(title_rect.width, max(s.get_width() for s in context_surfaces))
+
+            # Background with semi-transparent fill
+            bg_rect = pygame.Rect(0, 0, max_width + 60, total_height + 30)
+            bg_rect.center = (game_center_x, game_center_y + 20)
             bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(bg_surface, (0, 0, 0, 200), bg_surface.get_rect(), border_radius=10)
+            pygame.draw.rect(bg_surface, (0, 0, 0, 220), bg_surface.get_rect(), border_radius=12)
             self.game_surface.blit(bg_surface, bg_rect.topleft)
-            pygame.draw.rect(self.game_surface, (255, 200, 50), bg_rect, 3, border_radius=10)
-            
-            self.game_surface.blit(text, text_rect)
+            pygame.draw.rect(self.game_surface, (255, 200, 50), bg_rect, 3, border_radius=12)
+
+            # Draw title
+            title_rect.centery = bg_rect.top + 35
+            self.game_surface.blit(title_text, title_rect)
+
+            # Draw context lines
+            y = title_rect.bottom + 15
+            for surface in context_surfaces:
+                rect = surface.get_rect(centerx=game_center_x, top=y)
+                self.game_surface.blit(surface, rect)
+                y += surface.get_height() + 5
         
         # Render speed indicator if not normal (top right of game area)
         if self.game_speed != 1.0:
             speed_text = self._speed_font.render(f"Speed: {self.game_speed}x", True, (150, 150, 150))
             self.game_surface.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
-        
+
+        # Training mode indicator (top left of game area)
+        if self.paused:
+            mode_text = "PAUSED"
+            mode_color = (255, 200, 50)
+        elif hasattr(self, 'agent') and self.agent:
+            mode_text = f"TRAINING (e={self.agent.epsilon:.2f})"
+            mode_color = (100, 200, 100)
+        else:
+            mode_text = "READY"
+            mode_color = (150, 150, 150)
+        mode_surface = self._speed_font.render(mode_text, True, mode_color)
+        self.game_surface.blit(mode_surface, (10, 10))
+
+        # Render help legend (bottom left of game area, toggle with H)
+        if self.show_help_legend:
+            controls = [
+                ("P", "Pause/Resume"),
+                ("S", "Save Model"),
+                ("R", "Reset Episode"),
+                ("+/-", "Speed Up/Down"),
+                ("F", "Fullscreen"),
+                ("H", "Hide Help"),
+                ("ESC", "Quit"),
+            ]
+            padding = 15
+            line_height = 24
+            legend_width = 180
+            legend_height = len(controls) * line_height + padding * 2 + 30
+
+            # Position at bottom-left
+            legend_x = 10
+            legend_y = self.config.SCREEN_HEIGHT - legend_height - 10
+
+            # Draw background
+            legend_bg = pygame.Surface((legend_width, legend_height), pygame.SRCALPHA)
+            pygame.draw.rect(legend_bg, (0, 0, 0, 200), legend_bg.get_rect(), border_radius=8)
+            self.game_surface.blit(legend_bg, (legend_x, legend_y))
+            pygame.draw.rect(self.game_surface, (100, 100, 100), (legend_x, legend_y, legend_width, legend_height), 1, border_radius=8)
+
+            # Draw title
+            title = self._help_title_font.render("Controls", True, (255, 255, 255))
+            self.game_surface.blit(title, (legend_x + padding, legend_y + padding))
+
+            # Draw controls
+            y = legend_y + padding + 30
+            for key, desc in controls:
+                key_surface = self._help_font.render(key, True, (100, 200, 255))
+                desc_surface = self._help_font.render(f" - {desc}", True, (180, 180, 180))
+                self.game_surface.blit(key_surface, (legend_x + padding, y))
+                self.game_surface.blit(desc_surface, (legend_x + padding + key_surface.get_width(), y))
+                y += line_height
+        else:
+            # Show hint to display help
+            hint_text = self._speed_font.render("Press H for controls", True, (80, 80, 80))
+            self.game_surface.blit(hint_text, (10, self.config.SCREEN_HEIGHT - 25))
+
         # Capture screenshot for web dashboard (before scaling, every 10 frames)
         self.frame_count = (self.frame_count + 1) % 10000  # Keep bounded to avoid overflow
         if self.web_dashboard and self.frame_count % 10 == 0:
@@ -1549,17 +1689,17 @@ class GameApp:
         filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
         
         # Calculate metrics for metadata
-        avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
+        avg_score = np.mean(list(self.recent_scores)[-100:]) if self.recent_scores else 0.0
         win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, 'get_win_rate') else 0.0
-        
-        # Build training history for dashboard restoration
+
+        # Build training history for dashboard restoration from episode_history
         training_history = TrainingHistory(
-            scores=self.training_history_scores.copy(),
-            rewards=self.training_history_rewards.copy(),
-            steps=self.training_history_steps.copy(),
-            epsilons=self.training_history_epsilons.copy(),
-            bricks=self.training_history_bricks.copy(),
-            wins=self.training_history_wins.copy(),
+            scores=[ep.score for ep in self.episode_history],
+            rewards=[ep.reward for ep in self.episode_history],
+            steps=[ep.steps for ep in self.episode_history],
+            epsilons=[ep.epsilon for ep in self.episode_history],
+            bricks=[ep.bricks_hit for ep in self.episode_history],
+            wins=[ep.won for ep in self.episode_history],
             losses=list(self.agent.losses)[-1000:] if self.agent.losses else []
         )
         
@@ -1993,9 +2133,6 @@ class HeadlessTrainer:
         self.target_updates = 0
         self.total_steps = 0
         self.training_start_time = time.time()
-        self.exploration_actions = 0
-        self.exploitation_actions = 0
-        self.target_updates = 0
         self.last_target_update_step = 0
         
         if self.web_dashboard:
@@ -2472,37 +2609,43 @@ class HeadlessTrainer:
             initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
             bricks_broken = initial_bricks - info.get('bricks_remaining', initial_bricks)
             
-            # Update web dashboard metrics
-            if self.web_dashboard:
-                    avg_loss = self.agent.get_average_loss(100)
-                    
-                    # Calculate average Q-value for current state (was missing from headless)
-                    q_values = self.agent.get_q_values(state)
-                    avg_q_value = float(np.mean(q_values))
-                    
-                    self.web_dashboard.emit_metrics(
-                        episode=episode,
-                        score=info['score'],
-                        epsilon=self.agent.epsilon,
-                        loss=avg_loss,
-                        total_steps=self.total_steps,
-                        won=won,
-                        reward=episode_reward,
-                        memory_size=len(self.agent.memory),
-                        avg_q_value=avg_q_value,
-                        exploration_actions=self.exploration_actions,
-                        exploitation_actions=self.exploitation_actions,
-                        target_updates=self.target_updates,
-                        bricks_broken=bricks_broken,
-                        episode_length=episode_steps
-                    )
-                    # Update performance settings in dashboard state
-                    self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                    self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                    self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
-                    
-                    # Emit NN visualization data (throttled by server to ~10 FPS)
-                    self._emit_nn_visualization(state, action)
+            # Update web dashboard metrics (throttled to every 5 episodes for performance)
+            # Always emit on: first 10 episodes, new best score, or every 5th episode
+            is_new_best = info['score'] > getattr(self, 'best_score', 0)
+            should_emit = (
+                self.web_dashboard and
+                (episode <= 10 or is_new_best or episode % 5 == 0)
+            )
+            if should_emit:
+                avg_loss = self.agent.get_average_loss(100)
+
+                # Calculate average Q-value for current state (was missing from headless)
+                q_values = self.agent.get_q_values(state)
+                avg_q_value = float(np.mean(q_values))
+
+                self.web_dashboard.emit_metrics(
+                    episode=episode,
+                    score=info['score'],
+                    epsilon=self.agent.epsilon,
+                    loss=avg_loss,
+                    total_steps=self.total_steps,
+                    won=won,
+                    reward=episode_reward,
+                    memory_size=len(self.agent.memory),
+                    avg_q_value=avg_q_value,
+                    exploration_actions=self.exploration_actions,
+                    exploitation_actions=self.exploitation_actions,
+                    target_updates=self.target_updates,
+                    bricks_broken=bricks_broken,
+                    episode_length=episode_steps
+                )
+                # Update performance settings in dashboard state
+                self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
+
+                # Emit NN visualization data (throttled by server to ~10 FPS)
+                self._emit_nn_visualization(state, action)
             
             # Progress reporting (terminal) - only log when episodes complete
             current_time = time.time()
@@ -2696,11 +2839,17 @@ class HeadlessTrainer:
                         self.target_updates += 1
                         self.last_target_update_step = self.agent.steps
                     
-                    # Update web dashboard metrics
-                    if self.web_dashboard:
+                    # Update web dashboard metrics (throttled to every 5 episodes for performance)
+                    # Always emit on: first 10 episodes, new best score, or every 5th episode
+                    is_new_best = score > self.best_score
+                    should_emit_metrics = (
+                        self.web_dashboard and
+                        (self.current_episode <= 10 or is_new_best or self.current_episode % 5 == 0)
+                    )
+                    if should_emit_metrics:
                         initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
                         bricks_broken = initial_bricks - infos[i].get('bricks_remaining', initial_bricks)
-                        
+
                         self.web_dashboard.emit_metrics(
                             episode=self.current_episode,
                             score=score,
@@ -2721,7 +2870,7 @@ class HeadlessTrainer:
                         self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
                         self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                         self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
-                        
+
                         # Emit NN visualization data (throttled by server to ~10 FPS)
                         # Convert numpy int64 to Python int for JSON serialization
                         self._emit_nn_visualization(states[i], int(actions[i]))
@@ -3005,23 +3154,40 @@ def parse_args():
     # Import game registry for --game choices
     from src.game import list_games
     available_games = list_games()
-    
+
     parser = argparse.ArgumentParser(
-        description="Neural Network Game AI - Train an AI to play arcade games",
+        description="DQN Game AI - Train neural networks to play classic arcade games",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Examples:
-    python main.py                           # Train Breakout with visualization
-    python main.py --game space_invaders    # Train Space Invaders
-    python main.py --headless                # Headless training (no pygame)
-    python main.py --headless --turbo        # TURBO: ~4x faster training
-    python main.py --headless --turbo --web  # TURBO + web dashboard (~5000 steps/sec!)
-    python main.py --headless --learn-every 4 --batch-size 256  # Custom tuning
-    python main.py --play --model best.pth   # Watch trained agent play
-    python main.py --human                   # Play the game yourself
-    python main.py --episodes 5000 --lr 0.001  # Custom parameters
+EXAMPLES
+========
 
-Available Games: {', '.join(available_games)}
+Getting Started:
+    python main.py                    Train with visual display (shows game selection)
+    python main.py --human            Play a game yourself to test it
+    python main.py --game pong        Train a specific game directly
+
+Fast Training (Recommended):
+    python main.py --headless --turbo          ~5000 steps/sec on M4 Mac
+    python main.py --headless --turbo --web    With web dashboard at localhost:5000
+    python main.py --headless --vec-envs 8     Parallel training (~12,000 steps/sec)
+
+Watch Trained Agent:
+    python main.py --play --model models/pong_best.pth
+
+Model Management:
+    python main.py --list-models               Show all saved models
+    python main.py --inspect models/best.pth   Inspect model metadata
+
+AVAILABLE GAMES: {', '.join(available_games)}
+
+TIPS
+====
+- Use --headless for 10x faster training (no display overhead)
+- Add --turbo for optimized batch settings (~4x faster)
+- Add --vec-envs 8 for parallel environments (~2-3x faster)
+- Use --web to monitor training in browser at http://localhost:5000
+- Press Ctrl+C to gracefully stop training (model auto-saves)
         """
     )
     
@@ -3349,10 +3515,82 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
             print("\n👋 Training complete")
 
 
+def terminal_game_selector() -> Optional[str]:
+    """Terminal-based game selector for headless mode.
+
+    Returns:
+        Selected game name, or None if cancelled
+    """
+    available = list_games()
+
+    print("\n" + "=" * 60)
+    print("   SELECT A GAME TO TRAIN")
+    print("=" * 60)
+
+    # Difficulty color codes (for terminals that support it)
+    difficulty_indicators = {
+        'Easy': '(Easy)',
+        'Medium': '(Medium)',
+        'Hard': '(Hard)'
+    }
+
+    for i, game_name in enumerate(available, 1):
+        game_info = get_game_info(game_name)
+        if game_info:
+            difficulty = game_info.get('difficulty', 'Medium')
+            difficulty_str = difficulty_indicators.get(difficulty, '')
+            actions = game_info.get('actions', [])
+            action_str = ', '.join(actions) if actions else 'N/A'
+
+            print(f"\n  [{i}] {game_info['icon']} {game_info['name']} {difficulty_str}")
+            print(f"      {game_info['description']}")
+            print(f"      Actions: {action_str}")
+        else:
+            print(f"\n  [{i}] {game_name}")
+
+    print(f"\n  [0] Exit")
+    print("\n" + "=" * 60)
+
+    while True:
+        try:
+            choice = input("\nEnter number (1-{0}): ".format(len(available)))
+            if choice.strip() == '0':
+                return None
+            idx = int(choice) - 1
+            if 0 <= idx < len(available):
+                return available[idx]
+            print(f"Please enter a number between 1 and {len(available)}")
+        except ValueError:
+            print("Please enter a valid number")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+
+def print_startup_banner() -> None:
+    """Print a welcome banner for the application."""
+    print()
+    print("=" * 60)
+    print("       DQN GAME AI - Deep Q-Learning Trainer")
+    print("=" * 60)
+    print("   Train neural networks to play classic arcade games!")
+    print()
+    print("   Quick Start:")
+    print("   - python main.py              # Visual training (default)")
+    print("   - python main.py --human      # Play a game yourself")
+    print("   - python main.py --headless   # Fast training (no display)")
+    print("   - python main.py --help       # See all options")
+    print("=" * 60)
+
+
 def main():
     """Main entry point."""
+    # Show banner for non-help invocations
+    if '--help' not in sys.argv and '-h' not in sys.argv:
+        print_startup_banner()
+
     args = parse_args()
-    
+
     # Handle --inspect command (no pygame needed)
     if args.inspect:
         inspect_model(args.inspect)
@@ -3412,12 +3650,20 @@ def main():
         if args.game is None and args.web:
             run_web_launcher(config, args)
             return
-        
-        # If no game specified and no web, require a game choice
+
+        # If no game specified, show terminal game selector
         if args.game is None:
-            print("❌ No game specified. Use --game <name> or add --web for game selection UI.")
-            print(f"   Available games: {', '.join(list_games())}")
-            return
+            selected = terminal_game_selector()
+            if selected is None:
+                print("No game selected. Exiting.")
+                return
+            args.game = selected
+            config.GAME_NAME = selected
+            game_info = get_game_info(selected)
+            if game_info:
+                print(f"🎮 Selected: {game_info['icon']} {game_info['name']}")
+            else:
+                print(f"🎮 Selected: {selected}")
         
         trainer = HeadlessTrainer(config, args)
         try:

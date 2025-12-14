@@ -42,11 +42,11 @@ def draw_breakout_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[
 def draw_space_invaders_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]) -> None:
     """Draw a Space Invaders-style alien icon."""
     cx, cy = rect.centerx, rect.centery - 5
-    
+
     # Classic alien shape (pixel art style)
     alien_color = color
     pixel_size = 4
-    
+
     # Alien pattern (11x8 grid)
     pattern = [
         "  X     X  ",
@@ -58,17 +58,17 @@ def draw_space_invaders_icon(surface: pygame.Surface, rect: pygame.Rect, color: 
         "X X     X X",
         "   XX XX   ",
     ]
-    
+
     start_x = cx - len(pattern[0]) * pixel_size // 2
     start_y = cy - len(pattern) * pixel_size // 2
-    
+
     for row_idx, row in enumerate(pattern):
         for col_idx, char in enumerate(row):
             if char == 'X':
                 px = start_x + col_idx * pixel_size
                 py = start_y + row_idx * pixel_size
                 pygame.draw.rect(surface, alien_color, (px, py, pixel_size, pixel_size))
-    
+
     # Player ship at bottom
     ship_y = cy + 30
     pygame.draw.polygon(surface, (100, 200, 255), [
@@ -76,6 +76,97 @@ def draw_space_invaders_icon(surface: pygame.Surface, rect: pygame.Rect, color: 
         (cx - 12, ship_y + 5),
         (cx + 12, ship_y + 5)
     ])
+
+
+def draw_pong_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]) -> None:
+    """Draw a Pong-style icon with paddles and ball."""
+    cx, cy = rect.centerx, rect.centery
+
+    # Left paddle
+    pygame.draw.rect(surface, color, (cx - 30, cy - 20, 6, 40), border_radius=3)
+
+    # Right paddle
+    pygame.draw.rect(surface, color, (cx + 24, cy - 15, 6, 40), border_radius=3)
+
+    # Ball
+    pygame.draw.circle(surface, (255, 255, 255), (cx + 5, cy - 5), 6)
+
+    # Dashed center line
+    for i in range(5):
+        y_offset = cy - 25 + i * 12
+        pygame.draw.line(surface, (80, 90, 110), (cx, y_offset), (cx, y_offset + 6), 2)
+
+
+def draw_snake_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]) -> None:
+    """Draw a Snake-style icon."""
+    cx, cy = rect.centerx, rect.centery
+
+    # Snake body segments (gradient from tail to head)
+    segments = [
+        (cx - 15, cy + 15),
+        (cx - 5, cy + 15),
+        (cx + 5, cy + 15),
+        (cx + 5, cy + 5),
+        (cx + 5, cy - 5),
+        (cx - 5, cy - 5),
+        (cx - 15, cy - 5),
+        (cx - 15, cy - 15),  # Head
+    ]
+
+    # Draw snake segments with gradient
+    for i, (sx, sy) in enumerate(segments):
+        progress = i / len(segments)
+        segment_color = tuple(int(c * (0.5 + progress * 0.5)) for c in color)
+        pygame.draw.rect(surface, segment_color, (sx - 4, sy - 4, 8, 8), border_radius=2)
+
+    # Snake head (last segment) with eyes
+    head_x, head_y = segments[-1]
+    pygame.draw.circle(surface, (255, 255, 255), (head_x - 2, head_y - 1), 2)
+    pygame.draw.circle(surface, (255, 255, 255), (head_x + 2, head_y - 1), 2)
+    pygame.draw.circle(surface, (0, 0, 0), (head_x - 2, head_y - 1), 1)
+    pygame.draw.circle(surface, (0, 0, 0), (head_x + 2, head_y - 1), 1)
+
+    # Food (apple)
+    food_x, food_y = cx + 15, cy + 5
+    pygame.draw.circle(surface, (231, 76, 60), (food_x, food_y), 5)
+    pygame.draw.circle(surface, (231, 76, 60), (food_x, food_y), 5, 1)
+    # Leaf
+    pygame.draw.circle(surface, (46, 204, 113), (food_x + 3, food_y - 4), 2)
+
+
+def draw_asteroids_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]) -> None:
+    """Draw an Asteroids-style icon with vector graphics."""
+    cx, cy = rect.centerx, rect.centery
+
+    # Ship (triangle)
+    ship_points = [
+        (cx, cy + 20),       # Bottom point
+        (cx - 8, cy + 32),   # Left rear
+        (cx + 8, cy + 32),   # Right rear
+    ]
+    pygame.draw.polygon(surface, color, ship_points, 2)
+
+    # Asteroids (irregular polygons)
+    asteroid1_points = [
+        (cx - 25, cy - 15),
+        (cx - 18, cy - 20),
+        (cx - 10, cy - 18),
+        (cx - 12, cy - 10),
+        (cx - 20, cy - 8),
+    ]
+    pygame.draw.polygon(surface, (180, 180, 180), asteroid1_points, 2)
+
+    asteroid2_points = [
+        (cx + 15, cy - 5),
+        (cx + 25, cy - 8),
+        (cx + 28, cy + 2),
+        (cx + 22, cy + 8),
+        (cx + 14, cy + 5),
+    ]
+    pygame.draw.polygon(surface, (160, 160, 160), asteroid2_points, 2)
+
+    # Bullet
+    pygame.draw.circle(surface, (100, 200, 255), (cx + 5, cy + 5), 3)
 
 
 class GameCard:
@@ -168,30 +259,59 @@ class GameCard:
             accent_rect = pygame.Rect(rect.centerx - accent_width // 2, rect.top, accent_width, 3)
             pygame.draw.rect(screen, self.base_color, accent_rect, border_radius=2)
         
-        # Draw custom icon
-        icon_rect = pygame.Rect(rect.left, rect.top + 15, rect.width, 70)
+        # Draw custom icon (smaller for compact layout)
+        icon_rect = pygame.Rect(rect.left, rect.top + 10, rect.width, 60)
         if self.game_id == 'breakout':
             draw_breakout_icon(screen, icon_rect, self.base_color)
         elif self.game_id == 'space_invaders':
             draw_space_invaders_icon(screen, icon_rect, self.base_color)
+        elif self.game_id == 'pong':
+            draw_pong_icon(screen, icon_rect, self.base_color)
+        elif self.game_id == 'snake':
+            draw_snake_icon(screen, icon_rect, self.base_color)
+        elif self.game_id == 'asteroids':
+            draw_asteroids_icon(screen, icon_rect, self.base_color)
         else:
-            # Generic game icon
+            # Generic game icon (fallback)
             pygame.draw.circle(screen, self.base_color, icon_rect.center, 20, 3)
-        
-        # Game name
+
+        # Game name (smaller font for compact layout)
         name = self.info.get('name', self.game_id.replace('_', ' ').title())
-        name_font = pygame.font.Font(None, 34)
+        name_font = pygame.font.Font(None, 26)
         name_color = (255, 255, 255) if self.hover_progress > 0.5 else (220, 225, 235)
         name_text = name_font.render(name, True, name_color)
-        name_rect = name_text.get_rect(centerx=rect.centerx, top=rect.top + 95)
+        name_rect = name_text.get_rect(centerx=rect.centerx, top=rect.top + 75)
         screen.blit(name_text, name_rect)
-        
-        # Description
+
+        # Description (smaller, wrap text if needed)
         desc = self.info.get('description', '')
-        desc_font = pygame.font.Font(None, 20)
-        desc_text = desc_font.render(desc, True, (130, 140, 160))
-        desc_rect = desc_text.get_rect(centerx=rect.centerx, top=name_rect.bottom + 8)
-        screen.blit(desc_text, desc_rect)
+        desc_font = pygame.font.Font(None, 16)
+
+        # Wrap description to fit card width
+        words = desc.split()
+        lines = []
+        current_line = []
+        max_width = rect.width - 20
+
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            test_surface = desc_font.render(test_line, True, (130, 140, 160))
+            if test_surface.get_width() <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
+
+        if current_line:
+            lines.append(' '.join(current_line))
+
+        # Render wrapped description (max 2 lines)
+        desc_y = name_rect.bottom + 5
+        for i, line in enumerate(lines[:2]):
+            desc_text = desc_font.render(line, True, (130, 140, 160))
+            desc_rect = desc_text.get_rect(centerx=rect.centerx, top=desc_y + i * 16)
+            screen.blit(desc_text, desc_rect)
         
         # Difficulty badge with color coding
         difficulty = self.info.get('difficulty', 'Unknown')
@@ -327,33 +447,36 @@ class GameMenu:
     def _build_cards(self) -> None:
         """Build game cards from registry."""
         from . import list_games, get_game_info
-        
+
         games = list_games()
         num_games = len(games)
-        
+
         if num_games == 0:
             return
-        
-        # Card dimensions
-        card_width = 220
-        card_height = 220
-        card_spacing = 40
-        
+
+        # Card dimensions - adjusted to fit 5 games on screen
+        # With 800px width: 5 cards at 140px + 4 gaps at 20px = 780px
+        card_width = 140
+        card_height = 200
+        card_spacing = 20
+
         # Calculate total width
         total_width = num_games * card_width + (num_games - 1) * card_spacing
         start_x = (self.screen_width - total_width) // 2
         y = (self.screen_height - card_height) // 2 + 20
-        
+
         for i, game_id in enumerate(games):
             info = get_game_info(game_id) or {}
             x = start_x + i * (card_width + card_spacing)
-            
+
             card = GameCard(game_id, x, y, card_width, card_height, info)
             self.cards.append(card)
-        
-        # Select first card
+
+        # Select middle card initially (better UX for 5 cards)
         if self.cards:
-            self.cards[0].selected = True
+            middle_index = len(self.cards) // 2
+            self.cards[middle_index].selected = True
+            self.selected_index = middle_index
     
     def run(self, screen: pygame.Surface, clock: pygame.time.Clock) -> Optional[str]:
         """Run the menu and return selected game."""

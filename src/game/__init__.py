@@ -18,6 +18,9 @@ Game Registry:
 from typing import Dict, List, Type, Optional, Any
 from .breakout import Breakout
 from .space_invaders import SpaceInvaders, VecSpaceInvaders
+from .pong import Pong, VecPong
+from .snake import Snake, VecSnake
+from .asteroids import Asteroids, VecAsteroids
 from .base_game import BaseGame
 from .particles import ParticleSystem, TrailRenderer
 from .menu import GameMenu
@@ -50,6 +53,33 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         'difficulty': 'Medium-Hard',
         'color': (0, 255, 100),  # Green CRT theme
         'icon': '👾',
+    },
+    'pong': {
+        'class': Pong,
+        'name': 'Pong',
+        'description': 'Classic paddle vs AI opponent',
+        'actions': ['UP', 'STAY', 'DOWN'],
+        'difficulty': 'Easy',
+        'color': (255, 255, 255),  # White retro theme
+        'icon': '🏓',
+    },
+    'snake': {
+        'class': Snake,
+        'name': 'Snake',
+        'description': 'Grow the snake by eating food',
+        'actions': ['UP', 'DOWN', 'LEFT', 'RIGHT'],
+        'difficulty': 'Medium',
+        'color': (100, 255, 100),  # Green modern theme
+        'icon': '🐍',
+    },
+    'asteroids': {
+        'class': Asteroids,
+        'name': 'Asteroids',
+        'description': 'Destroy asteroids with your spaceship',
+        'actions': ['ROTATE_LEFT', 'ROTATE_RIGHT', 'THRUST', 'SHOOT', 'NOTHING'],
+        'difficulty': 'Hard',
+        'color': (200, 200, 200),  # Vector gray theme
+        'icon': '🚀',
     },
 }
 
@@ -132,6 +162,12 @@ __all__ = [
     'Breakout',
     'SpaceInvaders',
     'VecSpaceInvaders',
+    'Pong',
+    'VecPong',
+    'Snake',
+    'VecSnake',
+    'Asteroids',
+    'VecAsteroids',
     'BaseGame',
     'ParticleSystem',
     'TrailRenderer',

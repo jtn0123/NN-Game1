@@ -439,10 +439,16 @@ class PrioritizedReplayBuffer:
     
     def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Sample without copying (faster, returns views)."""
+        # Bug 8 fix: Check for empty buffer
+        if not self._initialized:
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+        if self._size == 0:
+            raise RuntimeError("Cannot sample from empty buffer.")
+
         self._frame_count += 1
         beta_progress = min(1.0, self._frame_count / self.beta_frames)
         self.beta = self.beta_start + beta_progress * (self.beta_end - self.beta_start)
-        
+
         priorities = self.priorities[:self._size]
         probs = priorities ** self.alpha
         probs_sum = probs.sum()
@@ -450,13 +456,15 @@ class PrioritizedReplayBuffer:
             probs = probs / probs_sum
         else:
             probs = np.ones(self._size, dtype=np.float32) / self._size
-        
-        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=False)
-        
+
+        # Bug 2 fix: Use replace=True if batch size exceeds buffer size (early training)
+        use_replacement = batch_size > self._size
+        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=use_replacement)
+
         weights = (self._size * probs[indices]) ** (-self.beta)
         weights = weights / weights.max()
         weights = weights.astype(np.float32)
-        
+
         return (
             self.states[indices],
             self.actions[indices],
@@ -496,29 +504,84 @@ class PrioritizedReplayBuffer:
     
     def save_to_dict(self) -> dict:
         """Save prioritized replay buffer with priorities."""
-        base_dict = super().save_to_dict()
-        if base_dict.get('initialized', False) and self._size > 0:
-            base_dict['priorities'] = self.priorities[:self._size].copy()
-            base_dict['max_priority'] = self.max_priority
-        return base_dict
-    
+        if not self._initialized or self._size == 0:
+            return {
+                'initialized': False,
+                'size': 0,
+                'position': 0,
+                'capacity': self.capacity,
+                'state_size': self._state_size
+            }
+
+        # Save all data including PER-specific state
+        return {
+            'initialized': True,
+            'size': self._size,
+            'position': self._position,
+            'capacity': self.capacity,
+            'state_size': self._state_size,
+            'states': self.states[:self._size].copy(),
+            'actions': self.actions[:self._size].copy(),
+            'rewards': self.rewards[:self._size].copy(),
+            'next_states': self.next_states[:self._size].copy(),
+            'dones': self.dones[:self._size].copy(),
+            'priorities': self.priorities[:self._size].copy(),
+            'max_priority': self.max_priority,
+            'frame_count': self._frame_count,
+            'beta': self.beta
+        }
+
     def load_from_dict(self, data: dict) -> bool:
         """Restore prioritized replay buffer with priorities."""
-        if not super().load_from_dict(data):
+        if not data.get('initialized', False) or data.get('size', 0) == 0:
             return False
-        
+
+        saved_size = data['size']
+        saved_state_size = data['state_size']
+
+        # Initialize arrays if needed
+        if not self._initialized:
+            self._init_arrays(saved_state_size)
+        elif self._state_size != saved_state_size:
+            print(f"⚠️ Replay buffer state size mismatch (saved: {saved_state_size}, current: {self._state_size})")
+            return False
+
+        # Restore data - handle case where saved buffer is larger than current capacity
+        load_size = min(saved_size, self.capacity)
+
+        # Copy experience data (taking the most recent if buffer was larger)
+        if saved_size <= self.capacity:
+            self.states[:load_size] = data['states'][:load_size]
+            self.actions[:load_size] = data['actions'][:load_size]
+            self.rewards[:load_size] = data['rewards'][:load_size]
+            self.next_states[:load_size] = data['next_states'][:load_size]
+            self.dones[:load_size] = data['dones'][:load_size]
+        else:
+            # Saved buffer is larger - take most recent experiences
+            offset = saved_size - self.capacity
+            self.states[:load_size] = data['states'][offset:offset + load_size]
+            self.actions[:load_size] = data['actions'][offset:offset + load_size]
+            self.rewards[:load_size] = data['rewards'][offset:offset + load_size]
+            self.next_states[:load_size] = data['next_states'][offset:offset + load_size]
+            self.dones[:load_size] = data['dones'][offset:offset + load_size]
+
+        # Restore priorities
         if 'priorities' in data:
-            load_size = min(len(data['priorities']), self.capacity)
-            if len(data['priorities']) <= self.capacity:
+            if saved_size <= self.capacity:
                 self.priorities[:load_size] = data['priorities'][:load_size]
             else:
-                offset = len(data['priorities']) - self.capacity
+                offset = saved_size - self.capacity
                 self.priorities[:load_size] = data['priorities'][offset:offset + load_size]
             self.max_priority = data.get('max_priority', 1.0)
-        
+
+        self._size = load_size
+        self._position = load_size % self.capacity
+
+        # Restore beta annealing state
+        self._frame_count = data.get('frame_count', 0)
+        self.beta = data.get('beta', self.beta_start)
+
         return True
-        self._frame_count = 0
-        self.beta = self.beta_start
 
 
 
