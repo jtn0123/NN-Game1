@@ -228,6 +228,7 @@ class GameApp:
         self.steps = 0
         self.paused = False
         self.running = True
+        self.return_to_menu = False  # Flag to return to game selector
         self.game_speed = 1.0  # Speed multiplier
         self.show_help_legend = False  # Toggle with H key
         
@@ -1484,8 +1485,16 @@ class GameApp:
                     if self.web_dashboard:
                         self.web_dashboard.log(f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success")
                 elif action == "menu":
-                    # Return to menu functionality (future enhancement)
-                    print("Return to menu not yet implemented")
+                    # Save current progress before returning to menu
+                    self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="menu_exit")
+                    if self.web_dashboard:
+                        self.web_dashboard.log("🏠 Returning to game selector...", "warning")
+                        self.web_dashboard.launcher_mode = True
+                        self.web_dashboard.socketio.emit('redirect_to_launcher', {
+                            'message': 'Returning to game selector...'
+                        })
+                    self.return_to_menu = True
+                    self.running = False
                 elif action == "quit":
                     self.running = False
                 continue  # Skip other event handling when paused
@@ -1740,7 +1749,8 @@ class GameApp:
             epsilons=[ep.epsilon for ep in self.episode_history],
             bricks=[ep.bricks_hit for ep in self.episode_history],
             wins=[ep.won for ep in self.episode_history],
-            losses=list(self.agent.losses)[-1000:] if self.agent.losses else []
+            losses=list(self.agent.losses)[-1000:] if self.agent.losses else [],
+            q_values=[]  # Q-values not tracked per-episode currently
         )
         
         result = self.agent.save(
@@ -3573,40 +3583,89 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
     dashboard.launcher_mode = False
     dashboard.socketio.emit('game_ready', {'game': selected_game, 'mode': selected_mode})
 
-    # Start appropriate trainer based on mode
-    try:
-        if args.headless and selected_mode != 'human':
-            # Headless training (only for AI mode)
-            trainer = HeadlessTrainer(config, args, existing_dashboard=dashboard)
-            trainer.train()
-        else:
-            # Visual mode (required for human play)
-            app = GameApp(config, args, existing_dashboard=dashboard)
+    # Game loop - supports returning to menu
+    while True:
+        return_to_menu = False
 
-            # Run appropriate mode
-            if selected_mode == 'human' or args.human:
-                app.run_human_mode()
-            elif args.play:
-                app.run_play_mode()
+        # Start appropriate trainer based on mode
+        try:
+            if args.headless and selected_mode != 'human':
+                # Headless training (only for AI mode)
+                trainer = HeadlessTrainer(config, args, existing_dashboard=dashboard)
+                trainer.train()
             else:
-                app.run_training()
-    except KeyboardInterrupt:
-        print("\n\n⛔ Training interrupted by user")
-        if args.headless:
-            if 'trainer' in locals():
-                trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
-        else:
-            if 'app' in locals():
-                app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
-                if app.web_dashboard:
-                    app.web_dashboard.log("⛔ Training interrupted by user", "warning")
-    finally:
-        # Clean up resources
-        if dashboard:
-            dashboard.stop()
-        if not args.headless:
-            pygame.quit()
-        print("\n👋 Done")
+                # Visual mode (required for human play)
+                app = GameApp(config, args, existing_dashboard=dashboard)
+
+                # Run appropriate mode
+                if selected_mode == 'human' or args.human:
+                    app.run_human_mode()
+                elif args.play:
+                    app.run_play_mode()
+                else:
+                    app.run_training()
+
+                # Check if user wants to return to game selector
+                return_to_menu = app.return_to_menu
+
+        except KeyboardInterrupt:
+            print("\n\n⛔ Training interrupted by user")
+            if args.headless:
+                if 'trainer' in locals():
+                    trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+            else:
+                if 'app' in locals():
+                    app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+                    if app.web_dashboard:
+                        app.web_dashboard.log("⛔ Training interrupted by user", "warning")
+            break  # Exit on keyboard interrupt
+
+        if not return_to_menu:
+            break  # Normal exit
+
+        # Return to game selector
+        print("\n🏠 Returning to game selector...")
+
+        # Reset selection state
+        selected_game = None
+        selected_mode = 'ai'
+        selection_event.clear()
+
+        # Switch dashboard back to launcher mode
+        dashboard.launcher_mode = True
+
+        print("\n⏳ Open browser to select a game...")
+        print("   Press Ctrl+C to exit\n")
+
+        try:
+            # Wait for new game selection
+            while not selection_event.is_set():
+                selection_event.wait(timeout=0.5)
+        except KeyboardInterrupt:
+            print("\n\n👋 Closed by user")
+            break
+
+        if not selected_game:
+            print("No game selected. Exiting.")
+            break
+
+        # Update config for new game
+        mode_text = "🎮 Playing" if selected_mode == 'human' else "🤖 Training"
+        print(f"\n{mode_text} {selected_game}...")
+
+        config.GAME_NAME = selected_game
+        args.game = selected_game
+        args.human = (selected_mode == 'human')
+
+        dashboard.launcher_mode = False
+        dashboard.socketio.emit('game_ready', {'game': selected_game, 'mode': selected_mode})
+
+    # Clean up resources
+    if dashboard:
+        dashboard.stop()
+    if not args.headless:
+        pygame.quit()
+    print("\n👋 Done")
 
 
 def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
@@ -3888,29 +3947,53 @@ def main():
         config.FORCE_CPU = True
         print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
     
-    # Create application (with pygame) and run
+    # Create application (with pygame) and run - supports returning to menu
     app = None
-    try:
-        app = GameApp(config, args)
+    while True:
+        try:
+            app = GameApp(config, args)
 
-        # Run appropriate mode
-        if args.human:
-            app.run_human_mode()
-        elif args.play:
-            app.run_play_mode()
-        else:
-            app.run_training()
-    except KeyboardInterrupt:
-        print("\n\n⛔ Training interrupted by user")
-        if app:
-            app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
-            if app.web_dashboard:
-                app.web_dashboard.log("⛔ Training interrupted by user", "warning")
-    finally:
-        # Clean up resources
-        if app and app.web_dashboard:
-            app.web_dashboard.stop()
-        pygame.quit()
+            # Run appropriate mode
+            if args.human:
+                app.run_human_mode()
+            elif args.play:
+                app.run_play_mode()
+            else:
+                app.run_training()
+
+            # Check if user wants to return to game selector
+            if not app.return_to_menu:
+                break  # Normal exit
+
+            # Return to game selector
+            print("\n🏠 Returning to game selector...")
+            pygame.quit()  # Close current window
+
+            selected = terminal_game_selector()
+            if not selected:
+                print("No game selected. Exiting.")
+                break
+
+            # Update config for new game
+            config.GAME_NAME = selected
+            args.game = selected
+            print(f"\n🎮 Starting {selected}...")
+
+            # Reinitialize pygame for new game
+            pygame.init()
+
+        except KeyboardInterrupt:
+            print("\n\n⛔ Training interrupted by user")
+            if app:
+                app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+                if app.web_dashboard:
+                    app.web_dashboard.log("⛔ Training interrupted by user", "warning")
+            break
+
+    # Clean up resources
+    if app and app.web_dashboard:
+        app.web_dashboard.stop()
+    pygame.quit()
 
 
 if __name__ == "__main__":

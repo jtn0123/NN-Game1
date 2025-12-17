@@ -34,8 +34,9 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            overflow: hidden;
+            padding: 40px 20px;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         /* Animated background */
@@ -308,9 +309,18 @@
     </div>
 
     <script>
-        const socket = io();
+        let socket = null;
         let selectedGame = null;
         let selectedMode = 'ai';  // Default to AI training
+
+        // Initialize socket connection
+        try {
+            socket = io();
+            document.getElementById('status-msg').textContent = 'Connecting...';
+        } catch (e) {
+            document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
+            console.error('Socket.IO initialization error:', e);
+        }
 
         function selectMode(mode) {
             selectedMode = mode;
@@ -373,58 +383,72 @@
         function selectGame(gameId, card) {
             // Remove selection from other cards
             document.querySelectorAll('.game-card').forEach(c => c.classList.remove('selected'));
-            
+
             // Select this card
             card.classList.add('selected');
             selectedGame = gameId;
-            
+
             // Enable start button
             const btn = document.getElementById('start-btn');
             const modeText = selectedMode === 'human' ? 'PLAY' : 'TRAIN';
             btn.textContent = `${modeText} ${gameId.toUpperCase().replace('_', ' ')}`;
             btn.classList.add('active');
+
+            // Update status
+            document.getElementById('status-msg').textContent = `Selected: ${gameId}`;
         }
 
         function startGame() {
-            if (!selectedGame) return;
+            if (!selectedGame) {
+                alert('Please select a game first');
+                return;
+            }
 
             const btn = document.getElementById('start-btn');
-            btn.textContent = 'LAUNCHING';
+            const statusMsg = document.getElementById('status-msg');
+
+            btn.textContent = 'LAUNCHING...';
             btn.classList.add('loading');
 
             const modeText = selectedMode === 'human' ? 'Playing' : 'Training';
-            document.getElementById('status-msg').textContent = `${modeText} ${selectedGame}...`;
+            statusMsg.textContent = `${modeText} ${selectedGame}...`;
+            statusMsg.style.color = '#00d4ff';
+
+            // Check socket connection
+            if (!socket || !socket.connected) {
+                statusMsg.textContent = 'Not connected to server. Refresh the page.';
+                statusMsg.style.color = '#ff4444';
+                btn.textContent = 'CONNECTION ERROR';
+                btn.classList.remove('loading');
+                return;
+            }
 
             // Send game selection with mode to server
             socket.emit('control', { action: 'select_game', game: selectedGame, mode: selectedMode });
         }
 
-        socket.on('game_starting', (data) => {
-            document.getElementById('status-msg').textContent = data.message;
-        });
+        // Only set up socket handlers if socket was initialized
+        if (socket) {
+            socket.on('game_starting', (data) => {
+                document.getElementById('status-msg').textContent = data.message;
+            });
 
-        // Handle game_ready event from server - same process, just mode switch
-        socket.on('game_ready', (data) => {
-            console.log('Game ready event received:', data);
-            document.getElementById('status-msg').textContent = `${data.game} is ready! Redirecting to dashboard...`;
-            
-            // Short delay then redirect - server is now serving dashboard at /
-            setTimeout(() => {
-                window.location.href = '/';
-            }, 500);
-        });
+            socket.on('disconnect', () => {
+                if (selectedGame && !document.getElementById('status-msg').textContent.includes('Redirecting')) {
+                    document.getElementById('status-msg').textContent = 'Connection lost. Reconnecting...';
+                }
+            });
 
-        socket.on('disconnect', () => {
-            console.log('Socket disconnected');
-            // Only show reconnecting message if we weren't already redirecting
-            if (selectedGame && !document.getElementById('status-msg').textContent.includes('Redirecting')) {
-                document.getElementById('status-msg').textContent = 'Connection lost. Reconnecting...';
-            }
-        });
+            socket.on('connect', () => {
+                document.getElementById('status-msg').textContent = 'Connected - Select a game';
+                document.getElementById('status-msg').style.color = '#00ff88';
+            });
 
-        socket.on('connect', () => {
-            console.log('Connected to server');
-        });
+            socket.on('connect_error', (error) => {
+                document.getElementById('status-msg').textContent = 'Connection error: ' + error.message;
+                document.getElementById('status-msg').style.color = '#ff4444';
+            });
+        }
     </script>
 </body>
 </html>

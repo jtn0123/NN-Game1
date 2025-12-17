@@ -40,7 +40,7 @@ try:
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     logging.getLogger('werkzeug').disabled = True
     
-    from flask import Flask, render_template, jsonify, request
+    from flask import Flask, render_template, jsonify, request, make_response
     from flask_socketio import SocketIO, emit
     FLASK_AVAILABLE = True
 except ImportError:
@@ -1107,7 +1107,6 @@ class WebDashboard:
         self.on_load_model_callback: Optional[Callable[[str], None]] = None
         self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
-        self.on_switch_game_callback: Optional[Callable[[str], None]] = None
         self.on_save_and_quit_callback: Optional[Callable[[], None]] = None
     
     def _register_routes(self) -> None:
@@ -1116,8 +1115,14 @@ class WebDashboard:
         @self.app.route('/')
         def index():
             if self.launcher_mode:
-                return render_template('launcher.html')
-            return render_template('dashboard.html')
+                response = make_response(render_template('launcher.html'))
+            else:
+                response = make_response(render_template('dashboard.html'))
+            # Prevent browser caching to ensure fresh content
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
         
         @self.app.route('/api/status')
         def api_status():
@@ -1182,16 +1187,6 @@ class WebDashboard:
                 return jsonify({'image': screenshot, 'headless': False})
             return jsonify({'image': None, 'headless': False})
         
-        @self.app.route('/api/nn-visualization')
-        def api_nn_visualization():
-            """Get current neural network visualization data."""
-            return jsonify(self.publisher.get_nn_visualization())
-        
-        @self.app.route('/api/logs')
-        def api_logs():
-            limit = request.args.get('limit', 100, type=int)
-            return jsonify({'logs': self.publisher.get_console_logs(limit)})
-        
         @self.app.route('/api/models')
         def api_models():
             """List available model files with metadata.
@@ -1250,57 +1245,7 @@ class WebDashboard:
             
             models.sort(key=lambda x: x['modified'], reverse=True)
             return jsonify({'models': models, 'current_game': self.config.GAME_NAME})
-        
-        @self.app.route('/api/model-info/<path:filepath>')
-        def api_model_info(filepath):
-            """Get detailed info about a specific model."""
-            import torch
-            from datetime import datetime
-            
-            # Security: ensure path is within model directory
-            # Reject paths with directory traversal attempts
-            if '..' in filepath or filepath.startswith('/') or filepath.startswith('\\'):
-                return jsonify({'error': 'Invalid path'}), 403
 
-            # Always join with model_dir first to prevent absolute path injection
-            model_dir = os.path.realpath(self.config.MODEL_DIR)
-            # Join filepath with model_dir, then resolve to prevent traversal
-            full_path = os.path.realpath(os.path.join(model_dir, filepath))
-            # Use os.path.commonpath to properly check containment
-            # This prevents path traversal attacks like /models_evil/file.pth
-            try:
-                common = os.path.commonpath([model_dir, full_path])
-                if common != model_dir:
-                    return jsonify({'error': 'Invalid path'}), 403
-            except ValueError:
-                # commonpath raises ValueError if paths are on different drives (Windows)
-                return jsonify({'error': 'Invalid path'}), 403
-            
-            if not os.path.exists(full_path):
-                return jsonify({'error': 'Model not found'}), 404
-            
-            try:
-                checkpoint = torch.load(full_path, map_location='cpu', weights_only=False)
-                file_stat = os.stat(full_path)
-                
-                info = {
-                    'filename': os.path.basename(full_path),
-                    'path': full_path,
-                    'size': file_stat.st_size,
-                    'size_mb': file_stat.st_size / (1024 * 1024),
-                    'modified': file_stat.st_mtime,
-                    'modified_str': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
-                    'steps': checkpoint.get('steps', 'unknown'),
-                    'epsilon': checkpoint.get('epsilon', 'unknown'),
-                    'state_size': checkpoint.get('state_size', 'unknown'),
-                    'action_size': checkpoint.get('action_size', 'unknown'),
-                    'has_metadata': 'metadata' in checkpoint,
-                    'metadata': checkpoint.get('metadata', None)
-                }
-                return jsonify(info)
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-        
         @self.app.route('/api/models/<path:filepath>', methods=['DELETE'])
         def api_delete_model(filepath):
             """Delete a model file.
@@ -1435,12 +1380,6 @@ class WebDashboard:
             analysis = self.publisher.get_layer_analysis(layer_idx)
             return jsonify(_make_json_safe(analysis))
 
-        @self.app.route('/api/layers')
-        def api_all_layers():
-            """Phase 2: Get analysis data for all layers."""
-            layers = self.publisher.get_all_layer_analysis()
-            return jsonify(_make_json_safe({'layers': layers}))
-
     def _register_socket_events(self) -> None:
         """Register SocketIO events."""
         
@@ -1480,6 +1419,8 @@ class WebDashboard:
             elif action == 'start_fresh':
                 if self.on_start_fresh_callback:
                     self.on_start_fresh_callback()
+                # Notify frontend to clear charts and reset UI
+                emit('training_reset', {'message': 'Training reset - starting fresh'})
             elif action == 'load_model':
                 model_path = data.get('path')
                 if model_path and self.on_load_model_callback:
@@ -1494,32 +1435,9 @@ class WebDashboard:
                 if self.on_performance_mode_callback:
                     self.on_performance_mode_callback(mode)
                 self.publisher.set_performance_mode(mode)
-            elif action == 'switch_game':
-                game_name = data.get('game')
-                if game_name and self.on_switch_game_callback:
-                    self.on_switch_game_callback(game_name)
             elif action == 'save_and_quit':
                 if self.on_save_and_quit_callback:
                     self.on_save_and_quit_callback()
-            elif action == 'stop_for_game_switch':
-                game_name = data.get('game')
-                # Log the switch request
-                self.publisher.log(
-                    f"🔄 Game switch requested: {game_name}",
-                    level="warning"
-                )
-                self.publisher.log(
-                    f"💾 Saving current progress before stopping...",
-                    level="info"
-                )
-                # Trigger save then stop
-                if self.on_save_callback:
-                    self.on_save_callback()
-                # Notify client with next command
-                self.socketio.emit('stop_for_switch', {
-                    'game': game_name,
-                    'command': f'python main.py --game {game_name} --headless --turbo --web'
-                })
             elif action == 'select_game':
                 # Launcher mode: user selected a game to start
                 game_name = data.get('game')
@@ -1546,7 +1464,22 @@ class WebDashboard:
                     })
                     # Trigger restart (will replace process)
                     self.on_restart_with_game_callback(game_name)
-        
+            elif action == 'go_to_launcher':
+                # Return to launcher mode for game/mode selection
+                self.publisher.log("🎮 Returning to launcher...", level="warning")
+                # Save current progress
+                if self.on_save_callback:
+                    self.on_save_callback()
+                # Switch back to launcher mode
+                self.launcher_mode = True
+                # Tell browser to redirect to launcher
+                emit('redirect_to_launcher', {
+                    'message': 'Returning to game launcher...'
+                })
+                # Trigger shutdown callback if set
+                if self.on_save_and_quit_callback:
+                    self.on_save_and_quit_callback()
+
         @self.socketio.on('clear_logs')
         def handle_clear_logs():
             self.publisher.console_logs.clear()

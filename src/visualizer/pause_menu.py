@@ -84,10 +84,10 @@ class PauseMenu:
 
         # Buttons
         self.buttons: List[PauseButton] = [
-            PauseButton("Resume", "resume"),
-            PauseButton("Save Model", "save"),
-            PauseButton("Return to Menu", "menu"),
-            PauseButton("Quit", "quit"),
+            PauseButton("Resume (P)", "resume"),
+            PauseButton("Save Model (S)", "save"),
+            PauseButton("Game Selector (H)", "menu"),
+            PauseButton("Quit (Q)", "quit"),
         ]
 
         self.selected_index = 0
@@ -127,8 +127,20 @@ class PauseMenu:
                 return self.buttons[self.selected_index].action
 
             elif event.key == pygame.K_p:
-                # P also resumes
+                # P resumes
                 return "resume"
+
+            elif event.key == pygame.K_s:
+                # S saves model
+                return "save"
+
+            elif event.key == pygame.K_h:
+                # H goes to game selector (Home)
+                return "menu"
+
+            elif event.key == pygame.K_q:
+                # Q quits
+                return "quit"
 
         elif event.type == pygame.MOUSEMOTION:
             mouse_pos = event.pos
@@ -201,7 +213,7 @@ class PauseMenu:
             button.render(surface, self._button_font)
 
         # Hint text
-        hint = "↑↓ Navigate  •  Enter/Space Select  •  P Resume"
+        hint = "↑↓ Navigate  •  Enter Select  •  H Home  •  Q Quit"
         hint_surface = self._context_font.render(hint, True, (150, 150, 150))
         hint_rect = hint_surface.get_rect(center=(center_x, self.screen_height - 30))
         surface.blit(hint_surface, hint_rect)

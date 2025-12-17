@@ -32,7 +32,6 @@ const MAX_CONSOLE_LOGS = 500;
 let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
-let targetEpisodes = 2000;
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -813,28 +812,7 @@ function connectSocket() {
             console.error('Error processing save event:', err);
         }
     });
-    
-    socket.on('game_switched', (data) => {
-        try {
-            addConsoleLog(data.message, 'success');
-            // Reload games to update UI
-            loadGames();
-            loadGameStats();
-        } catch (err) {
-            console.error('Error processing game switch:', err);
-        }
-    });
-    
-    socket.on('stop_for_switch', (data) => {
-        try {
-            addConsoleLog(`✅ Progress saved. Restart with: ${data.command}`, 'success');
-            // Show prominent message
-            showRestartBanner(data.game, data.command);
-        } catch (err) {
-            console.error('Error processing stop for switch:', err);
-        }
-    });
-    
+
     socket.on('restarting', (data) => {
         try {
             addConsoleLog(`🔄 ${data.message}`, 'warning');
@@ -844,7 +822,19 @@ function connectSocket() {
             console.error('Error processing restart:', err);
         }
     });
-    
+
+    socket.on('redirect_to_launcher', (data) => {
+        try {
+            addConsoleLog(`🎮 ${data.message}`, 'warning');
+            // Short delay then redirect to launcher
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 500);
+        } catch (err) {
+            console.error('Error processing redirect:', err);
+        }
+    });
+
     socket.on('nn_update', (data) => {
         try {
             if (nnVisualizer) {
@@ -1351,346 +1341,6 @@ function copyLogsSimple() {
     }).catch(err => {
         console.error('Failed to copy logs:', err);
     });
-}
-
-/**
- * Copy logs in structured format optimized for model consumption
- * Includes current training state and formatted metrics
- */
-function copyLogsStructured() {
-    // Fetch current state from dashboard
-    fetchWithTimeout('/api/status')
-        .then(response => response.json())
-        .then(stateData => {
-            let text = '';
-            
-            // Header with training context
-            const state = stateData.state || {};
-            const history = stateData.history || {};
-            
-            text += '='.repeat(80) + '\n';
-            text += 'NEURAL NETWORK TRAINING LOGS - STRUCTURED FORMAT\n';
-            text += '='.repeat(80) + '\n\n';
-            
-            // Current Training State
-            text += 'CURRENT TRAINING STATE:\n';
-            text += '-'.repeat(80) + '\n';
-            text += `Episode: ${state.episode || 0}\n`;
-            text += `Current Score: ${state.score || 0}\n`;
-            text += `Best Score: ${state.best_score || 0}\n`;
-            text += `Win Rate: ${((state.win_rate || 0) * 100).toFixed(1)}%\n`;
-            text += `Epsilon (Exploration): ${(state.epsilon || 0).toFixed(4)}\n`;
-            text += `Loss: ${(state.loss || 0).toFixed(6)}\n`;
-            text += `Average Q-Value: ${(state.avg_q_value || 0).toFixed(4)}\n`;
-            text += `Total Steps: ${(state.total_steps || 0).toLocaleString()}\n`;
-            text += `Steps/Second: ${(state.steps_per_second || 0).toFixed(0)}\n`;
-            text += `Episodes/Second: ${(state.episodes_per_second || 0).toFixed(2)}\n`;
-            text += `Memory Usage: ${(state.memory_size || 0).toLocaleString()} / ${(state.memory_capacity || 0).toLocaleString()}\n`;
-            text += `Exploration Actions: ${(state.exploration_actions || 0).toLocaleString()}\n`;
-            text += `Exploitation Actions: ${(state.exploitation_actions || 0).toLocaleString()}\n`;
-            text += `Target Network Updates: ${(state.target_updates || 0).toLocaleString()}\n`;
-            text += `Device: ${state.device || 'unknown'}\n`;
-            text += `Torch Compiled: ${state.torch_compiled ? 'Yes' : 'No'}\n`;
-            text += `Performance Mode: ${state.performance_mode || 'normal'}\n`;
-            text += `Parallel Environments: ${state.num_envs || 1}\n`;
-            text += `Status: ${state.is_paused ? 'Paused' : (state.is_running ? 'Training' : 'Idle')}\n`;
-            text += '\n';
-            
-            // Recent History Summary (last 20 episodes)
-            if (history.scores && history.scores.length > 0) {
-                const recentScores = history.scores.slice(-20);
-                const recentLosses = history.losses.slice(-20);
-                const recentQValues = history.q_values ? history.q_values.slice(-20) : [];
-                
-                text += 'RECENT PERFORMANCE (Last 20 Episodes):\n';
-                text += '-'.repeat(80) + '\n';
-                text += `Average Score: ${(recentScores.reduce((a, b) => a + b, 0) / recentScores.length).toFixed(1)}\n`;
-                text += `Max Score: ${Math.max(...recentScores)}\n`;
-                text += `Min Score: ${Math.min(...recentScores)}\n`;
-                if (recentLosses.length > 0) {
-                    text += `Average Loss: ${(recentLosses.reduce((a, b) => a + b, 0) / recentLosses.length).toFixed(6)}\n`;
-                }
-                if (recentQValues.length > 0) {
-                    text += `Average Q-Value: ${(recentQValues.reduce((a, b) => a + b, 0) / recentQValues.length).toFixed(4)}\n`;
-                }
-                text += '\n';
-            }
-            
-            // Get filtered logs
-            let logsToExport = consoleLogs;
-            if (currentLogFilter !== 'all') {
-                logsToExport = consoleLogs.filter(log => log.level === currentLogFilter);
-            }
-            
-            // Format logs section
-            text += 'CONSOLE LOGS:\n';
-            text += '-'.repeat(80) + '\n';
-            
-            if (logsToExport.length === 0) {
-                text += '(No logs to display)\n';
-            } else {
-                // Group logs by type for better readability
-                const logsByLevel = {};
-                logsToExport.forEach(log => {
-                    if (!logsByLevel[log.level]) {
-                        logsByLevel[log.level] = [];
-                    }
-                    logsByLevel[log.level].push(log);
-                });
-                
-                // Output logs grouped by level
-                const levelOrder = ['metric', 'action', 'success', 'info', 'warning', 'error', 'debug'];
-                levelOrder.forEach(level => {
-                    if (logsByLevel[level] && logsByLevel[level].length > 0) {
-                        text += `\n[${level.toUpperCase()} LOGS]\n`;
-                        logsByLevel[level].forEach(log => {
-                            let line = `  [${log.time}] ${log.message}`;
-                            if (log.data) {
-                                // Format data nicely
-                                try {
-                                    const dataStr = JSON.stringify(log.data, null, 2);
-                                    line += `\n    Data: ${dataStr.split('\n').join('\n    ')}`;
-                                } catch (e) {
-                                    line += ` ${JSON.stringify(log.data)}`;
-                                }
-                            }
-                            text += line + '\n';
-                        });
-                    }
-                });
-            }
-            
-            text += '\n' + '='.repeat(80) + '\n';
-            text += `Generated: ${new Date().toISOString()}\n`;
-            text += '='.repeat(80) + '\n';
-            
-            // Copy to clipboard
-            navigator.clipboard.writeText(text).then(() => {
-                // Visual feedback
-                const btn = document.querySelector('.copy-btn');
-                const originalText = btn.textContent;
-                btn.textContent = '✓ Copied!';
-                btn.classList.add('copied');
-                setTimeout(() => {
-                    btn.textContent = originalText;
-                    btn.classList.remove('copied');
-                }, 1500);
-            }).catch(err => {
-                console.error('Failed to copy logs:', err);
-                // Fallback to simple format
-                copyLogsSimple();
-            });
-        })
-        .catch(err => {
-            console.error('Failed to fetch state for structured copy:', err);
-            // Fallback to simple format
-            copyLogsSimple();
-        });
-}
-
-/**
- * Export current metrics in structured format optimized for model consumption
- * This exports only the current state, not logs
- */
-function exportMetrics() {
-    // Fetch current state from dashboard
-    fetchWithTimeout('/api/status')
-        .then(response => response.json())
-        .then(stateData => {
-            let text = '';
-            
-            const state = stateData.state || {};
-            const history = stateData.history || {};
-            
-            // Header
-            text += '='.repeat(80) + '\n';
-            text += 'NEURAL NETWORK TRAINING METRICS - STRUCTURED FORMAT\n';
-            text += 'Optimized for model consumption and analysis\n';
-            text += '='.repeat(80) + '\n\n';
-            
-            // Training Configuration
-            text += 'TRAINING CONFIGURATION:\n';
-            text += '-'.repeat(80) + '\n';
-            fetchWithTimeout('/api/config')
-                .then(configResponse => configResponse.json())
-                .then(config => {
-                    text += `Learning Rate: ${config.learning_rate || 'unknown'}\n`;
-                    text += `Gamma (Discount Factor): ${config.gamma || 'unknown'}\n`;
-                    text += `Epsilon Start: ${config.epsilon_start || 'unknown'}\n`;
-                    text += `Epsilon End: ${config.epsilon_end || 'unknown'}\n`;
-                    text += `Epsilon Decay: ${config.epsilon_decay || 'unknown'}\n`;
-                    text += `Batch Size: ${config.batch_size || 'unknown'}\n`;
-                    text += `Memory Size: ${config.memory_size || 'unknown'}\n`;
-                    text += `Target Update Frequency: ${config.target_update || 'unknown'}\n`;
-                    text += `Learn Every: ${config.learn_every || 'unknown'} steps\n`;
-                    text += `Gradient Steps: ${config.gradient_steps || 'unknown'}\n`;
-                    text += `Hidden Layers: ${JSON.stringify(config.hidden_layers || [])}\n`;
-                    text += `Game: ${config.game_name || 'unknown'}\n`;
-                    text += '\n';
-                    
-                    // Current Training State
-                    text += 'CURRENT TRAINING STATE:\n';
-                    text += '-'.repeat(80) + '\n';
-                    text += `Episode: ${state.episode || 0}\n`;
-                    text += `Current Score: ${state.score || 0}\n`;
-                    text += `Best Score: ${state.best_score || 0}\n`;
-                    text += `Win Rate: ${((state.win_rate || 0) * 100).toFixed(1)}%\n`;
-                    text += `Epsilon (Exploration Rate): ${(state.epsilon || 0).toFixed(4)}\n`;
-                    text += `Loss: ${(state.loss || 0).toFixed(6)}\n`;
-                    text += `Average Q-Value: ${(state.avg_q_value || 0).toFixed(4)}\n`;
-                    text += `Total Steps: ${(state.total_steps || 0).toLocaleString()}\n`;
-                    text += `Steps/Second: ${(state.steps_per_second || 0).toFixed(0)}\n`;
-                    text += `Episodes/Second: ${(state.episodes_per_second || 0).toFixed(2)}\n`;
-                    text += `Memory Usage: ${(state.memory_size || 0).toLocaleString()} / ${(state.memory_capacity || 0).toLocaleString()} (${((state.memory_size / state.memory_capacity) * 100 || 0).toFixed(1)}%)\n`;
-                    text += `Exploration Actions: ${(state.exploration_actions || 0).toLocaleString()}\n`;
-                    text += `Exploitation Actions: ${(state.exploitation_actions || 0).toLocaleString()}\n`;
-                    text += `Exploration Ratio: ${state.exploration_actions + state.exploitation_actions > 0 ? ((state.exploration_actions / (state.exploration_actions + state.exploitation_actions)) * 100).toFixed(1) : 0}%\n`;
-                    text += `Target Network Updates: ${(state.target_updates || 0).toLocaleString()}\n`;
-                    text += `Device: ${state.device || 'unknown'}\n`;
-                    text += `Torch Compiled: ${state.torch_compiled ? 'Yes' : 'No'}\n`;
-                    text += `Performance Mode: ${state.performance_mode || 'normal'}\n`;
-                    text += `Parallel Environments: ${state.num_envs || 1}\n`;
-                    text += `Status: ${state.is_paused ? 'Paused' : (state.is_running ? 'Training' : 'Idle')}\n`;
-                    text += '\n';
-                    
-                    // Performance History
-                    if (history.scores && history.scores.length > 0) {
-                        text += 'PERFORMANCE HISTORY:\n';
-                        text += '-'.repeat(80) + '\n';
-                        
-                        const recentScores = history.scores.slice(-50);
-                        const recentLosses = history.losses.slice(-50);
-                        const recentQValues = history.q_values ? history.q_values.slice(-50) : [];
-                        const recentEpsilons = history.epsilons ? history.epsilons.slice(-50) : [];
-                        
-                        // Summary statistics
-                        text += `Total Episodes Recorded: ${history.scores.length}\n`;
-                        text += `Recent Episodes (Last 50):\n`;
-                        text += `  Average Score: ${(recentScores.reduce((a, b) => a + b, 0) / recentScores.length).toFixed(1)}\n`;
-                        text += `  Max Score: ${Math.max(...recentScores)}\n`;
-                        text += `  Min Score: ${Math.min(...recentScores)}\n`;
-                        text += `  Score Trend: ${recentScores.length >= 10 ? (recentScores.slice(-10).reduce((a, b) => a + b, 0) / 10 > recentScores.slice(0, 10).reduce((a, b) => a + b, 0) / 10 ? 'Improving' : 'Declining') : 'Insufficient data'}\n`;
-                        
-                        if (recentLosses.length > 0) {
-                            text += `  Average Loss: ${(recentLosses.reduce((a, b) => a + b, 0) / recentLosses.length).toFixed(6)}\n`;
-                            text += `  Min Loss: ${Math.min(...recentLosses).toFixed(6)}\n`;
-                            text += `  Max Loss: ${Math.max(...recentLosses).toFixed(6)}\n`;
-                        }
-                        
-                        if (recentQValues.length > 0) {
-                            text += `  Average Q-Value: ${(recentQValues.reduce((a, b) => a + b, 0) / recentQValues.length).toFixed(4)}\n`;
-                            text += `  Q-Value Trend: ${recentQValues.length >= 10 ? (recentQValues.slice(-10).reduce((a, b) => a + b, 0) / 10 > recentQValues.slice(0, 10).reduce((a, b) => a + b, 0) / 10 ? 'Increasing' : 'Decreasing') : 'Insufficient data'}\n`;
-                        }
-                        
-                        if (recentEpsilons.length > 0) {
-                            text += `  Current Epsilon: ${recentEpsilons[recentEpsilons.length - 1].toFixed(4)}\n`;
-                            text += `  Epsilon Decay Progress: ${((1 - recentEpsilons[recentEpsilons.length - 1]) * 100).toFixed(1)}%\n`;
-                        }
-                        
-                        text += '\n';
-                        
-                        // Last 10 episodes detail
-                        text += 'LAST 10 EPISODES DETAIL:\n';
-                        text += '-'.repeat(80) + '\n';
-                        const last10 = Math.min(10, recentScores.length);
-                        const startEp = Math.max(0, (state.episode || 0) - last10);
-                        for (let i = recentScores.length - last10; i < recentScores.length; i++) {
-                            const epNum = startEp + (i - (recentScores.length - last10)) + 1;
-                            text += `Episode ${epNum}: Score=${recentScores[i]}`;
-                            if (i < recentLosses.length) {
-                                text += `, Loss=${recentLosses[i].toFixed(4)}`;
-                            }
-                            if (i < recentQValues.length) {
-                                text += `, Q-Value=${recentQValues[i].toFixed(2)}`;
-                            }
-                            text += '\n';
-                        }
-                        text += '\n';
-                    }
-                    
-                    // JSON format for programmatic access
-                    text += 'STRUCTURED DATA (JSON):\n';
-                    text += '-'.repeat(80) + '\n';
-                    const structuredData = {
-                        timestamp: new Date().toISOString(),
-                        configuration: config,
-                        current_state: {
-                            episode: state.episode || 0,
-                            score: state.score || 0,
-                            best_score: state.best_score || 0,
-                            win_rate: state.win_rate || 0,
-                            epsilon: state.epsilon || 0,
-                            loss: state.loss || 0,
-                            avg_q_value: state.avg_q_value || 0,
-                            total_steps: state.total_steps || 0,
-                            steps_per_second: state.steps_per_second || 0,
-                            episodes_per_second: state.episodes_per_second || 0,
-                            memory_size: state.memory_size || 0,
-                            memory_capacity: state.memory_capacity || 0,
-                            exploration_actions: state.exploration_actions || 0,
-                            exploitation_actions: state.exploitation_actions || 0,
-                            target_updates: state.target_updates || 0,
-                            device: state.device || 'unknown',
-                            torch_compiled: state.torch_compiled || false,
-                            performance_mode: state.performance_mode || 'normal',
-                            num_envs: state.num_envs || 1,
-                            is_paused: state.is_paused || false,
-                            is_running: state.is_running || false
-                        },
-                        recent_history: {
-                            scores: history.scores ? history.scores.slice(-50) : [],
-                            losses: history.losses ? history.losses.slice(-50) : [],
-                            q_values: history.q_values ? history.q_values.slice(-50) : [],
-                            epsilons: history.epsilons ? history.epsilons.slice(-50) : []
-                        }
-                    };
-                    text += JSON.stringify(structuredData, null, 2);
-                    text += '\n\n';
-                    
-                    text += '='.repeat(80) + '\n';
-                    text += `Generated: ${new Date().toISOString()}\n`;
-                    text += '='.repeat(80) + '\n';
-                    
-                    // Copy to clipboard
-                    navigator.clipboard.writeText(text).then(() => {
-                        // Visual feedback
-                        const btn = document.querySelector('.export-btn');
-                        if (btn) {
-                            const originalText = btn.textContent;
-                            btn.textContent = '✓ Exported!';
-                            btn.classList.add('copied');
-                            setTimeout(() => {
-                                btn.textContent = originalText;
-                                btn.classList.remove('copied');
-                            }, 2000);
-                        }
-                        addConsoleLog('Metrics exported to clipboard in structured format', 'success');
-                    }).catch(err => {
-                        console.error('Failed to copy metrics:', err);
-                        addConsoleLog('Failed to export metrics', 'error');
-                    });
-                })
-                .catch(err => {
-                    console.error('Failed to fetch config:', err);
-                    // Continue without config
-                    navigator.clipboard.writeText(text).then(() => {
-                        const btn = document.querySelector('.export-btn');
-                        if (btn) {
-                            const originalText = btn.textContent;
-                            btn.textContent = '✓ Exported!';
-                            btn.classList.add('copied');
-                            setTimeout(() => {
-                                btn.textContent = originalText;
-                                btn.classList.remove('copied');
-                            }, 2000);
-                        }
-                    });
-                });
-        })
-        .catch(err => {
-            console.error('Failed to fetch state for metrics export:', err);
-            addConsoleLog('Failed to export metrics: ' + err.message, 'error');
-        });
 }
 
 /**
@@ -2740,6 +2390,22 @@ function switchGame(gameId) {
     } else {
         // Reset dropdown to current game
         loadGames();
+    }
+}
+
+/**
+ * Go back to game launcher to select a different game/mode
+ */
+function goToLauncher() {
+    const confirmed = confirm(
+        'Go back to Game Launcher?\n\n' +
+        'This will stop the current session. Your progress has been auto-saved.'
+    );
+
+    if (confirmed) {
+        addConsoleLog('🎮 Returning to launcher...', 'warning');
+        // Tell server to switch back to launcher mode
+        socket.emit('control', { action: 'go_to_launcher' });
     }
 }
 
