@@ -1067,7 +1067,7 @@ class WebDashboard:
         self.port = port
         self.host = host
         self.launcher_mode = launcher_mode
-        self.on_game_selected_callback: Optional[Callable[[str], None]] = None
+        self.on_game_selected_callback: Optional[Callable[[str, str], None]] = None  # (game, mode)
         self.on_restart_with_game_callback: Optional[Callable[[str], None]] = None
         
         # Metrics publisher
@@ -1523,12 +1523,15 @@ class WebDashboard:
             elif action == 'select_game':
                 # Launcher mode: user selected a game to start
                 game_name = data.get('game')
+                mode = data.get('mode', 'ai')  # 'ai' or 'human'
                 if game_name and self.on_game_selected_callback:
+                    mode_text = 'Playing' if mode == 'human' else 'Training'
                     emit('game_starting', {
                         'game': game_name,
-                        'message': f'Starting {game_name}...'
+                        'mode': mode,
+                        'message': f'{mode_text} {game_name}...'
                     })
-                    self.on_game_selected_callback(game_name)
+                    self.on_game_selected_callback(game_name, mode)
             elif action == 'restart_with_game':
                 # Training mode: restart with a different game
                 game_name = data.get('game')

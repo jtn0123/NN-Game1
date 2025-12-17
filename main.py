@@ -68,6 +68,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional, Callable, Any, Type, Union
+from enum import Enum, auto
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -80,6 +81,8 @@ from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
 from src.ai.evaluator import Evaluator  # Deterministic performance tracking
 from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
+from src.visualizer.hud import TrainingHUD
+from src.visualizer.pause_menu import PauseMenu
 
 # Optional web dashboard
 WEB_AVAILABLE: bool
@@ -91,6 +94,15 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
     WebDashboard = None
+
+
+class GameState(Enum):
+    """Application state machine."""
+    MENU = auto()
+    TRAINING = auto()
+    PAUSED = auto()
+    PLAY_MODE = auto()
+    HUMAN_MODE = auto()
 
 
 @dataclass
@@ -116,13 +128,14 @@ class GameApp:
         - User input handling
     """
     
-    def __init__(self, config: Config, args: argparse.Namespace):
+    def __init__(self, config: Config, args: argparse.Namespace, existing_dashboard: Optional[Any] = None):
         """
         Initialize the application.
-        
+
         Args:
             config: Configuration object
             args: Command line arguments
+            existing_dashboard: Optional pre-initialized WebDashboard instance
         """
         self.config = config
         self.args = args
@@ -204,7 +217,11 @@ class GameApp:
             config=config,
             x=0, y=0, width=400, height=100  # Position doesn't matter, not rendered
         )
-        
+
+        # Create HUD and PauseMenu
+        self.hud = TrainingHUD(config=config)
+        self.pause_menu = PauseMenu(screen_width=config.SCREEN_WIDTH, screen_height=config.SCREEN_HEIGHT)
+
         # Training state
         self.episode = 0
         self.total_reward = 0.0
@@ -244,7 +261,31 @@ class GameApp:
         
         # Web dashboard (if enabled)
         self.web_dashboard: Optional[Any] = None
-        if hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
+        if existing_dashboard:
+            # Use pre-initialized dashboard from main()
+            self.web_dashboard = existing_dashboard
+            self.web_dashboard.launcher_mode = False  # Switch out of launcher mode
+
+            # Setup callbacks
+            self.web_dashboard.on_pause_callback = self._toggle_pause
+            self.web_dashboard.on_save_callback = lambda: self._save_model(f"{config.GAME_NAME}_web_save.pth", save_reason="manual")
+            self.web_dashboard.on_save_as_callback = self._save_model_as
+            self.web_dashboard.on_speed_callback = self._set_speed
+            self.web_dashboard.on_reset_callback = self._reset_episode
+            self.web_dashboard.on_start_fresh_callback = self._start_fresh
+            self.web_dashboard.on_load_model_callback = self._load_model
+            self.web_dashboard.on_config_change_callback = self._apply_config
+            self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
+            self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(game, args)
+            self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
+
+            # Send system info to dashboard
+            self._send_system_info()
+
+            # Log startup info
+            self._log_startup_info()
+        elif hasattr(args, 'web') and args.web and WEB_AVAILABLE and WebDashboard is not None:
+            # Create new dashboard
             self.web_dashboard = WebDashboard(config, port=args.port)
             self.web_dashboard.on_pause_callback = self._toggle_pause
             self.web_dashboard.on_save_callback = lambda: self._save_model(f"{config.GAME_NAME}_web_save.pth", save_reason="manual")
@@ -258,10 +299,15 @@ class GameApp:
             self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(game, args)
             self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
             self.web_dashboard.start()
-            
+
+            # Show URL prominently
+            print("\n" + "=" * 60)
+            print(f"🌐 WEB DASHBOARD: http://localhost:{args.port}")
+            print("=" * 60 + "\n")
+
             # Send system info to dashboard
             self._send_system_info()
-            
+
             # Log startup info
             self._log_startup_info()
         
@@ -1417,7 +1463,7 @@ class GameApp:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
-            
+
             elif event.type == pygame.VIDEORESIZE:
                 # Handle window resize
                 new_width = max(event.w, self.min_window_width)
@@ -1427,28 +1473,44 @@ class GameApp:
                     pygame.RESIZABLE
                 )
                 self._update_layout(new_width, new_height)
-            
+
+            # Handle pause menu interactions when paused
+            if self.paused:
+                action = self.pause_menu.handle_event(event)
+                if action == "resume":
+                    self._toggle_pause()
+                elif action == "save":
+                    self._save_model(f"{self.config.GAME_NAME}_manual_save.pth", save_reason="manual")
+                    if self.web_dashboard:
+                        self.web_dashboard.log(f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success")
+                elif action == "menu":
+                    # Return to menu functionality (future enhancement)
+                    print("Return to menu not yet implemented")
+                elif action == "quit":
+                    self.running = False
+                continue  # Skip other event handling when paused
+
             elif event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_ESCAPE, pygame.K_q):
                     self.running = False
-                
+
                 elif event.key == pygame.K_p:
                     self._toggle_pause()
-                
+
                 elif event.key == pygame.K_s:
                     self._save_model(f"{self.config.GAME_NAME}_manual_save.pth", save_reason="manual")
                     if self.web_dashboard:
                         self.web_dashboard.log(f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success")
-                
+
                 elif event.key == pygame.K_r:
                     self._reset_episode()
-                
+
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                     self._speed_up()
-                
+
                 elif event.key == pygame.K_MINUS:
                     self._speed_down()
-                
+
                 elif event.key == pygame.K_f:
                     # Toggle fullscreen
                     if self.screen.get_flags() & pygame.FULLSCREEN:
@@ -1476,65 +1538,43 @@ class GameApp:
         
         # Render game to the fixed-size game surface
         self.game.render(self.game_surface)
-        
-        # Render pause indicator with context (centered on the game surface)
+
+        # Render HUD (training stats overlay) if not paused
+        if not self.paused:
+            # Get action labels from game
+            action_labels = []
+            if hasattr(self.game, 'get_action_labels'):
+                action_labels = self.game.get_action_labels()
+            else:
+                # Fallback generic labels
+                action_labels = [f"Action {i}" for i in range(self.game.action_size)]
+
+            self.hud.render(
+                surface=self.game_surface,
+                episode=self.episode,
+                score=info.get('score', 0),
+                best_score=self.best_score_ever,
+                epsilon=self.agent.epsilon if hasattr(self, 'agent') else 0.0,
+                loss=0.0,  # Could track recent loss
+                speed=self.game_speed,
+                max_episodes=self.config.MAX_EPISODES,
+                selected_action=action,
+                action_labels=action_labels
+            )
+
+        # Render pause menu with context (centered on the game surface)
         if self.paused:
-            game_center_x = self.config.SCREEN_WIDTH // 2
-            game_center_y = self.config.SCREEN_HEIGHT // 2
-
-            # Build pause overlay content
-            title_text = self._pause_font.render("PAUSED", True, (255, 200, 50))
-            title_rect = title_text.get_rect(center=(game_center_x, game_center_y - 40))
-
-            # Context lines
-            context_lines = [
-                f"Episode: {self.episode}",
-                f"Best Score: {self.best_score_ever}",
-                f"Epsilon: {self.agent.epsilon:.3f}",
-                "Press P to resume"
-            ]
-            context_surfaces = [self._help_font.render(line, True, (200, 200, 200)) for line in context_lines]
-
-            # Calculate total height for background
-            total_height = title_rect.height + 20 + sum(s.get_height() + 5 for s in context_surfaces)
-            max_width = max(title_rect.width, max(s.get_width() for s in context_surfaces))
-
-            # Background with semi-transparent fill
-            bg_rect = pygame.Rect(0, 0, max_width + 60, total_height + 30)
-            bg_rect.center = (game_center_x, game_center_y + 20)
-            bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(bg_surface, (0, 0, 0, 220), bg_surface.get_rect(), border_radius=12)
-            self.game_surface.blit(bg_surface, bg_rect.topleft)
-            pygame.draw.rect(self.game_surface, (255, 200, 50), bg_rect, 3, border_radius=12)
-
-            # Draw title
-            title_rect.centery = bg_rect.top + 35
-            self.game_surface.blit(title_text, title_rect)
-
-            # Draw context lines
-            y = title_rect.bottom + 15
-            for surface in context_surfaces:
-                rect = surface.get_rect(centerx=game_center_x, top=y)
-                self.game_surface.blit(surface, rect)
-                y += surface.get_height() + 5
-        
-        # Render speed indicator if not normal (top right of game area)
-        if self.game_speed != 1.0:
-            speed_text = self._speed_font.render(f"Speed: {self.game_speed}x", True, (150, 150, 150))
-            self.game_surface.blit(speed_text, (self.config.SCREEN_WIDTH - 110, 10))
-
-        # Training mode indicator (top left of game area)
-        if self.paused:
-            mode_text = "PAUSED"
-            mode_color = (255, 200, 50)
-        elif hasattr(self, 'agent') and self.agent:
-            mode_text = f"TRAINING (e={self.agent.epsilon:.2f})"
-            mode_color = (100, 200, 100)
-        else:
-            mode_text = "READY"
-            mode_color = (150, 150, 150)
-        mode_surface = self._speed_font.render(mode_text, True, mode_color)
-        self.game_surface.blit(mode_surface, (10, 10))
+            # Build context for pause menu
+            pause_context = {
+                'episode': self.episode,
+                'score': info.get('score', 0),
+                'best_score': self.best_score_ever,
+                'epsilon': self.agent.epsilon if hasattr(self, 'agent') else 0.0,
+                'training_time': time.time() - self.training_start_time,
+                'memory_size': len(self.agent.memory) if hasattr(self, 'agent') else 0,
+                'memory_capacity': self.config.MEMORY_SIZE if hasattr(self.config, 'MEMORY_SIZE') else 0,
+            }
+            self.pause_menu.render(self.game_surface, pause_context)
 
         # Render help legend (bottom left of game area, toggle with H)
         if self.show_help_legend:
@@ -1926,6 +1966,12 @@ class HeadlessTrainer:
             self.web_dashboard = WebDashboard(config, port=args.port)
             self._setup_web_callbacks()
             self.web_dashboard.start()
+
+            # Show URL prominently
+            print("\n" + "=" * 60)
+            print(f"🌐 WEB DASHBOARD: http://localhost:{args.port}")
+            print("=" * 60 + "\n")
+
             self._send_system_info()
             self._log_startup_info()
             if initial_model_path:
@@ -3426,9 +3472,146 @@ def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
     os.execv(sys.executable, new_args)
 
 
+def run_web_mode(config: Config, args: argparse.Namespace) -> None:
+    """
+    Run with web interface for game selection and monitoring.
+    Works for both headless and visual modes.
+
+    This function handles all --web scenarios:
+    - If game specified: starts immediately with web dashboard
+    - If no game: shows web launcher for game selection, then starts training
+    """
+    import threading
+
+    import socket
+
+    try:
+        from src.web.server import WebDashboard
+    except ImportError:
+        print("❌ Web dashboard requires Flask. Install with:")
+        print("   pip install flask flask-socketio eventlet")
+        return
+
+    # Find available port (auto-increment if busy)
+    port = args.port
+    max_attempts = 10
+    for attempt in range(max_attempts):
+        try:
+            # Check if port is available
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', port))
+            break  # Port is available
+        except OSError:
+            if attempt == 0:
+                print(f"⚠️  Port {port} is busy, finding available port...")
+            port += 1
+    else:
+        print(f"❌ Could not find available port after {max_attempts} attempts")
+        return
+
+    if port != args.port:
+        print(f"✓ Using port {port}")
+
+    # Track game and mode selection
+    selected_game = None
+    selected_mode = 'ai'  # 'ai' or 'human'
+    selection_event = threading.Event()
+
+    def on_game_selected(game_name: str, mode: str) -> None:
+        """Called when user selects a game from web UI."""
+        nonlocal selected_game, selected_mode
+        selected_game = game_name
+        selected_mode = mode
+        selection_event.set()
+
+    # Start web dashboard in launcher mode
+    dashboard = WebDashboard(config, port=port, launcher_mode=True)
+    dashboard.on_game_selected_callback = on_game_selected  # Set callback BEFORE start
+    dashboard.start()
+
+    # Wait for server to print its startup message
+    import time
+    time.sleep(0.3)
+
+    # If game already specified, skip selection
+    if args.game:
+        selected_game = args.game
+        # Check if human mode was specified via CLI
+        if hasattr(args, 'human') and args.human:
+            selected_mode = 'human'
+        print(f"\n🎮 Starting {selected_game}...")
+    else:
+        # Wait for game selection from web UI
+        print("\n⏳ Open browser to select a game...")
+        print("   Press Ctrl+C to exit\n")
+
+        try:
+            # Wait for game selection or keyboard interrupt
+            while not selection_event.is_set():
+                selection_event.wait(timeout=0.5)
+        except KeyboardInterrupt:
+            print("\n\n👋 Closed by user")
+            dashboard.stop()
+            return
+
+        if not selected_game:
+            print("No game selected. Exiting.")
+            dashboard.stop()
+            return
+
+        mode_text = "🎮 Playing" if selected_mode == 'human' else "🤖 Training"
+        print(f"\n{mode_text} {selected_game}...")
+
+    # Update config and args based on selection
+    config.GAME_NAME = selected_game
+    args.game = selected_game
+
+    # Set mode based on web selection
+    if selected_mode == 'human':
+        args.human = True
+
+    dashboard.launcher_mode = False
+    dashboard.socketio.emit('game_ready', {'game': selected_game, 'mode': selected_mode})
+
+    # Start appropriate trainer based on mode
+    try:
+        if args.headless and selected_mode != 'human':
+            # Headless training (only for AI mode)
+            trainer = HeadlessTrainer(config, args, existing_dashboard=dashboard)
+            trainer.train()
+        else:
+            # Visual mode (required for human play)
+            app = GameApp(config, args, existing_dashboard=dashboard)
+
+            # Run appropriate mode
+            if selected_mode == 'human' or args.human:
+                app.run_human_mode()
+            elif args.play:
+                app.run_play_mode()
+            else:
+                app.run_training()
+    except KeyboardInterrupt:
+        print("\n\n⛔ Training interrupted by user")
+        if args.headless:
+            if 'trainer' in locals():
+                trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+        else:
+            if 'app' in locals():
+                app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+                if app.web_dashboard:
+                    app.web_dashboard.log("⛔ Training interrupted by user", "warning")
+    finally:
+        # Clean up resources
+        if dashboard:
+            dashboard.stop()
+        if not args.headless:
+            pygame.quit()
+        print("\n👋 Done")
+
+
 def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     """Run web-based game launcher mode.
-    
+
     This mode starts a web server without any training, allowing the user
     to select a game from the browser. When a game is selected, training
     starts in the SAME process (no restart needed).
@@ -3485,6 +3668,7 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
             selection_event.wait(timeout=0.5)
     except KeyboardInterrupt:
         print("\n\n👋 Launcher closed by user")
+        dashboard.stop()
         return
     
     if selected_game:
@@ -3512,6 +3696,9 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
             print("\n\n⛔ Training interrupted by user")
             trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
         finally:
+            # Clean up web dashboard
+            if dashboard:
+                dashboard.stop()
             print("\n👋 Training complete")
 
 
@@ -3603,7 +3790,12 @@ def main():
     
     # Load config
     config = Config()
-    
+
+    # Web mode: use web interface for everything
+    if hasattr(args, 'web') and args.web and WEB_AVAILABLE:
+        run_web_mode(config, args)
+        return
+
     # Show game selection menu if requested OR if no game specified (visual mode only)
     show_menu = (hasattr(args, 'menu') and args.menu) or (args.game is None and not args.headless)
     
@@ -3671,6 +3863,10 @@ def main():
         except KeyboardInterrupt:
             print("\n\n⛔ Training interrupted by user")
             trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+        finally:
+            # Clean up web dashboard if running
+            if trainer.web_dashboard:
+                trainer.web_dashboard.stop()
         return
     
     # Apply CLI overrides to config for visualized mode
@@ -3692,11 +3888,12 @@ def main():
         config.FORCE_CPU = True
         print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
     
-    # Create application (with pygame)
-    app = GameApp(config, args)
-    
-    # Run appropriate mode
+    # Create application (with pygame) and run
+    app = None
     try:
+        app = GameApp(config, args)
+
+        # Run appropriate mode
         if args.human:
             app.run_human_mode()
         elif args.play:
@@ -3705,10 +3902,14 @@ def main():
             app.run_training()
     except KeyboardInterrupt:
         print("\n\n⛔ Training interrupted by user")
-        app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
-        if app.web_dashboard:
-            app.web_dashboard.log("⛔ Training interrupted by user", "warning")
+        if app:
+            app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
+            if app.web_dashboard:
+                app.web_dashboard.log("⛔ Training interrupted by user", "warning")
     finally:
+        # Clean up resources
+        if app and app.web_dashboard:
+            app.web_dashboard.stop()
         pygame.quit()
 
 

@@ -17,6 +17,7 @@ import pygame
 from typing import Tuple, List, Optional
 import math
 import random
+import heapq
 
 from .base_game import BaseGame
 import sys
@@ -1306,18 +1307,21 @@ class SpaceInvaders(BaseGame):
         idx += 1
         
         # IMPROVED: Track multiple alien bullets (top N nearest to ship)
-        # Sort alien bullets by distance to ship Y (closest first = most dangerous)
+        # Use heapq.nsmallest for O(n log k) instead of O(n log n) sorting
         ship_y = self.ship.y
         ship_center_x = self.ship.x + self.ship.width // 2
-        
-        alive_bullets = [(b, ship_y - b.y) for b in self.alien_bullets if b.alive and b.y < ship_y]
-        alive_bullets.sort(key=lambda x: x[1])  # Sort by distance (closest first)
-        
+
+        alive_bullets = heapq.nsmallest(
+            self._max_tracked_alien_bullets,
+            [(ship_y - b.y, b) for b in self.alien_bullets if b.alive and b.y < ship_y],
+            key=lambda x: x[0]
+        )
+
         for i in range(self._max_tracked_alien_bullets):
             if i < len(alive_bullets):
-                bullet = alive_bullets[i][0]
-                # Normalized X position relative to ship (-0.5 to 1.5 range, 0.5 = centered on ship)
-                self._state_array[idx] = (bullet.x - ship_center_x) * self._inv_width + 0.5
+                bullet = alive_bullets[i][1]  # bullet is now at index 1
+                # Normalized X position relative to ship (clamped to [0, 1] range)
+                self._state_array[idx] = np.clip((bullet.x - ship_center_x) * self._inv_width + 0.5, 0.0, 1.0)
                 # Normalized Y position (0 = at ship level, 1 = top of screen)
                 self._state_array[idx + 1] = bullet.y * self._inv_height
             else:

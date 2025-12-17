@@ -228,15 +228,74 @@
         .difficulty.easy { background: rgba(0, 255, 136, 0.2); color: #00ff88; }
         .difficulty.medium { background: rgba(0, 212, 255, 0.2); color: #00d4ff; }
         .difficulty.hard { background: rgba(255, 152, 0, 0.2); color: #ff9800; }
+
+        /* Mode selector */
+        .mode-selector {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 25px 0;
+        }
+
+        .mode-btn {
+            padding: 12px 28px;
+            border: 2px solid var(--text-secondary);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mode-btn:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .mode-btn.selected {
+            border-color: var(--accent-green);
+            background: rgba(0, 255, 136, 0.1);
+            color: var(--accent-green);
+            box-shadow: var(--glow-green);
+        }
+
+        .mode-btn .mode-icon {
+            font-size: 1.2rem;
+        }
+
+        .mode-description {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <div class="bg-grid"></div>
-    
+
     <div class="container">
         <h1>🧠 NEURAL NETWORK AI</h1>
-        <p class="subtitle">Select a game to train your AI</p>
-        
+        <p class="subtitle">Select a mode and game</p>
+
+        <div class="mode-selector">
+            <button class="mode-btn selected" id="mode-ai" onclick="selectMode('ai')">
+                <span class="mode-icon">🤖</span>
+                <span>AI TRAINING</span>
+            </button>
+            <button class="mode-btn" id="mode-human" onclick="selectMode('human')">
+                <span class="mode-icon">🎮</span>
+                <span>PLAY YOURSELF</span>
+            </button>
+        </div>
+        <p class="mode-description" id="mode-desc">Train a neural network to master the game</p>
+
         <div class="games-grid" id="games-grid">
             <!-- Games loaded dynamically -->
         </div>
@@ -251,6 +310,30 @@
     <script>
         const socket = io();
         let selectedGame = null;
+        let selectedMode = 'ai';  // Default to AI training
+
+        function selectMode(mode) {
+            selectedMode = mode;
+
+            // Update button states
+            document.getElementById('mode-ai').classList.toggle('selected', mode === 'ai');
+            document.getElementById('mode-human').classList.toggle('selected', mode === 'human');
+
+            // Update description
+            const desc = document.getElementById('mode-desc');
+            if (mode === 'ai') {
+                desc.textContent = 'Train a neural network to master the game';
+            } else {
+                desc.textContent = 'Play the game yourself using keyboard controls';
+            }
+
+            // Update start button text if game is selected
+            if (selectedGame) {
+                const btn = document.getElementById('start-btn');
+                const modeText = mode === 'human' ? 'PLAY' : 'TRAIN';
+                btn.textContent = `${modeText} ${selectedGame.toUpperCase().replace('_', ' ')}`;
+            }
+        }
 
         // Load available games
         fetch('/api/games')
@@ -297,21 +380,23 @@
             
             // Enable start button
             const btn = document.getElementById('start-btn');
-            btn.textContent = `START ${gameId.toUpperCase().replace('_', ' ')}`;
+            const modeText = selectedMode === 'human' ? 'PLAY' : 'TRAIN';
+            btn.textContent = `${modeText} ${gameId.toUpperCase().replace('_', ' ')}`;
             btn.classList.add('active');
         }
 
         function startGame() {
             if (!selectedGame) return;
-            
+
             const btn = document.getElementById('start-btn');
             btn.textContent = 'LAUNCHING';
             btn.classList.add('loading');
-            
-            document.getElementById('status-msg').textContent = `Initializing ${selectedGame}...`;
-            
-            // Send game selection to server
-            socket.emit('control', { action: 'select_game', game: selectedGame });
+
+            const modeText = selectedMode === 'human' ? 'Playing' : 'Training';
+            document.getElementById('status-msg').textContent = `${modeText} ${selectedGame}...`;
+
+            // Send game selection with mode to server
+            socket.emit('control', { action: 'select_game', game: selectedGame, mode: selectedMode });
         }
 
         socket.on('game_starting', (data) => {

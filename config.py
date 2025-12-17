@@ -419,7 +419,11 @@ class Config:
     
     # Dashboard
     PLOT_HISTORY_LENGTH: int = 100  # Number of episodes to show in plots
-    
+
+    # Training HUD (Heads-Up Display)
+    HUD_ENABLED: bool = True  # Show on-screen training stats
+    HUD_OPACITY: float = 0.8  # Opacity of HUD elements (0.0 to 1.0)
+
     # =========================================================================
     # TRAINING CONTROL
     # =========================================================================

@@ -514,5 +514,106 @@ class TestNStepReplayBuffer:
         assert len(n_step_buffer._n_step_buffer) == 0
 
 
+class TestReplayBufferEdgeCases:
+    """Test edge cases and validation."""
+
+    def test_sample_from_empty_raises(self):
+        """Sampling from empty buffer should raise RuntimeError."""
+        buffer = ReplayBuffer(capacity=100, state_size=10)
+        with pytest.raises(RuntimeError, match="Cannot sample from empty buffer"):
+            buffer.sample(16)
+
+    def test_sample_no_copy_from_empty_raises(self):
+        """sample_no_copy from empty buffer should raise RuntimeError."""
+        buffer = ReplayBuffer(capacity=100, state_size=10)
+        with pytest.raises(RuntimeError, match="Cannot sample from empty buffer"):
+            buffer.sample_no_copy(16)
+
+    def test_negative_capacity_raises(self):
+        """Creating buffer with negative capacity should raise ValueError."""
+        with pytest.raises(ValueError, match="Capacity must be positive"):
+            ReplayBuffer(capacity=-10)
+
+    def test_zero_capacity_raises(self):
+        """Creating buffer with zero capacity should raise ValueError."""
+        with pytest.raises(ValueError, match="Capacity must be positive"):
+            ReplayBuffer(capacity=0)
+
+    def test_state_shape_mismatch_raises(self, state_size):
+        """Pushing state with wrong shape should raise ValueError."""
+        buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        # First push with correct size
+        state = np.ones(state_size, dtype=np.float32)
+        buffer.push(state, 0, 1.0, state, False)
+
+        # Second push with wrong size
+        wrong_state = np.ones(state_size + 5, dtype=np.float32)
+        with pytest.raises(ValueError, match="State shape mismatch"):
+            buffer.push(wrong_state, 0, 1.0, wrong_state, False)
+
+
+class TestPrioritizedReplayBufferEdgeCases:
+    """Test PER edge cases and validation."""
+
+    def test_per_sample_with_batch_larger_than_buffer(self, state_size, sample_experience):
+        """PER should use replacement when batch > buffer size."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        # Add only 5 experiences
+        for _ in range(5):
+            state, action, reward, next_state, done = sample_experience()
+            buffer.push(state, action, reward, next_state, done)
+
+        # Sample 16 (larger than 5) - should not crash
+        result = buffer.sample(16)
+        assert len(result) == 7
+
+    def test_per_save_and_load_restores_beta(self, state_size, sample_experience):
+        """Save/load should restore beta annealing state."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        for _ in range(50):
+            state, action, reward, next_state, done = sample_experience()
+            buffer.push(state, action, reward, next_state, done)
+
+        # Sample to advance beta
+        for _ in range(10):
+            buffer.sample(8)
+
+        saved_beta = buffer.beta
+        saved_frame_count = buffer._frame_count
+
+        # Save and load to new buffer
+        data = buffer.save_to_dict()
+        new_buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        new_buffer.load_from_dict(data)
+
+        assert new_buffer.beta == saved_beta
+        assert new_buffer._frame_count == saved_frame_count
+
+    def test_per_sample_empty_raises(self, state_size):
+        """Sampling from empty PER buffer should raise."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        buffer._initialized = True  # Force initialization
+        buffer._size = 0
+        with pytest.raises(RuntimeError, match="Cannot sample from empty buffer"):
+            buffer.sample_no_copy(16)
+
+    def test_per_negative_capacity_raises(self):
+        """Creating PER buffer with negative capacity should raise ValueError."""
+        with pytest.raises(ValueError, match="Capacity must be positive"):
+            PrioritizedReplayBuffer(capacity=-10)
+
+    def test_per_state_shape_mismatch_raises(self, state_size):
+        """Pushing state with wrong shape to PER buffer should raise ValueError."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        # First push with correct size
+        state = np.ones(state_size, dtype=np.float32)
+        buffer.push(state, 0, 1.0, state, False)
+
+        # Second push with wrong size
+        wrong_state = np.ones(state_size + 5, dtype=np.float32)
+        with pytest.raises(ValueError, match="State shape mismatch"):
+            buffer.push(wrong_state, 0, 1.0, wrong_state, False)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

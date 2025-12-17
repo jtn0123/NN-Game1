@@ -323,7 +323,7 @@ class Breakout(BaseGame):
         # If ball moves more than paddle/brick height in one frame, it can phase through
         max_safe_speed = min(self.config.PADDLE_HEIGHT, self.config.BRICK_HEIGHT) * 0.8
         current_speed = np.sqrt(self.ball.dx**2 + self.ball.dy**2)
-        if current_speed > max_safe_speed:
+        if current_speed > 0 and current_speed > max_safe_speed:
             scale = max_safe_speed / current_speed
             self.ball.dx *= scale
             self.ball.dy *= scale

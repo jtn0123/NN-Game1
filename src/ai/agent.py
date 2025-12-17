@@ -445,7 +445,7 @@ class Agent:
     ) -> None:
         """
         Store a batch of experiences in replay buffer.
-        
+
         Args:
             states: Batch of current states, shape (batch_size, state_size)
             actions: Batch of actions taken, shape (batch_size,)
@@ -453,8 +453,12 @@ class Agent:
             next_states: Batch of next states, shape (batch_size, state_size)
             dones: Batch of done flags, shape (batch_size,)
         """
-        for i in range(len(states)):
-            self.memory.push(states[i], int(actions[i]), float(rewards[i]), next_states[i], bool(dones[i]))
+        # Use push_batch if available (standard ReplayBuffer), otherwise fall back to loop
+        if hasattr(self.memory, 'push_batch'):
+            self.memory.push_batch(states, actions, rewards, next_states, dones)
+        else:
+            for i in range(len(states)):
+                self.memory.push(states[i], int(actions[i]), float(rewards[i]), next_states[i], bool(dones[i]))
     
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
         """

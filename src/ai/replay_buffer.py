@@ -54,11 +54,13 @@ class ReplayBuffer:
     def __init__(self, capacity: int, state_size: int = 0):
         """
         Initialize the replay buffer.
-        
+
         Args:
             capacity: Maximum number of experiences to store
             state_size: Size of state vector (auto-detected on first push if 0)
         """
+        if capacity <= 0:
+            raise ValueError(f"Capacity must be positive, got {capacity}")
         self.capacity = capacity
         self._state_size = state_size
         self._size = 0  # Current number of experiences stored
@@ -102,7 +104,11 @@ class ReplayBuffer:
         # Lazy initialization on first push
         if not self._initialized:
             self._init_arrays(len(state))
-        
+
+        # Validate state shape
+        if len(state) != self._state_size:
+            raise ValueError(f"State shape mismatch: expected ({self._state_size},), got ({len(state)},)")
+
         # Store experience at current position
         # Use np.copyto for explicit copy semantics (safe with views from VecBreakout)
         np.copyto(self.states[self._position], state)
@@ -159,20 +165,22 @@ class ReplayBuffer:
     def sample(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Sample a random batch of experiences using vectorized numpy indexing.
-        
+
         Args:
             batch_size: Number of experiences to sample
-            
+
         Returns:
             Tuple of numpy arrays: (states, actions, rewards, next_states, dones)
             All arrays are copies to prevent modification of buffer data.
-            
+
         Raises:
             RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
         if not self._initialized:
             raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
-        
+        if self._size == 0:
+            raise RuntimeError("Cannot sample from empty buffer.")
+
         # Sample with replacement for speed (duplicates are rare with large buffers)
         indices = np.random.choice(self._size, size=batch_size, replace=True)
         
@@ -188,22 +196,24 @@ class ReplayBuffer:
     def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Sample without copying (faster but arrays are views into buffer).
-        
+
         Use this only if you'll consume the batch immediately before the next sample
         or push operation. The returned arrays share memory with the buffer.
-        
+
         Args:
             batch_size: Number of experiences to sample
-            
+
         Returns:
             Tuple of numpy array views (not copies)
-            
+
         Raises:
             RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
         if not self._initialized:
             raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
-        
+        if self._size == 0:
+            raise RuntimeError("Cannot sample from empty buffer.")
+
         # Sample with replacement for speed (duplicates are rare with large buffers)
         indices = np.random.choice(self._size, size=batch_size, replace=True)
 
@@ -334,7 +344,7 @@ class PrioritizedReplayBuffer:
     ):
         """
         Initialize prioritized replay buffer.
-        
+
         Args:
             capacity: Maximum buffer size
             state_size: Size of state vector (auto-detected if 0)
@@ -343,6 +353,8 @@ class PrioritizedReplayBuffer:
             beta_end: Final importance sampling weight
             beta_frames: Number of frames over which to anneal beta
         """
+        if capacity <= 0:
+            raise ValueError(f"Capacity must be positive, got {capacity}")
         self.capacity = capacity
         self._state_size = state_size
         self._size = 0
@@ -384,7 +396,11 @@ class PrioritizedReplayBuffer:
         """Add experience with maximum priority."""
         if not self._initialized:
             self._init_arrays(len(state))
-        
+
+        # Validate state shape
+        if len(state) != self._state_size:
+            raise ValueError(f"State shape mismatch: expected ({self._state_size},), got ({len(state)},)")
+
         # Use np.copyto for explicit copy semantics (safe with views from VecBreakout)
         np.copyto(self.states[self._position], state)
         self.actions[self._position] = action
@@ -424,7 +440,8 @@ class PrioritizedReplayBuffer:
         
         # Calculate importance sampling weights
         weights = (self._size * probs[indices]) ** (-self.beta)
-        weights = weights / weights.max()  # Normalize
+        max_weight = weights.max()
+        weights = weights / max_weight if max_weight > 0 else weights  # Normalize (defend against zero)
         weights = weights.astype(np.float32)
         
         return (
@@ -462,7 +479,8 @@ class PrioritizedReplayBuffer:
         indices = np.random.choice(self._size, size=batch_size, p=probs, replace=use_replacement)
 
         weights = (self._size * probs[indices]) ** (-self.beta)
-        weights = weights / weights.max()
+        max_weight = weights.max()
+        weights = weights / max_weight if max_weight > 0 else weights  # Normalize (defend against zero)
         weights = weights.astype(np.float32)
 
         return (
