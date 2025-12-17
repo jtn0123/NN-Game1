@@ -1498,17 +1498,17 @@ class WebDashboard:
         def broadcast_nn_update(nn_data: Dict[str, Any]):
             self.socketio.emit('nn_update', nn_data)
         
-        # Clear any existing callbacks before registering (prevents duplication)
+        # Clear and register callbacks atomically (prevents race condition)
         with self.publisher._callback_lock:
             self.publisher._on_update_callbacks.clear()
             self.publisher._on_log_callbacks.clear()
             self.publisher._on_save_callbacks.clear()
             self.publisher._on_nn_update_callbacks.clear()
-        
-        self.publisher.on_update(broadcast_update)
-        self.publisher.on_log(broadcast_log)
-        self.publisher.on_save(broadcast_save)
-        self.publisher.on_nn_update(broadcast_nn_update)
+            # Register new callbacks inside the lock to prevent race condition
+            self.publisher._on_update_callbacks.append(broadcast_update)
+            self.publisher._on_log_callbacks.append(broadcast_log)
+            self.publisher._on_save_callbacks.append(broadcast_save)
+            self.publisher._on_nn_update_callbacks.append(broadcast_nn_update)
     
     def start(self) -> None:
         """Start the web server in a background thread."""

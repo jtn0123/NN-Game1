@@ -192,8 +192,8 @@ class Trainer:
             if done:
                 break
         
-        # Decay epsilon after episode
-        self.agent.decay_epsilon()
+        # Decay epsilon after episode (pass episode for warmup check)
+        self.agent.decay_epsilon(episode=self.current_episode)
         
         duration = time.time() - start_time
         

@@ -490,9 +490,10 @@ class NeuralNetVisualizer:
             else:
                 layer_acts = np.zeros(layer_pos['neurons'])
             
-            # Normalize
+            # Normalize and clamp to [-1, 1]
             max_act = np.abs(layer_acts).max() if len(layer_acts) > 0 else 1
             norm_acts = layer_acts / (max_act + 1e-6)
+            norm_acts = np.clip(norm_acts, -1.0, 1.0)
             
             for j, pos in enumerate(layer_pos['positions']):
                 act_val = norm_acts[j] if j < len(norm_acts) else 0

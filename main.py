@@ -65,6 +65,7 @@ import argparse
 import sys
 import os
 import time
+import math
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional, Callable, Any, Type, Union
@@ -154,6 +155,10 @@ class GameApp:
         self._speed_font = pygame.font.Font(None, 24)
         self._help_font = pygame.font.Font(None, 28)
         self._help_title_font = pygame.font.Font(None, 36)
+        self._notification_font = pygame.font.Font(None, 28)
+
+        # Notification system for visual feedback
+        self._notifications: List[dict] = []  # [{text, color, start_time, duration}]
 
         # Get game info for display
         game_info = get_game_info(config.GAME_NAME)
@@ -723,7 +728,7 @@ class GameApp:
         # Calculate win rate from history
         if training_history.wins:
             recent_wins = training_history.wins[-100:]
-            publisher.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins)
+            publisher.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins) if recent_wins else 0.0
         
         # Emit an update to connected clients
         self.web_dashboard.socketio.emit('state_update', publisher.get_snapshot())
@@ -745,10 +750,16 @@ class GameApp:
                 print(f"⚠️  Invalid learning_rate value: {config_data['learning_rate']}")
         
         if 'epsilon' in config_data:
-            old_eps = self.agent.epsilon
-            # Clamp epsilon to valid range
-            self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, config_data['epsilon']))
-            changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
+            try:
+                eps = float(config_data['epsilon'])
+                if not math.isfinite(eps):
+                    raise ValueError("Epsilon must be finite (not NaN or Inf)")
+                old_eps = self.agent.epsilon
+                # Clamp epsilon to valid range
+                self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
+                changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid epsilon value: {config_data['epsilon']} - {e}")
         
         if 'epsilon_decay' in config_data:
             try:
@@ -849,18 +860,22 @@ class GameApp:
         # Enforce minimum window size
         new_width = max(new_width, self.min_window_width)
         new_height = max(new_height, self.min_window_height)
-        
+
         self.window_width = new_width
         self.window_height = new_height
-        
+
         # The game has a FIXED render size (config.SCREEN_WIDTH x config.SCREEN_HEIGHT)
         # We position other elements around it
         # Game display area stays fixed (training stats and NN viz are on web dashboard)
         self.game_width = self.config.SCREEN_WIDTH   # 800
         self.game_height = self.config.SCREEN_HEIGHT  # 600
-        
+
         # Update scaling for the new window size
         self._update_scale()
+
+        # Update pause menu positions
+        if hasattr(self, 'pause_menu') and self.pause_menu:
+            self.pause_menu.handle_resize(new_width, new_height)
     
     def _update_scale(self) -> None:
         """Calculate scaling factor to fit game in window while maintaining aspect ratio."""
@@ -883,7 +898,73 @@ class GameApp:
             scaled_height = int(self.config.SCREEN_HEIGHT * self.scale_factor)
             self.game_offset_x = 0
             self.game_offset_y = (self.window_height - scaled_height) // 2
-    
+
+        # Ensure minimum scale factor to prevent division by zero or rendering issues
+        self.scale_factor = max(0.1, self.scale_factor)
+
+    def _show_notification(self, text: str, color: tuple = (100, 200, 255), duration: float = 2.0) -> None:
+        """
+        Show a notification on screen.
+
+        Args:
+            text: Notification text
+            color: Text color (RGB tuple)
+            duration: How long to show the notification in seconds
+        """
+        import time
+        self._notifications.append({
+            'text': text,
+            'color': color,
+            'start_time': time.time(),
+            'duration': duration
+        })
+
+    def _update_notifications(self) -> None:
+        """Remove expired notifications."""
+        import time
+        current_time = time.time()
+        self._notifications = [
+            n for n in self._notifications
+            if current_time - n['start_time'] < n['duration']
+        ]
+
+    def _render_notifications(self, surface: pygame.Surface) -> None:
+        """Render all active notifications."""
+        import time
+        if not self._notifications:
+            return
+
+        current_time = time.time()
+        y_offset = 10
+
+        for notification in self._notifications:
+            elapsed = current_time - notification['start_time']
+            # Fade out in the last 0.5 seconds
+            alpha = 255
+            if elapsed > notification['duration'] - 0.5:
+                alpha = int(255 * (notification['duration'] - elapsed) / 0.5)
+            alpha = max(0, min(255, alpha))
+
+            text_surface = self._notification_font.render(notification['text'], True, notification['color'])
+
+            # Create background with alpha
+            bg_width = text_surface.get_width() + 20
+            bg_height = text_surface.get_height() + 10
+            bg_surface = pygame.Surface((bg_width, bg_height), pygame.SRCALPHA)
+            pygame.draw.rect(bg_surface, (0, 0, 0, int(alpha * 0.7)), bg_surface.get_rect(), border_radius=5)
+
+            # Position at top-center
+            x = (surface.get_width() - bg_width) // 2
+            y = y_offset
+
+            # Apply alpha to text
+            text_surface.set_alpha(alpha)
+
+            surface.blit(bg_surface, (x, y))
+            surface.blit(text_surface, (x + 10, y + 5))
+
+            y_offset += bg_height + 5
+
     # Speed presets for clean stepping
     # Smoother geometric progression for speed control
     SPEED_PRESETS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
@@ -1507,18 +1588,25 @@ class GameApp:
                     self._toggle_pause()
 
                 elif event.key == pygame.K_s:
-                    self._save_model(f"{self.config.GAME_NAME}_manual_save.pth", save_reason="manual")
+                    success = self._save_model(f"{self.config.GAME_NAME}_manual_save.pth", save_reason="manual")
+                    if success:
+                        self._show_notification("Model Saved", (100, 255, 100), 1.5)
+                    else:
+                        self._show_notification("Save Failed", (255, 100, 100), 2.0)
                     if self.web_dashboard:
                         self.web_dashboard.log(f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success")
 
                 elif event.key == pygame.K_r:
                     self._reset_episode()
+                    self._show_notification("Episode Reset", (255, 200, 100), 1.0)
 
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                     self._speed_up()
+                    self._show_notification(f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0)
 
                 elif event.key == pygame.K_MINUS:
                     self._speed_down()
+                    self._show_notification(f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0)
 
                 elif event.key == pygame.K_f:
                     # Toggle fullscreen
@@ -1652,7 +1740,11 @@ class GameApp:
             scaled_surface = pygame.transform.smoothscale(self.game_surface, (scaled_width, scaled_height))
             # Blit centered on screen
             self.screen.blit(scaled_surface, (self.game_offset_x, self.game_offset_y))
-        
+
+        # Update and render notifications (on top of scaled game)
+        self._update_notifications()
+        self._render_notifications(self.screen)
+
         pygame.display.flip()
     
     def _emit_nn_visualization(self, state: np.ndarray, selected_action: int) -> None:
@@ -2356,7 +2448,7 @@ class HeadlessTrainer:
         # Calculate win rate from history
         if training_history.wins:
             recent_wins = training_history.wins[-100:]
-            publisher.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins)
+            publisher.state.win_rate = sum(1 for w in recent_wins if w) / len(recent_wins) if recent_wins else 0.0
         
         # Emit an update to connected clients
         self.web_dashboard.socketio.emit('state_update', publisher.get_snapshot())
@@ -2449,10 +2541,16 @@ class HeadlessTrainer:
             changes.append(f"LR: {old_lr} → {config_data['learning_rate']}")
         
         if 'epsilon' in config_data:
-            old_eps = self.agent.epsilon
-            # Clamp epsilon to valid range
-            self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, config_data['epsilon']))
-            changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
+            try:
+                eps = float(config_data['epsilon'])
+                if not math.isfinite(eps):
+                    raise ValueError("Epsilon must be finite (not NaN or Inf)")
+                old_eps = self.agent.epsilon
+                # Clamp epsilon to valid range
+                self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
+                changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid epsilon value: {config_data['epsilon']} - {e}")
         
         if 'epsilon_decay' in config_data:
             try:

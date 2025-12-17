@@ -276,7 +276,8 @@ class Snake(BaseGame):
 
         # Self collision (check against body, excluding tail which will move)
         # Convert to set for O(1) lookup, exclude last element
-        body_set = set(list(self.snake)[:-1])
+        # Guard: Only check collision if snake has > 1 segment
+        body_set = set(list(self.snake)[:-1]) if len(self.snake) > 1 else set()
         if new_head in body_set:
             self.game_over = True
             reward = -10.0

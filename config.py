@@ -510,6 +510,7 @@ class Config:
         assert self.SCREEN_WIDTH > 0, "Screen width must be positive"
         assert self.SCREEN_HEIGHT > 0, "Screen height must be positive"
         assert self.BALL_SPEED > 0, "Ball speed must be positive"
+        assert len(self.HIDDEN_LAYERS) > 0, "Must have at least one hidden layer"
 
 
 # Global config instance for easy importing

@@ -351,14 +351,17 @@ class Dashboard:
         s.fill((46, 204, 113, 15))
         screen.blit(s, good_rect.topleft)
     
-    def _draw_filled_area(self, screen: pygame.Surface, rect: pygame.Rect, 
+    def _draw_filled_area(self, screen: pygame.Surface, rect: pygame.Rect,
                           data: List[float], max_val: float, color: Tuple[int, int, int]) -> None:
         """Draw a filled area under the line graph."""
         if len(data) < 2:
             return
-        
+
+        # Filter out NaN and Inf values - replace with 0
+        clean_data = [v if math.isfinite(v) else 0.0 for v in data]
+
         points = [(rect.left, rect.bottom - 15)]
-        for i, val in enumerate(data):
+        for i, val in enumerate(clean_data):
             x = rect.left + (i / max(len(data) - 1, 1)) * rect.width
             y = rect.bottom - 15 - (val / max(max_val, 1)) * (rect.height - 25)
             y = max(rect.top + 5, min(rect.bottom - 15, y))
@@ -385,9 +388,12 @@ class Dashboard:
         """Draw a line graph with optional dashing."""
         if len(data) < 2:
             return
-        
+
+        # Filter out NaN and Inf values - replace with 0
+        clean_data = [v if math.isfinite(v) else 0.0 for v in data]
+
         points = []
-        for i, val in enumerate(data):
+        for i, val in enumerate(clean_data):
             x = rect.left + (i / max(len(data) - 1, 1)) * rect.width
             y = rect.bottom - 15 - (val / max(max_val, 1)) * (rect.height - 25)
             y = max(rect.top + 5, min(rect.bottom - 15, y))
@@ -441,11 +447,11 @@ class Dashboard:
             ("Epsilon", self.epsilon_color, True),  # True = dashed line
         ]
         
-        # Calculate total legend width for background
+        # Calculate total legend width for background (increased opacity for better contrast)
         total_width = len(legend_items) * 75 + 10
         legend_bg = pygame.Rect(legend_x - 5, legend_y - 8, total_width, 18)
-        pygame.draw.rect(screen, (15, 18, 28, 180), legend_bg, border_radius=4)
-        pygame.draw.rect(screen, (40, 45, 60), legend_bg, 1, border_radius=4)
+        pygame.draw.rect(screen, (15, 18, 28, 230), legend_bg, border_radius=4)
+        pygame.draw.rect(screen, (60, 65, 80), legend_bg, 1, border_radius=4)
         
         for label, color, is_dashed in legend_items:
             line_y = legend_y
@@ -542,8 +548,9 @@ class Dashboard:
         bg_rect = pygame.Rect(x, gauge_y, gauge_width, gauge_height)
         pygame.draw.rect(screen, (25, 30, 45), bg_rect, border_radius=6)
         
-        # Fill based on epsilon (exploration rate)
-        fill_width = max(2, int(gauge_width * self.current_epsilon))
+        # Fill based on epsilon (exploration rate) - clamp to [0, 1]
+        clamped_epsilon = max(0.0, min(1.0, self.current_epsilon))
+        fill_width = max(2, int(gauge_width * clamped_epsilon))
         if fill_width > 0:
             # Gradient fill effect - brighter on left
             fill_rect = pygame.Rect(x, gauge_y, fill_width, gauge_height)

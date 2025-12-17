@@ -478,18 +478,63 @@ class GameMenu:
             self.cards[middle_index].selected = True
             self.selected_index = middle_index
     
+    def handle_resize(self, new_width: int, new_height: int) -> None:
+        """
+        Handle window resize by rebuilding cards and repositioning buttons.
+
+        Args:
+            new_width: New screen width
+            new_height: New screen height
+        """
+        self.screen_width = new_width
+        self.screen_height = new_height
+
+        # Save current selection
+        current_selection = self.selected_index if self.cards else 0
+
+        # Rebuild cards
+        self.cards.clear()
+        self._build_cards()
+
+        # Restore selection
+        if self.cards:
+            self.selected_index = min(current_selection, len(self.cards) - 1)
+            for i, card in enumerate(self.cards):
+                card.selected = (i == self.selected_index)
+
+        # Reposition buttons
+        button_y = new_height - 50
+        button_positions = [
+            (new_width // 2 - 180, button_y),
+            (new_width // 2, button_y),
+            (new_width // 2 + 150, button_y),
+        ]
+        for i, button in enumerate(self.buttons):
+            if i < len(button_positions):
+                button.x, button.y = button_positions[i]
+                button.rect.center = (button.x, button.y)
+
+        # Update particles to new screen bounds
+        for p in self.particles:
+            p['x'] = p['x'] % new_width if new_width > 0 else 0
+            p['y'] = p['y'] % new_height if new_height > 0 else 0
+
     def run(self, screen: pygame.Surface, clock: pygame.time.Clock) -> Optional[str]:
         """Run the menu and return selected game."""
         running = True
-        
+
         while running:
             dt = clock.tick(60) / 1000.0
             self.time += dt
-            
+
             # Handle events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return None
+                elif event.type == pygame.VIDEORESIZE:
+                    # Handle window resize
+                    screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                    self.handle_resize(event.w, event.h)
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         return None

@@ -93,6 +93,9 @@ class PauseMenu:
         self.selected_index = 0
         self._update_button_positions()
 
+        # Quit confirmation state
+        self._confirm_quit = False
+
     def _update_button_positions(self) -> None:
         """Update button positions to be centered."""
         center_x = self.screen_width // 2
@@ -104,6 +107,18 @@ class PauseMenu:
                 start_y + i * (button.rect.height + 15)
             )
 
+    def handle_resize(self, new_width: int, new_height: int) -> None:
+        """
+        Handle window resize by updating button positions.
+
+        Args:
+            new_width: New screen width
+            new_height: New screen height
+        """
+        self.screen_width = new_width
+        self.screen_height = new_height
+        self._update_button_positions()
+
     def handle_event(self, event: pygame.event.Event) -> Optional[str]:
         """
         Handle keyboard/mouse input.
@@ -114,6 +129,17 @@ class PauseMenu:
         Returns:
             Action string if button activated, None otherwise
         """
+        # Handle quit confirmation mode
+        if self._confirm_quit:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_y:
+                    self._confirm_quit = False
+                    return "quit"
+                elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                    self._confirm_quit = False
+                    return None
+            return None
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_UP:
                 self.selected_index = (self.selected_index - 1) % len(self.buttons)
@@ -124,7 +150,11 @@ class PauseMenu:
                 return None
 
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                return self.buttons[self.selected_index].action
+                action = self.buttons[self.selected_index].action
+                if action == "quit":
+                    self._confirm_quit = True
+                    return None
+                return action
 
             elif event.key == pygame.K_p:
                 # P resumes
@@ -139,8 +169,9 @@ class PauseMenu:
                 return "menu"
 
             elif event.key == pygame.K_q:
-                # Q quits
-                return "quit"
+                # Q triggers quit confirmation
+                self._confirm_quit = True
+                return None
 
         elif event.type == pygame.MOUSEMOTION:
             mouse_pos = event.pos
@@ -152,7 +183,11 @@ class PauseMenu:
             mouse_pos = event.pos
             for button in self.buttons:
                 if button.contains_point(mouse_pos):
-                    return button.action
+                    action = button.action
+                    if action == "quit":
+                        self._confirm_quit = True
+                        return None
+                    return action
 
         return None
 
@@ -184,17 +219,34 @@ class PauseMenu:
             f"Epsilon: {context.get('epsilon', 0.0):.3f}",
         ]
 
-        # Add training time if available
+        # Add training time if available (with improved formatting)
         if 'training_time' in context:
             training_time = context['training_time']
             hours = int(training_time // 3600)
             minutes = int((training_time % 3600) // 60)
-            context_lines.append(f"Training Time: {hours}h {minutes}m")
+            seconds = int(training_time % 60)
+            if hours > 0:
+                context_lines.append(f"Training Time: {hours}h {minutes}m")
+            elif minutes > 0:
+                context_lines.append(f"Training Time: {minutes}m {seconds}s")
+            else:
+                context_lines.append(f"Training Time: {seconds}s")
 
-        # Add memory buffer if available
+        # Add memory buffer if available (with human-readable format)
         if 'memory_size' in context and 'memory_capacity' in context:
-            mem_pct = (context['memory_size'] / context['memory_capacity']) * 100
-            context_lines.append(f"Memory: {context['memory_size']:,} / {context['memory_capacity']:,} ({mem_pct:.0f}%)")
+            mem_size = context['memory_size']
+            mem_cap = context['memory_capacity']
+            mem_pct = (mem_size / mem_cap) * 100 if mem_cap > 0 else 0
+
+            # Format numbers in human-readable form (K for thousands)
+            def format_num(n: int) -> str:
+                if n >= 1000000:
+                    return f"{n / 1000000:.1f}M"
+                elif n >= 1000:
+                    return f"{n / 1000:.1f}K"
+                return str(n)
+
+            context_lines.append(f"Memory: {format_num(mem_size)} / {format_num(mem_cap)} ({mem_pct:.0f}%)")
 
         # Render context
         y_offset = center_y - 130
@@ -217,3 +269,37 @@ class PauseMenu:
         hint_surface = self._context_font.render(hint, True, (150, 150, 150))
         hint_rect = hint_surface.get_rect(center=(center_x, self.screen_height - 30))
         surface.blit(hint_surface, hint_rect)
+
+        # Quit confirmation dialog
+        if self._confirm_quit:
+            # Draw confirmation overlay
+            confirm_overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+            confirm_overlay.fill((0, 0, 0, 150))
+            surface.blit(confirm_overlay, (0, 0))
+
+            # Confirmation box
+            box_width = 350
+            box_height = 120
+            box_x = (self.screen_width - box_width) // 2
+            box_y = (self.screen_height - box_height) // 2
+
+            # Box background
+            box_surface = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+            pygame.draw.rect(box_surface, (40, 40, 50, 240), box_surface.get_rect(), border_radius=10)
+            surface.blit(box_surface, (box_x, box_y))
+            pygame.draw.rect(surface, (255, 100, 100), (box_x, box_y, box_width, box_height), 2, border_radius=10)
+
+            # Confirmation text
+            confirm_text = self._button_font.render("Quit training?", True, (255, 255, 255))
+            confirm_rect = confirm_text.get_rect(center=(center_x, box_y + 35))
+            surface.blit(confirm_text, confirm_rect)
+
+            # Sub text
+            sub_text = self._context_font.render("Unsaved progress will be lost.", True, (200, 150, 150))
+            sub_rect = sub_text.get_rect(center=(center_x, box_y + 60))
+            surface.blit(sub_text, sub_rect)
+
+            # Y/N options
+            options_text = self._context_font.render("Press Y to confirm, N to cancel", True, (150, 200, 150))
+            options_rect = options_text.get_rect(center=(center_x, box_y + 90))
+            surface.blit(options_text, options_rect)

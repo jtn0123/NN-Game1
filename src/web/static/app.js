@@ -1253,7 +1253,7 @@ function renderConsoleLogs() {
         container.innerHTML = visibleLogs.map(log => {
             let dataStr = '';
             if (log.data) {
-                dataStr = `<span class="log-data">${JSON.stringify(log.data)}</span>`;
+                dataStr = `<span class="log-data">${escapeHtml(JSON.stringify(log.data))}</span>`;
             }
             return `
                 <div class="console-line ${log.level}">
@@ -1600,49 +1600,72 @@ function refreshScreenshot() {
 
 /**
  * Start polling for screenshots
+ * Uses a singleton pattern to prevent duplicate listeners on reconnection
  */
+let screenshotPollingInitialized = false;
+let screenshotIntervalId = null;
+let screenshotIsHeadless = false;
+
 function startScreenshotPolling() {
-    let intervalId = null;
-    let isHeadless = false;
+    // Prevent duplicate initialization on reconnection
+    if (screenshotPollingInitialized) {
+        // Just restart polling if not headless
+        if (!screenshotIsHeadless && !screenshotIntervalId) {
+            startScreenshotPollingInternal();
+        }
+        return;
+    }
+    screenshotPollingInitialized = true;
 
     // Function to check screenshot and handle headless mode
     const checkScreenshot = async () => {
         const shouldContinue = await refreshScreenshot();
         if (!shouldContinue) {
             // Headless mode detected - stop polling
-            isHeadless = true;
-            stopPolling();
+            screenshotIsHeadless = true;
+            stopScreenshotPollingInternal();
             console.log('Headless mode detected - screenshot polling disabled');
         }
     };
 
-    // Function to start/resume polling
-    const startPolling = () => {
-        if (!intervalId && !isHeadless) {
-            checkScreenshot();
-            intervalId = setInterval(checkScreenshot, 2000);
-        }
-    };
-
-    // Function to stop polling
-    const stopPolling = () => {
-        if (intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
-        }
-    };
-
-    // Use Page Visibility API to pause polling when tab is hidden
+    // Use Page Visibility API to pause polling when tab is hidden (only add once)
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-            stopPolling();
-        } else if (!isHeadless) {
-            startPolling();
+            stopScreenshotPollingInternal();
+        } else if (!screenshotIsHeadless) {
+            startScreenshotPollingInternal();
         }
     });
 
+    // Internal start function
+    function startScreenshotPollingInternal() {
+        if (!screenshotIntervalId && !screenshotIsHeadless) {
+            checkScreenshot();
+            screenshotIntervalId = setInterval(checkScreenshot, 2000);
+        }
+    }
+
+    // Internal stop function
+    function stopScreenshotPollingInternal() {
+        if (screenshotIntervalId) {
+            clearInterval(screenshotIntervalId);
+            screenshotIntervalId = null;
+        }
+    }
+
+    // Export internal functions to module scope
+    window.startScreenshotPollingInternal = startScreenshotPollingInternal;
+    window.stopScreenshotPollingInternal = stopScreenshotPollingInternal;
+
     // Start polling initially
-    startPolling();
+    startScreenshotPollingInternal();
+}
+
+function stopScreenshotPollingInternal() {
+    if (screenshotIntervalId) {
+        clearInterval(screenshotIntervalId);
+        screenshotIntervalId = null;
+    }
 }
 
 // ============================================================
@@ -2616,9 +2639,11 @@ function showRestartingOverlay(game) {
         font-family: 'JetBrains Mono', monospace;
     `;
     
+    // Sanitize game name to prevent XSS
+    const safeGameName = escapeHtml(game.replace('_', ' ').toUpperCase());
     overlay.innerHTML = `
         <div style="font-size: 4rem; margin-bottom: 20px; animation: pulse 1s ease-in-out infinite;">🔄</div>
-        <h2 style="color: #00d4ff; margin: 0 0 15px 0; font-size: 1.5rem;">Restarting with ${game.replace('_', ' ').toUpperCase()}</h2>
+        <h2 style="color: #00d4ff; margin: 0 0 15px 0; font-size: 1.5rem;">Restarting with ${safeGameName}</h2>
         <p style="color: #7a7e8c; margin: 0;">Please wait while the server restarts...</p>
         <p style="color: #5a5e72; margin: 15px 0 0 0; font-size: 0.85rem;">Page will auto-refresh when ready</p>
         <style>
@@ -2680,6 +2705,10 @@ class NeuralNetworkVisualizer {
         this.isEnabled = true;
         this.animationId = null;
 
+        // Cleanup tracking for memory leak prevention
+        this.resizeObserver = null;
+        this.clickHandler = null;
+
         // Phase 1.2 & 1.4: Adaptive rendering
         this.renderInterval = 33;  // Default ~30Hz, will adapt based on training speed
         this.lastRenderTime = 0;
@@ -2730,7 +2759,12 @@ class NeuralNetworkVisualizer {
     }
     
     setupResize() {
-        const resizeObserver = new ResizeObserver(() => {
+        // Clean up old observer to prevent memory leak
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+
+        this.resizeObserver = new ResizeObserver(() => {
             if (this.canvas && this.canvas.parentElement) {
                 const rect = this.canvas.parentElement.getBoundingClientRect();
                 const dpr = window.devicePixelRatio || 1;
@@ -2745,7 +2779,7 @@ class NeuralNetworkVisualizer {
         });
 
         if (this.canvas.parentElement) {
-            resizeObserver.observe(this.canvas.parentElement);
+            this.resizeObserver.observe(this.canvas.parentElement);
         }
     }
 
@@ -2755,7 +2789,12 @@ class NeuralNetworkVisualizer {
         // Phase 2: Set up click handlers for neuron and layer inspection
         if (!this.canvas) return;
 
-        this.canvas.addEventListener('click', (e) => {
+        // Remove old handler to prevent memory leak
+        if (this.clickHandler) {
+            this.canvas.removeEventListener('click', this.clickHandler);
+        }
+
+        this.clickHandler = (e) => {
             const rect = this.canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
@@ -2772,7 +2811,9 @@ class NeuralNetworkVisualizer {
             if (neuronClicked) {
                 this.selectNeuron(neuronClicked.layerIdx, neuronClicked.neuronIdx);
             }
-        });
+        };
+
+        this.canvas.addEventListener('click', this.clickHandler);
     }
 
     findNeuronAtPosition(clickX, clickY) {
@@ -3081,6 +3122,9 @@ class NeuralNetworkVisualizer {
     }
 
     startAnimation() {
+        // Stop any existing animation to prevent duplicate loops
+        this.stopAnimation();
+
         const animate = (currentTime) => {
             // Phase 1.4: Adaptive render throttling
             // Only render if enough time has passed since last render
@@ -3115,7 +3159,32 @@ class NeuralNetworkVisualizer {
             this.animationId = null;
         }
     }
-    
+
+    /**
+     * Clean up all resources to prevent memory leaks.
+     * Call this before creating a new visualizer or when disabling.
+     */
+    destroy() {
+        // Stop animation loop
+        this.stopAnimation();
+
+        // Clean up ResizeObserver
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
+
+        // Clean up click handler
+        if (this.clickHandler && this.canvas) {
+            this.canvas.removeEventListener('click', this.clickHandler);
+            this.clickHandler = null;
+        }
+
+        // Clear data references
+        this.data = null;
+        this.cachedWeights = null;
+    }
+
     update(data) {
         if (!data || !data.layer_info || data.layer_info.length === 0) {
             return;
