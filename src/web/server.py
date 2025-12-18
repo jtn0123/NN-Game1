@@ -51,6 +51,10 @@ except ImportError:
 import sys
 sys.path.append('../..')
 from config import Config
+from src.utils.logger import get_logger
+
+# Module logger
+_logger = get_logger(__name__)
 
 
 def _make_json_safe(obj: Any) -> Any:
@@ -619,10 +623,10 @@ class MetricsPublisher:
                     buffer.seek(0)
                     self._screenshot_data = base64.b64encode(buffer.read()).decode('utf-8')
                 except Exception as fallback_error:
-                    print(f"Screenshot fallback error: {fallback_error}")
+                    _logger.warning(f"Screenshot fallback error: {fallback_error}")
                     self._screenshot_data = None
         except Exception as e:
-            print(f"Screenshot error: {e}")
+            _logger.warning(f"Screenshot error: {e}")
             self._screenshot_data = None  # Clear corrupted data
     
     def get_screenshot(self) -> Optional[str]:
@@ -1244,9 +1248,9 @@ class WebDashboard:
                             if 'metadata' in checkpoint:
                                 model_info['has_metadata'] = True
                                 model_info['metadata'] = checkpoint['metadata']
-                        except Exception:
-                            pass
-                        
+                        except Exception as e:
+                            _logger.debug(f"Could not load metadata from {f}: {e}")
+
                         models.append(model_info)
             
             models.sort(key=lambda x: x['modified'], reverse=True)
@@ -1276,15 +1280,17 @@ class WebDashboard:
                 if common_game == game_model_dir:
                     is_valid = True
             except ValueError:
-                pass
-            
+                # Expected when paths are on different drives (Windows) or incompatible
+                _logger.debug(f"Path {full_path} not in game model dir (different root)")
+
             try:
                 # Check legacy directory
                 common_legacy = os.path.commonpath([legacy_model_dir, full_path])
                 if common_legacy == legacy_model_dir:
                     is_valid = True
             except ValueError:
-                pass
+                # Expected when paths are on different drives (Windows) or incompatible
+                _logger.debug(f"Path {full_path} not in legacy model dir (different root)")
             
             if not is_valid:
                 return jsonify({'error': 'Invalid path - model must be in model directory'}), 403
@@ -1362,8 +1368,8 @@ class WebDashboard:
                                     if meta.get('episode', 0) > game_stats['total_episodes']:
                                         game_stats['total_episodes'] = meta['episode']
                                     game_stats['total_training_time'] += meta.get('total_training_time_seconds', 0)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                _logger.debug(f"Could not load stats from {f}: {e}")
                 
                 stats[game_id] = game_stats
             
@@ -1561,11 +1567,10 @@ class WebDashboard:
             import click
             click.echo = lambda *args, **kwargs: None
         except ImportError:
-            pass
-        
+            _logger.debug("click module not available, skipping echo suppression")
+
         def run_server():
-            print(f"\n🌐 Web Dashboard running at http://localhost:{self.port}")
-            print("   Open in browser to view training progress\n")
+            _logger.info(f"Web Dashboard running at http://localhost:{self.port}")
 
             try:
                 self.socketio.run(
@@ -1579,8 +1584,8 @@ class WebDashboard:
                 )
             # Bug 76 fix: Catch broader exceptions to prevent silent thread crashes
             except (OSError, RuntimeError, ConnectionError, Exception) as e:
-                print(f"\n❌ Failed to start web dashboard on port {self.port}: {type(e).__name__}: {e}")
-                print(f"   Port {self.port} may already be in use. Try a different port with --port\n")
+                _logger.error(f"Failed to start web dashboard on port {self.port}: {type(e).__name__}: {e}")
+                _logger.error(f"Port {self.port} may already be in use. Try a different port with --port")
         
         self._server_thread = threading.Thread(target=run_server, daemon=True)
         self._server_thread.start()
@@ -1594,8 +1599,9 @@ class WebDashboard:
         try:
             if hasattr(self.socketio, 'stop'):
                 self.socketio.stop()
-        except Exception:
-            pass  # Best effort - daemon thread will die with process anyway
+        except Exception as e:
+            # Best effort - daemon thread will die with process anyway
+            _logger.debug(f"Server stop (best effort): {e}")
     
     def emit_metrics(self, **kwargs) -> None:
         """Convenience method to update and emit metrics."""

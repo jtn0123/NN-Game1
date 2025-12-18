@@ -75,6 +75,7 @@ from enum import Enum, auto
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
+from src.utils.logger import setup_logging, get_logger, LogLevel
 from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
 from src.game.breakout import Breakout, VecBreakout
 from src.game.space_invaders import VecSpaceInvaders
@@ -4001,6 +4002,16 @@ def main():
     
     # Load config
     config = Config()
+
+    # Initialize logging from config
+    log_level = LogLevel[config.LOG_LEVEL.upper()]
+    setup_logging(
+        log_dir=config.LOG_DIR,
+        level=log_level,
+        console_output=config.LOG_TO_CONSOLE,
+        file_output=config.LOG_TO_FILE,
+    )
+    logger = get_logger(__name__)
 
     # Web mode: use web interface for everything
     if hasattr(args, 'web') and args.web and WEB_AVAILABLE:

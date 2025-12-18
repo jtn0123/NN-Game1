@@ -209,7 +209,7 @@ class Config:
     # Learning rate - How big of steps to take during optimization
     # Too high: unstable training, loss explodes
     # Too low: very slow learning
-    # EXPERIMENT 2: Reduced from 0.0003 to test if high LR causes forgetting
+    # Typical range: 0.0001 to 0.001
     LEARNING_RATE: float = 0.0001
     
     # Discount factor (gamma) - How much to value future rewards
@@ -329,7 +329,7 @@ class Config:
     # =========================================================================
 
     # Enable learning rate scheduler (reduces LR over time for fine-tuning)
-    # EXPERIMENT: Disabled to test if it was causing training instability
+    # Disabled by default - enable for long training runs (5000+ episodes)
     USE_LR_SCHEDULER: bool = False
 
     # Scheduler type: 'cosine' (smooth decay) or 'step' (periodic drops)
@@ -372,12 +372,12 @@ class Config:
     # REWARD SHAPING
     # =========================================================================
     
-    # Rewards for different events
-    REWARD_BRICK_HIT: float = 2.0       # Breaking a brick (doubled for more incentive)
-    REWARD_GAME_OVER: float = -5.0      # Losing a life (halved for less harsh punishment)
-    REWARD_WIN: float = 100.0           # Clearing all bricks (doubled for stronger completion incentive)
-    REWARD_PADDLE_HIT: float = 0.2      # Ball hitting paddle (doubled to encourage survival)
-    REWARD_STEP: float = 0.0            # Small reward each step (can set negative for urgency)
+    # Rewards for different events (tuned for stable learning)
+    REWARD_BRICK_HIT: float = 2.0       # Breaking a brick - primary positive signal
+    REWARD_GAME_OVER: float = -5.0      # Losing a life - moderate negative to avoid risk aversion
+    REWARD_WIN: float = 100.0           # Clearing all bricks - strong completion incentive
+    REWARD_PADDLE_HIT: float = 0.2      # Ball hitting paddle - encourages survival
+    REWARD_STEP: float = 0.0            # Per-step reward (can set negative for urgency)
     
     # Dense reward shaping for ball tracking
     REWARD_TRACKING_GOOD: float = 0.01  # Reward for moving toward predicted ball landing
@@ -489,7 +489,13 @@ class Config:
     # Paths
     MODEL_DIR: str = 'models'
     LOG_DIR: str = 'logs'
-    
+
+    # Logging settings
+    # Level options: 'DEBUG', 'INFO', 'WARNING', 'ERROR'
+    LOG_LEVEL: str = 'INFO'
+    LOG_TO_FILE: bool = True
+    LOG_TO_CONSOLE: bool = True
+
     @property
     def GAME_MODEL_DIR(self) -> str:
         """Get game-specific model directory (e.g., 'models/breakout/')."""
