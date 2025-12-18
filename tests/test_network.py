@@ -375,15 +375,24 @@ class TestNoisyLinear:
         noisy_layer.train()
         noisy_layer.reset_noise()
 
-        # Compute expected weight
+        # Compute expected weight using the noisy formula
         expected_weight = noisy_layer.weight_mu + noisy_layer.weight_sigma * noisy_layer.weight_epsilon
         expected_bias = noisy_layer.bias_mu + noisy_layer.bias_sigma * noisy_layer.bias_epsilon
 
-        # Forward pass to get actual weight used
+        # Verify the formula by computing output manually vs using forward pass
         x = torch.randn(1, 64)
-        _ = noisy_layer(x)
 
-        # Verify the formula (we can't directly access used weight, but we can verify shapes)
+        # Compute expected output using the noisy weight formula
+        expected_output = torch.nn.functional.linear(x, expected_weight, expected_bias)
+
+        # Get actual output from forward pass (uses the same formula internally)
+        actual_output = noisy_layer(x)
+
+        # Outputs should match since we computed with the same noise values
+        assert torch.allclose(actual_output, expected_output, atol=1e-5), \
+            f"Output mismatch: expected {expected_output}, got {actual_output}"
+
+        # Also verify shape consistency
         assert noisy_layer.weight_mu.shape == noisy_layer.weight_sigma.shape
         assert noisy_layer.weight_mu.shape == noisy_layer.weight_epsilon.shape
 

@@ -376,21 +376,25 @@ class Agent:
     def select_actions_batch(self, states: np.ndarray, training: bool = True) -> Tuple[np.ndarray, int, int]:
         """
         Select actions for a batch of states using epsilon-greedy or NoisyNets.
-        
+
         This is optimized for vectorized environments, performing a single
         forward pass for all states. When USE_NOISY_NETWORKS is enabled,
         exploration is handled by learned noise parameters instead of epsilon-greedy.
-        
+
         Args:
             states: Batch of game states, shape (batch_size, state_size)
             training: If True, use exploration; if False, use greedy
-            
+
         Returns:
             Tuple of:
             - actions: Array of selected action indices, shape (batch_size,)
             - num_explored: Number of random (exploration) actions taken
             - num_exploited: Number of greedy (exploitation) actions taken
         """
+        # Ensure states is 2D (handle 1D input gracefully)
+        if states.ndim == 1:
+            states = states.reshape(1, -1)
+
         batch_size = states.shape[0]
         actions = np.empty(batch_size, dtype=np.int64)
         num_explored = 0
@@ -715,16 +719,23 @@ class Agent:
     def _soft_update_target_network(self) -> None:
         """
         Soft update: Gradually blend policy network weights into target network.
-        
+
         target = TAU * policy + (1 - TAU) * target
-        
+
         This provides smoother, more stable learning than periodic hard updates.
         """
         tau = self.config.TARGET_TAU
-        for target_param, policy_param in zip(
-            self.target_net.parameters(),  # type: ignore[attr-defined]
-            self.policy_net.parameters()  # type: ignore[attr-defined]
-        ):
+        target_params = list(self.target_net.parameters())  # type: ignore[attr-defined]
+        policy_params = list(self.policy_net.parameters())  # type: ignore[attr-defined]
+
+        # Validate parameter counts match (guards against torch.compile edge cases)
+        if len(target_params) != len(policy_params):
+            raise RuntimeError(
+                f"Parameter count mismatch: target_net has {len(target_params)} params, "
+                f"policy_net has {len(policy_params)} params"
+            )
+
+        for target_param, policy_param in zip(target_params, policy_params):
             target_param.data.copy_(
                 tau * policy_param.data + (1.0 - tau) * target_param.data
             )

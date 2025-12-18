@@ -317,11 +317,8 @@ class Breakout(BaseGame):
         # Move paddle based on action
         direction = action - 1  # Convert 0,1,2 to -1,0,1
         self.paddle.move(direction, self.width)
-        
-        # Move ball
-        self.ball.move()
 
-        # Clamp ball speed to prevent tunneling through paddle/bricks
+        # Clamp ball speed BEFORE moving to prevent tunneling through paddle/bricks
         # If ball moves more than paddle/brick height in one frame, it can phase through
         max_safe_speed = min(self.config.PADDLE_HEIGHT, self.config.BRICK_HEIGHT) * 0.8
         current_speed = np.sqrt(self.ball.dx**2 + self.ball.dy**2)
@@ -329,6 +326,9 @@ class Breakout(BaseGame):
             scale = max_safe_speed / current_speed
             self.ball.dx *= scale
             self.ball.dy *= scale
+
+        # Move ball (with clamped velocity)
+        self.ball.move()
 
         # Update visual effects (skip in headless mode)
         if not self.headless:
@@ -424,7 +424,14 @@ class Breakout(BaseGame):
             # Calculate bounce angle based on where ball hits paddle
             # Hitting edges = sharper angle, center = straight up
             paddle_center = self.paddle.x + self.paddle.width / 2
-            ball_paddle_offset = (self.ball.x - paddle_center) / (self.paddle.width / 2)
+            # Guard against division by zero and clamp offset to [-1, 1] range
+            half_width = self.paddle.width / 2
+            if half_width > 0:
+                ball_paddle_offset = (self.ball.x - paddle_center) / half_width
+                # Clamp to prevent extreme bounce angles when ball is far from paddle center
+                ball_paddle_offset = max(-1.0, min(1.0, ball_paddle_offset))
+            else:
+                ball_paddle_offset = 0.0  # Default to center bounce if paddle width is zero
             
             # New angle: -150° to -30° (upward arc)
             angle = -np.pi/2 + ball_paddle_offset * np.pi/3
@@ -586,8 +593,11 @@ class Breakout(BaseGame):
         ball_y = self.ball.y * self._inv_height
         
         # Normalize velocities (approximate range: -speed to +speed)
+        # Clamp to [0, 1] range in case actual velocity exceeds _max_speed
         ball_dx = (self.ball.dx * self._inv_max_speed + 1) * 0.5  # Map [-1, 1] to [0, 1]
         ball_dy = (self.ball.dy * self._inv_max_speed + 1) * 0.5
+        ball_dx = max(0.0, min(1.0, ball_dx))
+        ball_dy = max(0.0, min(1.0, ball_dy))
         
         # Paddle position using pre-computed inverse
         paddle_x = self.paddle.x * self._inv_paddle_range
@@ -602,7 +612,8 @@ class Breakout(BaseGame):
         
         # Use cached predicted landing position (computed in step() to avoid redundant calls)
         predicted_x = self._cached_predicted_x
-        predicted_landing = predicted_x * self._inv_width
+        # Clamp to [0, 1] range for neural network input stability
+        predicted_landing = max(0.0, min(1.0, predicted_x * self._inv_width))
         
         # Distance from paddle center to predicted landing
         # Normalized: 0.5 means paddle is at landing spot, 0 or 1 means far away
@@ -748,9 +759,9 @@ class Breakout(BaseGame):
             text = self._big_font.render(msg, True, color)
             text_rect = text.get_rect(center=(self.width // 2, self.height // 2))
             
-            # Draw background box
+            # Draw background box (use 3-tuple color for pygame compatibility)
             box_rect = text_rect.inflate(40, 20)
-            pygame.draw.rect(screen, (0, 0, 0, 180), box_rect)
+            pygame.draw.rect(screen, (0, 0, 0), box_rect)
             pygame.draw.rect(screen, color, box_rect, 3)
             
             screen.blit(text, text_rect)

@@ -161,8 +161,8 @@ class ParticleSystem:
     def _add_particle(self, particle: Particle) -> None:
         """Add a particle with overflow protection."""
         if len(self.particles) >= self.max_particles:
-            # Remove oldest particles
-            self.particles = self.particles[10:]
+            # Remove oldest particles in-place (avoids list reallocation)
+            del self.particles[:10]
         self.particles.append(particle)
     
     def emit_brick_break(
