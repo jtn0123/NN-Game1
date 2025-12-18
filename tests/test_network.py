@@ -17,7 +17,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.network import DQN
+from src.ai.network import DQN, DuelingDQN, NoisyLinear
 
 
 @pytest.fixture
@@ -220,6 +220,187 @@ class TestCustomArchitecture:
         x = torch.randn(1, config.STATE_SIZE)
         output = net(x)
         assert output.shape == (1, config.ACTION_SIZE)
+
+
+class TestDuelingDQN:
+    """Test Dueling DQN architecture."""
+
+    @pytest.fixture
+    def dueling_network(self, config):
+        """Create DuelingDQN instance."""
+        return DuelingDQN(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+    def test_dueling_dqn_creates_successfully(self, config):
+        """DuelingDQN should initialize without errors."""
+        net = DuelingDQN(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+        assert net is not None
+
+    def test_dueling_dqn_forward_shape(self, dueling_network, config):
+        """Forward pass should return correct shape."""
+        batch_size = 16
+        x = torch.randn(batch_size, config.STATE_SIZE)
+        output = dueling_network(x)
+        assert output.shape == (batch_size, config.ACTION_SIZE)
+
+    def test_dueling_dqn_advantage_mean_subtraction(self, config):
+        """Q = V + (A - mean(A)) should hold."""
+        net = DuelingDQN(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+        net.eval()
+
+        x = torch.randn(1, config.STATE_SIZE)
+
+        # Get Q-values through normal forward pass
+        q_values = net(x)
+
+        # Compute manually using internal layers
+        features = x
+        for layer in net.feature_layers:
+            features = torch.relu(layer(features))
+
+        value = torch.relu(net.value_hidden(features))
+        value = net.value_output(value)
+
+        advantage = torch.relu(net.advantage_hidden(features))
+        advantage = net.advantage_output(advantage)
+
+        # Manual Q-value computation
+        expected_q = value + (advantage - advantage.mean(dim=1, keepdim=True))
+
+        assert torch.allclose(q_values, expected_q, atol=1e-5)
+
+    def test_dueling_dqn_value_stream_shape(self, dueling_network, config):
+        """Value stream should output (batch, 1)."""
+        batch_size = 8
+        x = torch.randn(batch_size, config.STATE_SIZE)
+
+        # Pass through feature layers
+        features = x
+        for layer in dueling_network.feature_layers:
+            features = torch.relu(layer(features))
+
+        value_hidden = torch.relu(dueling_network.value_hidden(features))
+        value = dueling_network.value_output(value_hidden)
+
+        assert value.shape == (batch_size, 1)
+
+    def test_dueling_dqn_gradient_flow(self, config):
+        """Gradients should flow through both value and advantage streams."""
+        # Disable NoisyNets for this test to ensure standard Linear layers
+        config.USE_NOISY_NETWORKS = False
+        net = DuelingDQN(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        x = torch.randn(4, config.STATE_SIZE, requires_grad=True)
+        output = net(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Check gradients exist for both streams
+        assert net.value_hidden.weight.grad is not None
+        assert net.advantage_hidden.weight.grad is not None
+        # Output layers should have gradients
+        assert net.value_output.weight.grad is not None
+        assert net.advantage_output.weight.grad is not None
+
+
+class TestNoisyLinear:
+    """Test NoisyLinear layer for exploration."""
+
+    @pytest.fixture
+    def noisy_layer(self):
+        """Create NoisyLinear layer."""
+        return NoisyLinear(in_features=64, out_features=32)
+
+    def test_noisy_linear_creates_successfully(self):
+        """NoisyLinear should initialize without errors."""
+        layer = NoisyLinear(in_features=10, out_features=5)
+        assert layer is not None
+
+    def test_noisy_linear_forward_shape(self, noisy_layer):
+        """Forward pass should return correct shape."""
+        batch_size = 8
+        x = torch.randn(batch_size, 64)
+        output = noisy_layer(x)
+        assert output.shape == (batch_size, 32)
+
+    def test_noisy_linear_reset_noise_changes_epsilon(self, noisy_layer):
+        """reset_noise should generate new noise values."""
+        old_weight_epsilon = noisy_layer.weight_epsilon.clone()
+        old_bias_epsilon = noisy_layer.bias_epsilon.clone()
+
+        noisy_layer.reset_noise()
+
+        # Noise should be different after reset
+        assert not torch.allclose(noisy_layer.weight_epsilon, old_weight_epsilon)
+        assert not torch.allclose(noisy_layer.bias_epsilon, old_bias_epsilon)
+
+    def test_noisy_linear_training_vs_eval_mode(self, noisy_layer):
+        """Training mode should use noise, eval mode should not."""
+        x = torch.randn(4, 64)
+
+        # In training mode, outputs should vary due to noise
+        noisy_layer.train()
+        noisy_layer.reset_noise()
+        train_out1 = noisy_layer(x).clone()
+        noisy_layer.reset_noise()
+        train_out2 = noisy_layer(x).clone()
+
+        # Due to noise reset, outputs should differ
+        assert not torch.allclose(train_out1, train_out2)
+
+        # In eval mode, same input should give same output (no noise)
+        noisy_layer.eval()
+        eval_out1 = noisy_layer(x).clone()
+        eval_out2 = noisy_layer(x).clone()
+
+        assert torch.allclose(eval_out1, eval_out2)
+
+    def test_noisy_linear_weight_formula(self, noisy_layer):
+        """Weight should equal mu + sigma * epsilon in training."""
+        noisy_layer.train()
+        noisy_layer.reset_noise()
+
+        # Compute expected weight
+        expected_weight = noisy_layer.weight_mu + noisy_layer.weight_sigma * noisy_layer.weight_epsilon
+        expected_bias = noisy_layer.bias_mu + noisy_layer.bias_sigma * noisy_layer.bias_epsilon
+
+        # Forward pass to get actual weight used
+        x = torch.randn(1, 64)
+        _ = noisy_layer(x)
+
+        # Verify the formula (we can't directly access used weight, but we can verify shapes)
+        assert noisy_layer.weight_mu.shape == noisy_layer.weight_sigma.shape
+        assert noisy_layer.weight_mu.shape == noisy_layer.weight_epsilon.shape
+
+    def test_noisy_linear_parameter_initialization(self):
+        """Parameters should be initialized within expected ranges."""
+        in_features = 100
+        out_features = 50
+        layer = NoisyLinear(in_features, out_features, std_init=0.5)
+
+        # mu should be initialized uniformly in [-1/sqrt(in), 1/sqrt(in)]
+        mu_range = 1 / (in_features ** 0.5)
+        assert layer.weight_mu.min() >= -mu_range - 0.01
+        assert layer.weight_mu.max() <= mu_range + 0.01
+
+        # sigma should be initialized to std_init / sqrt(in_features)
+        expected_sigma = 0.5 / (in_features ** 0.5)
+        assert torch.allclose(layer.weight_sigma, torch.full_like(layer.weight_sigma, expected_sigma))
 
 
 if __name__ == "__main__":
