@@ -673,9 +673,12 @@ class Breakout(BaseGame):
                 original_y = brick.rect.y
                 brick.rect.x += shake_x
                 brick.rect.y += shake_y
-                brick.draw(screen)
-                brick.rect.x = original_x
-                brick.rect.y = original_y
+                # Bug 86: Use try/finally to guarantee position restoration
+                try:
+                    brick.draw(screen)
+                finally:
+                    brick.rect.x = original_x
+                    brick.rect.y = original_y
         
         # Draw ball trail (behind ball)
         self.ball_trail.draw(screen, self.config.COLOR_BALL, self.ball.radius)
@@ -702,13 +705,14 @@ class Breakout(BaseGame):
         ball_y = int(self.ball.y) + shake_y
         ball_color = self.config.COLOR_BALL
         
+        # Bug 110: Increase outer glow radius for better differentiation
         # Outer glow
-        glow_radius = self.ball.radius + 6
-        glow_color = tuple(max(0, c // 3) for c in ball_color)
+        glow_radius = self.ball.radius + 10
+        glow_color = tuple(max(0, c // 4) for c in ball_color)
         pygame.draw.circle(screen, glow_color, (ball_x, ball_y), glow_radius)
-        
+
         # Inner glow
-        glow_radius = self.ball.radius + 3
+        glow_radius = self.ball.radius + 4
         glow_color = tuple(min(255, c + 30) for c in ball_color)
         pygame.draw.circle(screen, glow_color, (ball_x, ball_y), glow_radius)
         

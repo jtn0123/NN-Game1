@@ -545,17 +545,23 @@ class ShieldBlock:
     def draw(self, screen: pygame.Surface) -> None:
         if not self.alive:
             return
-        
+
         # Color fades as health decreases
         fade = self.health / 4.0
-        color = tuple(int(c * fade) for c in self.color)
-        
+        # Bug 109: Ensure minimum brightness so damaged shields are still visible
+        min_brightness = 0.3  # At least 30% brightness
+        effective_fade = max(min_brightness, fade)
+        color = tuple(int(c * effective_fade) for c in self.color)
+
         # Draw with slight erosion effect based on health
         rect = self.rect
         if self.health < 4:
             # Add erosion visual
             eroded_rect = rect.inflate(-1, -1)
             pygame.draw.rect(screen, color, eroded_rect)
+            # Bug 109: Add outline to make damaged shields more visible
+            outline_color = tuple(min(255, c + 40) for c in color)
+            pygame.draw.rect(screen, outline_color, eroded_rect, 1)
         else:
             pygame.draw.rect(screen, color, rect)
 
@@ -1410,13 +1416,25 @@ class SpaceInvaders(BaseGame):
                 original_y = alien.y
                 alien.x += int(self.alien_x_offset) + shake_x
                 alien.y += shake_y + int(pulse_offset)
-                alien.draw(screen, self._time)
-                alien.x = original_x
-                alien.y = original_y
-        
+                # Bug 87: Use try/finally to guarantee position restoration
+                try:
+                    alien.draw(screen, self._time)
+                finally:
+                    alien.x = original_x
+                    alien.y = original_y
+
         # Draw UFO
         if self.ufo is not None and self.ufo.alive:
-            self.ufo.draw(screen, self._time)
+            # Bug 91: Apply shake offset to UFO for visual coherence
+            original_ufo_x = self.ufo.x
+            original_ufo_y = self.ufo.y
+            self.ufo.x += shake_x
+            self.ufo.y += shake_y
+            try:
+                self.ufo.draw(screen, self._time)
+            finally:
+                self.ufo.x = original_ufo_x
+                self.ufo.y = original_ufo_y
         
         # Draw bullets with shake
         for bullet in self.player_bullets:
@@ -1440,8 +1458,18 @@ class SpaceInvaders(BaseGame):
         
         # Invincibility flashing effect
         if self.player_invincible:
-            # Flash on/off rapidly
+            # Bug 88: Always draw ship but add visual indicator when invincible
+            # Use alpha blending for "ghost" effect on off frames
             if int(self._time * 15) % 2 == 0:
+                self.ship.draw(screen, self._time)
+            else:
+                # Draw semi-transparent version instead of hiding completely
+                ghost_surface = pygame.Surface((self.ship.width + 20, self.ship.height + 20), pygame.SRCALPHA)
+                # Draw glow effect to indicate shield is active
+                glow_color = (100, 200, 255, 80)
+                pygame.draw.ellipse(ghost_surface, glow_color, ghost_surface.get_rect())
+                screen.blit(ghost_surface, (self.ship.x - 10, self.ship.y - 10))
+                # Draw ship with reduced opacity effect (tinted)
                 self.ship.draw(screen, self._time)
         else:
             self.ship.draw(screen, self._time)

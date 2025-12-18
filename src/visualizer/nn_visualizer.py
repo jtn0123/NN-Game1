@@ -143,6 +143,10 @@ class NeuralNetVisualizer:
         self.activation_history: Dict[str, deque] = {}
         self.history_length = 30
 
+        # Bug 89: Smoothed Q-value bar heights for animation
+        self._prev_bar_heights: List[float] = []
+        self._bar_lerp_speed = 0.25  # Interpolation speed per frame
+
         # Cache gradient background surface to avoid redrawing every frame
         self._cached_gradient: Optional[pygame.Surface] = None
         self._create_gradient_surface()
@@ -408,7 +412,9 @@ class NeuralNetVisualizer:
                                 )
                             
                             # Line thickness
-                            thickness = max(1, int(abs(norm_weight) * 2.5))
+                            # Bug 108: Scale thickness based on visualization width
+                            base_thickness = 2.5 * (self.width / 400.0)  # Scale relative to 400px baseline
+                            thickness = max(1, int(abs(norm_weight) * base_thickness))
                             
                             from_pos = from_layer['positions'][fi]
                             to_pos = to_layer['positions'][ti]
@@ -579,7 +585,8 @@ class NeuralNetVisualizer:
             screen.blit(text, text_rect)
             
             # Neuron count below
-            count_text = self.font_small.render(f"({layer_pos['actual_neurons']})", True, (90, 90, 110))
+            # Bug 102: Improve contrast - use lighter color for better readability
+            count_text = self.font_small.render(f"({layer_pos['actual_neurons']})", True, (150, 150, 170))
             count_rect = count_text.get_rect(centerx=int(layer_pos['x']), top=label_y + 14)
             screen.blit(count_text, count_rect)
     
@@ -617,11 +624,18 @@ class NeuralNetVisualizer:
         bar_max_height = 35
         best_action = np.argmax(q_values)
         
+        # Bug 89: Initialize previous bar heights if needed
+        if len(self._prev_bar_heights) != len(q_values):
+            self._prev_bar_heights = [8.0] * len(q_values)
+
         for i, (q_val, label, icon) in enumerate(zip(q_values, self.action_labels, self.action_icons)):
             bar_x = self.x + 20 + i * bar_width
-            
+
             norm_q = (q_val - q_min) / q_range
-            bar_height = max(8, int(norm_q * bar_max_height))
+            target_height = max(8.0, norm_q * bar_max_height)
+            # Bug 89: Interpolate bar height for smooth animation
+            self._prev_bar_heights[i] += (target_height - self._prev_bar_heights[i]) * self._bar_lerp_speed
+            bar_height = int(self._prev_bar_heights[i])
             
             # Determine if this is the selected/best action
             is_selected = (i == selected_action) or (selected_action is None and i == best_action)
@@ -652,9 +666,11 @@ class NeuralNetVisualizer:
             screen.blit(icon_text, icon_rect)
             
             # Q-value number
+            # Bug 93: Highlight Q-value text when action is selected
             q_str = f"{q_val:.2f}"
-            q_text = self.font_small.render(q_str, True, (100, 100, 120))
-            q_rect = q_text.get_rect(centerx=int(bar_x + bar_width / 2 - 5), 
+            q_text_color = (180, 255, 200) if is_selected else (100, 100, 120)
+            q_text = self.font_small.render(q_str, True, q_text_color)
+            q_rect = q_text.get_rect(centerx=int(bar_x + bar_width / 2 - 5),
                                      bottom=int(qv_y + 50 - bar_height - 2))
             screen.blit(q_text, q_rect)
     

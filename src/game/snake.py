@@ -218,6 +218,8 @@ class Snake(BaseGame):
 
     def _spawn_food(self) -> None:
         """Spawn food at a random empty location."""
+        # Bug 99: Reset food pulse phase when spawning new food
+        self._food_pulse_phase = 0.0
         snake_set = set(self.snake)
 
         # Use rejection sampling for efficiency when snake is small
@@ -473,6 +475,14 @@ class Snake(BaseGame):
 
         # Draw particles
         self.particles.draw(screen)
+
+        # Bug 106: Death flash effect using _death_timer
+        if self._death_timer > 0:
+            flash_alpha = int(100 * (self._death_timer / 60.0))
+            flash_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            flash_surface.fill((255, 50, 50, flash_alpha))
+            screen.blit(flash_surface, (0, 0))
+            self._death_timer -= 1
 
         # Draw HUD
         if self._font:

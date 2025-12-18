@@ -44,11 +44,18 @@ class TrainingHUD:
         self.accent_color = (52, 152, 219)  # Blue
         self.good_color = (46, 204, 113)  # Green
         self.warn_color = (241, 196, 15)  # Yellow
-        self.bg_color = (0, 0, 0, 180)  # Semi-transparent black
 
         # State
         self.enabled = getattr(config, 'HUD_ENABLED', True)
         self.opacity = getattr(config, 'HUD_OPACITY', 0.8)
+
+        # Bug 98: Use config opacity instead of hardcoded 180
+        bg_alpha = int(self.opacity * 255) if self.opacity <= 1.0 else int(self.opacity)
+        self.bg_color = (0, 0, 0, bg_alpha)
+
+        # Bug 90: Smooth score color transition state
+        self._current_score_color = list(self.text_color)
+        self._color_lerp_speed = 0.1
 
     def render(
         self,
@@ -115,7 +122,12 @@ class TrainingHUD:
     def _render_score_display(self, surface: pygame.Surface, score: int, best_score: int) -> None:
         """Render score display below episode counter."""
         text = f"Score: {score:,}  |  Best: {best_score:,}"
-        color = self.good_color if score >= best_score * 0.8 else self.text_color
+
+        # Bug 90: Smooth color transition instead of instant flip
+        target_color = self.good_color if score >= best_score * 0.8 else self.text_color
+        for i in range(3):
+            self._current_score_color[i] += (target_color[i] - self._current_score_color[i]) * self._color_lerp_speed
+        color = tuple(int(c) for c in self._current_score_color)
 
         text_surface = self._font_small.render(text, True, color)
 

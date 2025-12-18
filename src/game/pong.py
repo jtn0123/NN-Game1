@@ -613,10 +613,13 @@ class Pong(BaseGame):
 
         # Draw scores with labels
         if self._font and self._label_font:
-            # Score flash effect
+            # Bug 104: Score flash effect - use smooth interpolation to prevent stuttering
             score_color = (255, 255, 255)
             if self._score_flash_timer > 0:
-                flash_intensity = int(255 * self._score_flash_timer / 30)
+                # Normalized flash (0.0 to 1.0), then apply ease-out for smoother fade
+                flash_t = self._score_flash_timer / 30.0
+                flash_t = flash_t * flash_t  # Ease-out curve
+                flash_intensity = int(255 * flash_t)
                 score_color = (255, flash_intensity, flash_intensity)
 
             # AI label and score (left)

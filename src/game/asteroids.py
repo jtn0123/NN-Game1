@@ -319,6 +319,9 @@ class Asteroids(BaseGame):
         self._starfield_surface: Optional[pygame.Surface] = None
         self._starfield_data: List[Tuple[int, int, int, float]] = []  # (x, y, brightness, phase)
 
+        # Bug 105: Track game time for smooth animations (not affected by pause)
+        self._game_time = 0.0
+
         if not headless:
             pygame.font.init()
             self._font = pygame.font.Font(None, 48)
@@ -475,6 +478,9 @@ class Asteroids(BaseGame):
             self.level += 1
             self._spawn_asteroids(self.INITIAL_ASTEROID_COUNT + self.level - 1)
             reward += 50  # Level clear bonus
+
+        # Bug 105: Increment game time for smooth animations
+        self._game_time += 0.05
 
         return self.get_state(), reward, self.game_over, self._get_info()
 
@@ -757,11 +763,10 @@ class Asteroids(BaseGame):
         if self._starfield_surface:
             screen.blit(self._starfield_surface, (0, 0))
 
-            # Add subtle twinkle effect to a few bright stars (optimized - only update 10 stars)
-            current_time = pygame.time.get_ticks() * 0.003
+            # Bug 105: Use game time for smooth twinkle (not affected by pause/frame drops)
             for i in range(0, min(20, len(self._starfield_data)), 2):  # Every other star, max 10
                 x, y, brightness, phase = self._starfield_data[i]
-                twinkle = int(brightness + np.sin(current_time + phase) * 40)
+                twinkle = int(brightness + np.sin(self._game_time + phase) * 40)
                 twinkle = max(60, min(220, twinkle))
                 pygame.draw.circle(screen, (twinkle, twinkle, twinkle), (x, y), 1)
         else:

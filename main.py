@@ -460,11 +460,19 @@ class GameApp:
     def _toggle_pause(self) -> None:
         """Toggle pause state (for web dashboard control)."""
         self.paused = not self.paused
+        # Bug 85: Reset pause menu state when entering pause to clear stale dialogs
+        if self.paused and hasattr(self, 'pause_menu') and self.pause_menu:
+            self.pause_menu.reset_state()
         if self.web_dashboard:
             self.web_dashboard.publisher.set_paused(self.paused)
             status = "⏸️ Training paused" if self.paused else "▶️ Training resumed"
             self.web_dashboard.log(status, "action")
         print("⏸️  Paused" if self.paused else "▶️  Resumed")
+        # Bug 83: Show on-screen notification for pause/resume
+        if hasattr(self, '_show_notification'):
+            msg = "Paused" if self.paused else "Resumed"
+            color = (255, 200, 100) if self.paused else (100, 255, 100)
+            self._show_notification(msg, color, 1.0)
     
     def _reset_episode(self) -> None:
         """Reset the current episode."""
@@ -1342,6 +1350,8 @@ class GameApp:
                         if info['score'] > self.best_score_ever:
                             self.best_score_ever = info['score']
                             self._save_model(f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=False)
+                            # Bug 97: Show on-screen notification for new best score
+                            self._show_notification(f"New Best: {info['score']}!", (255, 215, 0), 2.0)
                             if self.web_dashboard:
                                 avg_score = np.mean(self.recent_scores[-100:]) if self.recent_scores else 0.0
                                 self.web_dashboard.log(
@@ -1637,6 +1647,8 @@ class GameApp:
                             (self.window_width, self.window_height),
                             pygame.RESIZABLE
                         )
+                        # Bug 95: Show notification for fullscreen toggle
+                        self._show_notification("Windowed", (100, 200, 255), 1.0)
                     else:
                         self.screen = pygame.display.set_mode(
                             (0, 0),
@@ -1645,10 +1657,15 @@ class GameApp:
                         # Update layout to new screen size
                         display_info = pygame.display.Info()
                         self._update_layout(display_info.current_w, display_info.current_h)
+                        # Bug 95: Show notification for fullscreen toggle
+                        self._show_notification("Fullscreen", (100, 200, 255), 1.0)
 
                 elif event.key == pygame.K_h:
                     # Toggle help legend
                     self.show_help_legend = not self.show_help_legend
+                    # Bug 96: Show notification for help legend toggle
+                    msg = "Help: ON" if self.show_help_legend else "Help: OFF"
+                    self._show_notification(msg, (150, 150, 200), 1.0)
     
     def _render_frame(self, state: np.ndarray, action: int, info: dict) -> None:
         """Render one frame of the visualization with proper scaling."""

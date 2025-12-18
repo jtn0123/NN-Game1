@@ -96,15 +96,22 @@ class PauseMenu:
         # Quit confirmation state
         self._confirm_quit = False
 
+        # Bug 94: Fade-in animation state
+        self._fade_alpha = 0  # Current overlay opacity (0-180)
+        self._target_alpha = 180  # Target opacity
+        self._fade_speed = 15  # Alpha increase per frame
+
     def _update_button_positions(self) -> None:
         """Update button positions to be centered."""
         center_x = self.screen_width // 2
         start_y = self.screen_height // 2 + 20
+        # Bug 114: Use scalable spacing based on screen height (minimum 10px)
+        button_spacing = max(10, int(self.screen_height * 0.02))
 
         for i, button in enumerate(self.buttons):
             button.update_position(
                 center_x - button.rect.width // 2,
-                start_y + i * (button.rect.height + 15)
+                start_y + i * (button.rect.height + button_spacing)
             )
 
     def handle_resize(self, new_width: int, new_height: int) -> None:
@@ -117,6 +124,8 @@ class PauseMenu:
         """
         self.screen_width = new_width
         self.screen_height = new_height
+        # Bug 84: Must reposition buttons after window resize
+        self._update_button_positions()
 
     def reset_state(self) -> None:
         """
@@ -125,6 +134,7 @@ class PauseMenu:
         """
         self._confirm_quit = False
         self.selected_index = 0
+        self._fade_alpha = 0  # Bug 94: Reset fade for new animation
         self._update_button_positions()
 
     def handle_event(self, event: pygame.event.Event) -> Optional[str]:
@@ -210,9 +220,13 @@ class PauseMenu:
         center_x = self.screen_width // 2
         center_y = self.screen_height // 2
 
-        # Semi-transparent overlay
+        # Bug 94: Animate fade-in instead of instant full opacity
+        if self._fade_alpha < self._target_alpha:
+            self._fade_alpha = min(self._fade_alpha + self._fade_speed, self._target_alpha)
+
+        # Semi-transparent overlay with animated fade
         overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill((0, 0, 0, self._fade_alpha))
         surface.blit(overlay, (0, 0))
 
         # Title
@@ -307,7 +321,7 @@ class PauseMenu:
             sub_rect = sub_text.get_rect(center=(center_x, box_y + 60))
             surface.blit(sub_text, sub_rect)
 
-            # Y/N options
-            options_text = self._context_font.render("Press Y to confirm, N to cancel", True, (150, 200, 150))
+            # Bug 101: Y/N options - use consistent warning colors (amber, not green)
+            options_text = self._context_font.render("Press Y to confirm, N to cancel", True, (255, 200, 150))
             options_rect = options_text.get_rect(center=(center_x, box_y + 90))
             surface.blit(options_text, options_rect)

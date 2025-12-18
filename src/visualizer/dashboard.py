@@ -164,6 +164,9 @@ class Dashboard:
         self.pulse_phase = 0.0
         self.scroll_offset = 0
 
+        # Bug 112: Loss spike detection
+        self._loss_spike_timer = 0  # Frames remaining for spike warning
+
         # Cache gradient background surface to avoid redrawing every frame
         self._cached_gradient: Optional[pygame.Surface] = None
         self._create_gradient_surface()
@@ -217,6 +220,9 @@ class Dashboard:
             self.smoothed_score = self.smoothed_score * 0.8 + score * 0.2
             # Guard against NaN/Inf in loss smoothing
             if math.isfinite(loss):
+                # Bug 112: Detect loss spikes (>2x smoothed average)
+                if self.smoothed_loss > 0 and loss > self.smoothed_loss * 2.0:
+                    self._loss_spike_timer = 30  # Flash for 30 frames
                 self.smoothed_loss = self.smoothed_loss * 0.9 + loss * 0.1
         
         # Calculate win rate
@@ -234,7 +240,11 @@ class Dashboard:
     def render(self, screen: pygame.Surface) -> None:
         """Render the enhanced dashboard."""
         self.pulse_phase = (self.pulse_phase + 0.05) % (2 * math.pi)
-        
+
+        # Bug 112: Decay loss spike timer
+        if self._loss_spike_timer > 0:
+            self._loss_spike_timer -= 1
+
         # Draw background with gradient
         self._draw_background(screen)
         
@@ -454,10 +464,12 @@ class Dashboard:
             ("Epsilon", self.epsilon_color, True),  # True = dashed line
         ]
         
-        # Calculate total legend width for background (increased opacity for better contrast)
+        # Bug 100: Use SRCALPHA surface for proper opacity handling
         total_width = len(legend_items) * 75 + 10
         legend_bg = pygame.Rect(legend_x - 5, legend_y - 8, total_width, 18)
-        pygame.draw.rect(screen, (15, 18, 28, 230), legend_bg, border_radius=4)
+        legend_surface = pygame.Surface((legend_bg.width, legend_bg.height), pygame.SRCALPHA)
+        pygame.draw.rect(legend_surface, (15, 18, 28, 230), legend_surface.get_rect(), border_radius=4)
+        screen.blit(legend_surface, legend_bg.topleft)
         pygame.draw.rect(screen, (60, 65, 80), legend_bg, 1, border_radius=4)
         
         for label, color, is_dashed in legend_items:
@@ -485,7 +497,8 @@ class Dashboard:
         for i in range(5):
             val = int(max_val * (1 - i / 4))
             y = rect.top + 5 + (i * (rect.height - 25) // 4)
-            text = self.font_tiny.render(str(val), True, (80, 85, 100))
+            # Bug 103: Improve contrast - use lighter color for better readability
+            text = self.font_tiny.render(str(val), True, (130, 135, 150))
             screen.blit(text, (rect.left + 3, y - 5))
     
     def _draw_metric_cards(self, screen: pygame.Surface, x: int, y: int, panel_width: int) -> None:
@@ -506,11 +519,18 @@ class Dashboard:
         for i, (key, value, indicator) in enumerate(metrics):
             card = self.cards[key]
             cy = y + i * card_spacing
-            
+
             # Card background
             card_rect = pygame.Rect(x, cy, card_width, card_height)
-            pygame.draw.rect(screen, (22, 25, 38), card_rect, border_radius=4)
-            pygame.draw.rect(screen, (45, 50, 65), card_rect, 1, border_radius=4)
+            bg_color = (22, 25, 38)
+            border_color = (45, 50, 65)
+            # Bug 112: Flash loss card red when spike detected
+            if key == 'loss' and self._loss_spike_timer > 0:
+                flash_intensity = self._loss_spike_timer / 30.0
+                bg_color = (int(22 + 40 * flash_intensity), 25, 38)
+                border_color = (int(100 + 155 * flash_intensity), 50, 50)
+            pygame.draw.rect(screen, bg_color, card_rect, border_radius=4)
+            pygame.draw.rect(screen, border_color, card_rect, 1, border_radius=4)
             
             # Color indicator bar
             indicator_rect = pygame.Rect(x, cy, 3, card_height)
@@ -520,16 +540,20 @@ class Dashboard:
             label_text = self.font_tiny.render(card.label, True, (130, 135, 150))
             screen.blit(label_text, (x + 8, cy + 4))
             
-            # Value - position based on card width
-            value_x = x + min(70, card_width * 0.4)
+            # Bug 107: Value - use consistent percentage-based positioning
+            value_x = x + int(card_width * 0.45)
             value_text = self.font_small.render(value, True, card.color)
             screen.blit(value_text, (value_x, cy + 3))
-            
+
             # Trend indicator
             if indicator:
                 trend_color = (100, 220, 130) if indicator == "↑" else (220, 100, 100) if indicator == "↓" else (150, 150, 150)
                 if indicator == "★":
                     trend_color = self.avg_color
+                # Bug 111: Add subtle pulse animation to trend indicators
+                if indicator in ("↑", "↓"):
+                    pulse = 0.7 + 0.3 * math.sin(self.pulse_phase * 2)
+                    trend_color = tuple(int(c * pulse) for c in trend_color)
                 trend_text = self.font_small.render(indicator, True, trend_color)
                 trend_rect = trend_text.get_rect(right=x + card_width - 5, top=cy + 3)
                 screen.blit(trend_text, trend_rect)
