@@ -267,10 +267,13 @@ class Trainer:
                 avg_score = self.metrics.get_recent_average('scores', 100)
                 avg_reward = self.metrics.get_recent_average('rewards', 100)
                 win_rate = self.metrics.get_win_rate(100)
-                
+
+                # Handle None values from get_recent_average (returns None if no data)
+                avg_score_display = avg_score if avg_score is not None else 0.0
+
                 print(f"Episode {episode:5d} | "
                       f"Score: {stats.score:4d} | "
-                      f"Avg: {avg_score:6.1f} | "
+                      f"Avg: {avg_score_display:6.1f} | "
                       f"ε: {stats.epsilon:.3f} | "
                       f"Loss: {stats.avg_loss:.4f} | "
                       f"Win: {win_rate*100:5.1f}%")

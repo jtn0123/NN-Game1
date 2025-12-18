@@ -1344,7 +1344,7 @@ class SpaceInvaders(BaseGame):
         idx += 1
 
         # Aliens remaining ratio (progress indicator)
-        self._state_array[idx] = self._aliens_remaining / self._num_aliens
+        self._state_array[idx] = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
         idx += 1
 
         # Lives remaining (risk awareness)

@@ -68,7 +68,7 @@ import time
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Callable, Any, Type, Union
+from typing import Optional, Callable, Any, Type, Union, List
 from enum import Enum, auto
 
 # Add project root to path

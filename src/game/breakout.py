@@ -165,7 +165,7 @@ class Breakout(BaseGame):
         # Pre-computed normalization constants for get_state() (avoids division per call)
         self._inv_width = 1.0 / self.width
         self._inv_height = 1.0 / self.height
-        self._max_speed = max(config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
+        self._max_speed = max(self.config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
         self._inv_max_speed = 1.0 / self._max_speed
         # Guard against paddle width >= screen width
         paddle_range = max(1.0, self.width - config.PADDLE_WIDTH)
