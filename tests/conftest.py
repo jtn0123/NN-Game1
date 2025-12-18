@@ -9,36 +9,20 @@ import pytest
 
 
 def pytest_configure(config):
-    """Configure pytest with custom markers and settings."""
-    # Register custom markers if needed
+    """Configure pytest with custom markers and warning filters."""
+    # Register custom markers
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
 
+    # Filter expected warnings at the pytest level (works during import time)
+    config.addinivalue_line(
+        "filterwarnings",
+        "ignore:MAX_EPISODES is 0:UserWarning"
+    )
 
-# Filter expected warnings that would otherwise clutter test output
-def pytest_collection_modifyitems(config, items):
-    """Modify test collection."""
-    pass
-
-
-# Configure warning filters
-pytest_plugins = []
-
-
-@pytest.fixture(autouse=True)
-def suppress_config_warning():
-    """Suppress the MAX_EPISODES=0 warning during tests.
-
-    This warning is useful for production to remind users that training
-    will run indefinitely, but it's expected behavior in tests where
-    we use the default Config().
-    """
-    import warnings
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="MAX_EPISODES is 0",
-            category=UserWarning
-        )
-        yield
+    # Suppress pygame's pkg_resources deprecation warning (external dependency)
+    config.addinivalue_line(
+        "filterwarnings",
+        "ignore:pkg_resources is deprecated:UserWarning"
+    )
