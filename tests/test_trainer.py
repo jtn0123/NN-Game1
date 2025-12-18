@@ -251,5 +251,87 @@ class TestRunEpisode:
         assert stats.duration > 0
 
 
+class TestTrainSavesCheckpoints:
+    """Test that train() saves checkpoints correctly."""
+
+    def test_train_saves_best_model(self, game, agent, config):
+        """Training should save best model when score improves."""
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config.MODEL_DIR = tmpdir
+            config.LOG_EVERY = 100  # Suppress logging
+            config.SAVE_EVERY = 1000  # Don't periodic save during test
+
+            trainer = Trainer(game, agent, config)
+
+            # Run just 3 episodes to see if best model is saved
+            trainer.train(num_episodes=3)
+
+            # Check that best model was saved
+            best_model_path = os.path.join(tmpdir, f'{config.GAME_NAME}_best.pth')
+            assert os.path.exists(best_model_path), "Best model should be saved during training"
+
+    def test_train_saves_final_model(self, game, agent, config):
+        """Training should save final model at end."""
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config.MODEL_DIR = tmpdir
+            config.LOG_EVERY = 100
+            config.SAVE_EVERY = 1000
+
+            trainer = Trainer(game, agent, config)
+            trainer.train(num_episodes=2)
+
+            # Check that final model was saved
+            final_model_path = os.path.join(tmpdir, f'{config.GAME_NAME}_final.pth')
+            assert os.path.exists(final_model_path), "Final model should be saved at training end"
+
+
+class TestEvaluateResetsEpsilon:
+    """Test that evaluate() properly handles epsilon."""
+
+    def test_evaluate_resets_epsilon(self, trainer):
+        """Evaluate should temporarily set epsilon to 0 then restore."""
+        # Set epsilon to a known value
+        trainer.agent.epsilon = 0.5
+
+        # Run evaluation
+        results = trainer.evaluate(num_episodes=2, render=False)
+
+        # Epsilon should be restored after evaluation
+        assert trainer.agent.epsilon == 0.5
+
+    def test_evaluate_uses_no_exploration(self, trainer):
+        """During evaluation, epsilon should be 0 (no exploration)."""
+        trainer.agent.epsilon = 0.5
+
+        # We can't directly check epsilon during evaluation, but we can
+        # verify the results are reasonable (evaluation ran without error)
+        results = trainer.evaluate(num_episodes=2, render=False)
+
+        assert 'mean_score' in results
+        assert 'max_score' in results
+        assert 'min_score' in results
+        assert 'win_rate' in results
+        assert results['mean_score'] >= 0
+
+    def test_evaluate_returns_correct_statistics(self, trainer):
+        """Evaluate should return correct statistics structure."""
+        results = trainer.evaluate(num_episodes=3, render=False)
+
+        assert isinstance(results['mean_score'], float)
+        assert isinstance(results['max_score'], (int, float))
+        assert isinstance(results['min_score'], (int, float))
+        assert 0.0 <= results['win_rate'] <= 1.0
+
+        # Max should be >= mean >= min
+        assert results['max_score'] >= results['mean_score']
+        assert results['mean_score'] >= results['min_score']
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

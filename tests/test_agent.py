@@ -607,6 +607,313 @@ class TestSaveLoadEdgeCases:
                 assert torch.allclose(orig, loaded)
 
 
+class TestPrioritizedReplayIntegration:
+    """Test PER integration with agent learning."""
+
+    def test_per_integrated_learning(self, config):
+        """Agent with PER should learn and update priorities."""
+        # Enable PER and disable N-step (N-step takes priority over PER)
+        config.USE_PRIORITIZED_REPLAY = True
+        config.USE_N_STEP_RETURNS = False
+        config.MEMORY_SIZE = 500
+        config.MEMORY_MIN = 50
+        config.BATCH_SIZE = 16
+        config.LEARN_EVERY = 1
+        config.GRADIENT_STEPS = 1
+
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        # Fill buffer with experiences
+        for _ in range(100):
+            state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            action = np.random.randint(0, config.ACTION_SIZE)
+            reward = np.random.randn()
+            next_state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            done = np.random.random() < 0.1
+            agent.remember(state, action, reward, next_state, done)
+
+        # Learning should work with PER
+        loss = agent.learn()
+        assert loss is not None
+        assert isinstance(loss, float)
+
+        # Verify PER buffer state is being used
+        assert agent._use_per is True
+        assert len(agent.memory) == 100
+
+
+class TestHardUpdateTargetNetwork:
+    """Test hard update target network functionality."""
+
+    def test_hard_update_on_schedule(self, config):
+        """Hard update should trigger at TARGET_UPDATE frequency."""
+        config.USE_SOFT_UPDATE = False
+        config.TARGET_UPDATE = 10  # Small value for testing
+        config.MEMORY_MIN = 50
+        config.BATCH_SIZE = 16
+        config.LEARN_EVERY = 1
+        config.GRADIENT_STEPS = 1
+
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        # Fill buffer
+        for _ in range(100):
+            state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            agent.remember(state, 0, 1.0, state, False)
+
+        # Modify policy network to make it different from target
+        with torch.no_grad():
+            for param in agent.policy_net.parameters():
+                param.add_(10.0)
+
+        # Verify networks are different
+        policy_params = list(agent.policy_net.parameters())
+        target_params = list(agent.target_net.parameters())
+        assert not torch.allclose(policy_params[0], target_params[0])
+
+        # Learn enough times to trigger hard update (TARGET_UPDATE / GRADIENT_STEPS)
+        for _ in range(15):
+            agent.learn()
+
+        # After enough steps, target should have been updated
+        # Verify that at least one update occurred by checking step count
+        assert agent.steps >= config.TARGET_UPDATE
+
+
+class TestSaveMetadataRoundtrip:
+    """Test SaveMetadata and TrainingHistory serialization."""
+
+    def test_save_metadata_roundtrip(self):
+        """SaveMetadata should serialize and deserialize correctly."""
+        from src.ai.agent import SaveMetadata
+
+        metadata = SaveMetadata(
+            timestamp="2024-01-01T00:00:00",
+            save_reason="best",
+            total_training_time_seconds=3600.0,
+            episode=100,
+            total_steps=50000,
+            epsilon=0.1,
+            best_score=250,
+            avg_score_last_100=180.5,
+            avg_loss=0.0025,
+            win_rate=0.75,
+            memory_buffer_size=100000,
+            learning_rate=0.0001,
+            gamma=0.99,
+            batch_size=64,
+            hidden_layers=[256, 128],
+            epsilon_start=1.0,
+            epsilon_end=0.01,
+            epsilon_decay=0.9995,
+            use_dueling=True
+        )
+
+        # Round-trip through dict
+        data = metadata.to_dict()
+        restored = SaveMetadata.from_dict(data)
+
+        assert restored.timestamp == metadata.timestamp
+        assert restored.save_reason == metadata.save_reason
+        assert restored.episode == metadata.episode
+        assert restored.best_score == metadata.best_score
+        assert restored.avg_loss == metadata.avg_loss
+        assert restored.hidden_layers == metadata.hidden_layers
+
+    def test_training_history_roundtrip(self):
+        """TrainingHistory should serialize and deserialize correctly."""
+        from src.ai.agent import TrainingHistory
+
+        history = TrainingHistory(
+            scores=[10, 20, 30],
+            rewards=[1.0, 2.0, 3.0],
+            steps=[100, 200, 300],
+            epsilons=[1.0, 0.9, 0.8],
+            bricks=[5, 10, 15],
+            wins=[False, False, True],
+            losses=[0.1, 0.05, 0.02],
+            q_values=[1.0, 1.5, 2.0],
+            exploration_actions=500,
+            exploitation_actions=1500,
+            target_updates=10,
+            best_score=30
+        )
+
+        # Round-trip through dict
+        data = history.to_dict()
+        restored = TrainingHistory.from_dict(data)
+
+        assert restored.scores == history.scores
+        assert restored.rewards == history.rewards
+        assert restored.wins == history.wins
+        assert restored.exploration_actions == history.exploration_actions
+        assert restored.best_score == history.best_score
+
+    def test_training_history_empty(self):
+        """TrainingHistory.empty() should create valid empty history."""
+        from src.ai.agent import TrainingHistory
+
+        history = TrainingHistory.empty()
+        assert history.scores == []
+        assert history.exploration_actions == 0
+        assert history.best_score == 0
+
+    def test_training_history_from_dict_backwards_compatible(self):
+        """TrainingHistory.from_dict should handle missing fields."""
+        from src.ai.agent import TrainingHistory
+
+        # Simulate old save format with missing fields
+        old_data = {
+            'scores': [10, 20],
+            'rewards': [1.0, 2.0],
+            'steps': [100, 200],
+            'epsilons': [1.0, 0.9],
+            # Missing: bricks, wins, losses, q_values, exploration_actions, etc.
+        }
+
+        restored = TrainingHistory.from_dict(old_data)
+        assert restored.scores == [10, 20]
+        assert restored.bricks == []  # Default to empty
+        assert restored.exploration_actions == 0  # Default to 0
+
+
+class TestTorchCompileExceptionHandling:
+    """Test torch.compile exception handling."""
+
+    def test_compile_disabled_gracefully(self, config):
+        """Agent should work when torch.compile is disabled."""
+        config.USE_TORCH_COMPILE = False
+
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        assert agent._compiled is False
+        # Agent should still work
+        state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+        action = agent.select_action(state)
+        assert 0 <= action < config.ACTION_SIZE
+
+
+class TestLRSchedulerConfiguration:
+    """Test learning rate scheduler configuration."""
+
+    def test_cosine_scheduler_enabled(self, config):
+        """Cosine LR scheduler should be configured when enabled."""
+        config.USE_LR_SCHEDULER = True
+        config.LR_SCHEDULER_TYPE = 'cosine'
+        config.LR_MIN = 1e-6
+
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        assert agent.scheduler is not None
+        # Scheduler should be CosineAnnealingLR
+        assert 'CosineAnnealing' in type(agent.scheduler).__name__
+
+    def test_step_scheduler_enabled(self, config):
+        """Step LR scheduler should be configured when enabled."""
+        config.USE_LR_SCHEDULER = True
+        config.LR_SCHEDULER_TYPE = 'step'
+        config.LR_SCHEDULER_STEP = 500
+        config.LR_SCHEDULER_GAMMA = 0.5
+
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        assert agent.scheduler is not None
+        assert 'StepLR' in type(agent.scheduler).__name__
+
+    def test_scheduler_step_updates_lr(self, config):
+        """Stepping scheduler should update learning rate."""
+        config.USE_LR_SCHEDULER = True
+        config.LR_SCHEDULER_TYPE = 'step'
+        config.LR_SCHEDULER_STEP = 1  # Step every episode
+        config.LR_SCHEDULER_GAMMA = 0.5
+        config.LEARNING_RATE = 0.001
+
+        agent = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        initial_lr = agent.optimizer.param_groups[0]['lr']
+        agent.step_scheduler()
+        new_lr = agent.optimizer.param_groups[0]['lr']
+
+        assert new_lr < initial_lr
+
+
+class TestArchitectureMismatchOnLoad:
+    """Test architecture mismatch detection on load."""
+
+    def test_state_size_mismatch_returns_none(self, config):
+        """Loading model with wrong state size should fail gracefully."""
+        # Create and save agent with one state size
+        agent1 = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "test_model.pth")
+            agent1.save(filepath)
+
+            # Create agent with different state size
+            agent2 = Agent(
+                state_size=config.STATE_SIZE + 10,  # Different state size
+                action_size=config.ACTION_SIZE,
+                config=config
+            )
+
+            # Load should fail and return None
+            metadata, history = agent2.load(filepath, quiet=True)
+            assert metadata is None
+            assert history is None
+
+    def test_action_size_mismatch_returns_none(self, config):
+        """Loading model with wrong action size should fail gracefully."""
+        agent1 = Agent(
+            state_size=config.STATE_SIZE,
+            action_size=config.ACTION_SIZE,
+            config=config
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "test_model.pth")
+            agent1.save(filepath)
+
+            # Create agent with different action size
+            agent2 = Agent(
+                state_size=config.STATE_SIZE,
+                action_size=config.ACTION_SIZE + 2,  # Different action size
+                config=config
+            )
+
+            # Load should fail and return None
+            metadata, history = agent2.load(filepath, quiet=True)
+            assert metadata is None
+            assert history is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

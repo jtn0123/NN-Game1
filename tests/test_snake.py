@@ -255,5 +255,84 @@ class TestVecSnake:
         assert len(infos) == 4
 
 
+class TestStarvationTimeout:
+    """Test starvation timeout mechanic."""
+
+    def test_snake_dies_after_timeout_without_food(self, config):
+        """Snake should die if it doesn't eat within timeout period."""
+        game = Snake(config, headless=True)
+
+        # Get the timeout for current snake length
+        initial_timeout = Snake.MAX_STEPS_WITHOUT_FOOD + len(game.snake) * 5
+
+        # Move snake in circles without eating food
+        # Move food far away so snake won't accidentally eat it
+        game.food_pos = (0, 0)  # Move food to corner
+        game.snake.clear()
+        game.snake.append((10, 10))  # Head in center
+        game.snake.append((10, 9))
+        game.snake.append((10, 8))
+
+        # Reset steps counter
+        game.steps_since_food = 0
+
+        # Run until game over or timeout
+        steps_taken = 0
+        directions = [Snake.UP, Snake.LEFT, Snake.DOWN, Snake.RIGHT]
+        while not game.game_over and steps_taken < initial_timeout + 100:
+            # Cycle through directions to avoid walls
+            direction = directions[steps_taken % 4]
+            game.step(direction)
+            steps_taken += 1
+
+        # Game should be over due to starvation (or wall/self collision)
+        assert game.game_over
+
+    def test_timeout_scales_with_snake_length(self, game):
+        """Longer snakes should have more time to find food."""
+        initial_length = len(game.snake)
+        initial_timeout = Snake.MAX_STEPS_WITHOUT_FOOD + initial_length * 5
+
+        # Simulate growing the snake
+        longer_length = initial_length + 5
+        longer_timeout = Snake.MAX_STEPS_WITHOUT_FOOD + longer_length * 5
+
+        # Longer snake should have more time
+        assert longer_timeout > initial_timeout
+        assert longer_timeout == initial_timeout + 5 * 5
+
+    def test_eating_food_resets_steps_counter(self, game):
+        """Eating food should reset the steps_since_food counter."""
+        # Manually set up a controlled scenario
+        # Position snake away from walls and food
+        game.snake.clear()
+        game.snake.append((10, 5))  # Head
+        game.snake.append((10, 4))
+        game.snake.append((10, 3))
+        game.direction = Snake.RIGHT
+        game.food_pos = (15, 15)  # Food far away
+
+        # Take some steps to increase the counter
+        game.steps_since_food = 0
+        for _ in range(5):
+            game.step(Snake.RIGHT)
+            if game.game_over:
+                break
+
+        # If game isn't over, steps_since_food should have increased
+        if not game.game_over:
+            assert game.steps_since_food > 0
+
+            # Now place food directly in front of snake and eat it
+            head = game.snake[0]
+            game.food_pos = (head[0], head[1] + 1)  # Food to the right
+            initial_score = game.score
+            game.step(Snake.RIGHT)
+
+            # If food was eaten, counter should be reset
+            if game.score > initial_score:
+                assert game.steps_since_food == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

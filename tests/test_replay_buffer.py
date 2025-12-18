@@ -616,5 +616,187 @@ class TestPrioritizedReplayBufferEdgeCases:
             buffer.push(wrong_state, 0, 1.0, wrong_state, False)
 
 
+class TestReplayBufferPersistence:
+    """Test replay buffer save/load functionality."""
+
+    def test_buffer_save_load_roundtrip(self, state_size, sample_experience):
+        """Buffer should save and load correctly."""
+        buffer = ReplayBuffer(capacity=100, state_size=state_size)
+
+        # Fill buffer with identifiable experiences
+        for i in range(50):
+            state = np.ones(state_size, dtype=np.float32) * i
+            next_state = np.ones(state_size, dtype=np.float32) * (i + 1)
+            buffer.push(state, i % 3, float(i), next_state, i % 10 == 0)
+
+        # Save to dict
+        saved_data = buffer.save_to_dict()
+
+        # Create new buffer and load
+        new_buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        success = new_buffer.load_from_dict(saved_data)
+
+        assert success is True
+        assert len(new_buffer) == 50
+        assert new_buffer._position == 50
+
+        # Verify data integrity
+        assert np.array_equal(new_buffer.states[:50], buffer.states[:50])
+        assert np.array_equal(new_buffer.actions[:50], buffer.actions[:50])
+        assert np.array_equal(new_buffer.rewards[:50], buffer.rewards[:50])
+
+    def test_buffer_save_load_empty(self, state_size):
+        """Saving empty buffer should work correctly."""
+        buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        saved_data = buffer.save_to_dict()
+
+        assert saved_data['initialized'] is False
+        assert saved_data['size'] == 0
+
+        new_buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        success = new_buffer.load_from_dict(saved_data)
+        assert success is False  # Empty buffer returns False
+
+    def test_buffer_load_larger_saved_truncates(self, state_size, sample_experience):
+        """Loading larger buffer into smaller capacity should truncate."""
+        # Create buffer with 100 capacity and fill with 80 experiences
+        buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        for i in range(80):
+            state = np.ones(state_size, dtype=np.float32) * i
+            buffer.push(state, 0, float(i), state, False)
+
+        saved_data = buffer.save_to_dict()
+
+        # Create smaller buffer and load
+        small_buffer = ReplayBuffer(capacity=50, state_size=state_size)
+        success = small_buffer.load_from_dict(saved_data)
+
+        assert success is True
+        assert len(small_buffer) == 50
+        # Should have the most recent 50 experiences (indices 30-79)
+        # First element should have reward 30.0 (offset by 30)
+        assert small_buffer.rewards[0] == 30.0
+
+
+class TestPrioritizedReplayBufferPriorities:
+    """Test PER priority-weighted sampling correctness."""
+
+    def test_per_priority_sampling_correctness(self, state_size, sample_experience):
+        """Higher priority experiences should be sampled more frequently."""
+        buffer = PrioritizedReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            alpha=0.6,
+            beta_start=0.4,
+            beta_end=1.0,
+            beta_frames=100000
+        )
+
+        # Add experiences with identifiable rewards
+        for i in range(50):
+            state = np.ones(state_size, dtype=np.float32) * i
+            buffer.push(state, 0, float(i), state, False)
+
+        # Update priorities: make experience at index 0 have very high priority
+        high_priority_indices = np.array([0])
+        high_td_errors = np.array([1000.0])  # Very high TD error
+        buffer.update_priorities(high_priority_indices, high_td_errors)
+
+        # Sample many times and count how often index 0 is sampled
+        sample_count = 0
+        for _ in range(100):
+            _, _, rewards, _, _, indices, _ = buffer.sample(10)
+            sample_count += np.sum(indices == 0)
+
+        # High priority experience should be sampled significantly more often
+        # With alpha=0.6 and very high priority, expect > 50% of samples
+        # Note: This is probabilistic, but 1000x priority diff should be very reliable
+        assert sample_count > 20, f"High priority sample count {sample_count} too low"
+
+    def test_per_importance_weights_normalized(self, state_size, sample_experience):
+        """Importance sampling weights should be normalized (max = 1)."""
+        buffer = PrioritizedReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            alpha=0.6,
+            beta_start=1.0,  # Full correction
+            beta_end=1.0,
+            beta_frames=1
+        )
+
+        for _ in range(50):
+            state, action, reward, next_state, done = sample_experience()
+            buffer.push(state, action, reward, next_state, done)
+
+        # Sample and check weights
+        _, _, _, _, _, _, weights = buffer.sample(16)
+
+        # Max weight should be 1.0 (normalized)
+        assert np.max(weights) == pytest.approx(1.0, rel=1e-5)
+        # All weights should be <= 1.0
+        assert np.all(weights <= 1.0 + 1e-5)
+
+
+class TestPushBatchCircularWrapping:
+    """Test push_batch behavior across circular buffer boundary."""
+
+    def test_push_batch_circular_wrapping(self, state_size):
+        """push_batch should correctly handle wrapping at buffer boundary."""
+        buffer = ReplayBuffer(capacity=10, state_size=state_size)
+
+        # Fill buffer to position 8
+        for i in range(8):
+            state = np.ones(state_size, dtype=np.float32) * i
+            buffer.push(state, 0, float(i), state, False)
+
+        assert buffer._position == 8
+        assert len(buffer) == 8
+
+        # Push batch of 5 - should wrap around
+        batch_states = np.ones((5, state_size), dtype=np.float32) * 100
+        batch_actions = np.array([1, 1, 1, 1, 1])
+        batch_rewards = np.array([100.0, 101.0, 102.0, 103.0, 104.0])
+        batch_next_states = batch_states.copy()
+        batch_dones = np.array([False, False, False, False, False])
+
+        buffer.push_batch(batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones)
+
+        # Buffer should be full (capacity 10)
+        assert len(buffer) == 10
+
+        # Position should have wrapped: (8 + 5) % 10 = 3
+        assert buffer._position == 3
+
+        # Check data integrity - indices 8,9,0,1,2 should have new data
+        assert buffer.rewards[8] == 100.0
+        assert buffer.rewards[9] == 101.0
+        assert buffer.rewards[0] == 102.0
+        assert buffer.rewards[1] == 103.0
+        assert buffer.rewards[2] == 104.0
+
+        # Old data at indices 3-7 should be preserved
+        assert buffer.rewards[3] == 3.0
+        assert buffer.rewards[7] == 7.0
+
+    def test_push_batch_larger_than_capacity(self, state_size):
+        """push_batch larger than capacity should fill entire buffer."""
+        buffer = ReplayBuffer(capacity=10, state_size=state_size)
+
+        # Push batch of 15 experiences (larger than capacity)
+        batch_states = np.arange(15).reshape(15, 1).repeat(state_size, axis=1).astype(np.float32)
+        batch_actions = np.arange(15) % 3
+        batch_rewards = np.arange(15, dtype=np.float32)
+        batch_next_states = batch_states.copy()
+        batch_dones = np.zeros(15, dtype=bool)
+
+        buffer.push_batch(batch_states, batch_actions, batch_rewards, batch_next_states, batch_dones)
+
+        # Buffer should be at capacity
+        assert len(buffer) == 10
+
+        # Position should be 15 % 10 = 5
+        assert buffer._position == 5
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

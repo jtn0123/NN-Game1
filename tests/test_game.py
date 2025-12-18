@@ -197,6 +197,137 @@ class TestBreakoutGameOver:
         assert 'lives' in info
 
 
+class TestBallBrickCollisionPhysics:
+    """Test ball-brick collision bounce direction physics."""
+
+    def test_ball_bounces_horizontal_on_side_hit(self, game, config):
+        """Ball should reverse dx (horizontal) when hitting brick from side."""
+        # Position ball to hit brick from the side
+        # Find a brick and position ball to its left, moving right
+        brick = game.bricks[0]
+
+        # Position ball just to the left of brick, moving right
+        game.ball.x = brick.rect.left - game.ball.radius - 1
+        game.ball.y = brick.rect.centery  # Center vertically
+        game.ball.dx = 5  # Moving right
+        game.ball.dy = 0.5  # Slight downward to ensure collision
+
+        initial_dx = game.ball.dx
+        initial_dy = game.ball.dy
+
+        # Step the game
+        game.step(1)
+
+        # If brick was hit from side, dx should flip
+        if not brick.alive:
+            # Ball was moving right (positive dx), should now be moving left (negative dx)
+            assert game.ball.dx != initial_dx, "Ball dx should change on side collision"
+
+    def test_ball_bounces_vertical_on_top_bottom_hit(self, game, config):
+        """Ball should reverse dy (vertical) when hitting brick from top/bottom."""
+        # Position ball above a brick, moving down
+        brick = game.bricks[0]
+
+        # Position ball just above the brick, moving down
+        game.ball.x = brick.rect.centerx  # Center horizontally
+        game.ball.y = brick.rect.top - game.ball.radius - 1
+        game.ball.dx = 0.5  # Slight horizontal movement
+        game.ball.dy = 5  # Moving down
+
+        initial_dy = game.ball.dy
+
+        # Step the game
+        game.step(1)
+
+        # If brick was hit from top, dy should flip
+        if not brick.alive:
+            assert game.ball.dy != initial_dy, "Ball dy should change on top/bottom collision"
+
+    def test_brick_destroyed_on_collision(self, game, config):
+        """Brick should be destroyed when ball collides with it."""
+        brick = game.bricks[0]
+        assert brick.alive is True
+
+        # Position ball inside brick bounds
+        game.ball.x = brick.rect.centerx
+        game.ball.y = brick.rect.centery
+        game.ball.dx = 1
+        game.ball.dy = 1
+
+        game.step(1)
+
+        # Brick should be destroyed
+        assert brick.alive is False
+        assert game.score > 0
+
+
+class TestPaddleBounceAngle:
+    """Test paddle bounce angle mechanics."""
+
+    def test_center_hit_bounces_straight_up(self, game, config):
+        """Ball hitting paddle center should bounce roughly straight up."""
+        # Position ball directly above paddle center
+        paddle_center_x = game.paddle.x + game.paddle.width / 2
+        game.ball.x = paddle_center_x
+        game.ball.y = game.paddle.y - game.ball.radius - 5
+        game.ball.dx = 0  # No horizontal velocity
+        game.ball.dy = 5  # Moving down
+
+        # Force ball to hit paddle
+        game.ball.y = game.paddle.y - game.ball.radius - 1
+
+        game.step(1)
+
+        # After center hit, dx should be small (close to straight up)
+        # Angle should be -90° ± some tolerance
+        assert game.ball.dy < 0, "Ball should be moving up after paddle hit"
+        # Center hit should result in small dx
+        assert abs(game.ball.dx) < abs(game.ball.dy) * 0.5, "Center hit should be mostly vertical"
+
+    def test_edge_hit_bounces_at_angle(self, game, config):
+        """Ball hitting paddle edge should bounce at sharper angle."""
+        # Position ball at right edge of paddle
+        paddle_right = game.paddle.x + game.paddle.width
+        game.ball.x = paddle_right - 5  # Near right edge
+        game.ball.y = game.paddle.y - game.ball.radius - 1
+        game.ball.dx = 0
+        game.ball.dy = 5  # Moving down
+
+        game.step(1)
+
+        # After edge hit, ball should have significant horizontal component
+        assert game.ball.dy < 0, "Ball should be moving up"
+        # Right edge hit should result in positive dx (moving right)
+        assert game.ball.dx > 0, "Right edge hit should bounce ball to the right"
+
+    def test_left_edge_hit_bounces_left(self, game, config):
+        """Ball hitting left paddle edge should bounce to the left."""
+        # Position ball at left edge of paddle
+        game.ball.x = game.paddle.x + 5  # Near left edge
+        game.ball.y = game.paddle.y - game.ball.radius - 1
+        game.ball.dx = 0
+        game.ball.dy = 5  # Moving down
+
+        game.step(1)
+
+        # After left edge hit, ball should move left (negative dx)
+        assert game.ball.dy < 0, "Ball should be moving up"
+        assert game.ball.dx < 0, "Left edge hit should bounce ball to the left"
+
+    def test_ball_y_adjusted_after_paddle_hit(self, game, config):
+        """Ball should be repositioned above paddle after collision to prevent sticking."""
+        # Position ball at paddle level
+        game.ball.x = game.paddle.x + game.paddle.width / 2
+        game.ball.y = game.paddle.y - game.ball.radius  # Just touching
+        game.ball.dx = 0
+        game.ball.dy = 5  # Moving down
+
+        game.step(1)
+
+        # Ball should be positioned above paddle
+        assert game.ball.y <= game.paddle.y - game.ball.radius
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
