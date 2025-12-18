@@ -425,10 +425,12 @@ class PrioritizedReplayBuffer:
         self.beta = self.beta_start + beta_progress * (self.beta_end - self.beta_start)
         
         # Calculate sampling probabilities from priorities
+        # Bug 66 fix: Use minimum threshold to prevent numerical instability from underflow
+        min_prob_threshold = 1e-10
         priorities = self.priorities[:self._size]
         probs = priorities ** self.alpha
         probs_sum = probs.sum()
-        if probs_sum > 0:
+        if probs_sum > min_prob_threshold:
             probs = probs / probs_sum
         else:
             probs = np.ones(self._size, dtype=np.float32) / self._size
@@ -457,19 +459,22 @@ class PrioritizedReplayBuffer:
     def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Sample without copying (faster, returns views)."""
         # Bug 8 fix: Check for empty buffer
+        # Bug 82 fix: Use class name in error messages for clarity
         if not self._initialized:
-            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+            raise RuntimeError(f"Cannot sample from uninitialized {self.__class__.__name__}. Call push() first.")
         if self._size == 0:
-            raise RuntimeError("Cannot sample from empty buffer.")
+            raise RuntimeError(f"Cannot sample from empty {self.__class__.__name__}.")
 
         self._frame_count += 1
         beta_progress = min(1.0, self._frame_count / self.beta_frames)
         self.beta = self.beta_start + beta_progress * (self.beta_end - self.beta_start)
 
+        # Bug 66 fix: Use minimum threshold to prevent numerical instability from underflow
+        min_prob_threshold = 1e-10
         priorities = self.priorities[:self._size]
         probs = priorities ** self.alpha
         probs_sum = probs.sum()
-        if probs_sum > 0:
+        if probs_sum > min_prob_threshold:
             probs = probs / probs_sum
         else:
             probs = np.ones(self._size, dtype=np.float32) / self._size

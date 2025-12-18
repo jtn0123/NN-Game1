@@ -443,9 +443,10 @@ class Breakout(BaseGame):
                 self.score += 10
                 reward += self.config.REWARD_BRICK_HIT
                 self._bricks_remaining -= 1  # Track incrementally
-                # Update pre-allocated array (with bounds check for safety)
-                if brick_idx < len(self._brick_states):
-                    self._brick_states[brick_idx] = 0.0
+                # Bug 69 fix: Assert instead of silent failure to catch state array mismatch early
+                assert brick_idx < len(self._brick_states), \
+                    f"Brick index {brick_idx} exceeds state array size {len(self._brick_states)}"
+                self._brick_states[brick_idx] = 0.0
                 
                 # Emit brick destruction particles (skip in headless mode)
                 if not self.headless:

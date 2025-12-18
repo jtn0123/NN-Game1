@@ -275,7 +275,9 @@ class Snake(BaseGame):
             return self.get_state(), reward, True, self._get_info()
 
         # Self collision (check against body, excluding tail which will move)
-        # Convert to set for O(1) lookup, exclude last element
+        # Convert to set for O(1) lookup, exclude last element (tail)
+        # Bug 75 clarification: This check runs BEFORE appendleft(), and excludes the tail
+        # because the tail will pop() if food isn't eaten, so new_head can safely occupy that space
         # Guard: Only check collision if snake has > 1 segment
         body_set = set(list(self.snake)[:-1]) if len(self.snake) > 1 else set()
         if new_head in body_set:

@@ -740,8 +740,13 @@ class GameApp:
         if 'learning_rate' in config_data:
             try:
                 lr = float(config_data['learning_rate'])
+                # Bug 80 fix: Add reasonable range validation for learning rate
                 if not math.isfinite(lr) or lr <= 0:
                     raise ValueError("Learning rate must be finite and positive")
+                if lr > 10.0:
+                    raise ValueError(f"Learning rate {lr} is unreasonably large (max 10.0)")
+                if lr < 1e-10:
+                    raise ValueError(f"Learning rate {lr} is too small (min 1e-10)")
                 old_lr = self.config.LEARNING_RATE
                 self.config.LEARNING_RATE = lr
                 # Update optimizer learning rate

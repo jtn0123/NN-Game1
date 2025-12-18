@@ -225,8 +225,11 @@ class NeuralNetVisualizer:
     def _smooth_activations(self, activations: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Interpolate activations for smoother animation."""
         smoothed = {}
-        
+
         for key, new_act in activations.items():
+            # Bug 64 fix: Skip None activations to prevent AttributeError
+            if new_act is None:
+                continue
             if len(new_act.shape) > 1:
                 new_act = new_act[0]
             
@@ -381,7 +384,11 @@ class NeuralNetVisualizer:
                 
                 for fi in from_sample:
                     for ti in to_sample:
-                        if fi < from_layer['actual_neurons'] and ti < weight_matrix.shape[0]:
+                        # Bug 62 fix: Add dimension check for weight_matrix to prevent IndexError
+                        if (fi < from_layer['actual_neurons'] and
+                            ti < weight_matrix.shape[0] and
+                            len(weight_matrix.shape) > 1 and
+                            weight_matrix.shape[1] > 0):
                             weight_idx = min(fi, weight_matrix.shape[1] - 1)
                             weight = weight_matrix[ti, weight_idx]
                             norm_weight = weight / max_weight
@@ -596,10 +603,14 @@ class NeuralNetVisualizer:
         title = self.font_small.render("Q-Values", True, (140, 140, 160))
         screen.blit(title, (self.x + 15, qv_y + 5))
         
+        # Bug 61 fix: Guard against empty q_values array
+        if len(q_values) == 0:
+            return
+
         # Normalize Q-values
         q_min, q_max = q_values.min(), q_values.max()
         q_range = q_max - q_min + 1e-6
-        
+
         # Calculate bar layout
         content_width = self.width - 50
         bar_width = content_width / len(q_values)

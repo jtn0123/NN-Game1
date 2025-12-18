@@ -997,8 +997,19 @@ if __name__ == "__main__":
                     game.show_controls = not game.show_controls  # Toggle controls
 
         # Get keyboard input as dict for step_human
+        # Bug 73 fix: Use explicit pygame key constants for robust key access
         pressed = pygame.key.get_pressed()
-        keys = {key: pressed[key] for key in range(len(pressed))}
+        keys = {
+            pygame.K_LEFT: pressed[pygame.K_LEFT],
+            pygame.K_RIGHT: pressed[pygame.K_RIGHT],
+            pygame.K_UP: pressed[pygame.K_UP],
+            pygame.K_DOWN: pressed[pygame.K_DOWN],
+            pygame.K_SPACE: pressed[pygame.K_SPACE],
+            pygame.K_w: pressed[pygame.K_w],
+            pygame.K_a: pressed[pygame.K_a],
+            pygame.K_s: pressed[pygame.K_s],
+            pygame.K_d: pressed[pygame.K_d],
+        }
 
         # Step game with human controls (allows simultaneous actions)
         state, reward, done, info = game.step_human(keys)

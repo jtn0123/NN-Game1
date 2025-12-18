@@ -322,9 +322,10 @@ class LayerAnalysisData:
             'activation_max': self.activation_max,
             'activation_histogram': self.activation_histogram,
             'dead_neuron_count': self.dead_neuron_count,
-            'dead_neuron_percent': (self.dead_neuron_count / max(1, self.neuron_count)) * 100,
+            # Bug 71 fix: Explicit check for neuron_count > 0 instead of masking with max(1, ...)
+            'dead_neuron_percent': (self.dead_neuron_count / self.neuron_count * 100) if self.neuron_count > 0 else 0.0,
             'saturated_neuron_count': self.saturated_neuron_count,
-            'saturated_percent': (self.saturated_neuron_count / max(1, self.neuron_count)) * 100,
+            'saturated_percent': (self.saturated_neuron_count / self.neuron_count * 100) if self.neuron_count > 0 else 0.0,
             'weight_mean': self.weight_mean,
             'weight_std': self.weight_std,
             'weight_min': self.weight_min,
@@ -524,29 +525,34 @@ class MetricsPublisher:
             avg_time = sum(self._episode_times) / len(self._episode_times)
             self.state.episodes_per_second = 1.0 / avg_time if avg_time > 0 else 0.0
         
-        # Calculate steps per second using time-windowed approach
-        # This gives accurate real-time rate instead of lifetime average
-        self._step_samples.append((current_time, total_steps))
-        
-        # Remove samples older than window, but keep at least 2 for rate calculation
-        cutoff_time = current_time - self._steps_window_seconds
-        while len(self._step_samples) > 2 and self._step_samples[0][0] < cutoff_time:
-            self._step_samples.popleft()
-        
-        # Calculate rate from remaining samples
-        if len(self._step_samples) >= 2:
-            oldest_time, oldest_steps = self._step_samples[0]
-            newest_time, newest_steps = self._step_samples[-1]
-            time_delta = newest_time - oldest_time
-            step_delta = newest_steps - oldest_steps
-            
-            if time_delta > 0.1 and step_delta > 0:  # Need at least 100ms of data and positive steps
-                self._last_steps_per_sec = step_delta / time_delta
-                self.state.steps_per_second = self._last_steps_per_sec
+        # Bug 67 fix: Thread-safe access to _step_samples
+        # Bug 79 fix: Rate limiting - only sample every 50ms to reduce overhead
+        with self._callback_lock:
+            # Calculate steps per second using time-windowed approach
+            # This gives accurate real-time rate instead of lifetime average
+            last_sample_time = self._step_samples[-1][0] if self._step_samples else 0
+            if current_time - last_sample_time >= 0.05:  # 50ms minimum between samples
+                self._step_samples.append((current_time, total_steps))
+
+            # Remove samples older than window, but keep at least 2 for rate calculation
+            cutoff_time = current_time - self._steps_window_seconds
+            while len(self._step_samples) > 2 and self._step_samples[0][0] < cutoff_time:
+                self._step_samples.popleft()
+
+            # Calculate rate from remaining samples
+            if len(self._step_samples) >= 2:
+                oldest_time, oldest_steps = self._step_samples[0]
+                newest_time, newest_steps = self._step_samples[-1]
+                time_delta = newest_time - oldest_time
+                step_delta = newest_steps - oldest_steps
+
+                if time_delta > 0.1 and step_delta > 0:  # Need at least 100ms of data and positive steps
+                    self._last_steps_per_sec = step_delta / time_delta
+                    self.state.steps_per_second = self._last_steps_per_sec
+                else:
+                    self.state.steps_per_second = self._last_steps_per_sec
             else:
                 self.state.steps_per_second = self._last_steps_per_sec
-        else:
-            self.state.steps_per_second = self._last_steps_per_sec
 
         # Phase 1.2: Adjust visualization update rate based on training speed
         self._calculate_adaptive_update_rate(self.state.steps_per_second)
@@ -1486,17 +1492,22 @@ class WebDashboard:
             emit('console_logs', {'logs': []})
         
         # Auto-emit on metric updates
+        # Bug 65 fix: Add null/running checks to prevent AttributeError during shutdown
         def broadcast_update(snapshot):
-            self.socketio.emit('state_update', snapshot)
-        
+            if self.socketio and self._running:
+                self.socketio.emit('state_update', snapshot)
+
         def broadcast_log(log_entry: LogMessage):
-            self.socketio.emit('console_log', log_entry.to_dict())
-        
+            if self.socketio and self._running:
+                self.socketio.emit('console_log', log_entry.to_dict())
+
         def broadcast_save(save_info: Dict[str, Any]):
-            self.socketio.emit('save_event', save_info)
-        
+            if self.socketio and self._running:
+                self.socketio.emit('save_event', save_info)
+
         def broadcast_nn_update(nn_data: Dict[str, Any]):
-            self.socketio.emit('nn_update', nn_data)
+            if self.socketio and self._running:
+                self.socketio.emit('nn_update', nn_data)
         
         # Clear and register callbacks atomically (prevents race condition)
         with self.publisher._callback_lock:
@@ -1566,8 +1577,9 @@ class WebDashboard:
                     log_output=False,
                     allow_unsafe_werkzeug=True
                 )
-            except OSError as e:
-                print(f"\n❌ Failed to start web dashboard on port {self.port}: {e}")
+            # Bug 76 fix: Catch broader exceptions to prevent silent thread crashes
+            except (OSError, RuntimeError, ConnectionError, Exception) as e:
+                print(f"\n❌ Failed to start web dashboard on port {self.port}: {type(e).__name__}: {e}")
                 print(f"   Port {self.port} may already be in use. Try a different port with --port\n")
         
         self._server_thread = threading.Thread(target=run_server, daemon=True)

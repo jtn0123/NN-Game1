@@ -1348,7 +1348,8 @@ class SpaceInvaders(BaseGame):
         idx += 1
 
         # Lives remaining (risk awareness)
-        self._state_array[idx] = self.lives / self.config.LIVES
+        # Bug 78 fix: Guard against division by zero if config.LIVES = 0
+        self._state_array[idx] = self.lives / self.config.LIVES if self.config.LIVES > 0 else 0.0
         idx += 1
 
         # Level (difficulty awareness)
@@ -1398,7 +1399,9 @@ class SpaceInvaders(BaseGame):
         
         # Draw aliens with shake offset and pulse effect
         # Pulse intensity increases as fewer aliens remain (like the audio in original)
-        pulse_intensity = 0.15 * (1 - self._aliens_remaining / self._num_aliens)
+        # Bug 63 fix: Guard against division by zero if _num_aliens = 0
+        aliens_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
+        pulse_intensity = 0.15 * (1 - aliens_ratio)
         pulse_offset = math.sin(self.alien_pulse_phase * math.pi * 2) * pulse_intensity * 3
         
         for alien in self.aliens:

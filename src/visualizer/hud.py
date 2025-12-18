@@ -195,7 +195,8 @@ class TrainingHUD:
         action_labels: List[str]
     ) -> None:
         """Render current action indicator at bottom-center."""
-        if selected_action >= len(action_labels):
+        # Bug 68 fix: Check for negative action indices to prevent wrong action via Python's negative indexing
+        if selected_action < 0 or selected_action >= len(action_labels):
             return
 
         action_name = action_labels[selected_action]
@@ -226,7 +227,8 @@ class TrainingHUD:
         screen_width = surface.get_width()
         screen_height = surface.get_height()
 
-        bar_width = screen_width - 40
+        # Bug 72 fix: Ensure bar_width is never negative for very small windows
+        bar_width = max(10, screen_width - 40)
         bar_height = 8
         bar_x = 20
         bar_y = screen_height - 12

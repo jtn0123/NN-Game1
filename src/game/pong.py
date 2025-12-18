@@ -188,7 +188,8 @@ class Pong(BaseGame):
 
         # Ball trail for retro effect (only in visual mode)
         self._ball_trail: List[Tuple[float, float]] = []
-        self._trail_length = 10
+        # Bug 81 fix: Ensure trail length is always at least 1 to prevent issues with pop(0) on empty list
+        self._trail_length = max(1, getattr(config, 'BALL_TRAIL_LENGTH', 10))
 
         # Visual effects timing
         self._score_flash_timer = 0
@@ -499,8 +500,14 @@ class Pong(BaseGame):
 
         # Normalize positions
         paddle_range = self.height - self.PADDLE_HEIGHT
-        paddle_y = self.player_paddle.y / paddle_range if paddle_range > 0 else 0.5
-        opponent_y = self.ai_paddle.y / paddle_range if paddle_range > 0 else 0.5
+        # Bug 70 fix: Use raw normalized position instead of misleading 0.5 when paddle >= screen height
+        if paddle_range > 0:
+            paddle_y = self.player_paddle.y / paddle_range
+            opponent_y = self.ai_paddle.y / paddle_range
+        else:
+            # Invalid config - normalize using screen height as fallback
+            paddle_y = self.player_paddle.y / max(1, self.height)
+            opponent_y = self.ai_paddle.y / max(1, self.height)
         ball_x = self.ball.x * self._inv_width
         ball_y = self.ball.y * self._inv_height
 

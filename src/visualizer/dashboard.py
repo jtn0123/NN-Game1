@@ -360,6 +360,7 @@ class Dashboard:
     def _draw_filled_area(self, screen: pygame.Surface, rect: pygame.Rect,
                           data: List[float], max_val: float, color: Tuple[int, int, int]) -> None:
         """Draw a filled area under the line graph."""
+        # Bug 74 note: Early return handles single data point case - need at least 2 points for line graph
         if len(data) < 2:
             return
 
