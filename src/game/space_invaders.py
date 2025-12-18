@@ -1058,7 +1058,9 @@ class SpaceInvaders(BaseGame):
         self.alien_x_offset += self.alien_direction * self.alien_speed
         
         # Update alien pulse phase (speeds up as fewer aliens remain)
-        pulse_speed = 0.5 + (1 - self._aliens_remaining / self._num_aliens) * 3
+        # Guard against division by zero when no aliens spawned
+        alien_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
+        pulse_speed = 0.5 + (1 - alien_ratio) * 3
         self.alien_pulse_phase += pulse_speed * (1.0 / 60.0)
         
         for alien in self.aliens:
@@ -1076,7 +1078,9 @@ class SpaceInvaders(BaseGame):
         bottom_aliens = self._get_bottom_aliens()
         for alien in bottom_aliens:
             # Increase shoot chance slightly as aliens are destroyed
-            shoot_chance = self.config.SI_ALIEN_SHOOT_CHANCE * (1 + 0.5 * (1 - self._aliens_remaining / self._num_aliens))
+            # Guard against division by zero when no aliens spawned
+            alien_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
+            shoot_chance = self.config.SI_ALIEN_SHOOT_CHANCE * (1 + 0.5 * (1 - alien_ratio))
             if random.random() < shoot_chance:
                 actual_x = alien.x + self.alien_x_offset + alien.width // 2
                 bullet = Bullet(

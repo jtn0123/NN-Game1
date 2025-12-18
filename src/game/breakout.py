@@ -243,8 +243,10 @@ class Breakout(BaseGame):
         self._brick_states.fill(1.0)
         
         # Reset visual effects (only if not headless)
-        if not self.headless:
+        # Explicit null checks for extra safety even with headless guard
+        if not self.headless and self.particles is not None:
             self.particles.clear()
+        if not self.headless and self.ball_trail is not None:
             self.ball_trail.clear()
         
         # Initialize cached predicted landing for get_state()

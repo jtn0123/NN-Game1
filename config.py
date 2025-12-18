@@ -504,6 +504,7 @@ class Config:
         assert self.LEARNING_RATE > 0, "Learning rate must be positive"
         assert 0 < self.GAMMA <= 1, "Gamma must be in (0, 1]"
         assert self.BATCH_SIZE > 0, "Batch size must be positive"
+        assert self.BATCH_SIZE <= self.MEMORY_SIZE, f"Batch size ({self.BATCH_SIZE}) cannot exceed memory size ({self.MEMORY_SIZE})"
         assert self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end"
         assert self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1"
         assert self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1"
@@ -511,6 +512,10 @@ class Config:
         assert self.SCREEN_HEIGHT > 0, "Screen height must be positive"
         assert self.BALL_SPEED > 0, "Ball speed must be positive"
         assert len(self.HIDDEN_LAYERS) > 0, "Must have at least one hidden layer"
+        # Warn about unlimited training
+        if self.MAX_EPISODES == 0:
+            import warnings
+            warnings.warn("MAX_EPISODES is 0 - training will run indefinitely until manually stopped", UserWarning)
 
 
 # Global config instance for easy importing

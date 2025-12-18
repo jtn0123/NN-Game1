@@ -740,6 +740,8 @@ class GameApp:
         if 'learning_rate' in config_data:
             try:
                 lr = float(config_data['learning_rate'])
+                if not math.isfinite(lr) or lr <= 0:
+                    raise ValueError("Learning rate must be finite and positive")
                 old_lr = self.config.LEARNING_RATE
                 self.config.LEARNING_RATE = lr
                 # Update optimizer learning rate
@@ -747,7 +749,7 @@ class GameApp:
                     param_group['lr'] = lr
                 changes.append(f"LR: {old_lr} → {lr}")
             except (ValueError, TypeError) as e:
-                print(f"⚠️  Invalid learning_rate value: {config_data['learning_rate']}")
+                print(f"⚠️  Invalid learning_rate value: {config_data['learning_rate']} - {e}")
         
         if 'epsilon' in config_data:
             try:
@@ -755,8 +757,11 @@ class GameApp:
                 if not math.isfinite(eps):
                     raise ValueError("Epsilon must be finite (not NaN or Inf)")
                 old_eps = self.agent.epsilon
-                # Clamp epsilon to valid range
-                self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
+                # Clamp epsilon to valid range with feedback
+                clamped_eps = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
+                if clamped_eps != eps:
+                    print(f"⚠️  Epsilon {eps:.4f} clamped to valid range [{self.config.EPSILON_END}, {self.config.EPSILON_START}]")
+                self.agent.epsilon = clamped_eps
                 changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
             except (ValueError, TypeError) as e:
                 print(f"⚠️  Invalid epsilon value: {config_data['epsilon']} - {e}")
@@ -764,42 +769,54 @@ class GameApp:
         if 'epsilon_decay' in config_data:
             try:
                 decay = float(config_data['epsilon_decay'])
+                if not math.isfinite(decay) or decay <= 0 or decay > 1:
+                    raise ValueError("Epsilon decay must be finite and in (0, 1]")
                 self.config.EPSILON_DECAY = decay
                 changes.append(f"Decay: {decay}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']} - {e}")
 
         if 'gamma' in config_data:
             try:
                 gamma = float(config_data['gamma'])
+                if not math.isfinite(gamma) or gamma < 0 or gamma > 1:
+                    raise ValueError("Gamma must be finite and in [0, 1]")
                 self.config.GAMMA = gamma
                 changes.append(f"Gamma: {gamma}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid gamma value: {config_data['gamma']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid gamma value: {config_data['gamma']} - {e}")
 
         if 'batch_size' in config_data:
             try:
                 batch_size = int(config_data['batch_size'])
+                if batch_size <= 0:
+                    raise ValueError("Batch size must be positive")
+                if batch_size > self.config.MEMORY_SIZE:
+                    raise ValueError(f"Batch size ({batch_size}) cannot exceed memory size ({self.config.MEMORY_SIZE})")
                 self.config.BATCH_SIZE = batch_size
                 changes.append(f"Batch: {batch_size}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']} - {e}")
 
         if 'learn_every' in config_data:
             try:
                 learn_every = int(config_data['learn_every'])
+                if learn_every <= 0:
+                    raise ValueError("Learn every must be positive")
                 self.config.LEARN_EVERY = learn_every
                 changes.append(f"LearnEvery: {learn_every}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']} - {e}")
 
         if 'gradient_steps' in config_data:
             try:
                 grad_steps = int(config_data['gradient_steps'])
+                if grad_steps <= 0:
+                    raise ValueError("Gradient steps must be positive")
                 self.config.GRADIENT_STEPS = grad_steps
                 changes.append(f"GradSteps: {grad_steps}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']} - {e}")
         
         if self.web_dashboard and changes:
             self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)
@@ -2546,8 +2563,11 @@ class HeadlessTrainer:
                 if not math.isfinite(eps):
                     raise ValueError("Epsilon must be finite (not NaN or Inf)")
                 old_eps = self.agent.epsilon
-                # Clamp epsilon to valid range
-                self.agent.epsilon = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
+                # Clamp epsilon to valid range with feedback
+                clamped_eps = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
+                if clamped_eps != eps:
+                    print(f"⚠️  Epsilon {eps:.4f} clamped to valid range [{self.config.EPSILON_END}, {self.config.EPSILON_START}]")
+                self.agent.epsilon = clamped_eps
                 changes.append(f"Epsilon: {old_eps:.4f} → {self.agent.epsilon:.4f}")
             except (ValueError, TypeError) as e:
                 print(f"⚠️  Invalid epsilon value: {config_data['epsilon']} - {e}")
@@ -2555,42 +2575,54 @@ class HeadlessTrainer:
         if 'epsilon_decay' in config_data:
             try:
                 decay = float(config_data['epsilon_decay'])
+                if not math.isfinite(decay) or decay <= 0 or decay > 1:
+                    raise ValueError("Epsilon decay must be finite and in (0, 1]")
                 self.config.EPSILON_DECAY = decay
                 changes.append(f"Decay: {decay}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']} - {e}")
 
         if 'gamma' in config_data:
             try:
                 gamma = float(config_data['gamma'])
+                if not math.isfinite(gamma) or gamma < 0 or gamma > 1:
+                    raise ValueError("Gamma must be finite and in [0, 1]")
                 self.config.GAMMA = gamma
                 changes.append(f"Gamma: {gamma}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid gamma value: {config_data['gamma']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid gamma value: {config_data['gamma']} - {e}")
 
         if 'batch_size' in config_data:
             try:
                 batch_size = int(config_data['batch_size'])
+                if batch_size <= 0:
+                    raise ValueError("Batch size must be positive")
+                if batch_size > self.config.MEMORY_SIZE:
+                    raise ValueError(f"Batch size ({batch_size}) cannot exceed memory size ({self.config.MEMORY_SIZE})")
                 self.config.BATCH_SIZE = batch_size
                 changes.append(f"Batch: {batch_size}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']} - {e}")
 
         if 'learn_every' in config_data:
             try:
                 learn_every = int(config_data['learn_every'])
+                if learn_every <= 0:
+                    raise ValueError("Learn every must be positive")
                 self.config.LEARN_EVERY = learn_every
                 changes.append(f"LearnEvery: {learn_every}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']} - {e}")
 
         if 'gradient_steps' in config_data:
             try:
                 grad_steps = int(config_data['gradient_steps'])
+                if grad_steps <= 0:
+                    raise ValueError("Gradient steps must be positive")
                 self.config.GRADIENT_STEPS = grad_steps
                 changes.append(f"GradSteps: {grad_steps}")
-            except (ValueError, TypeError):
-                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']} - {e}")
         
         if self.web_dashboard and changes:
             self.web_dashboard.log(f"⚙️ Config updated: {', '.join(changes)}", "action", config_data)

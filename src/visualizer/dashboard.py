@@ -215,7 +215,9 @@ class Dashboard:
             
             # Smooth current values
             self.smoothed_score = self.smoothed_score * 0.8 + score * 0.2
-            self.smoothed_loss = self.smoothed_loss * 0.9 + loss * 0.1
+            # Guard against NaN/Inf in loss smoothing
+            if math.isfinite(loss):
+                self.smoothed_loss = self.smoothed_loss * 0.9 + loss * 0.1
         
         # Calculate win rate
         if self.total_games > 0:
@@ -256,6 +258,10 @@ class Dashboard:
 
     def _create_gradient_surface(self) -> None:
         """Create and cache the gradient background surface."""
+        # Guard against zero dimensions
+        if self.width <= 0 or self.height <= 0:
+            self._cached_gradient = pygame.Surface((1, 1))
+            return
         self._cached_gradient = pygame.Surface((self.width, self.height))
         for i in range(self.height):
             progress = i / self.height

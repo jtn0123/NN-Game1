@@ -85,12 +85,17 @@ class TrainingMetrics:
                         'epsilons', 'durations', 'bricks', 'wins']:
                 setattr(self, attr, getattr(self, attr)[-self.history_length:])
     
-    def get_recent_average(self, metric: str, n: int = 100) -> float:
-        """Get average of last n values for a metric."""
+    def get_recent_average(self, metric: str, n: int = 100) -> Optional[float]:
+        """
+        Get average of last n values for a metric.
+
+        Returns:
+            Average value, or None if no data available (allows distinguishing empty from 0.0)
+        """
         values = getattr(self, metric, [])
         if not values:
-            return 0.0
-        return np.mean(values[-n:])
+            return None  # Distinguish "no data" from "average is 0.0"
+        return float(np.mean(values[-n:]))
     
     def get_best_score(self) -> int:
         """Get the highest score achieved."""

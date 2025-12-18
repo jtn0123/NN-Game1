@@ -117,6 +117,14 @@ class PauseMenu:
         """
         self.screen_width = new_width
         self.screen_height = new_height
+
+    def reset_state(self) -> None:
+        """
+        Reset menu state. Call when showing/hiding the pause menu
+        to ensure quit confirmation dialog doesn't persist.
+        """
+        self._confirm_quit = False
+        self.selected_index = 0
         self._update_button_positions()
 
     def handle_event(self, event: pygame.event.Event) -> Optional[str]:

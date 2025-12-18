@@ -458,7 +458,11 @@ class Agent:
             self.memory.push_batch(states, actions, rewards, next_states, dones)
         else:
             for i in range(len(states)):
-                self.memory.push(states[i], int(actions[i]), float(rewards[i]), next_states[i], bool(dones[i]))
+                # Use .item() for numpy scalar conversion (more reliable than int/float)
+                action = actions[i].item() if hasattr(actions[i], 'item') else int(actions[i])
+                reward = rewards[i].item() if hasattr(rewards[i], 'item') else float(rewards[i])
+                done = dones[i].item() if hasattr(dones[i], 'item') else bool(dones[i])
+                self.memory.push(states[i], action, reward, next_states[i], done)
     
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
         """
@@ -1145,13 +1149,11 @@ class Agent:
         with self._losses_lock:
             if not self.losses:
                 return 0.0
-            # Iterate from end - O(n) instead of O(len) for converting entire deque to list
+            # Copy to list inside lock to avoid iterator invalidation
             count = min(n, len(self.losses))
-            total = 0.0
-            it = iter(reversed(self.losses))
-            for _ in range(count):
-                total += next(it)
-        return total / count
+            recent_losses = list(self.losses)[-count:]
+            # Compute average inside lock for full thread safety
+            return sum(recent_losses) / count if count > 0 else 0.0
 
 
 # Testing
