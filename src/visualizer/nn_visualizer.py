@@ -98,6 +98,7 @@ class NeuralNetVisualizer:
         # Visualization parameters
         self.neuron_radius = self.config.VIS_NEURON_RADIUS
         self.max_neurons = self.config.VIS_MAX_NEURONS_DISPLAY
+        self.fast_mode = self.config.VIS_FAST_MODE  # Skip glow/highlight for performance
         
         # Enhanced color palette
         self.bg_color = (12, 12, 24)
@@ -525,30 +526,36 @@ class NeuralNetVisualizer:
                         min(abs(act_val), 1.0)
                     )
                 
-                # Pulse effect for highly active neurons
                 radius = self.neuron_radius
-                if abs(act_val) > 0.7:
-                    pulse = 1 + 0.2 * math.sin(self.pulse_phase + j * 0.5)
-                    radius = int(radius * pulse)
-                
-                # Draw outer glow for active neurons (with anti-aliasing)
-                if abs(act_val) > 0.4:
-                    glow_radius = radius + 4
-                    glow_alpha = abs(act_val) * 0.6
-                    glow_color = (int(color[0] * glow_alpha), int(color[1] * glow_alpha), int(color[2] * glow_alpha))
-                    self._draw_aa_circle(screen, glow_color, (int(pos[0]), int(pos[1])), glow_radius)
-                
-                # Draw neuron body with anti-aliasing
-                self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
-                
-                # Draw highlight (3D effect) with anti-aliasing
-                highlight_pos = (int(pos[0] - radius * 0.3), int(pos[1] - radius * 0.3))
-                highlight_radius = max(1, radius // 3)
-                highlight_color = (min(255, color[0] + 50), min(255, color[1] + 50), min(255, color[2] + 50))
-                self._draw_aa_circle(screen, highlight_color, highlight_pos, highlight_radius)
-                
-                # Draw anti-aliased border
-                self._draw_aa_circle(screen, (80, 90, 110), (int(pos[0]), int(pos[1])), radius, border=1)
+
+                if self.fast_mode:
+                    # Fast mode: simple filled circle, no effects
+                    self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
+                else:
+                    # Full quality mode with all effects
+                    # Pulse effect for highly active neurons
+                    if abs(act_val) > 0.7:
+                        pulse = 1 + 0.2 * math.sin(self.pulse_phase + j * 0.5)
+                        radius = int(radius * pulse)
+
+                    # Draw outer glow for active neurons (with anti-aliasing)
+                    if abs(act_val) > 0.4:
+                        glow_radius = radius + 4
+                        glow_alpha = abs(act_val) * 0.6
+                        glow_color = (int(color[0] * glow_alpha), int(color[1] * glow_alpha), int(color[2] * glow_alpha))
+                        self._draw_aa_circle(screen, glow_color, (int(pos[0]), int(pos[1])), glow_radius)
+
+                    # Draw neuron body with anti-aliasing
+                    self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
+
+                    # Draw highlight (3D effect) with anti-aliasing
+                    highlight_pos = (int(pos[0] - radius * 0.3), int(pos[1] - radius * 0.3))
+                    highlight_radius = max(1, radius // 3)
+                    highlight_color = (min(255, color[0] + 50), min(255, color[1] + 50), min(255, color[2] + 50))
+                    self._draw_aa_circle(screen, highlight_color, highlight_pos, highlight_radius)
+
+                    # Draw anti-aliased border
+                    self._draw_aa_circle(screen, (80, 90, 110), (int(pos[0]), int(pos[1])), radius, border=1)
             
             # Draw ellipsis for hidden neurons
             if layer_pos['neurons'] < info['neurons']:

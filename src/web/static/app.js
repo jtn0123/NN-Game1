@@ -67,6 +67,74 @@ function throttle(func, limit) {
     };
 }
 
+/**
+ * Downsample array data using LTTB algorithm for chart performance
+ * Largest-Triangle-Three-Buckets preserves visual shape of data
+ * @param {Array} data - Data array to downsample
+ * @param {number} targetPoints - Target number of points
+ * @returns {Object} - {data: downsampled data, indices: original indices}
+ */
+function downsampleLTTB(data, targetPoints) {
+    if (data.length <= targetPoints) {
+        return { data: data, indices: data.map((_, i) => i) };
+    }
+
+    const sampled = [];
+    const indices = [];
+    const bucketSize = (data.length - 2) / (targetPoints - 2);
+
+    // Always keep first point
+    sampled.push(data[0]);
+    indices.push(0);
+
+    for (let i = 0; i < targetPoints - 2; i++) {
+        const bucketStart = Math.floor((i) * bucketSize) + 1;
+        const bucketEnd = Math.floor((i + 1) * bucketSize) + 1;
+        const nextBucketStart = Math.floor((i + 1) * bucketSize) + 1;
+        const nextBucketEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, data.length);
+
+        // Calculate average of next bucket
+        let avgX = 0, avgY = 0, count = 0;
+        for (let j = nextBucketStart; j < nextBucketEnd; j++) {
+            avgX += j;
+            avgY += data[j];
+            count++;
+        }
+        avgX /= count;
+        avgY /= count;
+
+        // Find point in current bucket with largest triangle area
+        let maxArea = -1;
+        let maxIndex = bucketStart;
+        const prevX = indices[indices.length - 1];
+        const prevY = sampled[sampled.length - 1];
+
+        for (let j = bucketStart; j < bucketEnd && j < data.length; j++) {
+            const area = Math.abs(
+                (prevX - avgX) * (data[j] - prevY) -
+                (prevX - j) * (avgY - prevY)
+            );
+            if (area > maxArea) {
+                maxArea = area;
+                maxIndex = j;
+            }
+        }
+
+        sampled.push(data[maxIndex]);
+        indices.push(maxIndex);
+    }
+
+    // Always keep last point
+    sampled.push(data[data.length - 1]);
+    indices.push(data.length - 1);
+
+    return { data: sampled, indices: indices };
+}
+
+// Chart downsampling threshold - only downsample above this many points
+const CHART_DOWNSAMPLE_THRESHOLD = 2000;
+const CHART_DOWNSAMPLE_TARGET = 500;
+
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();

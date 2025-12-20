@@ -79,6 +79,9 @@ from src.utils.logger import setup_logging, get_logger, LogLevel
 from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
 from src.game.breakout import Breakout, VecBreakout
 from src.game.space_invaders import VecSpaceInvaders
+from src.game.pong import VecPong
+from src.game.snake import VecSnake
+from src.game.asteroids import VecAsteroids
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
 from src.ai.evaluator import Evaluator  # Deterministic performance tracking
@@ -2022,7 +2025,7 @@ class HeadlessTrainer:
             sys.exit(1)
         
         # Type annotations for game and vec_env
-        self.vec_env: Optional[Union[VecBreakout, VecSpaceInvaders]] = None
+        self.vec_env: Optional[Union[VecBreakout, VecSpaceInvaders, VecPong, VecSnake, VecAsteroids]] = None
         self.game: BaseGame
 
         if self.num_envs > 1:
@@ -2033,6 +2036,18 @@ class HeadlessTrainer:
                 print(f"🎮 Vectorized: {self.num_envs} parallel environments")
             elif config.GAME_NAME == 'space_invaders':
                 self.vec_env = VecSpaceInvaders(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == 'pong':
+                self.vec_env = VecPong(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == 'snake':
+                self.vec_env = VecSnake(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == 'asteroids':
+                self.vec_env = VecAsteroids(self.num_envs, config, headless=True)
                 self.game = self.vec_env.envs[0]  # Reference for state/action size
                 print(f"🎮 Vectorized: {self.num_envs} parallel environments")
             else:

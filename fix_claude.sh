@@ -153,15 +153,8 @@ force_reinstall_claude() {
 
 # Install/reinstall Claude Code CLI
 install_claude_cli() {
-    print_info "Installing @anthropic-ai/claude-code..."
-
-    if npm install -g @anthropic-ai/claude-code 2>&1; then
-        print_success "Claude Code CLI installed successfully"
-        return 0
-    else
-        print_error "Failed to install Claude Code CLI"
-        return 1
-    fi
+    # Use force_reinstall_claude which handles ENOTEMPTY errors and other edge cases
+    force_reinstall_claude
 }
 
 # Run Claude doctor if available

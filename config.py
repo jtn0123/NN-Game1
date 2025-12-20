@@ -410,6 +410,7 @@ class Config:
     VIS_LAYER_SPACING: int = 150
     VIS_NEURON_SPACING: int = 20
     VIS_MAX_NEURONS_DISPLAY: int = 20  # Limit for very large layers
+    VIS_FAST_MODE: bool = False  # Skip glow/highlight effects for performance
     
     # Activation coloring
     VIS_COLOR_INACTIVE: Tuple[int, int, int] = (50, 50, 50)
