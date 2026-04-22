@@ -18,7 +18,7 @@ flask-socketio>=5.3.0     # WebSocket support for real-time updates
 eventlet>=0.35.0          # Async server for SocketIO
 
 # Utilities
-tqdm>=4.65.0              # Progress bars
+tqdm>=4.67.3              # Progress bars
 dataclasses-json>=0.6.0   # Easy config serialization
 
 # Testing (optional)
