@@ -6,7 +6,7 @@ torch>=2.0.0              # PyTorch - Neural network framework
 numpy>=1.24.0             # Numerical computing
 
 # Game Engine
-pygame>=2.5.0             # Game development and visualization
+pygame>=2.6.1             # Game development and visualization
 
 # Visualization & Metrics
 matplotlib>=3.7.0         # Plotting training curves
