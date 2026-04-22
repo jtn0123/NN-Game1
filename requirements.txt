@@ -15,7 +15,7 @@ Pillow>=10.0.0            # Image processing for screenshots
 # Web Dashboard
 flask>=3.0.0              # Web framework
 flask-socketio>=5.3.0     # WebSocket support for real-time updates
-eventlet>=0.35.0          # Async server for SocketIO
+eventlet>=0.41.0          # Async server for SocketIO
 
 # Utilities
 tqdm>=4.65.0              # Progress bars
