@@ -13,7 +13,7 @@ To add a new game:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Protocol, Tuple
+from typing import List, Protocol, Sequence, Tuple
 
 import numpy as np
 
@@ -137,3 +137,27 @@ class BaseVecGame(Protocol):
     def seed(self, seeds: List[int]) -> None:
         """Seed every environment."""
         ...
+
+
+def step_vector_env_no_copy(
+    envs: Sequence[BaseGame],
+    states: np.ndarray,
+    rewards: np.ndarray,
+    dones: np.ndarray,
+    actions: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    """Step vectorized envs and return reusable internal buffers."""
+    infos = []
+
+    for i, (env, action) in enumerate(zip(envs, actions)):
+        next_state, reward, done, info = env.step(int(action))
+
+        states[i] = next_state
+        rewards[i] = reward
+        dones[i] = done
+        infos.append(info)
+
+        if done:
+            env.reset()
+
+    return states, rewards, dones, infos

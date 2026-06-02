@@ -1812,10 +1812,8 @@ class WebDashboard:
                     allow_unsafe_werkzeug=True,
                 )
             # Bug 76 fix: Catch broader exceptions to prevent silent thread crashes
-            except (OSError, RuntimeError, ConnectionError, Exception) as e:
-                _logger.error(
-                    f"Failed to start web dashboard on port {self.port}: {type(e).__name__}: {e}"
-                )
+            except (OSError, RuntimeError, ConnectionError, Exception):
+                _logger.exception("Failed to start web dashboard on port %s", self.port)
                 _logger.error(
                     f"Port {self.port} may already be in use. Try a different port with --port"
                 )

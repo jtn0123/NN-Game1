@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pygame
 
-from .base_game import BaseGame
+from .base_game import BaseGame, step_vector_env_no_copy
 
 sys.path.append("..")
 from config import Config
@@ -799,7 +799,6 @@ class Asteroids(BaseGame):
 
             # Glow effect (draw multiple times with decreasing alpha)
             for glow in range(3):
-                glow * 2
                 glow_verts = [(v[0], v[1]) for v in verts]
                 alpha = 100 - glow * 30
                 pygame.draw.polygon(screen, (alpha, alpha, alpha), glow_verts, 1)
@@ -985,20 +984,7 @@ class VecAsteroids:
         self, actions: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments and return reusable internal buffers."""
-        infos = []
-
-        for i, (env, action) in enumerate(zip(self.envs, actions)):
-            next_state, reward, done, info = env.step(int(action))
-
-            self._states[i] = next_state
-            self._rewards[i] = reward
-            self._dones[i] = done
-            infos.append(info)
-
-            if done:
-                env.reset()
-
-        return self._states, self._rewards, self._dones, infos
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def close(self) -> None:
         """Clean up all environments."""

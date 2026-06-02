@@ -24,7 +24,7 @@ from typing import Deque, List, Optional, Tuple
 import numpy as np
 import pygame
 
-from .base_game import BaseGame
+from .base_game import BaseGame, step_vector_env_no_copy
 from .particles import ParticleSystem
 
 sys.path.append("..")
@@ -670,20 +670,7 @@ class VecSnake:
         self, actions: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments and return reusable internal buffers."""
-        infos = []
-
-        for i, (env, action) in enumerate(zip(self.envs, actions)):
-            next_state, reward, done, info = env.step(int(action))
-
-            self._states[i] = next_state
-            self._rewards[i] = reward
-            self._dones[i] = done
-            infos.append(info)
-
-            if done:
-                env.reset()
-
-        return self._states, self._rewards, self._dones, infos
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def close(self) -> None:
         """Clean up all environments."""

@@ -1518,7 +1518,6 @@ class GameApp:
                     frame_training_time = time.time() - training_start
                     measured_step_time = frame_training_time / steps_this_frame
                     step_time_samples.append(measured_step_time)  # deque auto-trims to maxlen=100
-                    sum(step_time_samples) / len(step_time_samples)
 
                     # Log performance occasionally
                     if self.steps % 500 == 0 and self.web_dashboard:
@@ -1681,7 +1680,6 @@ class GameApp:
                 elapsed_since_report >= self.config.REPORT_INTERVAL_SECONDS
                 or episode % self.config.LOG_EVERY == 0
             ):
-                current_time - start_time
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
@@ -3390,11 +3388,9 @@ class HeadlessTrainer:
             if self.current_episode > last_logged_episode and (
                 should_log_by_episode or should_log_by_time
             ):
-                elapsed_total = current_time - self.training_start_time
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
-                episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0

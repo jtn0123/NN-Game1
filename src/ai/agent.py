@@ -1199,9 +1199,12 @@ class Agent:
 
         if sidecar is None:
             try:
-                checkpoint = torch.load(filepath, map_location="cpu", weights_only=False)
+                checkpoint = torch.load(filepath, map_location="cpu", weights_only=True)
             except Exception as e:
                 print(f"❌ Failed to read model: {e}")
+                return None
+            if not isinstance(checkpoint, dict):
+                print("❌ Failed to read model metadata: checkpoint is not a dictionary")
                 return None
             steps = checkpoint.get("steps", "unknown")
             epsilon = checkpoint.get("epsilon", "unknown")
