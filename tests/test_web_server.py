@@ -417,7 +417,7 @@ class TestWebDashboardIntegration:
         dashboard.app.config["TESTING"] = True
         with dashboard.app.test_client() as client:
             response = client.delete(
-                f"/api/models/{quote(str(model_path), safe='')}",
+                f"/api/models/{quote(model_path.name, safe='')}",
                 headers={"X-Dashboard-Token": dashboard.control_token},
             )
 
@@ -442,7 +442,7 @@ class TestWebDashboardIntegration:
         dashboard.app.config["TESTING"] = True
         with dashboard.app.test_client() as client:
             response = client.delete(
-                f"/api/models/{quote(str(outside_path), safe='')}",
+                f"/api/models/{quote(outside_path.name, safe='')}",
                 headers={"X-Dashboard-Token": dashboard.control_token},
             )
 

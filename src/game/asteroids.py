@@ -981,6 +981,25 @@ class VecAsteroids:
 
         return states_to_return, rewards_to_return, dones_to_return, infos
 
+    def step_no_copy(
+        self, actions: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step all environments and return reusable internal buffers."""
+        infos = []
+
+        for i, (env, action) in enumerate(zip(self.envs, actions)):
+            next_state, reward, done, info = env.step(int(action))
+
+            self._states[i] = next_state
+            self._rewards[i] = reward
+            self._dones[i] = done
+            infos.append(info)
+
+            if done:
+                env.reset()
+
+        return self._states, self._rewards, self._dones, infos
+
     def close(self) -> None:
         """Clean up all environments."""
         for env in self.envs:
