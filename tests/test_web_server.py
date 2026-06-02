@@ -414,6 +414,48 @@ class TestWebDashboardIntegration:
             assert "models" in data
             assert "current_game" in data
 
+    def test_dashboard_page_serves_tokenized_frontend_contract(self, web_dashboard):
+        """Dashboard HTML should expose the token and load core JS before app JS."""
+        web_dashboard.app.config["TESTING"] = True
+        with web_dashboard.app.test_client() as client:
+            response = client.get("/")
+            core_response = client.get("/static/dashboard_core.js")
+            app_response = client.get("/static/app.js")
+
+        html = response.data.decode("utf-8")
+
+        assert response.status_code == 200
+        assert (
+            response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
+        )
+        assert (
+            f'<meta name="dashboard-token" content="{web_dashboard.access_token}">'
+            in html
+        )
+        assert "Training Dashboard" in html
+        assert html.index("dashboard_core.js") < html.index("app.js")
+        assert core_response.status_code == 200
+        assert app_response.status_code == 200
+
+    def test_launcher_page_serves_tokenized_frontend_contract(self):
+        """Launcher mode should also serve an authenticated Socket.IO page."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        config = Config()
+        dashboard = WebDashboard(port=5103, config=config, launcher_mode=True)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.get("/")
+
+        html = response.data.decode("utf-8")
+
+        assert response.status_code == 200
+        assert (
+            f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
+        )
+        assert "auth: { token: DASHBOARD_TOKEN }" in html
+
     def test_api_models_uses_opaque_ids(self, tmp_path):
         """Model list should not expose absolute local filesystem paths."""
         from src.web.server import WebDashboard
