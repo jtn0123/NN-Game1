@@ -1,0 +1,64 @@
+import os
+
+import pytest
+import torch
+
+from src.web.model_service import ModelService
+
+
+def test_model_service_lists_opaque_ids_without_paths(tmp_path):
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    torch.save({"steps": 7, "epsilon": 0.25}, model_dir / "best.pth")
+
+    service = ModelService([(str(model_dir), "breakout")])
+    models = service.list_models()
+
+    assert models[0]["id"] == "breakout:best.pth"
+    assert models[0]["steps"] == 7
+    assert "path" not in models[0]
+
+
+def test_model_service_resolves_ids_and_rejects_traversal(tmp_path):
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    model_path = model_dir / "best.pth"
+    model_path.write_bytes(b"checkpoint")
+
+    service = ModelService([(str(model_dir), "breakout")])
+
+    assert service.resolve("breakout:best.pth") == os.path.realpath(model_path)
+    assert service.resolve("breakout:../best.pth") is None
+    assert service.resolve("legacy:best.pth") is None
+
+
+def test_model_service_delete_rejects_symlink_path(tmp_path):
+    model_dir = tmp_path / "models" / "breakout"
+    target_dir = tmp_path / "target"
+    model_dir.mkdir(parents=True)
+    target_dir.mkdir()
+    (target_dir / "unsafe.pth").write_bytes(b"checkpoint")
+    os.symlink(target_dir, model_dir / "linked")
+
+    service = ModelService([(str(model_dir), "breakout")])
+
+    success, filename, error = service.delete("breakout:linked")
+
+    assert not success
+    assert filename is None
+    assert error == "Invalid model id"
+
+
+def test_model_service_deletes_allowed_model(tmp_path):
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    model_path = model_dir / "best.pth"
+    model_path.write_bytes(b"checkpoint")
+
+    service = ModelService([(str(model_dir), "breakout")])
+    success, filename, error = service.delete("breakout:best.pth")
+
+    assert success
+    assert filename == "best.pth"
+    assert error is None
+    assert not model_path.exists()

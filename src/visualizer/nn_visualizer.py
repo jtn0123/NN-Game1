@@ -25,9 +25,6 @@ from collections import deque
 import math
 import time
 
-import sys
-
-sys.path.append("../..")
 from config import Config
 
 

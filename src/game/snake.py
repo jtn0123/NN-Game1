@@ -24,9 +24,6 @@ from collections import deque
 
 from .base_game import BaseGame
 from .particles import ParticleSystem
-import sys
-
-sys.path.append("..")
 from config import Config
 
 

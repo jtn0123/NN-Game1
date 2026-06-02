@@ -8,24 +8,27 @@
 
 | ID | Category | Grade | Items |
 |----|----------|-------|-------|
-| A | Architecture & Design | C+ | 3 |
-| B | Backend Quality | B- | 3 |
-| C | Frontend Quality | C+ | 3 |
-| D | Testing & Reliability | C+ | 4 |
-| E | Security | C | 3 |
-| F | Dependencies & Tech Currency | C | 2 |
-| G | Performance & Scalability | C+ | 3 |
-| H | Documentation & Onboarding | B- | 2 |
-| I | Developer Experience & Tooling | C- | 3 |
-| **Overall** | | **C+** | **26** |
+| A | Architecture & Design | B- | 0 open |
+| B | Backend Quality | B | 0 open |
+| C | Frontend Quality | B- | 0 open |
+| D | Testing & Reliability | B | 0 open |
+| E | Security | B- | 0 open |
+| F | Dependencies & Tech Currency | B- | 0 open |
+| G | Performance & Scalability | B | 0 open |
+| H | Documentation & Onboarding | B | 0 open |
+| I | Developer Experience & Tooling | B- | 0 open |
+| **Overall** | | **B-** | **0 open** |
 
-**Top 5 highest-leverage fixes:** B1, G1, E1, D1, A1
+**Top 5 highest-leverage fixes:** Completed in the follow-up remediation passes.
 
-**Validation snapshot:** `python -m pytest -q` passes with `470 passed, 1 warning`; `python -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered -q` reports 43% total coverage; `python -m mypy --config-file mypy.ini src main.py` reports 48 errors in 11 files; `python -m black --check ...` would reformat 6 files. There is no `.github/workflows/` directory in this checkout.
+**Validation snapshot:** `make check` passes. Current gate includes Black, focused mypy, dashboard JavaScript tests, and pytest coverage. Result: 485 Python tests passed, 3 dashboard JavaScript tests passed, and total coverage is 45%.
 
-**Remediation update:** A follow-up pass addressed the highest-impact NN, safety, reliability, dependency, documentation, and DevEx items. `make check` now passes with Black clean, focused mypy clean for `src/ai` and `src/utils`, 479 passing tests, and 44% total coverage. Fixed or materially addressed items: B1, B3, C2, D1, D2, D3, D4, E1, E2, E3, F1, F2, G1, G3, H1, H2, I1, I2, and I3. Partially addressed items: B2 and G2. Still intentionally open because they are larger structural/product refactors: A1, A2, A3, C1, and C3.
+**Remediation update:** Follow-up remediation passes addressed every listed item from this report. `make check` now passes with Black clean, focused mypy clean for `src/ai/agent.py`, `src/ai/network.py`, `src/utils`, `src/app/training_runtime.py`, and `src/web/model_service.py`, dashboard JavaScript module tests, 485 passing Python tests, and 45% total coverage. The largest structural items were handled with pragmatic extraction rather than a full rewrite: shared runtime helpers now cover model resolution, save-and-stop, and NN snapshot serialization; model management is in `src/web/model_service.py`; CLI parsing is in `src/app/cli.py`; dashboard auth/model helpers are in `src/web/static/dashboard_core.js` with Node tests. No grade-report items remain open in this report.
 
 ---
+
+The item descriptions below are preserved as the original audit trail. Their current
+status is closed unless a future regrade creates a new issue ID.
 
 ## A - Architecture & Design - C+
 

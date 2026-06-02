@@ -28,9 +28,6 @@ from typing import List, Optional, Callable, Dict, Any, cast
 import numpy as np
 import math
 
-import sys
-
-sys.path.append("../..")
 from config import Config
 
 

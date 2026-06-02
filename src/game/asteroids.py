@@ -23,9 +23,6 @@ from typing import Tuple, List, Optional
 from dataclasses import dataclass
 
 from .base_game import BaseGame
-import sys
-
-sys.path.append("..")
 from config import Config
 
 

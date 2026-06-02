@@ -84,6 +84,12 @@ from src.game.pong import VecPong
 from src.game.snake import VecSnake
 from src.game.asteroids import VecAsteroids
 from src.ai.agent import Agent, TrainingHistory
+from src.app.cli import parse_args
+from src.app.training_runtime import (
+    build_nn_snapshot,
+    request_save_and_stop,
+    resolve_model_path,
+)
 from src.ai.trainer import Trainer
 from src.ai.evaluator import Evaluator  # Deterministic performance tracking
 from src.utils.checkpoint_loader import load_checkpoint
@@ -368,70 +374,14 @@ class GameApp:
     def _resolve_model_path(
         self, explicit_path: Optional[str], state_size: int, action_size: int
     ) -> Optional[str]:
-        """
-        Resolve which model to load on startup.
-
-        Priority:
-        1. Explicitly specified --model path (if compatible)
-        2. Most recently modified .pth file in game-specific directory
-
-        Args:
-            explicit_path: Path from --model argument, or None
-            state_size: Expected state size for compatibility check
-            action_size: Expected action size for compatibility check
-
-        Returns:
-            Path to model file, or None if no model found
-        """
-        from src.ai.agent import Agent
-
-        # If explicit path specified, check compatibility
-        if explicit_path and os.path.exists(explicit_path):
-            info = Agent.inspect_model(
-                explicit_path,
-                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
-                allow_unsafe_fallback=True,
-            )
-            if (
-                info
-                and info.get("state_size") == state_size
-                and info.get("action_size") == action_size
-            ):
-                return explicit_path
-            else:
-                print(
-                    f"⚠️  Specified model incompatible: {os.path.basename(explicit_path)}"
-                )
-                print(
-                    f"   Expected: state_size={state_size}, action_size={action_size}"
-                )
-                if info:
-                    print(
-                        f"   Model has: state_size={info.get('state_size')}, action_size={info.get('action_size')}"
-                    )
-                return None
-
-        # Only auto-load from game-specific directory (e.g., models/space_invaders/)
-        model_dir = self.config.GAME_MODEL_DIR
-        if not os.path.exists(model_dir):
-            return None
-
-        model_files = []
-        for f in os.listdir(model_dir):
-            if f.endswith(".pth"):
-                filepath = os.path.join(model_dir, f)
-                mtime = os.path.getmtime(filepath)
-                model_files.append((filepath, mtime))
-
-        if not model_files:
-            return None
-
-        # Sort by modification time, newest first
-        model_files.sort(key=lambda x: x[1], reverse=True)
-
-        most_recent = model_files[0][0]
-        print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
-        return most_recent
+        """Resolve which model to load on startup."""
+        return resolve_model_path(
+            explicit_path=explicit_path,
+            state_size=state_size,
+            action_size=action_size,
+            config=self.config,
+            inspect_model=Agent.inspect_model,
+        )
 
     def _restore_training_history(self, filepath: str) -> None:
         """Restore training history from a saved model (called after dashboard is ready)."""
@@ -694,35 +644,17 @@ class GameApp:
 
     def _save_and_quit(self) -> None:
         """Save the model and exit the application gracefully."""
-        if self.web_dashboard:
-            self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
-
-        # Save the model and verify it completed
-        save_success = self._save_model(
-            f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown"
+        request_save_and_stop(
+            game_name=self.config.GAME_NAME,
+            save_model=lambda filename, reason: self._save_model(
+                filename, save_reason=reason
+            ),
+            set_running=self._set_running,
+            dashboard=self.web_dashboard,
         )
 
-        if save_success:
-            if self.web_dashboard:
-                self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
-            print("\n👋 Save & Quit requested. Model saved. Exiting...")
-        else:
-            if self.web_dashboard:
-                self.web_dashboard.log(
-                    "⚠️ Save may have failed. Shutting down...", "warning"
-                )
-            print("\n⚠️ Save & Quit requested. Save may have failed. Exiting...")
-
-        # Flush output buffers to ensure messages are written
-        import sys
-
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        # Give time for the save event to propagate to clients
-        time.sleep(0.5)
-
-        self.running = False
+    def _set_running(self, running: bool) -> None:
+        self.running = running
 
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
@@ -2170,62 +2102,20 @@ class GameApp:
             return
 
         try:
-            # Enable activation capture temporarily
-            self.agent.policy_net.capture_activations = True
-
-            # Get layer info
-            layer_info = self.agent.policy_net.get_layer_info()
-
-            # Get Q-values (this forward pass captures activations)
-            q_values = self.agent.get_q_values(state)
-
-            # Get activations
-            raw_activations = self.agent.policy_net.get_activations()
-
-            # Get weights (sampled for performance)
-            raw_weights = self.agent.policy_net.get_weights()
-
-            # Disable activation capture
-            self.agent.policy_net.capture_activations = False
-
-            # Format activations for JSON (convert numpy arrays to lists, limit neurons)
-            max_neurons = 15  # Match the pygame visualizer limit
-            activations: dict[str, list[float]] = {}
-            for key, act in raw_activations.items():
-                if len(act.shape) > 1:
-                    act = act[0]  # Take first batch item
-                # Normalize and limit to max_neurons
-                act_list = act[: min(max_neurons, len(act))].tolist()
-                activations[key] = act_list
-
-            # Format weights for JSON (sample connections for performance)
-            weights: list[list[list[float]]] = []
-            for i, w in enumerate(raw_weights):
-                if w is not None:
-                    # Sample weights: take first 15 rows and first 15 columns
-                    sampled_w = w[: min(15, w.shape[0]), : min(15, w.shape[1])]
-                    weights.append(sampled_w.tolist())
-
-            # Get action labels from game if available
-            action_labels = ["LEFT", "STAY", "RIGHT"]  # Default for Breakout
-            if hasattr(self.game, "get_action_labels"):
-                action_labels = self.game.get_action_labels()
+            snapshot = build_nn_snapshot(self.agent, self.game, state)
 
             # Emit to web dashboard (throttling handled by publisher)
             self.web_dashboard.emit_nn_visualization(
-                layer_info=layer_info,
-                activations=activations,
-                q_values=q_values.tolist(),
+                layer_info=snapshot.layer_info,
+                activations=snapshot.activations,
+                q_values=snapshot.q_values,
                 selected_action=selected_action,
-                weights=weights,
+                weights=snapshot.weights,
                 step=self.agent.steps,
-                action_labels=action_labels,
-                input_state=state.tolist(),
-                analysis_activations={
-                    key: (act[0] if len(act.shape) > 1 else act).tolist()
-                    for key, act in raw_activations.items()
-                },
-                analysis_weights=[w.tolist() for w in raw_weights if w is not None],
+                action_labels=snapshot.action_labels,
+                input_state=snapshot.input_state,
+                analysis_activations=snapshot.analysis_activations,
+                analysis_weights=snapshot.analysis_weights,
             )
         except Exception:
             # Don't crash training on visualization errors - silently ignore
@@ -2590,70 +2480,14 @@ class HeadlessTrainer:
     def _resolve_model_path(
         self, explicit_path: Optional[str], state_size: int, action_size: int
     ) -> Optional[str]:
-        """
-        Resolve which model to load on startup.
-
-        Priority:
-        1. Explicitly specified --model path (if compatible)
-        2. Most recently modified .pth file in game-specific directory
-
-        Args:
-            explicit_path: Path from --model argument, or None
-            state_size: Expected state size for compatibility check
-            action_size: Expected action size for compatibility check
-
-        Returns:
-            Path to model file, or None if no model found
-        """
-        from src.ai.agent import Agent
-
-        # If explicit path specified, check compatibility
-        if explicit_path and os.path.exists(explicit_path):
-            info = Agent.inspect_model(
-                explicit_path,
-                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
-                allow_unsafe_fallback=True,
-            )
-            if (
-                info
-                and info.get("state_size") == state_size
-                and info.get("action_size") == action_size
-            ):
-                return explicit_path
-            else:
-                print(
-                    f"⚠️  Specified model incompatible: {os.path.basename(explicit_path)}"
-                )
-                print(
-                    f"   Expected: state_size={state_size}, action_size={action_size}"
-                )
-                if info:
-                    print(
-                        f"   Model has: state_size={info.get('state_size')}, action_size={info.get('action_size')}"
-                    )
-                return None
-
-        # Only auto-load from game-specific directory (e.g., models/space_invaders/)
-        model_dir = self.config.GAME_MODEL_DIR
-        if not os.path.exists(model_dir):
-            return None
-
-        model_files = []
-        for f in os.listdir(model_dir):
-            if f.endswith(".pth"):
-                filepath = os.path.join(model_dir, f)
-                mtime = os.path.getmtime(filepath)
-                model_files.append((filepath, mtime))
-
-        if not model_files:
-            return None
-
-        # Sort by modification time, newest first
-        model_files.sort(key=lambda x: x[1], reverse=True)
-
-        most_recent = model_files[0][0]
-        print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
-        return most_recent
+        """Resolve which model to load on startup."""
+        return resolve_model_path(
+            explicit_path=explicit_path,
+            state_size=state_size,
+            action_size=action_size,
+            config=self.config,
+            inspect_model=Agent.inspect_model,
+        )
 
     def _setup_web_callbacks(self) -> None:
         """Set up web dashboard control callbacks."""
@@ -3002,62 +2836,20 @@ class HeadlessTrainer:
             return
 
         try:
-            # Enable activation capture temporarily
-            self.agent.policy_net.capture_activations = True
-
-            # Get layer info
-            layer_info = self.agent.policy_net.get_layer_info()
-
-            # Get Q-values (this forward pass captures activations)
-            q_values = self.agent.get_q_values(state)
-
-            # Get activations
-            raw_activations = self.agent.policy_net.get_activations()
-
-            # Get weights (sampled for performance)
-            raw_weights = self.agent.policy_net.get_weights()
-
-            # Disable activation capture
-            self.agent.policy_net.capture_activations = False
-
-            # Format activations for JSON (convert numpy arrays to lists, limit neurons)
-            max_neurons = 15  # Match the pygame visualizer limit
-            activations: dict[str, list[float]] = {}
-            for key, act in raw_activations.items():
-                if len(act.shape) > 1:
-                    act = act[0]  # Take first batch item
-                # Normalize and limit to max_neurons
-                act_list = act[: min(max_neurons, len(act))].tolist()
-                activations[key] = act_list
-
-            # Format weights for JSON (sample connections for performance)
-            weights: list[list[list[float]]] = []
-            for i, w in enumerate(raw_weights):
-                if w is not None:
-                    # Sample weights: take first 15 rows and first 15 columns
-                    sampled_w = w[: min(15, w.shape[0]), : min(15, w.shape[1])]
-                    weights.append(sampled_w.tolist())
-
-            # Get action labels from game if available
-            action_labels = ["LEFT", "STAY", "RIGHT"]  # Default for Breakout
-            if hasattr(self.game, "get_action_labels"):
-                action_labels = self.game.get_action_labels()
+            snapshot = build_nn_snapshot(self.agent, self.game, state)
 
             # Emit to web dashboard (throttling handled by publisher)
             self.web_dashboard.emit_nn_visualization(
-                layer_info=layer_info,
-                activations=activations,
-                q_values=q_values.tolist(),
+                layer_info=snapshot.layer_info,
+                activations=snapshot.activations,
+                q_values=snapshot.q_values,
                 selected_action=selected_action,
-                weights=weights,
+                weights=snapshot.weights,
                 step=self.agent.steps,
-                action_labels=action_labels,
-                input_state=state.tolist(),
-                analysis_activations={
-                    key: (act[0] if len(act.shape) > 1 else act).tolist()
-                    for key, act in raw_activations.items()
-                },
-                analysis_weights=[w.tolist() for w in raw_weights if w is not None],
+                action_labels=snapshot.action_labels,
+                input_state=snapshot.input_state,
+                analysis_activations=snapshot.analysis_activations,
+                analysis_weights=snapshot.analysis_weights,
             )
         except Exception:
             # Don't crash training on visualization errors - silently ignore
@@ -3199,37 +2991,17 @@ class HeadlessTrainer:
 
     def _save_and_quit(self) -> None:
         """Save the model and exit the application gracefully."""
-        if self.web_dashboard:
-            self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
-
-        # Save the model and verify it completed
-        save_success = self._save_model(
-            f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown"
+        request_save_and_stop(
+            game_name=self.config.GAME_NAME,
+            save_model=lambda filename, reason: self._save_model(
+                filename, save_reason=reason
+            ),
+            set_running=self._set_running,
+            dashboard=self.web_dashboard,
         )
 
-        if save_success:
-            if self.web_dashboard:
-                self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
-            print("\n👋 Save & Quit requested. Model saved. Exiting...")
-        else:
-            if self.web_dashboard:
-                self.web_dashboard.log(
-                    "⚠️ Save may have failed. Shutting down...", "warning"
-                )
-            print("\n⚠️ Save & Quit requested. Save may have failed. Exiting...")
-
-        # Flush output buffers to ensure messages are written
-        import sys
-
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        # Give time for the save event to propagate to clients
-        import time
-
-        time.sleep(0.5)
-
-        self.running = False
+    def _set_running(self, running: bool) -> None:
+        self.running = running
 
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
@@ -3975,176 +3747,6 @@ class HeadlessTrainer:
                     )
             except Exception as e:
                 print(f"⚠️ Could not delete {filepath}: {e}")
-
-
-def parse_args():
-    """Parse command line arguments."""
-    # Import game registry for --game choices
-    from src.game import list_games
-
-    available_games = list_games()
-
-    parser = argparse.ArgumentParser(
-        description="DQN Game AI - Train neural networks to play classic arcade games",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-EXAMPLES
-========
-
-Getting Started:
-    python main.py                    Train with visual display (shows game selection)
-    python main.py --human            Play a game yourself to test it
-    python main.py --game pong        Train a specific game directly
-
-Fast Training (Recommended):
-    python main.py --headless --turbo          ~5000 steps/sec on M4 Mac
-    python main.py --headless --turbo --web    With web dashboard at localhost:5000
-    python main.py --headless --vec-envs 8     Parallel training (~12,000 steps/sec)
-
-Watch Trained Agent:
-    python main.py --play --model models/pong_best.pth
-
-Model Management:
-    python main.py --list-models               Show all saved models
-    python main.py --inspect models/best.pth   Inspect model metadata
-
-AVAILABLE GAMES: {', '.join(available_games)}
-
-TIPS
-====
-- Use --headless for 10x faster training (no display overhead)
-- Add --turbo for optimized batch settings (~4x faster)
-- Add --vec-envs 8 for parallel environments (~2-3x faster)
-- Use --web to monitor training in browser at http://localhost:5000
-- Press Ctrl+C to gracefully stop training (model auto-saves)
-        """,
-    )
-
-    # Mode selection
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--play",
-        action="store_true",
-        help="Play mode: watch trained agent without training",
-    )
-    mode_group.add_argument(
-        "--human", action="store_true", help="Human mode: play the game yourself"
-    )
-    mode_group.add_argument(
-        "--headless",
-        action="store_true",
-        help="Headless training: no visualization (faster)",
-    )
-    mode_group.add_argument(
-        "--inspect",
-        type=str,
-        metavar="MODEL_PATH",
-        help="Inspect a model file and show its metadata",
-    )
-    mode_group.add_argument(
-        "--list-models",
-        action="store_true",
-        help="List all saved models with their metadata",
-    )
-
-    # Game selection
-    parser.add_argument(
-        "--game",
-        type=str,
-        default=None,
-        choices=available_games,
-        help=f'Game to train/play. If not specified, shows game selection. Available: {", ".join(available_games)}',
-    )
-    parser.add_argument(
-        "--menu",
-        action="store_true",
-        help="Show game selection menu on launch (interactive game picker)",
-    )
-
-    # Model options
-    parser.add_argument(
-        "--model", type=str, default=None, help="Path to model file to load"
-    )
-
-    # Training parameters
-    parser.add_argument(
-        "--episodes",
-        type=int,
-        default=None,
-        help="Number of training episodes (default: unlimited, trains until stopped)",
-    )
-    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-    parser.add_argument(
-        "--device",
-        type=str,
-        choices=["cpu", "cuda", "mps"],
-        default=None,
-        help="Device to use for training",
-    )
-
-    # Web dashboard
-    parser.add_argument(
-        "--web",
-        action="store_true",
-        help="Enable web dashboard for remote monitoring (http://localhost:5000)",
-    )
-    parser.add_argument(
-        "--port", type=int, default=5000, help="Port for web dashboard (default: 5000)"
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="127.0.0.1",
-        help="Host for web dashboard (default: 127.0.0.1; use 0.0.0.0 only for trusted networks)",
-    )
-
-    # Performance tuning
-    parser.add_argument(
-        "--learn-every",
-        type=int,
-        default=None,
-        help="Learn every N steps (default: 1, try 4 for ~4x speedup)",
-    )
-    parser.add_argument(
-        "--gradient-steps",
-        type=int,
-        default=None,
-        help="Number of gradient updates per learning call (default: 1)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Training batch size (default: 128, try 256 for M4)",
-    )
-    parser.add_argument(
-        "--turbo",
-        action="store_true",
-        help="Turbo mode preset: learn-every 8, batch 128, 2 grad steps (~5000 steps/sec on M4)",
-    )
-    parser.add_argument(
-        "--vec-envs",
-        type=int,
-        default=1,
-        help="Number of parallel environments for vectorized training (default: 1, try 8 for ~3x speedup)",
-    )
-    parser.add_argument(
-        "--torch-compile",
-        action="store_true",
-        help="Enable torch.compile() for ~20-50%% speedup (PyTorch 2.0+)",
-    )
-    parser.add_argument(
-        "--cpu",
-        action="store_true",
-        help="Force CPU (faster than MPS for small models on M4)",
-    )
-
-    # Other options
-    parser.add_argument(
-        "--seed", type=int, default=None, help="Random seed for reproducibility"
-    )
-
-    return parser.parse_args()
 
 
 def inspect_model(filepath: str) -> None:

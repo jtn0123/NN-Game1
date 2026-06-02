@@ -18,9 +18,6 @@ from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 import os
 
-import sys
-
-sys.path.append("../..")
 from config import Config
 
 

@@ -23,9 +23,6 @@ from typing import Tuple, List, Optional
 
 from .base_game import BaseGame
 from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
-import sys
-
-sys.path.append("..")
 from config import Config
 
 

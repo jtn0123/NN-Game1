@@ -32,7 +32,7 @@ const MAX_CONSOLE_LOGS = 500;
 let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
-const DASHBOARD_TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
+const DASHBOARD_TOKEN = DashboardCore.readToken(document);
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -47,12 +47,9 @@ const FETCH_TIMEOUT_MS = 10000; // 10 second timeout for API calls
 function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
-    const headers = {
-        ...(options.headers || {}),
-        'X-Dashboard-Token': DASHBOARD_TOKEN,
-    };
+    const authorizedOptions = DashboardCore.withDashboardToken(options, DASHBOARD_TOKEN);
 
-    return fetch(url, { ...options, headers, signal: controller.signal })
+    return fetch(url, { ...authorizedOptions, signal: controller.signal })
         .finally(() => clearTimeout(timeoutId));
 }
 
@@ -767,14 +764,7 @@ function resetChartView(chartName = 'all') {
  * Connect to SocketIO server
  */
 function connectSocket() {
-    socket = io({ auth: { token: DASHBOARD_TOKEN } });
-    const emit = socket.emit.bind(socket);
-    socket.emit = (event, payload = {}, ...args) => {
-        if ((event === 'control' || event === 'clear_logs') && payload && typeof payload === 'object') {
-            payload = { ...payload, token: DASHBOARD_TOKEN };
-        }
-        return emit(event, payload, ...args);
-    };
+    socket = DashboardCore.createAuthorizedSocket(io, DASHBOARD_TOKEN);
 
     // Throttle dashboard updates to 60fps max (prevent excessive DOM manipulation)
     const throttledUpdateDashboard = throttle(updateDashboard, 16);  // ~60fps
@@ -1806,7 +1796,7 @@ function showLoadModal() {
                 
                 // Escape model name and id to prevent XSS
                 const safeName = escapeHtml(model.name);
-                const modelId = model.id || model.path || '';
+                const modelId = DashboardCore.modelId(model);
                 const safeIdForJs = modelId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
                 
@@ -1871,7 +1861,7 @@ function hideLoadModal() {
 function loadModel(modelId) {
     socket.emit('control', { action: 'load_model', id: modelId });
     hideLoadModal();
-    addConsoleLog(`Loading model: ${modelId.split(':').pop()}`, 'action');
+    addConsoleLog(`Loading model: ${DashboardCore.modelDisplayName(modelId)}`, 'action');
 }
 
 /**

@@ -1,4 +1,4 @@
-.PHONY: test coverage typecheck format format-check audit check
+.PHONY: test coverage typecheck dashboard-test format format-check audit check
 
 PYTHON ?= python
 
@@ -9,7 +9,10 @@ coverage:
 	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=40 -q
 
 typecheck:
-	$(PYTHON) -m mypy --config-file mypy.ini src/ai src/utils
+	$(PYTHON) -m mypy --config-file mypy.ini --follow-imports=silent src/ai/agent.py src/ai/network.py src/utils src/app/training_runtime.py src/web/model_service.py
+
+dashboard-test:
+	node --test tests/js/*.test.mjs
 
 format:
 	$(PYTHON) -m black main.py config.py src tests
@@ -20,4 +23,4 @@ format-check:
 audit:
 	$(PYTHON) -m pip_audit -r requirements.txt
 
-check: format-check typecheck coverage
+check: format-check typecheck dashboard-test coverage

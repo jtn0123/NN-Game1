@@ -22,9 +22,6 @@ import pygame
 from typing import Tuple, List, Optional
 
 from .base_game import BaseGame
-import sys
-
-sys.path.append("..")
 from config import Config
 
 

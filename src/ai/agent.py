@@ -42,9 +42,6 @@ from .network import DQN, DuelingDQN
 from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
 from src.utils.checkpoint_loader import load_checkpoint
 
-import sys
-
-sys.path.append("../..")
 from config import Config
 
 

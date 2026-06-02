@@ -51,12 +51,10 @@ except ImportError:
     print("Warning: Flask not installed. Web dashboard unavailable.")
     print("Install with: pip install flask flask-socketio eventlet")
 
-import sys
-
-sys.path.append("../..")
 from config import Config
 from src.utils.checkpoint_loader import load_checkpoint
 from src.utils.logger import get_logger
+from src.web.model_service import ModelService
 
 # Module logger
 _logger = get_logger(__name__)
@@ -1155,6 +1153,7 @@ class WebDashboard:
         self.access_token = os.environ.get(
             "NN_GAME_DASHBOARD_TOKEN"
         ) or secrets.token_urlsafe(24)
+        self.model_service = ModelService(self._model_search_dirs())
         self.on_game_selected_callback: Optional[Callable[[str, str], None]] = (
             None  # (game, mode)
         )
@@ -1227,44 +1226,11 @@ class WebDashboard:
     @staticmethod
     def _model_id(source: str, filename: str) -> str:
         """Create a browser-safe model identifier without exposing local paths."""
-        return f"{source}:{filename}"
+        return ModelService.model_id(source, filename)
 
     def _resolve_model_ref(self, model_ref: str) -> Optional[str]:
         """Resolve a model id, or a legacy absolute path, to an allowed .pth file."""
-        if not model_ref:
-            return None
-
-        if os.path.isabs(model_ref):
-            candidate = os.path.realpath(model_ref)
-            for model_dir, _ in self._model_search_dirs():
-                real_dir = os.path.realpath(model_dir)
-                try:
-                    if os.path.commonpath([real_dir, candidate]) == real_dir:
-                        return candidate if candidate.endswith(".pth") else None
-                except ValueError:
-                    continue
-            return None
-
-        if ":" not in model_ref:
-            return None
-
-        source, filename = model_ref.split(":", 1)
-        if not filename or os.path.basename(filename) != filename:
-            return None
-
-        for model_dir, allowed_source in self._model_search_dirs():
-            if source != allowed_source:
-                continue
-            candidate = os.path.realpath(os.path.join(model_dir, filename))
-            real_dir = os.path.realpath(model_dir)
-            try:
-                if os.path.commonpath(
-                    [real_dir, candidate]
-                ) == real_dir and candidate.endswith(".pth"):
-                    return candidate
-            except ValueError:
-                return None
-        return None
+        return self.model_service.resolve(model_ref)
 
     def _register_routes(self) -> None:
         """Register Flask routes."""
@@ -1355,58 +1321,12 @@ class WebDashboard:
 
             Searches both game-specific directory and legacy models directory.
             """
-            import os
-            from datetime import datetime
-
-            models = []
-            seen_paths = set()  # Avoid duplicates
-
-            for model_dir, source in self._model_search_dirs():
-                if not os.path.exists(model_dir):
-                    continue
-
-                for f in os.listdir(model_dir):
-                    if f.endswith(".pth"):
-                        path = os.path.join(model_dir, f)
-
-                        # Skip if we've already seen this file
-                        if path in seen_paths:
-                            continue
-                        seen_paths.add(path)
-
-                        model_info = {
-                            "name": f,
-                            "id": self._model_id(source, f),
-                            "source": source,  # Which directory it came from
-                            "size": os.path.getsize(path),
-                            "modified": os.path.getmtime(path),
-                            "modified_str": datetime.fromtimestamp(
-                                os.path.getmtime(path)
-                            ).strftime("%Y-%m-%d %H:%M"),
-                            "has_metadata": False,
-                            "metadata": None,
-                        }
-
-                        # Try to extract metadata
-                        try:
-                            checkpoint = load_checkpoint(
-                                path,
-                                map_location="cpu",
-                                trusted_dirs=[model_dir],
-                                allow_unsafe_fallback=False,
-                            )
-                            model_info["steps"] = checkpoint.get("steps", None)
-                            model_info["epsilon"] = checkpoint.get("epsilon", None)
-                            if "metadata" in checkpoint:
-                                model_info["has_metadata"] = True
-                                model_info["metadata"] = checkpoint["metadata"]
-                        except Exception as e:
-                            _logger.debug(f"Could not load metadata from {f}: {e}")
-
-                        models.append(model_info)
-
-            models.sort(key=lambda x: x["modified"], reverse=True)
-            return jsonify({"models": models, "current_game": self.config.GAME_NAME})
+            return jsonify(
+                {
+                    "models": self.model_service.list_models(),
+                    "current_game": self.config.GAME_NAME,
+                }
+            )
 
         @self.app.route("/api/models/<path:model_id>", methods=["DELETE"])
         def api_delete_model(model_id):
@@ -1418,38 +1338,13 @@ class WebDashboard:
             if not self._is_authorized_request():
                 return jsonify({"error": "Unauthorized"}), 401
 
-            full_path = self._resolve_model_ref(model_id)
-            if full_path is None:
-                return jsonify({"error": "Invalid model id"}), 403
-
-            if not os.path.exists(full_path):
-                return jsonify({"error": "Model not found"}), 404
-
-            # Security: Reject symlinks in ANY path component to prevent symlink-based attacks
-            # Even though realpath resolves them and the containment check catches external targets,
-            # it's safer to explicitly reject symlinks in all path components
-            path_to_check = full_path
-            current_path = path_to_check
-            allowed_roots = [
-                os.path.realpath(path) for path, _ in self._model_search_dirs()
-            ]
-            while current_path and current_path not in allowed_roots:
-                if os.path.islink(current_path):
-                    return (
-                        jsonify(
-                            {"error": "Cannot delete files with symbolic links in path"}
-                        ),
-                        403,
-                    )
-                current_path = os.path.dirname(current_path)
-
-            # Ensure it's a .pth file
-            if not full_path.endswith(".pth"):
-                return jsonify({"error": "Invalid file type"}), 400
-
             try:
-                filename = os.path.basename(full_path)
-                os.remove(full_path)
+                success, filename, error = self.model_service.delete(model_id)
+                if not success:
+                    status = 404 if error == "Model not found" else 403
+                    if error == "Invalid file type":
+                        status = 400
+                    return jsonify({"error": error}), status
                 self.publisher.log(f"🗑️ Deleted model: {filename}", level="action")
                 return jsonify(
                     {

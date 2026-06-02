@@ -20,9 +20,6 @@ import random
 import heapq
 
 from .base_game import BaseGame
-import sys
-
-sys.path.append("..")
 from config import Config
 
 # Classic Space Invader pixel patterns (8x8)
