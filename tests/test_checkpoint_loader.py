@@ -62,3 +62,32 @@ def test_load_checkpoint_allows_trusted_compatibility_fallback(monkeypatch):
 
         assert checkpoint == {"loaded": True}
         assert calls == [True, False]
+
+
+def test_load_checkpoint_rejects_trusted_dir_symlink_to_outside(monkeypatch, tmp_path):
+    """Trusted dirs should not authorize unsafe fallback through symlink escapes."""
+    trusted_dir = tmp_path / "trusted"
+    outside_dir = tmp_path / "outside"
+    trusted_dir.mkdir()
+    outside_dir.mkdir()
+    outside_file = outside_dir / "checkpoint.pth"
+    outside_file.write_bytes(b"placeholder")
+    link_path = trusted_dir / "linked.pth"
+    os.symlink(outside_file, link_path)
+    calls = []
+
+    def fake_load(filepath, map_location=None, weights_only=True):
+        calls.append(weights_only)
+        raise ValueError("restricted load failed")
+
+    monkeypatch.setattr(torch, "load", fake_load)
+
+    with pytest.raises(RuntimeError, match="restricted loader"):
+        load_checkpoint(
+            str(link_path),
+            map_location="cpu",
+            trusted_dirs=[str(trusted_dir)],
+            allow_unsafe_fallback=True,
+        )
+
+    assert calls == [True]

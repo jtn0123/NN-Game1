@@ -593,6 +593,76 @@ class TestWebDashboardIntegration:
         }
         client.disconnect()
 
+    def test_socket_control_rejects_empty_payload(self, web_dashboard):
+        """Malformed control payloads should fail instead of crashing the handler."""
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit("control", None, callback=True)
+
+        assert ack == {"success": False, "error": "Unauthorized"}
+        client.disconnect()
+
+    def test_socket_control_rejects_missing_load_model_id(self, web_dashboard):
+        """A load-model request without a model id should not report success."""
+        called = []
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+        web_dashboard.on_load_model_callback = lambda path: called.append(path)
+
+        ack = client.emit(
+            "control",
+            {"action": "load_model", "token": web_dashboard.access_token},
+            callback=True,
+        )
+
+        assert ack == {
+            "success": False,
+            "action": "load_model",
+            "error": "Invalid model id",
+        }
+        assert called == []
+        client.disconnect()
+
+    def test_socket_control_rejects_missing_load_model_file(self, tmp_path):
+        """A stale allowed model id should fail before invoking load callbacks."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        os.makedirs(config.GAME_MODEL_DIR)
+        dashboard = WebDashboard(port=5104, config=config)
+        called = []
+        client = dashboard.socketio.test_client(
+            dashboard.app,
+            auth={"token": dashboard.access_token},
+        )
+        dashboard.on_load_model_callback = lambda path: called.append(path)
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "load_model",
+                "id": "breakout:missing.pth",
+                "token": dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {
+            "success": False,
+            "action": "load_model",
+            "error": "Model not found",
+        }
+        assert called == []
+        client.disconnect()
+
     def test_api_config_endpoint(self, web_dashboard):
         """GET /api/config should return configuration."""
         web_dashboard.app.config["TESTING"] = True
@@ -604,6 +674,33 @@ class TestWebDashboardIntegration:
             # Config returns training hyperparameters
             assert "batch_size" in data or "learning_rate" in data
             assert "device" in data
+
+    def test_api_game_stats_uses_restricted_metadata_scan(self, monkeypatch, tmp_path):
+        """Game stats should not enable unsafe checkpoint fallback while scanning."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        config = Config()
+        config.MODEL_DIR = str(tmp_path / "models")
+        breakout_dir = tmp_path / "models" / "breakout"
+        breakout_dir.mkdir(parents=True)
+        (breakout_dir / "demo.pth").write_bytes(b"checkpoint")
+        calls = []
+
+        def fake_load_checkpoint(*args, **kwargs):
+            calls.append(kwargs.get("allow_unsafe_fallback"))
+            return {"metadata": {"best_score": 10, "episode": 2}}
+
+        monkeypatch.setattr("src.web.server.load_checkpoint", fake_load_checkpoint)
+
+        dashboard = WebDashboard(port=5105, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.get("/api/game-stats")
+
+        assert response.status_code == 200
+        assert calls
+        assert set(calls) == {False}
 
     def test_api_layers_endpoint(self, web_dashboard):
         """GET /api/layers should return all layer analysis data."""

@@ -1402,7 +1402,7 @@ class WebDashboard:
                                     path,
                                     map_location="cpu",
                                     trusted_dirs=[game_model_dir],
-                                    allow_unsafe_fallback=True,
+                                    allow_unsafe_fallback=False,
                                 )
                                 if "metadata" in checkpoint:
                                     meta = checkpoint["metadata"]
@@ -1469,6 +1469,7 @@ class WebDashboard:
 
         @self.socketio.on("control")
         def handle_control(data):
+            data = data if isinstance(data, dict) else {}
             if not self._is_authorized_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
                 return {"success": False, "error": "Unauthorized"}
@@ -1501,15 +1502,27 @@ class WebDashboard:
                 emit("training_reset", {"message": "Training reset - starting fresh"})
             elif action == "load_model":
                 model_ref = data.get("id") or data.get("path")
-                model_path = self._resolve_model_ref(model_ref)
-                if model_path and self.on_load_model_callback:
-                    self.on_load_model_callback(model_path)
-                elif model_ref:
+                if not model_ref:
                     return {
                         "success": False,
                         "action": action,
                         "error": "Invalid model id",
                     }
+                model_path = self._resolve_model_ref(model_ref)
+                if not model_path:
+                    return {
+                        "success": False,
+                        "action": action,
+                        "error": "Invalid model id",
+                    }
+                if not os.path.exists(model_path):
+                    return {
+                        "success": False,
+                        "action": action,
+                        "error": "Model not found",
+                    }
+                if self.on_load_model_callback:
+                    self.on_load_model_callback(model_path)
             elif action == "config_change":
                 config_data = data.get("config", {})
                 if self.on_config_change_callback:
