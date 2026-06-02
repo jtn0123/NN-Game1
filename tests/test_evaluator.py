@@ -106,11 +106,11 @@ class TestEvaluate:
         results = evaluator.evaluate(num_episodes=5, max_steps=50)
 
         # Should have score statistics
-        assert hasattr(results, 'mean_score')
-        assert hasattr(results, 'median_score')
-        assert hasattr(results, 'std_score')
-        assert hasattr(results, 'min_score')
-        assert hasattr(results, 'max_score')
+        assert hasattr(results, "mean_score")
+        assert hasattr(results, "median_score")
+        assert hasattr(results, "std_score")
+        assert hasattr(results, "min_score")
+        assert hasattr(results, "max_score")
 
         # Min should be <= mean <= max
         assert results.min_score <= results.mean_score <= results.max_score
@@ -132,7 +132,9 @@ class TestPlateauDetection:
     def test_is_plateau_after_improvements(self, game, agent, config):
         """Should not be plateau if improvements are happening."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            evaluator = Evaluator(game, agent, config, log_dir=tmpdir, plateau_threshold=3)
+            evaluator = Evaluator(
+                game, agent, config, log_dir=tmpdir, plateau_threshold=3
+            )
 
             # Simulate improving evaluations by manually updating history
             evaluator.best_eval_score = 10.0
@@ -143,7 +145,9 @@ class TestPlateauDetection:
     def test_is_plateau_after_no_improvement(self, game, agent, config):
         """Should detect plateau after N evals without improvement."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            evaluator = Evaluator(game, agent, config, log_dir=tmpdir, plateau_threshold=3)
+            evaluator = Evaluator(
+                game, agent, config, log_dir=tmpdir, plateau_threshold=3
+            )
 
             # Manually set state to simulate no improvement
             evaluator.best_eval_score = 100.0
@@ -154,7 +158,9 @@ class TestPlateauDetection:
     def test_plateau_threshold_respected(self, game, agent, config):
         """Plateau should trigger at exactly threshold."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            evaluator = Evaluator(game, agent, config, log_dir=tmpdir, plateau_threshold=5)
+            evaluator = Evaluator(
+                game, agent, config, log_dir=tmpdir, plateau_threshold=5
+            )
 
             evaluator.best_eval_score = 100.0
 
@@ -176,9 +182,9 @@ class TestEvalResults:
         result_dict = results.to_dict()
 
         assert isinstance(result_dict, dict)
-        assert 'mean_score' in result_dict
-        assert 'win_rate' in result_dict
-        assert 'num_games' in result_dict
+        assert "mean_score" in result_dict
+        assert "win_rate" in result_dict
+        assert "num_games" in result_dict
 
     def test_eval_results_has_timestamp(self, evaluator):
         """EvalResults should have timestamp."""
@@ -200,10 +206,10 @@ class TestGetSummary:
         evaluator.evaluate(num_episodes=2, max_steps=50)
         summary = evaluator.get_summary()
 
-        assert 'num_evals' in summary
-        assert summary['num_evals'] == 1
-        assert 'best_eval_score' in summary
-        assert 'is_plateau' in summary
+        assert "num_evals" in summary
+        assert summary["num_evals"] == 1
+        assert "best_eval_score" in summary
+        assert "is_plateau" in summary
 
 
 if __name__ == "__main__":

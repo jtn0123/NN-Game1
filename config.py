@@ -20,7 +20,7 @@ import torch
 class Config:
     """
     Central configuration for the entire project.
-    
+
     Sections:
     1. Game Settings - Breakout game parameters
     2. Neural Network - Architecture configuration
@@ -29,35 +29,35 @@ class Config:
     5. Visualization - Display options
     6. System - Hardware and paths
     """
-    
+
     # =========================================================================
     # GAME SELECTION
     # =========================================================================
-    
+
     # Current game to play/train
     # Options: 'breakout', 'space_invaders'
-    GAME_NAME: str = 'breakout'
-    
+    GAME_NAME: str = "breakout"
+
     # =========================================================================
     # SCREEN SETTINGS
     # =========================================================================
-    
+
     # Screen dimensions (shared across all games)
     SCREEN_WIDTH: int = 800
     SCREEN_HEIGHT: int = 600
-    
+
     # =========================================================================
     # BREAKOUT SETTINGS
     # =========================================================================
-    
+
     # Breakout-specific
     PADDLE_WIDTH: int = 100
     PADDLE_HEIGHT: int = 15
     PADDLE_SPEED: int = 8
-    
+
     BALL_RADIUS: int = 8
     BALL_SPEED: int = 6
-    
+
     BRICK_ROWS: int = 5
     BRICK_COLS: int = 10
     BRICK_WIDTH: int = 70
@@ -65,15 +65,15 @@ class Config:
     BRICK_PADDING: int = 5
     BRICK_OFFSET_TOP: int = 60
     BRICK_OFFSET_LEFT: int = 35
-    
+
     # Game mechanics
     LIVES: int = 3
     FPS: int = 60
-    
+
     # =========================================================================
     # SPACE INVADERS SETTINGS
     # =========================================================================
-    
+
     # Grid of aliens (classic: 5 rows x 11 columns = 55 aliens)
     SI_ALIEN_ROWS: int = 5
     SI_ALIEN_COLS: int = 11
@@ -82,18 +82,18 @@ class Config:
     SI_ALIEN_PADDING: int = 12
     SI_ALIEN_OFFSET_TOP: int = 100  # Start aliens higher for more play space
     SI_ALIEN_OFFSET_LEFT: int = 70
-    
+
     # Alien movement - tuned for AI learning with slower initial speed
     SI_ALIEN_SPEED_X: float = 0.8  # Slower initial speed (was 2.0)
     SI_ALIEN_SPEED_Y: int = 10  # Smaller drops (was 20) - gives AI more time
     SI_ALIEN_SPEED_MULTIPLIER: float = 1.03  # Gradual speed increase
-    
+
     # Player ship
     SI_SHIP_WIDTH: int = 50
     SI_SHIP_HEIGHT: int = 30
     SI_SHIP_SPEED: int = 7  # Slightly faster for responsive control
     SI_SHIP_Y_OFFSET: int = 80  # More space from bottom for base visual
-    
+
     # Bullets
     SI_BULLET_WIDTH: int = 4
     SI_BULLET_HEIGHT: int = 15
@@ -101,34 +101,34 @@ class Config:
     SI_MAX_PLAYER_BULLETS: int = 2  # Limited to 2 like original
     SI_ALIEN_SHOOT_CHANCE: float = 0.001  # Reduced from 0.002 - less spam
     SI_ALIEN_BULLET_SPEED: int = 4  # Slower alien bullets for fairness
-    
+
     # UFO bonus
     SI_UFO_CHANCE: float = 0.0008  # Slightly rarer
     SI_UFO_SPEED: int = 3
     SI_UFO_POINTS: int = 100  # 50-300 random in original, we use fixed
-    
+
     # Shields/bunkers (classic Space Invaders defense)
     # Set to False to disable bunkers for simpler gameplay/training
     SI_SHIELDS_ENABLED: bool = False
     SI_SHIELD_COUNT: int = 4
     SI_SHIELD_WIDTH: int = 50
     SI_SHIELD_HEIGHT: int = 35
-    
+
     # Space Invaders rewards - tuned for AI training
     SI_REWARD_ALIEN_HIT: float = 1.0  # Per alien killed
     SI_REWARD_UFO_HIT: float = 5.0  # UFO bonus
     SI_REWARD_PLAYER_DEATH: float = -2.5  # Death penalty (3 lives, so moderate penalty)
     SI_REWARD_LEVEL_CLEAR: float = 0.0  # Removed - score-based rewards only
-    
+
     # Anti-passive rewards - CRITICAL for learning aggressive play
     # Without these, model learns to stand still (death penalty >> step penalty)
     SI_REWARD_STEP: float = -0.01  # 10x stronger time penalty (was -0.001)
     SI_REWARD_SHOOT: float = 0.02  # Small reward for shooting (encourages aggression)
     SI_REWARD_STAY: float = -0.02  # Penalty for doing nothing (action=1)
-    
+
     # Win condition: Number of levels/waves to complete to win (0 = endless mode, no wins)
     SI_WIN_LEVELS: int = 10  # Complete 10 levels to win
-    
+
     # Space Invaders colors (CRT phosphor aesthetic)
     SI_COLOR_BACKGROUND: Tuple[int, int, int] = (0, 5, 0)  # Near black with green tint
     SI_COLOR_SHIP: Tuple[int, int, int] = (0, 255, 100)  # Bright green
@@ -138,46 +138,52 @@ class Config:
     SI_COLOR_ALIEN_3: Tuple[int, int, int] = (100, 200, 255)  # Cyan (bottom)
     SI_COLOR_UFO: Tuple[int, int, int] = (255, 50, 50)  # Red
     SI_COLOR_SHIELD: Tuple[int, int, int] = (0, 220, 80)  # Bright green bunkers
-    
+
     # Curriculum learning (optional - disabled by default)
     # When enabled, starts with easier game settings and gradually increases difficulty
     SI_CURRICULUM_ENABLED: bool = False
-    
+
     # Curriculum stages: each stage defines game parameters and episode count
     # Format: {'alien_rows': int, 'alien_shoot_chance': float, 'episodes': int or None}
     # None for episodes means "continue indefinitely at this difficulty"
-    SI_CURRICULUM_STAGES: List[dict] = field(default_factory=lambda: [
-        {'alien_rows': 2, 'alien_shoot_chance': 0.0005, 'episodes': 500},
-        {'alien_rows': 3, 'alien_shoot_chance': 0.0008, 'episodes': 500},
-        {'alien_rows': 4, 'alien_shoot_chance': 0.001, 'episodes': 500},
-        {'alien_rows': 5, 'alien_shoot_chance': 0.001, 'episodes': None},  # Full game
-    ])
-    
+    SI_CURRICULUM_STAGES: List[dict] = field(
+        default_factory=lambda: [
+            {"alien_rows": 2, "alien_shoot_chance": 0.0005, "episodes": 500},
+            {"alien_rows": 3, "alien_shoot_chance": 0.0008, "episodes": 500},
+            {"alien_rows": 4, "alien_shoot_chance": 0.001, "episodes": 500},
+            {
+                "alien_rows": 5,
+                "alien_shoot_chance": 0.001,
+                "episodes": None,
+            },  # Full game
+        ]
+    )
+
     # =========================================================================
     # NEURAL NETWORK ARCHITECTURE
     # =========================================================================
-    
+
     # Input size is calculated based on game state:
     # - Ball position (x, y) = 2
-    # - Ball velocity (dx, dy) = 2  
+    # - Ball velocity (dx, dy) = 2
     # - Paddle position (x) = 1
     # - Brick states = BRICK_ROWS * BRICK_COLS
-    
+
     @property
     def STATE_SIZE(self) -> int:
         """Calculate input layer size based on game state representation.
-        
+
         NOTE: This is a legacy property used only for standalone tests.
         In production, use game.state_size instead, which is calculated
         dynamically by each game class.
         """
-        if self.GAME_NAME == 'breakout':
-            ball_info = 4        # x, y, dx, dy
-            paddle_info = 1      # x position
-            tracking_info = 3    # relative_x, predicted_landing, distance_to_target
+        if self.GAME_NAME == "breakout":
+            ball_info = 4  # x, y, dx, dy
+            paddle_info = 1  # x position
+            tracking_info = 3  # relative_x, predicted_landing, distance_to_target
             brick_info = self.BRICK_ROWS * self.BRICK_COLS  # binary brick states
             return ball_info + paddle_info + tracking_info + brick_info
-        elif self.GAME_NAME == 'space_invaders':
+        elif self.GAME_NAME == "space_invaders":
             # Space Invaders has dynamic state size based on aliens/bullets
             # This is an approximation - use game.state_size in production
             max_player_bullets = 3
@@ -186,80 +192,80 @@ class Config:
         else:
             # Default fallback
             return 128
-    
+
     # Action space
-    ACTION_SIZE: int = 3      # LEFT, STAY, RIGHT
-    
+    ACTION_SIZE: int = 3  # LEFT, STAY, RIGHT
+
     # Hidden layer architecture
     # More neurons = more capacity but slower training
     # [512, 512, 256, 128] - 4 layers, slightly more capacity than original
     HIDDEN_LAYERS: List[int] = field(default_factory=lambda: [512, 512, 256, 128])
-    
+
     # Activation function: 'relu', 'leaky_relu', 'tanh'
-    ACTIVATION: str = 'relu'
-    
+    ACTIVATION: str = "relu"
+
     # Use Dueling DQN architecture (separates value and advantage streams)
     # This helps the network learn which states are valuable independent of actions
     USE_DUELING: bool = True
-    
+
     # =========================================================================
     # TRAINING HYPERPARAMETERS
     # =========================================================================
-    
+
     # Learning rate - How big of steps to take during optimization
     # Too high: unstable training, loss explodes
     # Too low: very slow learning
     # Typical range: 0.0001 to 0.001
     LEARNING_RATE: float = 0.0001
-    
+
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
     # 0.90 = more short-sighted, prefers immediate rewards
     # 0.99 = more far-sighted for Space Invaders long-term planning
     GAMMA: float = 0.99
-    
+
     # Batch size - Number of experiences to sample per training step
     # Larger = more stable gradients but slower per step
     # M4 CPU optimal: 128 (balances throughput and stability)
     BATCH_SIZE: int = 128
-    
+
     # Replay buffer capacity
     # Larger = more diverse experiences but more memory
     # 500k experiences ≈ 40MB - retains ~5x more history
     MEMORY_SIZE: int = 500_000
-    
+
     # Minimum experiences before training starts
     MEMORY_MIN: int = 1000
-    
+
     # Target network update frequency (in steps) - used for hard updates
     # How often to sync target network with policy network
     TARGET_UPDATE: int = 1000
-    
+
     # Soft target update coefficient (TAU)
     # If > 0, uses soft updates instead of hard updates
     # target = TAU * policy + (1 - TAU) * target
     # Typical values: 0.001 to 0.01
     # 0.005 provides faster learning propagation while maintaining stability
     TARGET_TAU: float = 0.005
-    
+
     # Use soft updates instead of hard updates
     USE_SOFT_UPDATE: bool = True
-    
+
     # Gradient clipping to prevent exploding gradients
     GRAD_CLIP: float = 1.0
-    
+
     # =========================================================================
     # PERFORMANCE OPTIMIZATION
     # =========================================================================
-    # 
+    #
     # M4 MacBook Benchmark Results (headless training):
     #   CPU B=128, LE=8, GS=2:  ~5,000 steps/sec, 663 grad/sec (balanced)
     #   CPU B=128, LE=16, GS=4: ~2,900 steps/sec, 719 grad/sec (max learning)
     #   MPS B=256, LE=4:        ~640 steps/sec (GPU overhead dominates)
-    # 
+    #
     # CONCLUSION: Use CPU for small models - MPS transfer overhead is too high.
     # =========================================================================
-    
+
     # Learn every N steps (1 = every step, higher = faster but less frequent learning)
     # Lower value = more frequent updates for faster learning
     LEARN_EVERY: int = 4
@@ -268,30 +274,30 @@ class Config:
     # Compensates for LEARN_EVERY > 1 to maintain learning throughput
     # Rule of thumb: GRADIENT_STEPS = LEARN_EVERY / 2 (for similar grad/sec)
     GRADIENT_STEPS: int = 2
-    
+
     # Use torch.compile() for potential speedup (PyTorch 2.0+)
     # Note: Minimal benefit on CPU for small models, can cause overhead
     USE_TORCH_COMPILE: bool = False  # Disabled - minimal benefit for this model size
-    
+
     # Compile mode: 'default', 'reduce-overhead', 'max-autotune'
-    TORCH_COMPILE_MODE: str = 'reduce-overhead'
-    
+    TORCH_COMPILE_MODE: str = "reduce-overhead"
+
     # Use mixed precision (float16) for faster computation on GPU/MPS
     # Only beneficial on GPU - CPU uses float32 regardless
     USE_MIXED_PRECISION: bool = False  # Disabled - using CPU by default
-    
+
     # Force CPU device (faster than MPS for small models on M4)
     # Set via --cpu flag or environment variable
     FORCE_CPU: bool = False
-    
+
     # =========================================================================
     # EXPLORATION SETTINGS (Epsilon-Greedy)
     # =========================================================================
-    
+
     # Starting exploration rate (1.0 = 100% random)
     # With NoisyNets: small epsilon as fallback exploration
     EPSILON_START: float = 0.1
-    
+
     # Minimum exploration rate
     EPSILON_END: float = 0.02
 
@@ -299,16 +305,16 @@ class Config:
     EPSILON_DECAY: float = 0.9995
 
     # Exploration decay strategy: 'exponential', 'linear', 'cosine'
-    EXPLORATION_STRATEGY: str = 'exponential'
+    EXPLORATION_STRATEGY: str = "exponential"
 
     # Warmup episodes before epsilon starts decaying
     # Allows buffer to fill with diverse experiences
     EPSILON_WARMUP: int = 200
-    
+
     # =========================================================================
     # PRIORITIZED EXPERIENCE REPLAY
     # =========================================================================
-    
+
     # Enable prioritized replay (samples important experiences more often)
     # Improves learning efficiency by 30-40% at cost of ~10% speed overhead
     # Enabled for Space Invaders improvements
@@ -333,7 +339,7 @@ class Config:
     USE_LR_SCHEDULER: bool = False
 
     # Scheduler type: 'cosine' (smooth decay) or 'step' (periodic drops)
-    LR_SCHEDULER_TYPE: str = 'cosine'
+    LR_SCHEDULER_TYPE: str = "cosine"
 
     # For step scheduler: decay LR every N episodes
     LR_SCHEDULER_STEP: int = 500
@@ -371,53 +377,59 @@ class Config:
     # =========================================================================
     # REWARD SHAPING
     # =========================================================================
-    
+
     # Rewards for different events (tuned for stable learning)
-    REWARD_BRICK_HIT: float = 2.0       # Breaking a brick - primary positive signal
-    REWARD_GAME_OVER: float = -5.0      # Losing a life - moderate negative to avoid risk aversion
-    REWARD_WIN: float = 100.0           # Clearing all bricks - strong completion incentive
-    REWARD_PADDLE_HIT: float = 0.2      # Ball hitting paddle - encourages survival
-    REWARD_STEP: float = 0.0            # Per-step reward (can set negative for urgency)
-    
+    REWARD_BRICK_HIT: float = 2.0  # Breaking a brick - primary positive signal
+    REWARD_GAME_OVER: float = (
+        -5.0
+    )  # Losing a life - moderate negative to avoid risk aversion
+    REWARD_WIN: float = 100.0  # Clearing all bricks - strong completion incentive
+    REWARD_PADDLE_HIT: float = 0.2  # Ball hitting paddle - encourages survival
+    REWARD_STEP: float = 0.0  # Per-step reward (can set negative for urgency)
+
     # Dense reward shaping for ball tracking
-    REWARD_TRACKING_GOOD: float = 0.01  # Reward for moving toward predicted ball landing
+    REWARD_TRACKING_GOOD: float = (
+        0.01  # Reward for moving toward predicted ball landing
+    )
     REWARD_TRACKING_BAD: float = -0.01  # Penalty for moving away from predicted landing
-    
+
     # Reward clipping to prevent extreme gradients during training
     # Set to 0 to disable clipping
     # Note: Only clips negative rewards to preserve win bonus signal
     REWARD_CLIP: float = 5.0
-    
+
     # =========================================================================
     # VISUALIZATION SETTINGS
     # =========================================================================
-    
+
     # Colors (RGB tuples)
     COLOR_BACKGROUND: Tuple[int, int, int] = (15, 15, 35)
     COLOR_PADDLE: Tuple[int, int, int] = (52, 152, 219)
     COLOR_BALL: Tuple[int, int, int] = (241, 196, 15)
-    COLOR_BRICK_COLORS: List[Tuple[int, int, int]] = field(default_factory=lambda: [
-        (231, 76, 60),    # Red
-        (230, 126, 34),   # Orange
-        (241, 196, 15),   # Yellow
-        (46, 204, 113),   # Green
-        (52, 152, 219),   # Blue
-    ])
+    COLOR_BRICK_COLORS: List[Tuple[int, int, int]] = field(
+        default_factory=lambda: [
+            (231, 76, 60),  # Red
+            (230, 126, 34),  # Orange
+            (241, 196, 15),  # Yellow
+            (46, 204, 113),  # Green
+            (52, 152, 219),  # Blue
+        ]
+    )
     COLOR_TEXT: Tuple[int, int, int] = (255, 255, 255)
-    
+
     # Neural network visualizer
     VIS_NEURON_RADIUS: int = 8
     VIS_LAYER_SPACING: int = 150
     VIS_NEURON_SPACING: int = 20
     VIS_MAX_NEURONS_DISPLAY: int = 20  # Limit for very large layers
     VIS_FAST_MODE: bool = False  # Skip glow/highlight effects for performance
-    
+
     # Activation coloring
     VIS_COLOR_INACTIVE: Tuple[int, int, int] = (50, 50, 50)
     VIS_COLOR_ACTIVE: Tuple[int, int, int] = (0, 255, 128)
     VIS_COLOR_WEIGHT_POS: Tuple[int, int, int] = (100, 200, 100)
     VIS_COLOR_WEIGHT_NEG: Tuple[int, int, int] = (200, 100, 100)
-    
+
     # Dashboard
     PLOT_HISTORY_LENGTH: int = 100  # Number of episodes to show in plots
 
@@ -428,72 +440,76 @@ class Config:
     # =========================================================================
     # TRAINING CONTROL
     # =========================================================================
-    
+
     # Total episodes to train (0 = unlimited, train until manually stopped)
     MAX_EPISODES: int = 0
-    
+
     # Maximum steps per episode (prevents infinite games)
     MAX_STEPS_PER_EPISODE: int = 10000
-    
+
     # Save model every N episodes
     SAVE_EVERY: int = 100
-    
+
     # =========================================================================
     # EVALUATION SETTINGS (Deterministic Performance Tracking)
     # =========================================================================
-    
+
     # Run deterministic evaluation (ε=0) every N episodes
     # This measures TRUE performance, separate from noisy training metrics
     # Set to 0 to disable periodic evaluation
     EVAL_EVERY: int = 500
-    
+
     # Number of games per evaluation run
     EVAL_EPISODES: int = 30
-    
+
     # Max steps per eval game (prevents stuck games)
     EVAL_MAX_STEPS: int = 5000
-    
+
     # Plateau detection: warn if no improvement after N evals
     EVAL_PLATEAU_THRESHOLD: int = 5
-    
+
     # Auto-exploration boost: when plateau detected, reset epsilon to explore new strategies
     # This helps escape local optima by forcing the agent to try new behaviors
-    EVAL_PLATEAU_EPSILON_BOOST: float = 0.15  # Reset epsilon to this value when plateau detected
-    EVAL_PLATEAU_BOOST_EPISODES: int = 1000   # Keep boosted epsilon for this many episodes
-    
+    EVAL_PLATEAU_EPSILON_BOOST: float = (
+        0.15  # Reset epsilon to this value when plateau detected
+    )
+    EVAL_PLATEAU_BOOST_EPISODES: int = (
+        1000  # Keep boosted epsilon for this many episodes
+    )
+
     # Render every N episodes during training (0 = never)
     RENDER_EVERY: int = 1
-    
+
     # Print stats every N episodes
     LOG_EVERY: int = 10
-    
+
     # Report interval for headless mode (seconds between progress reports)
     REPORT_INTERVAL_SECONDS: float = 5.0
-    
+
     # =========================================================================
     # SYSTEM SETTINGS
     # =========================================================================
-    
+
     # Device selection
     @property
     def DEVICE(self) -> torch.device:
         """Auto-detect CUDA/MPS/CPU, or force CPU if configured."""
         # Force CPU mode (faster for small models on M4)
         if self.FORCE_CPU:
-            return torch.device('cpu')
+            return torch.device("cpu")
         if torch.cuda.is_available():
-            return torch.device('cuda')
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return torch.device('mps')
-        return torch.device('cpu')
-    
+            return torch.device("cuda")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
     # Paths
-    MODEL_DIR: str = 'models'
-    LOG_DIR: str = 'logs'
+    MODEL_DIR: str = "models"
+    LOG_DIR: str = "logs"
 
     # Logging settings
     # Level options: 'DEBUG', 'INFO', 'WARNING', 'ERROR'
-    LOG_LEVEL: str = 'INFO'
+    LOG_LEVEL: str = "INFO"
     LOG_TO_FILE: bool = True
     LOG_TO_CONSOLE: bool = True
 
@@ -501,17 +517,20 @@ class Config:
     def GAME_MODEL_DIR(self) -> str:
         """Get game-specific model directory (e.g., 'models/breakout/')."""
         import os
+
         return os.path.join(self.MODEL_DIR, self.GAME_NAME)
-    
+
     # Random seed for reproducibility (None for random)
     SEED: Optional[int] = None
-    
+
     def __post_init__(self):
         """Validation and derived calculations."""
         assert self.LEARNING_RATE > 0, "Learning rate must be positive"
         assert 0 < self.GAMMA <= 1, "Gamma must be in (0, 1]"
         assert self.BATCH_SIZE > 0, "Batch size must be positive"
-        assert self.BATCH_SIZE <= self.MEMORY_SIZE, f"Batch size ({self.BATCH_SIZE}) cannot exceed memory size ({self.MEMORY_SIZE})"
+        assert (
+            self.BATCH_SIZE <= self.MEMORY_SIZE
+        ), f"Batch size ({self.BATCH_SIZE}) cannot exceed memory size ({self.MEMORY_SIZE})"
         assert self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end"
         assert self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1"
         assert self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1"
@@ -522,7 +541,11 @@ class Config:
         # Warn about unlimited training
         if self.MAX_EPISODES == 0:
             import warnings
-            warnings.warn("MAX_EPISODES is 0 - training will run indefinitely until manually stopped", UserWarning)
+
+            warnings.warn(
+                "MAX_EPISODES is 0 - training will run indefinitely until manually stopped",
+                UserWarning,
+            )
 
 
 # Global config instance for easy importing
@@ -536,7 +559,9 @@ if __name__ == "__main__":
     print("Neural Network Game AI - Configuration Summary")
     print("=" * 60)
     print(f"\n📺 Game: {cfg.SCREEN_WIDTH}x{cfg.SCREEN_HEIGHT}")
-    print(f"🧱 Bricks: {cfg.BRICK_ROWS}x{cfg.BRICK_COLS} = {cfg.BRICK_ROWS * cfg.BRICK_COLS}")
+    print(
+        f"🧱 Bricks: {cfg.BRICK_ROWS}x{cfg.BRICK_COLS} = {cfg.BRICK_ROWS * cfg.BRICK_COLS}"
+    )
     print(f"\n🧠 Neural Network:")
     print(f"   Input size: {cfg.STATE_SIZE}")
     print(f"   Hidden layers: {cfg.HIDDEN_LAYERS}")
@@ -550,4 +575,3 @@ if __name__ == "__main__":
     print(f"   Decay: {cfg.EPSILON_DECAY}")
     print(f"\n💻 Device: {cfg.DEVICE}")
     print("=" * 60)
-

@@ -94,7 +94,10 @@ class TestPongActions:
         """Action 2 (DOWN) should move paddle down."""
         initial_y = game.player_paddle.y
         game.step(2)  # DOWN
-        assert game.player_paddle.y > initial_y or game.player_paddle.y >= game.height - game.PADDLE_HEIGHT
+        assert (
+            game.player_paddle.y > initial_y
+            or game.player_paddle.y >= game.height - game.PADDLE_HEIGHT
+        )
 
     def test_action_stay_no_movement(self, game):
         """Action 1 (STAY) should not move paddle."""
@@ -176,12 +179,12 @@ class TestPongGameOver:
     def test_info_contains_score(self, game):
         """Info dict should contain score."""
         _, _, _, info = game.step(1)
-        assert 'score' in info
+        assert "score" in info
 
     def test_info_contains_ai_score(self, game):
         """Info dict should contain AI score."""
         _, _, _, info = game.step(1)
-        assert 'ai_score' in info
+        assert "ai_score" in info
 
 
 class TestVecPong:

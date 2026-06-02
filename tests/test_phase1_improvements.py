@@ -63,9 +63,9 @@ class TestPhase1EnhancedMetrics:
             )
 
         # Verify counts
-        assert publisher.action_frequency['left'] == 4
-        assert publisher.action_frequency['stay'] == 4
-        assert publisher.action_frequency['right'] == 2
+        assert publisher.action_frequency["left"] == 4
+        assert publisher.action_frequency["stay"] == 4
+        assert publisher.action_frequency["right"] == 2
 
         # Verify state is updated
         assert publisher.state.action_count_left == 4
@@ -162,8 +162,8 @@ class TestPhase1SelectiveWeightTransmission:
 
         # Update at step 150 with last update at 0 - should include weights
         result = nn_data.to_dict(include_weights=False)
-        assert 'weights' in result
-        assert len(result['weights']) > 0
+        assert "weights" in result
+        assert len(result["weights"]) > 0
 
     def test_weights_empty_when_not_requested(self):
         """Verify weights are empty between periodic updates"""
@@ -174,8 +174,8 @@ class TestPhase1SelectiveWeightTransmission:
 
         # Mid-interval update - should have empty weights
         result = nn_data.to_dict(include_weights=False)
-        assert 'weights' in result
-        assert len(result['weights']) == 0
+        assert "weights" in result
+        assert len(result["weights"]) == 0
 
     def test_explicit_weight_request(self):
         """Verify weights are included when explicitly requested"""
@@ -185,8 +185,8 @@ class TestPhase1SelectiveWeightTransmission:
 
         # Explicit request for weights
         result = nn_data.to_dict(include_weights=True)
-        assert 'weights' in result
-        assert len(result['weights']) == 2
+        assert "weights" in result
+        assert len(result["weights"]) == 2
 
     def test_nn_data_excludes_internal_fields(self):
         """Verify to_dict() doesn't expose internal implementation details"""
@@ -194,13 +194,13 @@ class TestPhase1SelectiveWeightTransmission:
         result = nn_data.to_dict()
 
         # Should not expose internal fields
-        assert '_last_weights_step' not in result
-        assert 'include_weights' not in result
+        assert "_last_weights_step" not in result
+        assert "include_weights" not in result
 
         # Should include public fields
-        assert 'layer_info' in result
-        assert 'activations' in result
-        assert 'q_values' in result
+        assert "layer_info" in result
+        assert "activations" in result
+        assert "q_values" in result
 
 
 class TestPhase1Integration:
@@ -226,19 +226,19 @@ class TestPhase1Integration:
             target_updates=1,
             bricks_broken=5,
             episode_length=500,
-            q_value_left=0.5,      # Phase 1 new
-            q_value_stay=0.6,      # Phase 1 new
-            q_value_right=0.55,    # Phase 1 new
-            selected_action=1,     # Phase 1 new
+            q_value_left=0.5,  # Phase 1 new
+            q_value_stay=0.6,  # Phase 1 new
+            q_value_right=0.55,  # Phase 1 new
+            selected_action=1,  # Phase 1 new
         )
 
         # Verify state contains new fields
-        assert hasattr(publisher.state, 'q_value_left')
-        assert hasattr(publisher.state, 'q_value_stay')
-        assert hasattr(publisher.state, 'q_value_right')
-        assert hasattr(publisher.state, 'action_count_left')
-        assert hasattr(publisher.state, 'action_count_stay')
-        assert hasattr(publisher.state, 'action_count_right')
+        assert hasattr(publisher.state, "q_value_left")
+        assert hasattr(publisher.state, "q_value_stay")
+        assert hasattr(publisher.state, "q_value_right")
+        assert hasattr(publisher.state, "action_count_left")
+        assert hasattr(publisher.state, "action_count_stay")
+        assert hasattr(publisher.state, "action_count_right")
 
     def test_adaptive_rate_updates_during_training_simulation(self):
         """Simulate training at different speeds and verify rate adaptation"""
@@ -256,5 +256,5 @@ class TestPhase1Integration:
         assert fast_interval > slow_interval  # Slower updates for faster training
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

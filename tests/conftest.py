@@ -16,13 +16,9 @@ def pytest_configure(config):
     )
 
     # Filter expected warnings at the pytest level (works during import time)
-    config.addinivalue_line(
-        "filterwarnings",
-        "ignore:MAX_EPISODES is 0:UserWarning"
-    )
+    config.addinivalue_line("filterwarnings", "ignore:MAX_EPISODES is 0:UserWarning")
 
     # Suppress pygame's pkg_resources deprecation warning (external dependency)
     config.addinivalue_line(
-        "filterwarnings",
-        "ignore:pkg_resources is deprecated:UserWarning"
+        "filterwarnings", "ignore:pkg_resources is deprecated:UserWarning"
     )

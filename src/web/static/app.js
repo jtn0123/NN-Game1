@@ -32,6 +32,7 @@ const MAX_CONSOLE_LOGS = 500;
 let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
+const DASHBOARD_TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -46,8 +47,12 @@ const FETCH_TIMEOUT_MS = 10000; // 10 second timeout for API calls
 function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const headers = {
+        ...(options.headers || {}),
+        'X-Dashboard-Token': DASHBOARD_TOKEN,
+    };
 
-    return fetch(url, { ...options, signal: controller.signal })
+    return fetch(url, { ...options, headers, signal: controller.signal })
         .finally(() => clearTimeout(timeoutId));
 }
 
@@ -762,7 +767,14 @@ function resetChartView(chartName = 'all') {
  * Connect to SocketIO server
  */
 function connectSocket() {
-    socket = io();
+    socket = io({ auth: { token: DASHBOARD_TOKEN } });
+    const emit = socket.emit.bind(socket);
+    socket.emit = (event, payload = {}, ...args) => {
+        if ((event === 'control' || event === 'clear_logs') && payload && typeof payload === 'object') {
+            payload = { ...payload, token: DASHBOARD_TOKEN };
+        }
+        return emit(event, payload, ...args);
+    };
 
     // Throttle dashboard updates to 60fps max (prevent excessive DOM manipulation)
     const throttledUpdateDashboard = throttle(updateDashboard, 16);  // ~60fps
@@ -1361,7 +1373,7 @@ function setLogFilter(filter) {
  */
 function clearLogs() {
     consoleLogs = [];
-    socket.emit('clear_logs');
+    socket.emit('clear_logs', {});
     renderConsoleLogs();
     addConsoleLog('Console cleared', 'info');
 }
@@ -1499,15 +1511,17 @@ function startFresh() {
     }
     
     if (saveFirst) {
-        // Save current model first, then reset after a short delay
-        socket.emit('control', { action: 'save' });
+        // Save current model first, then reset after the server confirms handling it.
         addConsoleLog('💾 Saving current progress before reset...', 'action');
-        
-        // Wait for save to complete before resetting
-        setTimeout(() => {
-            socket.emit('control', { action: 'start_fresh' });
-            addConsoleLog('🔄 Starting fresh training...', 'warning');
-        }, 500);
+
+        socket.emit('control', { action: 'save' }, (response) => {
+            if (response && response.success) {
+                socket.emit('control', { action: 'start_fresh' });
+                addConsoleLog('🔄 Starting fresh training...', 'warning');
+            } else {
+                addConsoleLog(`❌ Save before reset failed: ${response?.error || 'Unknown error'}`, 'error');
+            }
+        });
     } else {
         socket.emit('control', { action: 'start_fresh' });
         addConsoleLog('🔄 Starting fresh training...', 'warning');
@@ -1790,10 +1804,10 @@ function showLoadModal() {
                 // Format episode and best score
                 const episodeStr = typeof episode === 'number' ? episode.toLocaleString() : episode;
                 
-                // Escape model name and path to prevent XSS
+                // Escape model name and id to prevent XSS
                 const safeName = escapeHtml(model.name);
-                // For onclick, escape backslashes and single quotes for JS string context
-                const safePathForJs = model.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const modelId = model.id || model.path || '';
+                const safeIdForJs = modelId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
                 
                 // Reason badge (reason is from our own metadata, but escape anyway)
@@ -1802,7 +1816,7 @@ function showLoadModal() {
                 
                 return `
                     <div class="model-item">
-                        <div class="model-item-content" onclick="loadModel('${safePathForJs}')">
+                        <div class="model-item-content" onclick="loadModel('${safeIdForJs}')">
                             <div class="model-header">
                                 <div class="model-name">
                                     📁 ${safeName}
@@ -1830,7 +1844,7 @@ function showLoadModal() {
                             </div>
                             <div class="model-date">${safeModifiedStr}</div>
                         </div>
-                        <button class="model-delete-btn" onclick="event.stopPropagation(); deleteModel('${safePathForJs}', '${safeName}')" title="Delete this model">
+                        <button class="model-delete-btn" onclick="event.stopPropagation(); deleteModel('${safeIdForJs}', '${safeName}')" title="Delete this model">
                             🗑️
                         </button>
                     </div>
@@ -1854,22 +1868,22 @@ function hideLoadModal() {
 /**
  * Load a specific model
  */
-function loadModel(path) {
-    socket.emit('control', { action: 'load_model', path: path });
+function loadModel(modelId) {
+    socket.emit('control', { action: 'load_model', id: modelId });
     hideLoadModal();
-    addConsoleLog(`Loading model: ${path.split('/').pop()}`, 'action');
+    addConsoleLog(`Loading model: ${modelId.split(':').pop()}`, 'action');
 }
 
 /**
  * Delete a model file
  */
-function deleteModel(path, name) {
+function deleteModel(modelId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"?\n\nThis action cannot be undone.`)) {
         return;
     }
     
     // Encode path for URL (handle special characters)
-    const encodedPath = encodeURIComponent(path);
+    const encodedPath = encodeURIComponent(modelId);
     
     fetchWithTimeout(`/api/models/${encodedPath}`, {
         method: 'DELETE',

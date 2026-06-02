@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="dashboard-token" content="{{ access_token }}">
     <title>🧠 Neural Network AI - Game Launcher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -312,10 +313,18 @@
         let socket = null;
         let selectedGame = null;
         let selectedMode = 'ai';  // Default to AI training
+        const DASHBOARD_TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
 
         // Initialize socket connection
         try {
-            socket = io();
+            socket = io({ auth: { token: DASHBOARD_TOKEN } });
+            const emit = socket.emit.bind(socket);
+            socket.emit = (event, payload = {}, ...args) => {
+                if (event === 'control' && payload && typeof payload === 'object') {
+                    payload = { ...payload, token: DASHBOARD_TOKEN };
+                }
+                return emit(event, payload, ...args);
+            };
             document.getElementById('status-msg').textContent = 'Connecting...';
         } catch (e) {
             document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
@@ -452,4 +461,3 @@
     </script>
 </body>
 </html>
-

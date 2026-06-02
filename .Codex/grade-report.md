@@ -23,6 +23,8 @@
 
 **Validation snapshot:** `python -m pytest -q` passes with `470 passed, 1 warning`; `python -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered -q` reports 43% total coverage; `python -m mypy --config-file mypy.ini src main.py` reports 48 errors in 11 files; `python -m black --check ...` would reformat 6 files. There is no `.github/workflows/` directory in this checkout.
 
+**Remediation update:** A follow-up pass addressed the highest-impact NN, safety, reliability, dependency, documentation, and DevEx items. `make check` now passes with Black clean, focused mypy clean for `src/ai` and `src/utils`, 479 passing tests, and 44% total coverage. Fixed or materially addressed items: B1, B3, C2, D1, D2, D3, D4, E1, E2, E3, F1, F2, G1, G3, H1, H2, I1, I2, and I3. Partially addressed items: B2 and G2. Still intentionally open because they are larger structural/product refactors: A1, A2, A3, C1, and C3.
+
 ---
 
 ## A - Architecture & Design - C+

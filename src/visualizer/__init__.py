@@ -16,5 +16,4 @@ from .dashboard import Dashboard
 from .hud import TrainingHUD
 from .pause_menu import PauseMenu
 
-__all__ = ['NeuralNetVisualizer', 'Dashboard', 'TrainingHUD', 'PauseMenu']
-
+__all__ = ["NeuralNetVisualizer", "Dashboard", "TrainingHUD", "PauseMenu"]

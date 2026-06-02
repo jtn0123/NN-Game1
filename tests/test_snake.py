@@ -220,12 +220,12 @@ class TestSnakeGameOver:
     def test_info_contains_score(self, game):
         """Info dict should contain score."""
         _, _, _, info = game.step(Snake.RIGHT)
-        assert 'score' in info
+        assert "score" in info
 
     def test_info_contains_length(self, game):
         """Info dict should contain snake length."""
         _, _, _, info = game.step(Snake.RIGHT)
-        assert 'length' in info
+        assert "length" in info
 
 
 class TestVecSnake:

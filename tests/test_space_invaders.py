@@ -252,22 +252,22 @@ class TestSpaceInvadersGameOver:
     def test_info_contains_score(self, game):
         """Info dict should contain score."""
         _, _, _, info = game.step(1)
-        assert 'score' in info
+        assert "score" in info
 
     def test_info_contains_level(self, game):
         """Info dict should contain level."""
         _, _, _, info = game.step(1)
-        assert 'level' in info
+        assert "level" in info
 
     def test_info_contains_lives(self, game):
         """Info dict should contain lives."""
         _, _, _, info = game.step(1)
-        assert 'lives' in info
+        assert "lives" in info
 
     def test_info_contains_aliens_remaining(self, game):
         """Info dict should contain aliens_remaining."""
         _, _, _, info = game.step(1)
-        assert 'aliens_remaining' in info
+        assert "aliens_remaining" in info
 
 
 class TestVecSpaceInvaders:
@@ -342,7 +342,7 @@ class TestShieldDamageSystem:
 
         # Blocks should have health
         block = shield.blocks[0]
-        assert hasattr(block, 'health')
+        assert hasattr(block, "health")
         assert block.health > 0
 
     def test_shield_block_damaged_by_bullet(self, config):
@@ -364,6 +364,7 @@ class TestShieldDamageSystem:
         # Simulate bullet collision by calling check_collision directly
         # Create a mock rect that overlaps with the block
         import pygame
+
         bullet_rect = pygame.Rect(block.x, block.y, 4, 10)
         shield.check_collision(bullet_rect)
 
@@ -492,7 +493,7 @@ class TestAlienBulletThreatTracking:
                 y=game.ship.y - 100 - i * 50,
                 speed=5,  # Positive speed = moving down (alien bullets)
                 is_player=False,
-                color=(255, 0, 0)
+                color=(255, 0, 0),
             )
             game.alien_bullets.append(bullet)
 
@@ -510,12 +511,13 @@ class TestAlienBulletThreatTracking:
 
         # Add alien bullets near the ship
         from src.game.space_invaders import Bullet
+
         bullet = Bullet(
             x=game.ship.x,
             y=game.ship.y - 50,
             speed=5,  # Positive speed = moving down (alien bullets)
             is_player=False,
-            color=(255, 0, 0)
+            color=(255, 0, 0),
         )
         game.alien_bullets.append(bullet)
 

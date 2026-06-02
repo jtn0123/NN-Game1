@@ -132,7 +132,7 @@ class TestBreakoutRewards:
         for _ in range(50):
             _, reward, done, info = game.step(1)
             total_reward += reward
-            if info.get('won', False):
+            if info.get("won", False):
                 break
 
         # Should have received win reward (plus brick hit)

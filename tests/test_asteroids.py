@@ -177,6 +177,7 @@ class TestAsteroidsCollisions:
             asteroid = game.asteroids[0]
             game.bullets.clear()
             from src.game.asteroids import Bullet
+
             bullet = Bullet(asteroid.x, asteroid.y, 0)
             game.bullets.append(bullet)
 
@@ -242,17 +243,17 @@ class TestAsteroidsGameOver:
     def test_info_contains_score(self, game):
         """Info dict should contain score."""
         _, _, _, info = game.step(4)
-        assert 'score' in info
+        assert "score" in info
 
     def test_info_contains_lives(self, game):
         """Info dict should contain lives."""
         _, _, _, info = game.step(4)
-        assert 'lives' in info
+        assert "lives" in info
 
     def test_info_contains_level(self, game):
         """Info dict should contain level."""
         _, _, _, info = game.step(4)
-        assert 'level' in info
+        assert "level" in info
 
 
 class TestShip:

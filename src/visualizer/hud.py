@@ -46,8 +46,8 @@ class TrainingHUD:
         self.warn_color = (241, 196, 15)  # Yellow
 
         # State
-        self.enabled = getattr(config, 'HUD_ENABLED', True)
-        self.opacity = getattr(config, 'HUD_OPACITY', 0.8)
+        self.enabled = getattr(config, "HUD_ENABLED", True)
+        self.opacity = getattr(config, "HUD_OPACITY", 0.8)
 
         # Bug 98: Use config opacity instead of hardcoded 180
         bg_alpha = int(self.opacity * 255) if self.opacity <= 1.0 else int(self.opacity)
@@ -68,7 +68,7 @@ class TrainingHUD:
         speed: float,
         max_episodes: int,
         selected_action: Optional[int],
-        action_labels: List[str]
+        action_labels: List[str],
     ) -> None:
         """
         Render all HUD elements onto the surface.
@@ -100,7 +100,9 @@ class TrainingHUD:
         if max_episodes > 0:
             self._render_progress_bar(surface, episode, max_episodes)
 
-    def _render_episode_counter(self, surface: pygame.Surface, episode: int, max_episodes: int) -> None:
+    def _render_episode_counter(
+        self, surface: pygame.Surface, episode: int, max_episodes: int
+    ) -> None:
         """Render episode counter in top-left."""
         if max_episodes > 0:
             text = f"Episode: {episode:,} / {max_episodes:,}"
@@ -113,20 +115,26 @@ class TrainingHUD:
         bg_rect = text_surface.get_rect(topleft=(10, 10))
         bg_rect.inflate_ip(16, 8)
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
+        pygame.draw.rect(
+            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
+        )
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Text
         surface.blit(text_surface, (18, 14))
 
-    def _render_score_display(self, surface: pygame.Surface, score: int, best_score: int) -> None:
+    def _render_score_display(
+        self, surface: pygame.Surface, score: int, best_score: int
+    ) -> None:
         """Render score display below episode counter."""
         text = f"Score: {score:,}  |  Best: {best_score:,}"
 
         # Bug 90: Smooth color transition instead of instant flip
         target_color = self.good_color if score >= best_score * 0.8 else self.text_color
         for i in range(3):
-            self._current_score_color[i] += (target_color[i] - self._current_score_color[i]) * self._color_lerp_speed
+            self._current_score_color[i] += (
+                target_color[i] - self._current_score_color[i]
+            ) * self._color_lerp_speed
         color = tuple(int(c) for c in self._current_score_color)
 
         text_surface = self._font_small.render(text, True, color)
@@ -135,7 +143,9 @@ class TrainingHUD:
         bg_rect = text_surface.get_rect(topleft=(10, 42))
         bg_rect.inflate_ip(16, 6)
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
+        pygame.draw.rect(
+            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
+        )
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Text
@@ -155,20 +165,32 @@ class TrainingHUD:
         # Background
         bg_rect = pygame.Rect(10, 68, 170, 24)
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
+        pygame.draw.rect(
+            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
+        )
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Label
         surface.blit(label_surface, (bar_x, bar_y - 14))
 
         # Bar background
-        pygame.draw.rect(surface, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height), border_radius=3)
+        pygame.draw.rect(
+            surface,
+            (40, 40, 40),
+            (bar_x, bar_y, bar_width, bar_height),
+            border_radius=3,
+        )
 
         # Bar fill
         fill_width = int(bar_width * epsilon)
         if fill_width > 0:
             fill_color = self.warn_color if epsilon > 0.5 else self.accent_color
-            pygame.draw.rect(surface, fill_color, (bar_x, bar_y, fill_width, bar_height), border_radius=3)
+            pygame.draw.rect(
+                surface,
+                fill_color,
+                (bar_x, bar_y, fill_width, bar_height),
+                border_radius=3,
+            )
 
         # Percentage text
         pct_text = f"{epsilon*100:.0f}%"
@@ -194,17 +216,16 @@ class TrainingHUD:
 
         # Background
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
+        pygame.draw.rect(
+            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
+        )
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Text
         surface.blit(text_surface, (bg_rect.left + 8, 14))
 
     def _render_action_indicator(
-        self,
-        surface: pygame.Surface,
-        selected_action: int,
-        action_labels: List[str]
+        self, surface: pygame.Surface, selected_action: int, action_labels: List[str]
     ) -> None:
         """Render current action indicator at bottom-center."""
         # Bug 68 fix: Check for negative action indices to prevent wrong action via Python's negative indexing
@@ -220,12 +241,16 @@ class TrainingHUD:
         screen_width = surface.get_width()
         screen_height = surface.get_height()
 
-        bg_rect = text_surface.get_rect(centerx=screen_width // 2, bottom=screen_height - 35)
+        bg_rect = text_surface.get_rect(
+            centerx=screen_width // 2, bottom=screen_height - 35
+        )
         bg_rect.inflate_ip(20, 10)
 
         # Background with accent border
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=6)
+        pygame.draw.rect(
+            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=6
+        )
         surface.blit(bg_surface, bg_rect.topleft)
         pygame.draw.rect(surface, self.accent_color, bg_rect, 2, border_radius=6)
 
@@ -233,7 +258,9 @@ class TrainingHUD:
         text_rect = text_surface.get_rect(center=bg_rect.center)
         surface.blit(text_surface, text_rect)
 
-    def _render_progress_bar(self, surface: pygame.Surface, episode: int, max_episodes: int) -> None:
+    def _render_progress_bar(
+        self, surface: pygame.Surface, episode: int, max_episodes: int
+    ) -> None:
         """Render training progress bar at bottom of screen."""
         # Bar dimensions
         screen_width = surface.get_width()
@@ -249,7 +276,12 @@ class TrainingHUD:
         progress = min(episode / max_episodes, 1.0) if max_episodes > 0 else 0.0
 
         # Bar background
-        pygame.draw.rect(surface, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height), border_radius=4)
+        pygame.draw.rect(
+            surface,
+            (40, 40, 40),
+            (bar_x, bar_y, bar_width, bar_height),
+            border_radius=4,
+        )
 
         # Bar fill
         fill_width = int(bar_width * progress)
@@ -262,7 +294,12 @@ class TrainingHUD:
             else:
                 fill_color = self.good_color
 
-            pygame.draw.rect(surface, fill_color, (bar_x, bar_y, fill_width, bar_height), border_radius=4)
+            pygame.draw.rect(
+                surface,
+                fill_color,
+                (bar_x, bar_y, fill_width, bar_height),
+                border_radius=4,
+            )
 
         # Progress percentage (small text above bar)
         if progress > 0:

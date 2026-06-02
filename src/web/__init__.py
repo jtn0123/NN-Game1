@@ -12,5 +12,4 @@ Components:
 
 from .server import WebDashboard, MetricsPublisher
 
-__all__ = ['WebDashboard', 'MetricsPublisher']
-
+__all__ = ["WebDashboard", "MetricsPublisher"]

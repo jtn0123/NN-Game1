@@ -124,7 +124,7 @@ class TestSaveLoadIntegration:
 
             # Get a weight key from the network (first layer)
             state_dict = agent.policy_net.state_dict()
-            weight_key = [k for k in state_dict.keys() if 'weight' in k][0]
+            weight_key = [k for k in state_dict.keys() if "weight" in k][0]
             initial_weights = state_dict[weight_key].clone()
 
             # Train briefly to potentially change weights
@@ -197,7 +197,7 @@ class TestDeviceCompatibility:
         action = agent.select_action(state, training=True)
 
         assert 0 <= action < game.action_size
-        assert agent.device.type == 'cpu'
+        assert agent.device.type == "cpu"
 
     def test_state_tensor_device_matches_agent(self, game, agent):
         """State tensors should be on the same device as agent."""

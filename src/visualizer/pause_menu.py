@@ -46,7 +46,9 @@ class PauseButton:
             border_color = (80, 80, 90)
 
         # Background
-        bg_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        bg_surface = pygame.Surface(
+            (self.rect.width, self.rect.height), pygame.SRCALPHA
+        )
         pygame.draw.rect(bg_surface, bg_color, bg_surface.get_rect(), border_radius=8)
         surface.blit(bg_surface, self.rect.topleft)
 
@@ -111,7 +113,7 @@ class PauseMenu:
         for i, button in enumerate(self.buttons):
             button.update_position(
                 center_x - button.rect.width // 2,
-                start_y + i * (button.rect.height + button_spacing)
+                start_y + i * (button.rect.height + button_spacing),
             )
 
     def handle_resize(self, new_width: int, new_height: int) -> None:
@@ -222,10 +224,14 @@ class PauseMenu:
 
         # Bug 94: Animate fade-in instead of instant full opacity
         if self._fade_alpha < self._target_alpha:
-            self._fade_alpha = min(self._fade_alpha + self._fade_speed, self._target_alpha)
+            self._fade_alpha = min(
+                self._fade_alpha + self._fade_speed, self._target_alpha
+            )
 
         # Semi-transparent overlay with animated fade
-        overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+        overlay = pygame.Surface(
+            (self.screen_width, self.screen_height), pygame.SRCALPHA
+        )
         overlay.fill((0, 0, 0, self._fade_alpha))
         surface.blit(overlay, (0, 0))
 
@@ -242,8 +248,8 @@ class PauseMenu:
         ]
 
         # Add training time if available (with improved formatting)
-        if 'training_time' in context:
-            training_time = context['training_time']
+        if "training_time" in context:
+            training_time = context["training_time"]
             hours = int(training_time // 3600)
             minutes = int((training_time % 3600) // 60)
             seconds = int(training_time % 60)
@@ -255,9 +261,9 @@ class PauseMenu:
                 context_lines.append(f"Training Time: {seconds}s")
 
         # Add memory buffer if available (with human-readable format)
-        if 'memory_size' in context and 'memory_capacity' in context:
-            mem_size = context['memory_size']
-            mem_cap = context['memory_capacity']
+        if "memory_size" in context and "memory_capacity" in context:
+            mem_size = context["memory_size"]
+            mem_cap = context["memory_capacity"]
             mem_pct = (mem_size / mem_cap) * 100 if mem_cap > 0 else 0
 
             # Format numbers in human-readable form (K for thousands)
@@ -268,7 +274,9 @@ class PauseMenu:
                     return f"{n / 1000:.1f}K"
                 return str(n)
 
-            context_lines.append(f"Memory: {format_num(mem_size)} / {format_num(mem_cap)} ({mem_pct:.0f}%)")
+            context_lines.append(
+                f"Memory: {format_num(mem_size)} / {format_num(mem_cap)} ({mem_pct:.0f}%)"
+            )
 
         # Render context
         y_offset = center_y - 130
@@ -280,7 +288,7 @@ class PauseMenu:
 
         # Update hover states based on selected index
         for i, button in enumerate(self.buttons):
-            button.hovered = (i == self.selected_index)
+            button.hovered = i == self.selected_index
 
         # Render buttons
         for button in self.buttons:
@@ -295,7 +303,9 @@ class PauseMenu:
         # Quit confirmation dialog
         if self._confirm_quit:
             # Draw confirmation overlay
-            confirm_overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+            confirm_overlay = pygame.Surface(
+                (self.screen_width, self.screen_height), pygame.SRCALPHA
+            )
             confirm_overlay.fill((0, 0, 0, 150))
             surface.blit(confirm_overlay, (0, 0))
 
@@ -307,21 +317,35 @@ class PauseMenu:
 
             # Box background
             box_surface = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
-            pygame.draw.rect(box_surface, (40, 40, 50, 240), box_surface.get_rect(), border_radius=10)
+            pygame.draw.rect(
+                box_surface, (40, 40, 50, 240), box_surface.get_rect(), border_radius=10
+            )
             surface.blit(box_surface, (box_x, box_y))
-            pygame.draw.rect(surface, (255, 100, 100), (box_x, box_y, box_width, box_height), 2, border_radius=10)
+            pygame.draw.rect(
+                surface,
+                (255, 100, 100),
+                (box_x, box_y, box_width, box_height),
+                2,
+                border_radius=10,
+            )
 
             # Confirmation text
-            confirm_text = self._button_font.render("Quit training?", True, (255, 255, 255))
+            confirm_text = self._button_font.render(
+                "Quit training?", True, (255, 255, 255)
+            )
             confirm_rect = confirm_text.get_rect(center=(center_x, box_y + 35))
             surface.blit(confirm_text, confirm_rect)
 
             # Sub text
-            sub_text = self._context_font.render("Unsaved progress will be lost.", True, (200, 150, 150))
+            sub_text = self._context_font.render(
+                "Unsaved progress will be lost.", True, (200, 150, 150)
+            )
             sub_rect = sub_text.get_rect(center=(center_x, box_y + 60))
             surface.blit(sub_text, sub_rect)
 
             # Bug 101: Y/N options - use consistent warning colors (amber, not green)
-            options_text = self._context_font.render("Press Y to confirm, N to cancel", True, (255, 200, 150))
+            options_text = self._context_font.render(
+                "Press Y to confirm, N to cancel", True, (255, 200, 150)
+            )
             options_rect = options_text.get_rect(center=(center_x, box_y + 90))
             surface.blit(options_text, options_rect)

@@ -45,29 +45,31 @@ class TestNeuronInspectionData:
         # Manually set weights to test the stats computation
         data.incoming_weights = [0.1, -0.2, 0.15]
         data.incoming_weight_stats = {
-            'mean': 0.016666,
-            'std': 0.162,
-            'min': -0.2,
-            'max': 0.15,
+            "mean": 0.016666,
+            "std": 0.162,
+            "min": -0.2,
+            "max": 0.15,
         }
         data.outgoing_weights = [0.2, -0.1]
         data.outgoing_weight_stats = {
-            'mean': 0.05,
-            'std': 0.15,
-            'min': -0.1,
-            'max': 0.2,
+            "mean": 0.05,
+            "std": 0.15,
+            "min": -0.1,
+            "max": 0.2,
         }
-        data.q_value_contributions = {'left': 0.1, 'stay': 0.3, 'right': 0.05}
+        data.q_value_contributions = {"left": 0.1, "stay": 0.3, "right": 0.05}
 
         result = data.to_dict()
 
-        assert result['layer_idx'] == 1
-        assert result['neuron_idx'] == 10
-        assert result['layer_name'] == "hidden_1"
-        assert result['current_activation'] == 0.5
-        assert len(result['activation_history']) == 5
-        assert result['incoming_weight_stats']['mean'] == pytest.approx(0.016666, abs=0.001)
-        assert result['q_value_contributions']['stay'] == 0.3
+        assert result["layer_idx"] == 1
+        assert result["neuron_idx"] == 10
+        assert result["layer_name"] == "hidden_1"
+        assert result["current_activation"] == 0.5
+        assert len(result["activation_history"]) == 5
+        assert result["incoming_weight_stats"]["mean"] == pytest.approx(
+            0.016666, abs=0.001
+        )
+        assert result["q_value_contributions"]["stay"] == 0.3
 
 
 class TestLayerAnalysisData:
@@ -99,11 +101,11 @@ class TestLayerAnalysisData:
 
         result = data.to_dict()
 
-        assert result['layer_idx'] == 1
-        assert result['neuron_count'] == 256
-        assert result['avg_activation'] == 0.3
-        assert result['dead_neuron_percent'] == pytest.approx(1.953, abs=0.01)
-        assert result['saturated_percent'] == pytest.approx(3.906, abs=0.01)
+        assert result["layer_idx"] == 1
+        assert result["neuron_count"] == 256
+        assert result["avg_activation"] == 0.3
+        assert result["dead_neuron_percent"] == pytest.approx(1.953, abs=0.01)
+        assert result["saturated_percent"] == pytest.approx(3.906, abs=0.01)
 
 
 class TestNeuronInspectionStorage:
@@ -122,16 +124,16 @@ class TestNeuronInspectionStorage:
             activation_history=[0.1, 0.2, 0.3, 0.4, 0.45],
             incoming_weights=np.array([0.1, -0.2, 0.15]),
             outgoing_weights=np.array([0.2, -0.1, 0.05, 0.08]),
-            q_contributions={'left': 0.1, 'stay': 0.3, 'right': 0.05},
+            q_contributions={"left": 0.1, "stay": 0.3, "right": 0.05},
         )
 
         # Retrieve neuron details
         details = publisher.get_neuron_details(0, 5)
 
-        assert details['layer_idx'] == 0
-        assert details['neuron_idx'] == 5
-        assert details['current_activation'] == 0.45
-        assert details['q_value_contributions']['stay'] == 0.3
+        assert details["layer_idx"] == 0
+        assert details["neuron_idx"] == 5
+        assert details["current_activation"] == 0.45
+        assert details["q_value_contributions"]["stay"] == 0.3
 
     def test_neuron_not_found(self):
         """Verify appropriate error when neuron not found"""
@@ -139,7 +141,7 @@ class TestNeuronInspectionStorage:
 
         details = publisher.get_neuron_details(99, 99)
 
-        assert 'error' in details
+        assert "error" in details
 
     def test_activation_history_rolling_window(self):
         """Verify activation history maintains rolling window (500 steps)"""
@@ -159,7 +161,7 @@ class TestNeuronInspectionStorage:
         details = publisher.get_neuron_details(0, 0)
 
         # Should keep last 500 for storage, last 100 for transmission
-        assert len(details['activation_history']) == 100  # Last 100
+        assert len(details["activation_history"]) == 100  # Last 100
 
 
 class TestLayerAnalysisStatistics:
@@ -181,10 +183,10 @@ class TestLayerAnalysisStatistics:
 
         analysis = publisher.get_layer_analysis(0)
 
-        assert analysis['neuron_count'] == 10
-        assert abs(analysis['avg_activation'] - 0.45) < 0.01
-        assert analysis['activation_min'] == 0.0
-        assert analysis['activation_max'] == 0.9
+        assert analysis["neuron_count"] == 10
+        assert abs(analysis["avg_activation"] - 0.45) < 0.01
+        assert analysis["activation_min"] == 0.0
+        assert analysis["activation_max"] == 0.9
 
     def test_dead_neuron_detection(self):
         """Verify dead neuron detection (activation < 0.01)"""
@@ -202,8 +204,8 @@ class TestLayerAnalysisStatistics:
 
         analysis = publisher.get_layer_analysis(0)
 
-        assert analysis['dead_neuron_count'] == 4  # 0.001, 0.001, 0.0, 0.0
-        assert analysis['dead_neuron_percent'] == pytest.approx(40.0)
+        assert analysis["dead_neuron_count"] == 4  # 0.001, 0.001, 0.0, 0.0
+        assert analysis["dead_neuron_percent"] == pytest.approx(40.0)
 
     def test_saturated_neuron_detection(self):
         """Verify saturated neuron detection (activation > 0.95)"""
@@ -221,8 +223,8 @@ class TestLayerAnalysisStatistics:
 
         analysis = publisher.get_layer_analysis(0)
 
-        assert analysis['saturated_neuron_count'] == 3
-        assert analysis['saturated_percent'] == pytest.approx(30.0)
+        assert analysis["saturated_neuron_count"] == 3
+        assert analysis["saturated_percent"] == pytest.approx(30.0)
 
     def test_weight_statistics(self):
         """Verify weight statistics computation"""
@@ -241,10 +243,10 @@ class TestLayerAnalysisStatistics:
 
         analysis = publisher.get_layer_analysis(0)
 
-        assert 'weight_mean' in analysis
-        assert 'weight_std' in analysis
-        assert 'weight_histogram' in analysis
-        assert len(analysis['weight_histogram']) == 20
+        assert "weight_mean" in analysis
+        assert "weight_std" in analysis
+        assert "weight_histogram" in analysis
+        assert len(analysis["weight_histogram"]) == 20
 
     def test_gradient_statistics(self):
         """Verify gradient statistics computation"""
@@ -263,8 +265,8 @@ class TestLayerAnalysisStatistics:
 
         analysis = publisher.get_layer_analysis(0)
 
-        assert analysis['gradient_mean'] > 0
-        assert analysis['gradient_max_magnitude'] > 0
+        assert analysis["gradient_mean"] > 0
+        assert analysis["gradient_max_magnitude"] > 0
 
 
 class TestMultipleLayers:
@@ -287,9 +289,9 @@ class TestMultipleLayers:
         layers = publisher.get_all_layer_analysis()
 
         assert len(layers) == 3
-        assert layers[0]['layer_idx'] == 0
-        assert layers[1]['layer_idx'] == 1
-        assert layers[2]['layer_idx'] == 2
+        assert layers[0]["layer_idx"] == 0
+        assert layers[1]["layer_idx"] == 1
+        assert layers[2]["layer_idx"] == 2
 
     def test_layer_analysis_sorted_by_index(self):
         """Verify layers are sorted by index"""
@@ -308,9 +310,9 @@ class TestMultipleLayers:
         layers = publisher.get_all_layer_analysis()
 
         # Should be sorted
-        assert layers[0]['layer_idx'] == 0
-        assert layers[1]['layer_idx'] == 1
-        assert layers[2]['layer_idx'] == 2
+        assert layers[0]["layer_idx"] == 0
+        assert layers[1]["layer_idx"] == 1
+        assert layers[2]["layer_idx"] == 2
 
 
 class TestPhase2Integration:
@@ -341,21 +343,21 @@ class TestPhase2Integration:
         layer_analysis = publisher.get_layer_analysis(0)
         neuron_details = publisher.get_neuron_details(0, 42)
 
-        assert layer_analysis['neuron_count'] == 256
-        assert neuron_details['layer_idx'] == 0
-        assert neuron_details['neuron_idx'] == 42
+        assert layer_analysis["neuron_count"] == 256
+        assert neuron_details["layer_idx"] == 0
+        assert neuron_details["neuron_idx"] == 42
 
     def test_callback_registration(self):
         """Verify callback registration works"""
         publisher = MetricsPublisher()
 
-        callbacks_called = {'neuron': False, 'layer': False}
+        callbacks_called = {"neuron": False, "layer": False}
 
         def on_neuron(data):
-            callbacks_called['neuron'] = True
+            callbacks_called["neuron"] = True
 
         def on_layer(data):
-            callbacks_called['layer'] = True
+            callbacks_called["layer"] = True
 
         publisher.on_neuron_select(on_neuron)
         publisher.on_layer_analysis(on_layer)
@@ -365,5 +367,5 @@ class TestPhase2Integration:
         assert len(publisher._on_layer_analysis_callbacks) == 1
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
