@@ -19,7 +19,6 @@ Configuration:
 """
 
 import logging
-import os
 import sys
 from datetime import datetime
 from enum import Enum
@@ -29,6 +28,7 @@ from typing import Optional
 
 class LogLevel(Enum):
     """Log levels for configuration."""
+
     DEBUG = logging.DEBUG
     INFO = logging.INFO
     WARNING = logging.WARNING
@@ -45,12 +45,12 @@ class ColoredFormatter(logging.Formatter):
     """Formatter that adds colors to console output."""
 
     COLORS = {
-        'DEBUG': '\033[36m',     # Cyan
-        'INFO': '\033[32m',      # Green
-        'WARNING': '\033[33m',   # Yellow
-        'ERROR': '\033[31m',     # Red
-        'CRITICAL': '\033[35m',  # Magenta
-        'RESET': '\033[0m',
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[35m",  # Magenta
+        "RESET": "\033[0m",
     }
 
     def __init__(self, fmt: str, use_colors: bool = True):
@@ -59,13 +59,13 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         if self.use_colors:
-            color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+            color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
             record.levelname = f"{color}{record.levelname}{self.COLORS['RESET']}"
         return super().format(record)
 
 
 def setup_logging(
-    log_dir: str = 'logs',
+    log_dir: str = "logs",
     level: LogLevel = LogLevel.INFO,
     console_output: bool = True,
     file_output: bool = True,
@@ -90,7 +90,7 @@ def setup_logging(
     _log_dir.mkdir(parents=True, exist_ok=True)
 
     # Configure root logger for the project
-    root_logger = logging.getLogger('dqn')
+    root_logger = logging.getLogger("dqn")
     root_logger.setLevel(level.value)
     root_logger.handlers.clear()
 
@@ -99,8 +99,7 @@ def setup_logging(
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(level.value)
         console_fmt = ColoredFormatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-            use_colors=True
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", use_colors=True
         )
         console_handler.setFormatter(console_fmt)
         root_logger.addHandler(console_handler)
@@ -108,15 +107,13 @@ def setup_logging(
     # File handler without colors
     if file_output:
         if log_filename is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            log_filename = f'training_{timestamp}.log'
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = f"training_{timestamp}.log"
 
         log_path = _log_dir / log_filename
-        _file_handler = logging.FileHandler(log_path, mode='a', encoding='utf-8')
+        _file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
         _file_handler.setLevel(logging.DEBUG)  # Capture everything in file
-        file_fmt = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
-        )
+        file_fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
         _file_handler.setFormatter(file_fmt)
         root_logger.addHandler(_file_handler)
 
@@ -144,10 +141,10 @@ def get_logger(name: str) -> logging.Logger:
 
     # Create child logger under 'dqn' namespace
     # Strip 'src.' prefix for cleaner names
-    if name.startswith('src.'):
+    if name.startswith("src."):
         name = name[4:]
 
-    return logging.getLogger(f'dqn.{name}')
+    return logging.getLogger(f"dqn.{name}")
 
 
 def get_log_path() -> Optional[Path]:
@@ -176,7 +173,7 @@ def log_training_metrics(
         avg_q: Average Q-value (if available)
         steps: Steps in episode (if available)
     """
-    logger = get_logger('training')
+    logger = get_logger("training")
 
     metrics = [
         f"ep={episode}",
@@ -203,7 +200,7 @@ def log_model_event(event: str, path: str, **kwargs) -> None:
         path: Model file path
         **kwargs: Additional context (e.g., episode, score)
     """
-    logger = get_logger('model')
+    logger = get_logger("model")
 
     extra = " | ".join(f"{k}={v}" for k, v in kwargs.items())
     if extra:

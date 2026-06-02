@@ -9,19 +9,18 @@ These tests verify:
     - Save/Load functionality
 """
 
-import pytest
-import numpy as np
-import torch
-import tempfile
 import os
 import sys
+import tempfile
+
+import numpy as np
+import pytest
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.ai.agent import Agent
-from src.ai.network import DQN
-from src.ai.replay_buffer import ReplayBuffer
 
 
 @pytest.fixture
@@ -37,40 +36,32 @@ def config():
 @pytest.fixture
 def agent(config):
     """Create agent instance."""
-    return Agent(
-        state_size=config.STATE_SIZE,
-        action_size=config.ACTION_SIZE,
-        config=config
-    )
+    return Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
 
 class TestAgentInitialization:
     """Test agent initialization."""
-    
+
     def test_agent_creates_successfully(self, config):
         """Agent should initialize without errors."""
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
         assert agent is not None
-    
+
     def test_networks_initialized(self, agent):
         """Both policy and target networks should be initialized."""
         assert agent.policy_net is not None
         assert agent.target_net is not None
-    
+
     def test_networks_same_architecture(self, agent):
         """Policy and target networks should have same architecture."""
         policy_params = sum(p.numel() for p in agent.policy_net.parameters())
         target_params = sum(p.numel() for p in agent.target_net.parameters())
         assert policy_params == target_params
-    
+
     def test_epsilon_starts_at_max(self, agent, config):
         """Epsilon should start at EPSILON_START."""
         assert agent.epsilon == config.EPSILON_START
-    
+
     def test_memory_initialized(self, agent):
         """Replay buffer should be initialized."""
         assert agent.memory is not None
@@ -79,53 +70,45 @@ class TestAgentInitialization:
 
 class TestActionSelection:
     """Test action selection."""
-    
+
     def test_select_action_returns_valid_action(self, agent, config):
         """Selected action should be in valid range."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
         action = agent.select_action(state)
         assert 0 <= action < config.ACTION_SIZE
-    
+
     def test_greedy_action_selection(self, agent, config):
         """With epsilon=0, should always select best action."""
         agent.epsilon = 0
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        
+
         # Get multiple actions - should all be the same (deterministic)
         actions = [agent.select_action(state, training=False) for _ in range(10)]
         assert len(set(actions)) == 1
-    
+
     def test_exploration_with_high_epsilon(self, config):
         """With epsilon=1 and no NoisyNets, should be random."""
         # Disable NoisyNets to test epsilon-greedy exploration
         config.USE_NOISY_NETWORKS = False
         config.EPSILON_START = 1.0
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        
+
         # Get multiple actions - should have variety
         actions = [agent.select_action(state, training=True) for _ in range(100)]
         assert len(set(actions)) > 1
-    
+
     def test_exploration_with_noisy_nets(self, config):
         """With NoisyNets, exploration is handled by learned noise."""
         config.USE_NOISY_NETWORKS = True
         config.USE_DUELING = True  # NoisyNets require DuelingDQN
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        
+
         # NoisyNets should produce varied actions due to noise in weights
         # Even with epsilon=0, training mode should have exploration
         actions = [agent.select_action(state, training=True) for _ in range(100)]
@@ -149,7 +132,7 @@ class TestActionSelection:
 
 class TestExperienceStorage:
     """Test experience storage in replay buffer."""
-    
+
     def test_remember_adds_experience(self, agent, config):
         """Remember should add experience to buffer."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
@@ -157,90 +140,82 @@ class TestExperienceStorage:
         reward = 1.0
         next_state = np.random.randn(config.STATE_SIZE).astype(np.float32)
         done = False
-        
+
         initial_size = len(agent.memory)
         agent.remember(state, action, reward, next_state, done)
         assert len(agent.memory) == initial_size + 1
-    
+
     def test_memory_capacity(self, agent, config):
         """Buffer should not exceed capacity."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        
+
         for _ in range(config.MEMORY_SIZE + 100):
             agent.remember(state, 0, 0, state, False)
-        
+
         assert len(agent.memory) == config.MEMORY_SIZE
 
 
 class TestLearning:
     """Test learning functionality."""
-    
+
     def test_no_learning_without_enough_samples(self, agent, config):
         """Should not learn without minimum samples."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        
+
         # Add fewer than minimum required
         for _ in range(config.MEMORY_MIN - 10):
             agent.remember(state, 0, 1.0, state, False)
-        
+
         loss = agent.learn()
         assert loss is None
-    
+
     def test_learning_with_enough_samples(self, agent, config):
         """Should learn with enough samples."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        
+
         # Add enough experiences
         for _ in range(config.MEMORY_MIN + 50):
             agent.remember(state, np.random.randint(0, 3), 1.0, state, False)
-        
+
         # Call learn() enough times to account for LEARN_EVERY setting
-        learn_every = getattr(config, 'LEARN_EVERY', 1)
+        learn_every = getattr(config, "LEARN_EVERY", 1)
         loss = None
         for _ in range(learn_every):
             loss = agent.learn()
             if loss is not None:
                 break
-        
+
         assert loss is not None
         assert isinstance(loss, float)
-    
+
     def test_epsilon_decay(self, config):
         """Epsilon should decay correctly (when not using NoisyNets)."""
         # Disable NoisyNets to test epsilon-greedy decay
         config.USE_NOISY_NETWORKS = False
         config.EPSILON_START = 1.0
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
-        
+
         expected = initial_epsilon * config.EPSILON_DECAY
         assert agent.epsilon == max(config.EPSILON_END, expected)
-    
+
     def test_epsilon_decay_with_decay_one(self, config):
         """Epsilon should remain unchanged when EPSILON_DECAY is 1.0."""
         # Disable NoisyNets to test epsilon-greedy decay
         config.USE_NOISY_NETWORKS = False
         config.EPSILON_DECAY = 1.0
         config.EPSILON_START = 1.0
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
         # With decay=1.0, epsilon * 1.0 = epsilon (unchanged)
         assert agent.epsilon == initial_epsilon
-    
+
     def test_epsilon_decay_respects_minimum(self, config):
         """Epsilon should not decay below EPSILON_END."""
         # Disable NoisyNets to test epsilon-greedy decay
@@ -248,20 +223,16 @@ class TestLearning:
         config.EPSILON_DECAY = 0.5  # Aggressive decay
         config.EPSILON_END = 0.1
         config.EPSILON_START = 1.0
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
         # Decay many times
         for _ in range(100):
             agent.decay_epsilon()
-        
+
         # Should be at minimum, not below
         assert agent.epsilon == config.EPSILON_END
-    
+
     def test_epsilon_decay_with_noisy_nets_hybrid(self, config):
         """Epsilon SHOULD decay with NoisyNets for hybrid exploration (NoisyNets + epsilon-greedy fallback)."""
         config.USE_NOISY_NETWORKS = True
@@ -269,11 +240,7 @@ class TestLearning:
         config.EPSILON_DECAY = 0.9995
         config.EPSILON_END = 0.01
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
@@ -286,13 +253,13 @@ class TestLearning:
 
 class TestQValues:
     """Test Q-value computation."""
-    
+
     def test_get_q_values_shape(self, agent, config):
         """Q-values should have correct shape."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
         q_values = agent.get_q_values(state)
         assert q_values.shape == (config.ACTION_SIZE,)
-    
+
     def test_q_values_dtype(self, agent, config):
         """Q-values should be float."""
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
@@ -302,91 +269,84 @@ class TestQValues:
 
 class TestSaveLoad:
     """Test save/load functionality."""
-    
+
     def test_save_creates_file(self, agent):
         """Save should create a file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test_model.pth")
             agent.save(filepath)
             assert os.path.exists(filepath)
-    
+
     def test_load_restores_state(self, agent, config):
         """Load should restore agent state."""
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test_model.pth")
-            
+
             # Modify agent state
             agent.epsilon = 0.5
             agent.steps = 1000
             agent.save(filepath)
-            
+
             # Create new agent and load
             new_agent = Agent(
-                state_size=config.STATE_SIZE,
-                action_size=config.ACTION_SIZE,
-                config=config
+                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
             )
             new_agent.load(filepath)
-            
+
             assert new_agent.epsilon == 0.5
             assert new_agent.steps == 1000
 
 
 class TestTargetNetwork:
     """Test target network updates."""
-    
+
     def test_update_target_network(self, agent):
         """Target network should sync with policy network."""
         # Modify policy network
         with torch.no_grad():
             for param in agent.policy_net.parameters():
                 param.add_(1.0)
-        
+
         # Update target
         agent.update_target_network()
-        
+
         # Check they're equal
-        for p_param, t_param in zip(
-            agent.policy_net.parameters(),
-            agent.target_net.parameters()
-        ):
+        for p_param, t_param in zip(agent.policy_net.parameters(), agent.target_net.parameters()):
             assert torch.allclose(p_param, t_param)
-    
+
     def test_soft_update_target_network(self, config):
         """Soft update should blend policy into target network."""
         # Enable soft updates
         config.USE_SOFT_UPDATE = True
         config.TARGET_TAU = 0.1  # Use larger tau for easier testing
-        
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
-        
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
         # Store original target weights
-        original_target_weights = [
-            param.clone() for param in agent.target_net.parameters()
-        ]
-        
+        original_target_weights = [param.clone() for param in agent.target_net.parameters()]
+
         # Modify policy network significantly
         with torch.no_grad():
             for param in agent.policy_net.parameters():
                 param.add_(10.0)
-        
+
         # Soft update
         agent._soft_update_target_network()
-        
+
         # Check that target has changed but is not equal to policy
-        for i, (t_param, p_param, orig_param) in enumerate(zip(
-            agent.target_net.parameters(),
-            agent.policy_net.parameters(),
-            original_target_weights
-        )):
+        for i, (t_param, p_param, orig_param) in enumerate(
+            zip(
+                agent.target_net.parameters(),
+                agent.policy_net.parameters(),
+                original_target_weights,
+            )
+        ):
             # Target should have moved toward policy
             assert not torch.allclose(t_param, orig_param), f"Target param {i} didn't change"
             # But shouldn't be equal to policy (soft update)
-            assert not torch.allclose(t_param, p_param), f"Target param {i} equals policy (should be blended)"
+            assert not torch.allclose(
+                t_param, p_param
+            ), f"Target param {i} equals policy (should be blended)"
 
 
 class TestVectorizedTraining:
@@ -496,11 +456,7 @@ class TestQValueComputation:
 
     def test_q_values_done_masking(self, config):
         """Q-values for terminal states should be masked (no future reward)."""
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Create tensors directly
         batch_size = 4
@@ -520,8 +476,9 @@ class TestQValueComputation:
         # Non-done states should differ from pure reward due to future Q-value component
         # The target is: reward + gamma * max_Q(next_state) for non-terminal states
         # Since next_states are random, the Q-values won't exactly equal the reward
-        assert target_q[2] != 1.0 or target_q[3] != 1.0, \
-            "Non-terminal states should have future Q-value component (unlikely both equal 1.0)"
+        assert (
+            target_q[2] != 1.0 or target_q[3] != 1.0
+        ), "Non-terminal states should have future Q-value component (unlikely both equal 1.0)"
 
     def test_get_q_values_returns_all_actions(self, agent, config):
         """get_q_values should return Q-values for all actions."""
@@ -540,11 +497,7 @@ class TestSaveLoadEdgeCases:
         """Model saved on one device should load on another."""
         # Create and save agent on CPU
         config.FORCE_CPU = True
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
         agent.epsilon = 0.42
         agent.steps = 5000
 
@@ -554,15 +507,13 @@ class TestSaveLoadEdgeCases:
 
             # Load on same device (CPU)
             new_agent = Agent(
-                state_size=config.STATE_SIZE,
-                action_size=config.ACTION_SIZE,
-                config=config
+                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
             )
             new_agent.load(filepath)
 
             assert new_agent.epsilon == 0.42
             assert new_agent.steps == 5000
-            assert new_agent.device.type == 'cpu'
+            assert new_agent.device.type == "cpu"
 
     def test_save_includes_metadata(self, agent, config):
         """Saved model should include training metadata."""
@@ -574,14 +525,14 @@ class TestSaveLoadEdgeCases:
             agent.save(filepath, episode=500, best_score=150)
 
             # Load the checkpoint directly to inspect metadata
-            checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
+            checkpoint = torch.load(filepath, map_location="cpu", weights_only=False)
 
-            assert 'epsilon' in checkpoint
-            assert checkpoint['epsilon'] == 0.25
-            assert 'steps' in checkpoint
-            assert checkpoint['steps'] == 10000
+            assert "epsilon" in checkpoint
+            assert checkpoint["epsilon"] == 0.25
+            assert "steps" in checkpoint
+            assert checkpoint["steps"] == 10000
             # Verify network state dict is saved
-            assert 'policy_net_state_dict' in checkpoint
+            assert "policy_net_state_dict" in checkpoint
 
     def test_load_preserves_network_weights(self, agent, config):
         """Loading should exactly restore network weights."""
@@ -596,14 +547,14 @@ class TestSaveLoadEdgeCases:
 
             # Create new agent and load
             new_agent = Agent(
-                state_size=config.STATE_SIZE,
-                action_size=config.ACTION_SIZE,
-                config=config
+                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
             )
             new_agent.load(filepath)
 
             # Weights should match
-            for orig, loaded in zip(agent.policy_net.parameters(), new_agent.policy_net.parameters()):
+            for orig, loaded in zip(
+                agent.policy_net.parameters(), new_agent.policy_net.parameters()
+            ):
                 assert torch.allclose(orig, loaded)
 
 
@@ -621,11 +572,7 @@ class TestPrioritizedReplayIntegration:
         config.LEARN_EVERY = 1
         config.GRADIENT_STEPS = 1
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Fill buffer with experiences
         for _ in range(100):
@@ -658,11 +605,7 @@ class TestHardUpdateTargetNetwork:
         config.LEARN_EVERY = 1
         config.GRADIENT_STEPS = 1
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Fill buffer
         for _ in range(100):
@@ -714,7 +657,7 @@ class TestSaveMetadataRoundtrip:
             epsilon_start=1.0,
             epsilon_end=0.01,
             epsilon_decay=0.9995,
-            use_dueling=True
+            use_dueling=True,
         )
 
         # Round-trip through dict
@@ -744,7 +687,7 @@ class TestSaveMetadataRoundtrip:
             exploration_actions=500,
             exploitation_actions=1500,
             target_updates=10,
-            best_score=30
+            best_score=30,
         )
 
         # Round-trip through dict
@@ -772,10 +715,10 @@ class TestSaveMetadataRoundtrip:
 
         # Simulate old save format with missing fields
         old_data = {
-            'scores': [10, 20],
-            'rewards': [1.0, 2.0],
-            'steps': [100, 200],
-            'epsilons': [1.0, 0.9],
+            "scores": [10, 20],
+            "rewards": [1.0, 2.0],
+            "steps": [100, 200],
+            "epsilons": [1.0, 0.9],
             # Missing: bricks, wins, losses, q_values, exploration_actions, etc.
         }
 
@@ -792,11 +735,7 @@ class TestTorchCompileExceptionHandling:
         """Agent should work when torch.compile is disabled."""
         config.USE_TORCH_COMPILE = False
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         assert agent._compiled is False
         # Agent should still work
@@ -811,52 +750,40 @@ class TestLRSchedulerConfiguration:
     def test_cosine_scheduler_enabled(self, config):
         """Cosine LR scheduler should be configured when enabled."""
         config.USE_LR_SCHEDULER = True
-        config.LR_SCHEDULER_TYPE = 'cosine'
+        config.LR_SCHEDULER_TYPE = "cosine"
         config.LR_MIN = 1e-6
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         assert agent.scheduler is not None
         # Scheduler should be CosineAnnealingLR
-        assert 'CosineAnnealing' in type(agent.scheduler).__name__
+        assert "CosineAnnealing" in type(agent.scheduler).__name__
 
     def test_step_scheduler_enabled(self, config):
         """Step LR scheduler should be configured when enabled."""
         config.USE_LR_SCHEDULER = True
-        config.LR_SCHEDULER_TYPE = 'step'
+        config.LR_SCHEDULER_TYPE = "step"
         config.LR_SCHEDULER_STEP = 500
         config.LR_SCHEDULER_GAMMA = 0.5
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         assert agent.scheduler is not None
-        assert 'StepLR' in type(agent.scheduler).__name__
+        assert "StepLR" in type(agent.scheduler).__name__
 
     def test_scheduler_step_updates_lr(self, config):
         """Stepping scheduler should update learning rate."""
         config.USE_LR_SCHEDULER = True
-        config.LR_SCHEDULER_TYPE = 'step'
+        config.LR_SCHEDULER_TYPE = "step"
         config.LR_SCHEDULER_STEP = 1  # Step every episode
         config.LR_SCHEDULER_GAMMA = 0.5
         config.LEARNING_RATE = 0.001
 
-        agent = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
-        initial_lr = agent.optimizer.param_groups[0]['lr']
+        initial_lr = agent.optimizer.param_groups[0]["lr"]
         agent.step_scheduler()
-        new_lr = agent.optimizer.param_groups[0]['lr']
+        new_lr = agent.optimizer.param_groups[0]["lr"]
 
         assert new_lr < initial_lr
 
@@ -867,11 +794,7 @@ class TestArchitectureMismatchOnLoad:
     def test_state_size_mismatch_returns_none(self, config):
         """Loading model with wrong state size should fail gracefully."""
         # Create and save agent with one state size
-        agent1 = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent1 = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test_model.pth")
@@ -881,7 +804,7 @@ class TestArchitectureMismatchOnLoad:
             agent2 = Agent(
                 state_size=config.STATE_SIZE + 10,  # Different state size
                 action_size=config.ACTION_SIZE,
-                config=config
+                config=config,
             )
 
             # Load should fail and return None
@@ -891,11 +814,7 @@ class TestArchitectureMismatchOnLoad:
 
     def test_action_size_mismatch_returns_none(self, config):
         """Loading model with wrong action size should fail gracefully."""
-        agent1 = Agent(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        agent1 = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test_model.pth")
@@ -905,7 +824,7 @@ class TestArchitectureMismatchOnLoad:
             agent2 = Agent(
                 state_size=config.STATE_SIZE,
                 action_size=config.ACTION_SIZE + 2,  # Different action size
-                config=config
+                config=config,
             )
 
             # Load should fail and return None
@@ -916,4 +835,3 @@ class TestArchitectureMismatchOnLoad:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

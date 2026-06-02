@@ -17,13 +17,15 @@ Game Rules:
 - Ball bounces off paddles and top/bottom walls
 """
 
+import sys
+from typing import List, Optional, Tuple
+
 import numpy as np
 import pygame
-from typing import Tuple, List, Optional
 
 from .base_game import BaseGame
-import sys
-sys.path.append('..')
+
+sys.path.append("..")
 from config import Config
 
 
@@ -45,7 +47,7 @@ class PongBall:
         self.y = y
         self.speed = self.base_speed
         # Random angle between -45 and 45 degrees
-        angle = np.random.uniform(-np.pi/4, np.pi/4)
+        angle = np.random.uniform(-np.pi / 4, np.pi / 4)
         self.dx = self.speed * direction * np.cos(angle)
         self.dy = self.speed * np.sin(angle)
 
@@ -53,10 +55,7 @@ class PongBall:
     def rect(self) -> pygame.Rect:
         """Get bounding rectangle for collision detection."""
         return pygame.Rect(
-            self.x - self.radius,
-            self.y - self.radius,
-            self.radius * 2,
-            self.radius * 2
+            self.x - self.radius, self.y - self.radius, self.radius * 2, self.radius * 2
         )
 
     def move(self) -> None:
@@ -134,13 +133,14 @@ class Pong(BaseGame):
 
     # AI difficulty settings
     AI_SKILL_LEVELS = {
-        'easy': {'error': 60, 'reaction': 0.3, 'speed_mult': 0.7},
-        'medium': {'error': 30, 'reaction': 0.15, 'speed_mult': 0.9},
-        'hard': {'error': 10, 'reaction': 0.05, 'speed_mult': 1.0},
+        "easy": {"error": 60, "reaction": 0.3, "speed_mult": 0.7},
+        "medium": {"error": 30, "reaction": 0.15, "speed_mult": 0.9},
+        "hard": {"error": 10, "reaction": 0.05, "speed_mult": 1.0},
     }
 
-    def __init__(self, config: Optional[Config] = None, headless: bool = False,
-                 ai_difficulty: str = 'medium'):
+    def __init__(
+        self, config: Optional[Config] = None, headless: bool = False, ai_difficulty: str = "medium"
+    ):
         """
         Initialize the Pong game.
 
@@ -157,10 +157,10 @@ class Pong(BaseGame):
         self.height = self.config.SCREEN_HEIGHT
 
         # AI difficulty
-        ai_settings = self.AI_SKILL_LEVELS.get(ai_difficulty, self.AI_SKILL_LEVELS['medium'])
-        self.ai_error = ai_settings['error']
-        self.ai_reaction = ai_settings['reaction']
-        self.ai_speed_mult = ai_settings['speed_mult']
+        ai_settings = self.AI_SKILL_LEVELS.get(ai_difficulty, self.AI_SKILL_LEVELS["medium"])
+        self.ai_error = ai_settings["error"]
+        self.ai_reaction = ai_settings["reaction"]
+        self.ai_speed_mult = ai_settings["speed_mult"]
         self.ai_target_y = self.height / 2  # Smoothed target
 
         # Game objects
@@ -173,7 +173,7 @@ class Pong(BaseGame):
         self.ai_score = 0
         self.game_over = False
         self.rally_count = 0  # Track hits in current rally
-        self.last_hit_by = None  # 'player' or 'ai'
+        self.last_hit_by: Optional[str] = None  # 'player' or 'ai'
 
         # Pre-allocated state array
         self._state_array = np.zeros(10, dtype=np.float32)
@@ -189,7 +189,7 @@ class Pong(BaseGame):
         # Ball trail for retro effect (only in visual mode)
         self._ball_trail: List[Tuple[float, float]] = []
         # Bug 81 fix: Ensure trail length is always at least 1 to prevent issues with pop(0) on empty list
-        self._trail_length = max(1, getattr(config, 'BALL_TRAIL_LENGTH', 10))
+        self._trail_length = max(1, getattr(config, "BALL_TRAIL_LENGTH", 10))
 
         # Visual effects timing
         self._score_flash_timer = 0
@@ -231,25 +231,22 @@ class Pong(BaseGame):
         player_x = self.width - self.PADDLE_MARGIN - self.PADDLE_WIDTH
         player_y = (self.height - self.PADDLE_HEIGHT) // 2
         self.player_paddle = PongPaddle(
-            player_x, player_y,
-            self.PADDLE_WIDTH, self.PADDLE_HEIGHT,
-            self.PADDLE_SPEED
+            player_x, player_y, self.PADDLE_WIDTH, self.PADDLE_HEIGHT, self.PADDLE_SPEED
         )
 
         # Create AI paddle (left side)
         ai_x = self.PADDLE_MARGIN
         ai_y = (self.height - self.PADDLE_HEIGHT) // 2
         self.ai_paddle = PongPaddle(
-            ai_x, ai_y,
-            self.PADDLE_WIDTH, self.PADDLE_HEIGHT,
-            int(self.PADDLE_SPEED * self.ai_speed_mult)
+            ai_x,
+            ai_y,
+            self.PADDLE_WIDTH,
+            self.PADDLE_HEIGHT,
+            int(self.PADDLE_SPEED * self.ai_speed_mult),
         )
 
         # Create ball at center
-        self.ball = PongBall(
-            self.width / 2, self.height / 2,
-            self.BALL_RADIUS, self.BALL_SPEED
-        )
+        self.ball = PongBall(self.width / 2, self.height / 2, self.BALL_RADIUS, self.BALL_SPEED)
         # Alternate starting direction
         direction = 1 if np.random.random() > 0.5 else -1
         self.ball.reset(self.width / 2, self.height / 2, direction=direction)
@@ -409,14 +406,14 @@ class Pong(BaseGame):
         if self.ball.rect.colliderect(self.player_paddle.rect) and self.ball.dx > 0:
             reward += 0.2  # Reward for hitting ball
             self.rally_count += 1
-            self.last_hit_by = 'player'
+            self.last_hit_by = "player"
             self._hit_flash_timer = 10
             self._paddle_bounce(self.player_paddle, direction=-1)
 
         # AI paddle collision (left side)
         if self.ball.rect.colliderect(self.ai_paddle.rect) and self.ball.dx < 0:
             self.rally_count += 1
-            self.last_hit_by = 'ai'
+            self.last_hit_by = "ai"
             self._paddle_bounce(self.ai_paddle, direction=1)
 
         # Scoring (ball past paddles)
@@ -548,11 +545,11 @@ class Pong(BaseGame):
     def _get_info(self) -> dict:
         """Get additional game information."""
         return {
-            'score': self.player_score,
-            'ai_score': self.ai_score,
-            'lives': max(0, self.WIN_SCORE - self.ai_score),  # Pseudo-lives
-            'won': self.player_score >= self.WIN_SCORE,
-            'rally': self.rally_count,
+            "score": self.player_score,
+            "ai_score": self.ai_score,
+            "lives": max(0, self.WIN_SCORE - self.ai_score),  # Pseudo-lives
+            "won": self.player_score >= self.WIN_SCORE,
+            "rally": self.rally_count,
         }
 
     def render(self, screen: pygame.Surface) -> None:
@@ -582,9 +579,11 @@ class Pong(BaseGame):
                 alpha = int(100 * (i + 1) / trail_len)
                 trail_size = max(2, self.ball.radius * (i + 1) // trail_len)
                 trail_color = (alpha, alpha, alpha)
-                pygame.draw.rect(screen, trail_color,
-                               (int(tx) - trail_size, int(ty) - trail_size,
-                                trail_size * 2, trail_size * 2))
+                pygame.draw.rect(
+                    screen,
+                    trail_color,
+                    (int(tx) - trail_size, int(ty) - trail_size, trail_size * 2, trail_size * 2),
+                )
 
         # Draw paddles
         # AI paddle (left) - slightly blue tint
@@ -607,7 +606,7 @@ class Pong(BaseGame):
             int(self.ball.x) - self.ball.radius,
             int(self.ball.y) - self.ball.radius,
             self.ball.radius * 2,
-            self.ball.radius * 2
+            self.ball.radius * 2,
         )
         pygame.draw.rect(screen, ball_color, ball_rect)
 
@@ -638,7 +637,9 @@ class Pong(BaseGame):
 
             # Rally counter
             if self.rally_count > 0 and self._small_font:
-                rally_text = self._small_font.render(f"Rally: {self.rally_count}", True, (100, 100, 100))
+                rally_text = self._small_font.render(
+                    f"Rally: {self.rally_count}", True, (100, 100, 100)
+                )
                 screen.blit(rally_text, (center_x - rally_text.get_width() // 2, self.height - 30))
 
         # Draw CRT scanline effect (lighter for less visual noise)
@@ -670,10 +671,11 @@ class Pong(BaseGame):
             # Final score
             if self._small_font:
                 final = self._small_font.render(
-                    f"Final: {self.player_score} - {self.ai_score}",
-                    True, (200, 200, 200)
+                    f"Final: {self.player_score} - {self.ai_score}", True, (200, 200, 200)
                 )
-                screen.blit(final, (self.width // 2 - final.get_width() // 2, self.height // 2 + 40))
+                screen.blit(
+                    final, (self.width // 2 - final.get_width() // 2, self.height // 2 + 40)
+                )
 
     def close(self) -> None:
         """Clean up resources."""
@@ -743,8 +745,8 @@ class VecPong:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done in enumerate(self._dones):
-            if done:
+        for i, done_flag in enumerate(self._dones):
+            if bool(done_flag):
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos
@@ -768,7 +770,7 @@ if __name__ == "__main__":
     pygame.display.set_caption("Pong - Human Play (UP/DOWN or W/S)")
     clock = pygame.time.Clock()
 
-    game = Pong(config, ai_difficulty='medium')
+    game = Pong(config, ai_difficulty="medium")
 
     print("\n🏓 PONG - Human Play Mode")
     print("   Controls: UP/DOWN arrows or W/S keys")
@@ -798,7 +800,7 @@ if __name__ == "__main__":
         state, reward, done, info = game.step(action)
 
         if done:
-            if info['won']:
+            if info["won"]:
                 print(f"   You WIN! Final: {info['score']} - {info['ai_score']}")
             else:
                 print(f"   Game Over! Final: {info['score']} - {info['ai_score']}")

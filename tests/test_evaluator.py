@@ -7,17 +7,17 @@ These tests verify:
     - Statistics computation
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
 import tempfile
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.evaluator import Evaluator, EvalResults
 from src.ai.agent import Agent
+from src.ai.evaluator import EvalResults, Evaluator
 from src.game.breakout import Breakout
 
 
@@ -106,11 +106,11 @@ class TestEvaluate:
         results = evaluator.evaluate(num_episodes=5, max_steps=50)
 
         # Should have score statistics
-        assert hasattr(results, 'mean_score')
-        assert hasattr(results, 'median_score')
-        assert hasattr(results, 'std_score')
-        assert hasattr(results, 'min_score')
-        assert hasattr(results, 'max_score')
+        assert hasattr(results, "mean_score")
+        assert hasattr(results, "median_score")
+        assert hasattr(results, "std_score")
+        assert hasattr(results, "min_score")
+        assert hasattr(results, "max_score")
 
         # Min should be <= mean <= max
         assert results.min_score <= results.mean_score <= results.max_score
@@ -176,9 +176,9 @@ class TestEvalResults:
         result_dict = results.to_dict()
 
         assert isinstance(result_dict, dict)
-        assert 'mean_score' in result_dict
-        assert 'win_rate' in result_dict
-        assert 'num_games' in result_dict
+        assert "mean_score" in result_dict
+        assert "win_rate" in result_dict
+        assert "num_games" in result_dict
 
     def test_eval_results_has_timestamp(self, evaluator):
         """EvalResults should have timestamp."""
@@ -200,10 +200,10 @@ class TestGetSummary:
         evaluator.evaluate(num_episodes=2, max_steps=50)
         summary = evaluator.get_summary()
 
-        assert 'num_evals' in summary
-        assert summary['num_evals'] == 1
-        assert 'best_eval_score' in summary
-        assert 'is_plateau' in summary
+        assert "num_evals" in summary
+        assert summary["num_evals"] == 1
+        assert "best_eval_score" in summary
+        assert "is_plateau" in summary
 
 
 if __name__ == "__main__":
