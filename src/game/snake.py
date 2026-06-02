@@ -131,6 +131,9 @@ class Snake(BaseGame):
         self._death_timer = 0
 
         # Visual effects (only in visual mode)
+        self._font: Optional[pygame.font.Font]
+        self._small_font: Optional[pygame.font.Font]
+        self._background: Optional[pygame.Surface]
         if not headless:
             self.particles = ParticleSystem(max_particles=300)
             pygame.font.init()

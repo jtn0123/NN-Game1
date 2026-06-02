@@ -196,6 +196,9 @@ class Pong(BaseGame):
         self._hit_flash_timer = 0
 
         # Visual effects
+        self._font: Optional[pygame.font.Font]
+        self._small_font: Optional[pygame.font.Font]
+        self._label_font: Optional[pygame.font.Font]
         if not headless:
             pygame.font.init()
             self._font = pygame.font.Font(None, 72)

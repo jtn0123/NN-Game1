@@ -19,7 +19,8 @@
 | I | Developer Experience & Tooling | C | 4 |
 | **Overall** | | **C+** | **35** |
 
-**Top 5 highest-leverage fixes:** E1, A1, D1, I1, B1
+**Original top 5 highest-leverage fixes:** E1, A1, D1, I1, B1
+**Current highest-leverage remaining fixes:** C1, A1, C3, A2, E4
 
 **Implementation progress:**
 - 2026-06-01: Implemented E1 by adding checkpoint metadata sidecars and making dashboard model/stat listing read JSON metadata instead of deserializing `.pth` files.
@@ -34,6 +35,27 @@
 - 2026-06-01: Advanced B1/A1 by extracting `src/app/model_service.py` for shared model filename normalization, path resolution, training-history payload construction, recent metric helpers, and periodic checkpoint cleanup used by both visual and headless modes.
 - 2026-06-01: Implemented A3 by adding a `BaseVecGame` protocol, registering vectorized constructors beside normal game metadata, and making headless vector setup registry-driven.
 - 2026-06-01: Implemented C2 by replacing dashboard and launcher inline event handlers with data-action bindings, delegated JS listeners, and a static regression test that rejects inline handler attributes.
+- 2026-06-01: Tightened CI compatibility by fixing pygame-stub type errors in visual surfaces/fonts and documenting the remaining implementation backlog below.
+
+**Completed items:** A3, A4, B2, B3, B4, C2, C4, D1, D3, D4, E1, E2, E3, F2, F3, G1, H1, H2, I1, I2, I3.
+
+**Partially completed items:** A1 and B1 were advanced by `src/app/model_service.py`, but `main.py` still needs deeper service extraction and residual visual/headless lifecycle cleanup. F1 was advanced by package metadata/extras, but a lockfile or explicit lock strategy is still open.
+
+**Remaining implementation backlog:**
+
+| ID | Remaining work | Impact | Effort |
+|----|----------------|--------|--------|
+| C1 | Split `src/web/static/app.js` into focused modules with a small bootstrap entry. | Major | L |
+| A1 | Continue extracting `main.py` lifecycle, CLI, web launcher, and training-controller responsibilities beyond the first `ModelService` slice. | Major | L |
+| C3 | Add frontend smoke/unit coverage for dashboard state transitions, model empty states, controls, and chart rendering. | Moderate | M |
+| A2 | Migrate `config.py` toward scoped config dataclasses while preserving current attribute compatibility. | Moderate | M |
+| E4 | Vendor pinned dashboard browser assets or add exact SRI/crossorigin attributes for CDN scripts. | Moderate | S |
+| D2 | Add pytest markers/skip guards for heavyweight `torch`, `pygame`, `web`, and slow integration tests. | Moderate | S |
+| F1 | Choose and commit a reproducible lock strategy (`uv.lock`, `pip-tools`, or documented equivalent). | Major | M |
+| G2 | Move neural-network visualization sampling into a rate-limited publisher with explicit serialization budgets. | Moderate | M |
+| G3 | Add an advisory performance benchmark command for headless steps/sec regression tracking. | Minor | S |
+| H3 | Mark historical bug/progress reports as snapshots and add a current status note with validation caveats. | Moderate | S |
+| I4 | Improve optional dependency first-run errors and dependency-specific test selection. | Moderate | S |
 
 ---
 

@@ -285,7 +285,13 @@ class Dashboard:
         rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
         # Blit cached gradient surface
-        screen.blit(self._cached_gradient, (self.x, self.y))
+        gradient = self._cached_gradient
+        if gradient is None:
+            self._create_gradient_surface()
+            gradient = self._cached_gradient
+        if gradient is None:
+            return
+        screen.blit(gradient, (self.x, self.y))
 
         # Border
         pygame.draw.rect(screen, (45, 50, 70), rect, 2, border_radius=5)

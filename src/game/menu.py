@@ -638,7 +638,7 @@ class GameMenu:
             end = (offset - self.screen_height, self.screen_height)
 
             line_surface = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
-            pygame.draw.line(line_surface, (255, 255, 255, line["alpha"]), start, end, 1)
+            pygame.draw.line(line_surface, (255, 255, 255, int(line["alpha"])), start, end, 1)
             screen.blit(line_surface, (0, 0))
 
         # Particles (stars)

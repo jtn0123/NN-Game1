@@ -324,6 +324,8 @@ class Asteroids(BaseGame):
         # Bug 105: Track game time for smooth animations (not affected by pause)
         self._game_time = 0.0
 
+        self._font: Optional[pygame.font.Font]
+        self._small_font: Optional[pygame.font.Font]
         if not headless:
             pygame.font.init()
             self._font = pygame.font.Font(None, 48)
