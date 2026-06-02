@@ -51,6 +51,7 @@ except ImportError:
 import sys
 sys.path.append('../..')
 from config import Config
+from src.utils.checkpoint_loader import load_checkpoint
 from src.utils.logger import get_logger
 
 # Module logger
@@ -1226,7 +1227,6 @@ class WebDashboard:
             Searches both game-specific directory and legacy models directory.
             """
             import os
-            import torch
             from datetime import datetime
             
             # Search both game-specific and legacy directories
@@ -1264,7 +1264,12 @@ class WebDashboard:
                         
                         # Try to extract metadata
                         try:
-                            checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+                            checkpoint = load_checkpoint(
+                                path,
+                                map_location='cpu',
+                                trusted_dirs=[model_dir],
+                                allow_unsafe_fallback=True,
+                            )
                             model_info['steps'] = checkpoint.get('steps', None)
                             model_info['epsilon'] = checkpoint.get('epsilon', None)
                             if 'metadata' in checkpoint:
@@ -1355,7 +1360,6 @@ class WebDashboard:
         def api_game_stats():
             """Get training statistics for all games (for comparison panel)."""
             import os
-            import torch
             from src.game import list_games, get_game_info
             
             stats = {}
@@ -1381,7 +1385,12 @@ class WebDashboard:
                             game_stats['model_count'] += 1
                             path = os.path.join(game_model_dir, f)
                             try:
-                                checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+                                checkpoint = load_checkpoint(
+                                    path,
+                                    map_location='cpu',
+                                    trusted_dirs=[game_model_dir],
+                                    allow_unsafe_fallback=True,
+                                )
                                 if 'metadata' in checkpoint:
                                     meta = checkpoint['metadata']
                                     if meta.get('best_score', 0) > game_stats['best_score']:
@@ -1663,7 +1672,10 @@ class WebDashboard:
         selected_action: int,
         weights: List[List[List[float]]],
         step: int,
-        action_labels: Optional[List[str]] = None
+        action_labels: Optional[List[str]] = None,
+        input_state: Optional[List[float]] = None,
+        analysis_activations: Optional[Dict[str, List[float]]] = None,
+        analysis_weights: Optional[List[List[List[float]]]] = None,
     ) -> None:
         """
         Emit neural network visualization data to connected clients.
@@ -1680,6 +1692,15 @@ class WebDashboard:
             step: Current training step
             action_labels: Labels for each action (e.g., ["LEFT", "STAY", "RIGHT"])
         """
+        self._sync_phase2_inspection(
+            layer_info=layer_info,
+            activations=analysis_activations if analysis_activations is not None else activations,
+            q_values=q_values,
+            weights=analysis_weights if analysis_weights is not None else weights,
+            input_state=input_state,
+            action_labels=action_labels,
+        )
+
         self.publisher.update_nn_visualization(
             layer_info=layer_info,
             activations=activations,
@@ -1689,6 +1710,97 @@ class WebDashboard:
             step=step,
             action_labels=action_labels
         )
+
+    def _sync_phase2_inspection(
+        self,
+        layer_info: List[Dict[str, Any]],
+        activations: Dict[str, List[float]],
+        q_values: List[float],
+        weights: List[List[List[float]]],
+        input_state: Optional[List[float]],
+        action_labels: Optional[List[str]],
+    ) -> None:
+        """Populate neuron and layer inspection data from live NN snapshots."""
+        weight_arrays = [np.asarray(weight) for weight in weights]
+        linear_keys = sorted(
+            (key for key in activations if key.startswith('layer_')),
+            key=lambda key: int(key.split('_', 1)[1])
+        )
+        linear_key_idx = 0
+        weight_idx = 0
+
+        for layer_idx, info in enumerate(layer_info):
+            layer_type = info.get('type', '')
+            layer_name = info.get('name', f'Layer {layer_idx}')
+            neuron_count = int(info.get('neurons', 0))
+
+            if layer_type == 'input':
+                layer_acts = np.asarray(input_state if input_state is not None else [])
+            elif layer_type == 'value_stream':
+                layer_acts = np.asarray(activations.get('value_hidden', []))
+            elif layer_type == 'advantage_stream':
+                layer_acts = np.asarray(activations.get('advantage_hidden', []))
+            elif linear_key_idx < len(linear_keys):
+                layer_acts = np.asarray(activations.get(linear_keys[linear_key_idx], []))
+                linear_key_idx += 1
+            elif layer_type == 'output':
+                layer_acts = np.asarray(q_values)
+            else:
+                layer_acts = np.asarray([])
+
+            if layer_acts.ndim > 1:
+                layer_acts = layer_acts[0]
+            layer_acts = layer_acts.reshape(-1)
+
+            incoming_weights = None
+            if layer_type != 'input' and weight_idx < len(weight_arrays):
+                incoming_weights = weight_arrays[weight_idx]
+                weight_idx += 1
+            next_weights = weight_arrays[weight_idx] if weight_idx < len(weight_arrays) else None
+
+            self.publisher.update_layer_analysis(
+                layer_idx=layer_idx,
+                layer_name=layer_name,
+                neuron_count=neuron_count,
+                activations=layer_acts,
+                weights=incoming_weights,
+            )
+
+            for neuron_idx, activation in enumerate(layer_acts[:neuron_count]):
+                neuron_incoming = None
+                if (
+                    incoming_weights is not None
+                    and incoming_weights.ndim >= 2
+                    and neuron_idx < incoming_weights.shape[0]
+                ):
+                    neuron_incoming = incoming_weights[neuron_idx].tolist()
+
+                neuron_outgoing = None
+                if (
+                    next_weights is not None
+                    and next_weights.ndim >= 2
+                    and neuron_idx < next_weights.shape[1]
+                ):
+                    neuron_outgoing = next_weights[:, neuron_idx].tolist()
+
+                q_contributions = None
+                if layer_type == 'output' and neuron_idx < len(q_values):
+                    label = (
+                        action_labels[neuron_idx]
+                        if action_labels and neuron_idx < len(action_labels)
+                        else f'action_{neuron_idx}'
+                    )
+                    q_contributions = {label: float(q_values[neuron_idx])}
+
+                self.publisher.update_neuron_inspection(
+                    layer_idx=layer_idx,
+                    neuron_idx=neuron_idx,
+                    layer_name=layer_name,
+                    current_activation=float(activation),
+                    incoming_weights=neuron_incoming,
+                    outgoing_weights=neuron_outgoing,
+                    q_contributions=q_contributions,
+                )
 
 
 # Create templates directory structure

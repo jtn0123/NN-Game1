@@ -454,6 +454,40 @@ class TestWebDashboardIntegration:
             assert data[0]['layer_idx'] == 0
             assert data[0]['layer_name'] == "input"
 
+    def test_emit_nn_visualization_updates_phase2_inspection(self, web_dashboard):
+        """Live NN snapshots should populate layer and neuron inspection endpoints."""
+        layer_info = [
+            {'name': 'Input', 'neurons': 2, 'type': 'input'},
+            {'name': 'Hidden 1', 'neurons': 2, 'type': 'hidden'},
+            {'name': 'Output', 'neurons': 2, 'type': 'output'},
+        ]
+
+        web_dashboard.emit_nn_visualization(
+            layer_info=layer_info,
+            activations={'layer_0': [0.5, 0.6], 'layer_1': [0.7, 0.8]},
+            q_values=[0.7, 0.8],
+            selected_action=1,
+            weights=[
+                [[0.1, 0.2], [0.3, 0.4]],
+                [[1.0, 2.0], [3.0, 4.0]],
+            ],
+            step=10,
+            action_labels=["LEFT", "RIGHT"],
+            input_state=[0.9, 0.1],
+        )
+
+        hidden = web_dashboard.publisher.get_layer_analysis(1)
+        assert hidden['layer_name'] == 'Hidden 1'
+        assert hidden['avg_activation'] == pytest.approx(0.55)
+
+        hidden_neuron = web_dashboard.publisher.get_neuron_details(1, 0)
+        assert hidden_neuron['current_activation'] == pytest.approx(0.5)
+        assert hidden_neuron['incoming_weights'] == [0.1, 0.2]
+        assert hidden_neuron['outgoing_weights'] == [1.0, 3.0]
+
+        output_neuron = web_dashboard.publisher.get_neuron_details(2, 0)
+        assert output_neuron['q_value_contributions'] == {'LEFT': 0.7}
+
     def test_logging_during_training(self, web_dashboard):
         """Logging should work during training simulation."""
         web_dashboard.log("Training started", level="info")

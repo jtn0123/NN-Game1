@@ -85,6 +85,7 @@ from src.game.asteroids import VecAsteroids
 from src.ai.agent import Agent, TrainingHistory
 from src.ai.trainer import Trainer
 from src.ai.evaluator import Evaluator  # Deterministic performance tracking
+from src.utils.checkpoint_loader import load_checkpoint
 from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
 from src.visualizer.hud import TrainingHUD
 from src.visualizer.pause_menu import PauseMenu
@@ -347,7 +348,11 @@ class GameApp:
         
         # If explicit path specified, check compatibility
         if explicit_path and os.path.exists(explicit_path):
-            info = Agent.inspect_model(explicit_path)
+            info = Agent.inspect_model(
+                explicit_path,
+                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
+                allow_unsafe_fallback=True,
+            )
             if info and info.get('state_size') == state_size and info.get('action_size') == action_size:
                 return explicit_path
             else:
@@ -382,8 +387,12 @@ class GameApp:
     def _restore_training_history(self, filepath: str) -> None:
         """Restore training history from a saved model (called after dashboard is ready)."""
         try:
-            import torch
-            checkpoint = torch.load(filepath, map_location=self.config.DEVICE, weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.config.DEVICE,
+                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
+                allow_unsafe_fallback=True,
+            )
             
             if 'training_history' in checkpoint:
                 history_data = checkpoint['training_history']
@@ -586,10 +595,7 @@ class GameApp:
         # Give time for the save event to propagate to clients
         time.sleep(0.5)
         
-        # Exit gracefully - use os._exit() because this is called from SocketIO thread
         self.running = False
-        pygame.quit()
-        os._exit(0)  # Terminates process from any thread
     
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
@@ -1851,7 +1857,17 @@ class GameApp:
                 selected_action=selected_action,
                 weights=weights,
                 step=self.agent.steps,
-                action_labels=action_labels
+                action_labels=action_labels,
+                input_state=state.tolist(),
+                analysis_activations={
+                    key: (act[0] if len(act.shape) > 1 else act).tolist()
+                    for key, act in raw_activations.items()
+                },
+                analysis_weights=[
+                    w.tolist()
+                    for w in raw_weights
+                    if w is not None
+                ]
             )
         except Exception:
             # Don't crash training on visualization errors - silently ignore
@@ -1989,6 +2005,7 @@ class HeadlessTrainer:
         self.config = config
         self.args = args
         self._existing_dashboard = existing_dashboard
+        self.running = True
         
         # Apply CLI overrides to config
         if args.lr:
@@ -2162,8 +2179,12 @@ class HeadlessTrainer:
             return
         
         try:
-            import torch
-            checkpoint = torch.load(filepath, map_location=self.config.DEVICE, weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.config.DEVICE,
+                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
+                allow_unsafe_fallback=True,
+            )
             
             if 'training_history' in checkpoint:
                 training_history = TrainingHistory.from_dict(checkpoint['training_history'])
@@ -2198,7 +2219,11 @@ class HeadlessTrainer:
         
         # If explicit path specified, check compatibility
         if explicit_path and os.path.exists(explicit_path):
-            info = Agent.inspect_model(explicit_path)
+            info = Agent.inspect_model(
+                explicit_path,
+                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
+                allow_unsafe_fallback=True,
+            )
             if info and info.get('state_size') == state_size and info.get('action_size') == action_size:
                 return explicit_path
             else:
@@ -2578,7 +2603,17 @@ class HeadlessTrainer:
                 selected_action=selected_action,
                 weights=weights,
                 step=self.agent.steps,
-                action_labels=action_labels
+                action_labels=action_labels,
+                input_state=state.tolist(),
+                analysis_activations={
+                    key: (act[0] if len(act.shape) > 1 else act).tolist()
+                    for key, act in raw_activations.items()
+                },
+                analysis_weights=[
+                    w.tolist()
+                    for w in raw_weights
+                    if w is not None
+                ]
             )
         except Exception:
             # Don't crash training on visualization errors - silently ignore
@@ -2726,10 +2761,7 @@ class HeadlessTrainer:
         import time
         time.sleep(0.5)
 
-        # Exit gracefully - use os._exit() because this is called from SocketIO thread
         self.running = False
-        import os
-        os._exit(0)  # Terminates process from any thread
 
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
@@ -2767,12 +2799,14 @@ class HeadlessTrainer:
         
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         episode = start_episode
-        while config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES:
+        while self.running and (config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES):
             self.current_episode = episode
-            
+
             # Handle pause (only if web dashboard is active)
-            while self.paused:
+            while self.running and self.paused:
                 time.sleep(0.1)
+            if not self.running:
+                break
             
             state = self.game.reset()
             episode_reward = 0.0
@@ -3004,10 +3038,12 @@ class HeadlessTrainer:
         last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
         
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
-        while config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES:
+        while self.running and (config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES):
             # Handle pause (only if web dashboard is active)
-            while self.paused:
+            while self.running and self.paused:
                 time.sleep(0.1)
+            if not self.running:
+                break
             
             # Batch action selection for all environments
             actions, num_explored, num_exploited = self.agent.select_actions_batch(states, training=True)

@@ -11,8 +11,8 @@ The historical report files in the repository were validated against current cod
 `30_MORE_BUGS_LIST.md`, and `POTENTIAL_BUGS.md`.
 
 Most old critical replay-buffer and game-state items were already fixed. This
-pass fixed the remaining small/medium report items that were current, cohesive,
-and safe for one PR.
+pass fixed all currently validated report items, including the larger follow-ups
+that were initially separated for compatibility and lifecycle work.
 
 ## Fixed In This PR
 
@@ -51,6 +51,21 @@ and safe for one PR.
 - **Validated:** Timestamp formatting sliced microseconds to centiseconds while the comment said milliseconds.
 - **Fix:** Emits `HH:MM:SS.mmm` timestamps and tests the format.
 
+#### E1 - Safer checkpoint loading
+- **Where:** `src/ai/agent.py`, `src/web/server.py`, `main.py`, `src/utils/checkpoint_loader.py`
+- **Validated:** Several model inspection/load paths still used `torch.load(..., weights_only=False)`.
+- **Fix:** Added a shared checkpoint loader that tries `weights_only=True` first and only falls back to unrestricted loading for explicitly trusted local model directories.
+
+#### A1 - Replace hard process exit in save-and-quit
+- **Where:** `main.py`
+- **Validated:** The SocketIO save-and-quit path called `os._exit(0)`, bypassing normal shutdown.
+- **Fix:** Save-and-quit now requests loop shutdown by setting `running = False`; headless loops now honor that flag, including while paused.
+
+#### C3 - Wire live Phase 2 neuron/layer data into training
+- **Where:** `main.py`, `src/web/server.py`
+- **Validated:** The frontend could fetch neuron/layer details, but training did not consistently populate live inspection data.
+- **Fix:** `emit_nn_visualization()` now syncs Phase 2 layer analysis and neuron details from live NN snapshots, and the training paths pass full activation/weight data for inspection while still sending sampled data to the visualizer.
+
 ## Already Fixed Or Invalid
 
 - PER save/load no longer calls a nonexistent superclass method and now persists beta/frame count.
@@ -62,27 +77,11 @@ and safe for one PR.
 - Web win-rate empty-history division is already guarded.
 - Dashboard epsilon/config validation is already materially improved.
 
-## Remaining Larger Follow-Ups
+## Remaining Follow-Ups
 
-These were validated as real but intentionally left out of this PR because they
-need broader design and compatibility decisions:
-
-#### E1 - Safer checkpoint loading
-- **Where:** `src/ai/agent.py`, `src/web/server.py`, `main.py`
-- **What's left:** Several model inspection/load paths still use `torch.load(..., weights_only=False)`.
-- **Why separate:** The checkpoints contain metadata and history beyond tensors, so a safe-loader migration needs compatibility fallback and explicit allowlisting.
-
-#### A1 - Replace hard process exit in save-and-quit
-- **Where:** `main.py`
-- **What's left:** The SocketIO save-and-quit path still calls `os._exit(0)`.
-- **Why separate:** Removing it cleanly needs lifecycle work across the pygame loop and web thread shutdown.
-
-#### C3 - Wire live Phase 2 neuron/layer data into training
-- **Where:** `main.py`, `src/web/static/app.js`, `src/web/server.py`
-- **What's left:** The frontend can fetch neuron/layer details, but the training path still does not consistently publish live layer inspection updates.
-- **Why separate:** This is feature wiring with UX/runtime implications, not just a guard fix.
+No validated grade-report items remain open from this pass.
 
 ## Validation
 
 - `python -m pytest -q`
-- Result: 464 passed, 1 existing PyTorch scheduler-order warning.
+- Result: 470 passed, 1 existing PyTorch scheduler-order warning.

@@ -22,6 +22,7 @@ from config import Config
 from src.ai.agent import Agent
 from src.ai.network import DQN
 from src.ai.replay_buffer import ReplayBuffer
+from src.utils.checkpoint_loader import load_checkpoint
 
 
 @pytest.fixture
@@ -594,7 +595,7 @@ class TestSaveLoadEdgeCases:
             agent.save(filepath, episode=500, best_score=150)
 
             # Load the checkpoint directly to inspect metadata
-            checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
+            checkpoint = load_checkpoint(filepath, map_location='cpu')
 
             assert 'epsilon' in checkpoint
             assert checkpoint['epsilon'] == 0.25

@@ -40,6 +40,7 @@ import threading
 
 from .network import DQN, DuelingDQN
 from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from src.utils.checkpoint_loader import load_checkpoint
 
 import sys
 sys.path.append('../..')
@@ -490,6 +491,11 @@ class Agent:
         Returns:
             Array of Q-values for each action
         """
+        if state.size != self.state_size:
+            raise ValueError(
+                f"State size mismatch: expected {self.state_size} values, got {state.size}"
+            )
+
         with torch.inference_mode():
             # Reuse pre-allocated tensor to avoid allocation overhead
             # copy_() handles CPU→device transfer automatically (no .to(device) needed)
@@ -958,6 +964,14 @@ class Agent:
                 adapted[f'_orig_mod.{k}'] = v
         
         return adapted
+
+    def _trusted_checkpoint_dirs(self) -> List[str]:
+        """Return local directories that may contain app-created checkpoints."""
+        dirs = [self.config.MODEL_DIR]
+        game_model_dir = getattr(self.config, "GAME_MODEL_DIR", None)
+        if game_model_dir:
+            dirs.append(game_model_dir)
+        return dirs
     
     def load(self, filepath: str, quiet: bool = False) -> Tuple[Optional[SaveMetadata], Optional['TrainingHistory']]:
         """
@@ -975,7 +989,12 @@ class Agent:
             return None, None
         
         try:
-            checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.device,
+                trusted_dirs=self._trusted_checkpoint_dirs(),
+                allow_unsafe_fallback=True,
+            )
         except Exception as e:
             print(f"❌ Failed to load model: {e}")
             return None, None
@@ -1097,7 +1116,11 @@ class Agent:
         return metadata, training_history
     
     @staticmethod
-    def inspect_model(filepath: str) -> Optional[Dict[str, Any]]:
+    def inspect_model(
+        filepath: str,
+        trusted_dirs: Optional[List[str]] = None,
+        allow_unsafe_fallback: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         """
         Inspect a model file without loading it into an agent.
         
@@ -1112,7 +1135,12 @@ class Agent:
             return None
         
         try:
-            checkpoint = torch.load(filepath, map_location='cpu', weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location='cpu',
+                trusted_dirs=trusted_dirs,
+                allow_unsafe_fallback=allow_unsafe_fallback,
+            )
         except Exception as e:
             print(f"❌ Failed to read model: {e}")
             return None
@@ -1155,7 +1183,11 @@ class Agent:
         for filename in os.listdir(model_dir):
             if filename.endswith('.pth'):
                 filepath = os.path.join(model_dir, filename)
-                info = Agent.inspect_model(filepath)
+                info = Agent.inspect_model(
+                    filepath,
+                    trusted_dirs=[model_dir],
+                    allow_unsafe_fallback=True,
+                )
                 if info:
                     models.append(info)
         
