@@ -17,15 +17,17 @@ Game Rules:
 - Maximize score by eating as much food as possible
 """
 
+import sys
+from collections import deque
+from typing import Deque, List, Optional, Tuple
+
 import numpy as np
 import pygame
-from typing import Tuple, List, Optional, Deque
-from collections import deque
 
-from .base_game import BaseGame
+from .base_game import BaseGame, step_vector_env_no_copy
 from .particles import ParticleSystem
-import sys
-sys.path.append('..')
+
+sys.path.append("..")
 from config import Config
 
 
@@ -64,10 +66,10 @@ class Snake(BaseGame):
 
     # Direction vectors (dy, dx)
     DIRECTION_VECTORS = {
-        0: (-1, 0),   # UP
-        1: (1, 0),    # DOWN
-        2: (0, -1),   # LEFT
-        3: (0, 1),    # RIGHT
+        0: (-1, 0),  # UP
+        1: (1, 0),  # DOWN
+        2: (0, -1),  # LEFT
+        3: (0, 1),  # RIGHT
     }
 
     # Opposite directions (can't reverse)
@@ -129,6 +131,9 @@ class Snake(BaseGame):
         self._death_timer = 0
 
         # Visual effects (only in visual mode)
+        self._font: Optional[pygame.font.Font]
+        self._small_font: Optional[pygame.font.Font]
+        self._background: Optional[pygame.Surface]
         if not headless:
             self.particles = ParticleSystem(max_particles=300)
             pygame.font.init()
@@ -172,7 +177,7 @@ class Snake(BaseGame):
             self.grid_offset_x - 2,
             self.grid_offset_y - 2,
             self.grid_pixel_width + 4,
-            self.grid_pixel_height + 4
+            self.grid_pixel_height + 4,
         )
         pygame.draw.rect(surface, (60, 70, 80), border_rect, 2)
 
@@ -181,12 +186,20 @@ class Snake(BaseGame):
         for i in range(self.GRID_SIZE + 1):
             x = self.grid_offset_x + i * self.CELL_SIZE
             y = self.grid_offset_y + i * self.CELL_SIZE
-            pygame.draw.line(surface, grid_color,
-                           (x, self.grid_offset_y),
-                           (x, self.grid_offset_y + self.grid_pixel_height), 1)
-            pygame.draw.line(surface, grid_color,
-                           (self.grid_offset_x, y),
-                           (self.grid_offset_x + self.grid_pixel_width, y), 1)
+            pygame.draw.line(
+                surface,
+                grid_color,
+                (x, self.grid_offset_y),
+                (x, self.grid_offset_y + self.grid_pixel_height),
+                1,
+            )
+            pygame.draw.line(
+                surface,
+                grid_color,
+                (self.grid_offset_x, y),
+                (self.grid_offset_x + self.grid_pixel_width, y),
+                1,
+            )
 
         return surface
 
@@ -269,8 +282,12 @@ class Snake(BaseGame):
 
         # Check for collisions
         # Wall collision
-        if (new_head[0] < 0 or new_head[0] >= self.GRID_SIZE or
-            new_head[1] < 0 or new_head[1] >= self.GRID_SIZE):
+        if (
+            new_head[0] < 0
+            or new_head[0] >= self.GRID_SIZE
+            or new_head[1] < 0
+            or new_head[1] >= self.GRID_SIZE
+        ):
             self.game_over = True
             reward = -10.0
             self._death_timer = 60
@@ -356,7 +373,7 @@ class Snake(BaseGame):
             self._grid[self.food_pos[0], self.food_pos[1]] = 1.0
 
         # Flatten grid into state
-        self._state_array[:self.GRID_SIZE * self.GRID_SIZE] = self._grid.flatten()
+        self._state_array[: self.GRID_SIZE * self.GRID_SIZE] = self._grid.flatten()
 
         # Additional features
         base_idx = self.GRID_SIZE * self.GRID_SIZE
@@ -385,10 +402,10 @@ class Snake(BaseGame):
     def _get_info(self) -> dict:
         """Get additional game information."""
         return {
-            'score': self.score,
-            'length': len(self.snake),
-            'lives': 1 if not self.game_over else 0,
-            'won': len(self.snake) >= self._max_length
+            "score": self.score,
+            "length": len(self.snake),
+            "lives": 1 if not self.game_over else 0,
+            "won": len(self.snake) >= self._max_length,
         }
 
     def render(self, screen: pygame.Surface) -> None:
@@ -422,7 +439,7 @@ class Snake(BaseGame):
                 self.grid_offset_x + self.food_pos[1] * self.CELL_SIZE + 4,
                 self.grid_offset_y + self.food_pos[0] * self.CELL_SIZE + 4,
                 self.CELL_SIZE - 8,
-                self.CELL_SIZE - 8
+                self.CELL_SIZE - 8,
             )
             pygame.draw.rect(screen, (100, 255, 100), food_rect, border_radius=6)
 
@@ -457,21 +474,41 @@ class Snake(BaseGame):
 
                     if dx == 1:  # Right
                         eye1 = (x + self.CELL_SIZE - eye_offset, y + eye_offset)
-                        eye2 = (x + self.CELL_SIZE - eye_offset, y + self.CELL_SIZE - eye_offset - eye_size)
+                        eye2 = (
+                            x + self.CELL_SIZE - eye_offset,
+                            y + self.CELL_SIZE - eye_offset - eye_size,
+                        )
                     elif dx == -1:  # Left
                         eye1 = (x + eye_offset - eye_size, y + eye_offset)
-                        eye2 = (x + eye_offset - eye_size, y + self.CELL_SIZE - eye_offset - eye_size)
+                        eye2 = (
+                            x + eye_offset - eye_size,
+                            y + self.CELL_SIZE - eye_offset - eye_size,
+                        )
                     elif dy == -1:  # Up
                         eye1 = (x + eye_offset, y + eye_offset - eye_size)
-                        eye2 = (x + self.CELL_SIZE - eye_offset - eye_size, y + eye_offset - eye_size)
+                        eye2 = (
+                            x + self.CELL_SIZE - eye_offset - eye_size,
+                            y + eye_offset - eye_size,
+                        )
                     else:  # Down
                         eye1 = (x + eye_offset, y + self.CELL_SIZE - eye_offset)
-                        eye2 = (x + self.CELL_SIZE - eye_offset - eye_size, y + self.CELL_SIZE - eye_offset)
+                        eye2 = (
+                            x + self.CELL_SIZE - eye_offset - eye_size,
+                            y + self.CELL_SIZE - eye_offset,
+                        )
 
-                    pygame.draw.rect(screen, (255, 255, 255),
-                                   (eye1[0], eye1[1], eye_size, eye_size), border_radius=1)
-                    pygame.draw.rect(screen, (255, 255, 255),
-                                   (eye2[0], eye2[1], eye_size, eye_size), border_radius=1)
+                    pygame.draw.rect(
+                        screen,
+                        (255, 255, 255),
+                        (eye1[0], eye1[1], eye_size, eye_size),
+                        border_radius=1,
+                    )
+                    pygame.draw.rect(
+                        screen,
+                        (255, 255, 255),
+                        (eye2[0], eye2[1], eye_size, eye_size),
+                        border_radius=1,
+                    )
 
         # Draw particles
         self.particles.draw(screen)
@@ -492,7 +529,9 @@ class Snake(BaseGame):
 
             # Length
             if self._small_font:
-                length_text = self._small_font.render(f"Length: {len(self.snake)}", True, (150, 200, 150))
+                length_text = self._small_font.render(
+                    f"Length: {len(self.snake)}", True, (150, 200, 150)
+                )
                 screen.blit(length_text, (10, 55))
 
                 # Hunger indicator
@@ -539,11 +578,15 @@ class Snake(BaseGame):
             # Final stats
             if self._small_font:
                 final_text = self._small_font.render(
-                    f"Final Length: {len(self.snake)} | Score: {self.score}",
-                    True, (180, 180, 180)
+                    f"Final Length: {len(self.snake)} | Score: {self.score}", True, (180, 180, 180)
                 )
-                screen.blit(final_text, (self.screen_width // 2 - final_text.get_width() // 2,
-                                         self.screen_height // 2 + 35))
+                screen.blit(
+                    final_text,
+                    (
+                        self.screen_width // 2 - final_text.get_width() // 2,
+                        self.screen_height // 2 + 35,
+                    ),
+                )
 
     def close(self) -> None:
         """Clean up resources."""
@@ -617,11 +660,17 @@ class VecSnake:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done in enumerate(self._dones):
-            if done:
+        for i, done_flag in enumerate(self._dones):
+            if bool(done_flag):
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos
+
+    def step_no_copy(
+        self, actions: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step all environments and return reusable internal buffers."""
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def close(self) -> None:
         """Clean up all environments."""
@@ -676,7 +725,7 @@ if __name__ == "__main__":
         state, reward, done, info = game.step(action)
 
         if done:
-            if info['won']:
+            if info["won"]:
                 print(f"   You WIN! Length: {info['length']}, Score: {info['score']}")
             else:
                 print(f"   Game Over! Length: {info['length']}, Score: {info['score']}")

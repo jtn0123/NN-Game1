@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>window.DASHBOARD_CONTROL_TOKEN = {{ control_token|tojson }};</script>
     <style>
         :root {
             --bg-dark: #0a0a0f;
@@ -286,11 +287,11 @@
         <p class="subtitle">Select a mode and game</p>
 
         <div class="mode-selector">
-            <button class="mode-btn selected" id="mode-ai" onclick="selectMode('ai')">
+            <button class="mode-btn selected" id="mode-ai" data-mode="ai">
                 <span class="mode-icon">🤖</span>
                 <span>AI TRAINING</span>
             </button>
-            <button class="mode-btn" id="mode-human" onclick="selectMode('human')">
+            <button class="mode-btn" id="mode-human" data-mode="human">
                 <span class="mode-icon">🎮</span>
                 <span>PLAY YOURSELF</span>
             </button>
@@ -301,7 +302,7 @@
             <!-- Games loaded dynamically -->
         </div>
         
-        <button class="start-btn" id="start-btn" onclick="startGame()">
+        <button class="start-btn" id="start-btn">
             SELECT A GAME
         </button>
         
@@ -313,14 +314,19 @@
         let selectedGame = null;
         let selectedMode = 'ai';  // Default to AI training
 
-        // Initialize socket connection
-        try {
-            socket = io();
-            document.getElementById('status-msg').textContent = 'Connecting...';
-        } catch (e) {
-            document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
-            console.error('Socket.IO initialization error:', e);
-        }
+	        // Initialize socket connection
+	        try {
+	            socket = io();
+	            document.getElementById('status-msg').textContent = 'Connecting...';
+	        } catch (e) {
+	            document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
+	            console.error('Socket.IO initialization error:', e);
+	        }
+
+	        document.querySelectorAll('.mode-btn[data-mode]').forEach((button) => {
+	            button.addEventListener('click', () => selectMode(button.dataset.mode));
+	        });
+	        document.getElementById('start-btn').addEventListener('click', startGame);
 
         function selectMode(mode) {
             selectedMode = mode;
@@ -355,11 +361,15 @@
                 data.games.forEach(game => {
                     const card = document.createElement('div');
                     card.className = 'game-card';
-                    card.setAttribute('role', 'button');
-                    card.setAttribute('tabindex', '0');
-                    card.setAttribute('aria-label', `Select ${game.name}`);
-                    card.onclick = () => selectGame(game.id, card);
-                    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') selectGame(game.id, card); };
+	                    card.setAttribute('role', 'button');
+	                    card.setAttribute('tabindex', '0');
+	                    card.setAttribute('aria-label', `Select ${game.name}`);
+	                    card.addEventListener('click', () => selectGame(game.id, card));
+	                    card.addEventListener('keydown', (e) => {
+	                        if (e.key === 'Enter' || e.key === ' ') {
+	                            selectGame(game.id, card);
+	                        }
+	                    });
                     
                     // Determine difficulty class
                     let diffClass = 'medium';
@@ -424,7 +434,12 @@
             }
 
             // Send game selection with mode to server
-            socket.emit('control', { action: 'select_game', game: selectedGame, mode: selectedMode });
+            socket.emit('control', {
+                action: 'select_game',
+                game: selectedGame,
+                mode: selectedMode,
+                token: window.DASHBOARD_CONTROL_TOKEN
+            });
         }
 
         // Only set up socket handlers if socket was initialized
@@ -452,4 +467,3 @@
     </script>
 </body>
 </html>
-

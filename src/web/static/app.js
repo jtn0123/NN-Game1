@@ -32,6 +32,7 @@ const MAX_CONSOLE_LOGS = 500;
 let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
+const DASHBOARD_CONTROL_TOKEN = window.DASHBOARD_CONTROL_TOKEN || '';
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -49,6 +50,13 @@ function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
 
     return fetch(url, { ...options, signal: controller.signal })
         .finally(() => clearTimeout(timeoutId));
+}
+
+function emitControl(payload) {
+    if (!socket) {
+        return;
+    }
+    socket.emit('control', { ...payload, token: DASHBOARD_CONTROL_TOKEN });
 }
 
 /**
@@ -137,6 +145,7 @@ const CHART_DOWNSAMPLE_TARGET = 500;
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
+    bindDashboardActions();
     initCharts();
     initNNVisualizer();
     connectSocket();
@@ -147,6 +156,121 @@ document.addEventListener('DOMContentLoaded', () => {
     loadGames();
     loadGameStats();
 });
+
+function bindDashboardActions() {
+    document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const target = event.target.closest('[data-action]');
+        if (!target) return;
+
+        const action = target.dataset.action;
+        switch (action) {
+            case 'go-to-launcher':
+                goToLauncher();
+                break;
+            case 'reset-chart':
+                resetChartView(target.dataset.chart || 'all');
+                break;
+            case 'toggle-nn-panel':
+                toggleNNPanel();
+                break;
+            case 'toggle-nn-visualization':
+                event.stopPropagation();
+                toggleNNVisualization();
+                break;
+            case 'set-log-filter':
+                setLogFilter(target.dataset.filter || 'all');
+                break;
+            case 'copy-logs':
+                copyLogsToClipboard();
+                break;
+            case 'clear-logs':
+                clearLogs();
+                break;
+            case 'refresh-screenshot':
+                refreshScreenshot();
+                break;
+            case 'set-performance-mode':
+                setPerformanceMode(target.dataset.mode || 'normal');
+                break;
+            case 'toggle-pause':
+                togglePause();
+                break;
+            case 'save-model':
+                saveModel();
+                break;
+            case 'reset-episode':
+                resetEpisode();
+                break;
+            case 'show-load-modal':
+                showLoadModal();
+                break;
+            case 'start-fresh':
+                startFresh();
+                break;
+            case 'save-and-quit':
+                saveAndQuit();
+                break;
+            case 'save-model-as':
+                saveModelAs();
+                break;
+            case 'toggle-settings':
+                toggleSettings();
+                break;
+            case 'apply-settings':
+                applySettings();
+                break;
+            case 'toggle-comparison':
+                toggleComparison();
+                break;
+            case 'refresh-game-stats':
+                refreshGameStats();
+                break;
+            case 'hide-load-modal':
+                hideLoadModal();
+                break;
+            case 'load-model':
+                loadModel(target.dataset.modelPath || '');
+                break;
+            case 'delete-model':
+                event.stopPropagation();
+                deleteModel(target.dataset.modelPath || '', target.dataset.modelName || '');
+                break;
+            case 'copy-restart-command':
+                copyRestartCommand(event);
+                break;
+            case 'close-restart-banner':
+                closeRestartBanner();
+                break;
+            case 'close-neuron-inspection':
+                closeNeuronInspection();
+                break;
+            case 'close-layer-analysis':
+                closeLayerAnalysis();
+                break;
+        }
+    });
+
+    document.addEventListener('change', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const target = event.target.closest('[data-action="switch-game"]');
+        if (target) {
+            switchGame(target.value);
+        }
+    });
+
+    document.addEventListener('input', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const target = event.target.closest('[data-action]');
+        if (!target) return;
+
+        if (target.dataset.action === 'update-speed') {
+            updateSpeed(target.value);
+        } else if (target.dataset.action === 'update-learn-every-label') {
+            updateLearnEveryLabel(target.value);
+        }
+    });
+}
 
 /**
  * Initialize Chart.js charts
@@ -1361,7 +1485,7 @@ function setLogFilter(filter) {
  */
 function clearLogs() {
     consoleLogs = [];
-    socket.emit('clear_logs');
+    socket.emit('clear_logs', { token: DASHBOARD_CONTROL_TOKEN });
     renderConsoleLogs();
     addConsoleLog('Console cleared', 'info');
 }
@@ -1428,14 +1552,14 @@ function escapeHtml(text) {
  * Toggle pause state
  */
 function togglePause() {
-    socket.emit('control', { action: 'pause' });
+    emitControl({ action: 'pause' });
 }
 
 /**
  * Save model
  */
 function saveModel() {
-    socket.emit('control', { action: 'save' });
+    emitControl({ action: 'save' });
     
     // Visual feedback
     const btn = document.querySelector('.control-btn.save');
@@ -1452,7 +1576,7 @@ function saveModel() {
  * Reset current episode
  */
 function resetEpisode() {
-    socket.emit('control', { action: 'reset' });
+    emitControl({ action: 'reset' });
     addConsoleLog('Episode reset requested', 'action');
 }
 
@@ -1500,16 +1624,16 @@ function startFresh() {
     
     if (saveFirst) {
         // Save current model first, then reset after a short delay
-        socket.emit('control', { action: 'save' });
+        emitControl({ action: 'save' });
         addConsoleLog('💾 Saving current progress before reset...', 'action');
         
         // Wait for save to complete before resetting
         setTimeout(() => {
-            socket.emit('control', { action: 'start_fresh' });
+            emitControl({ action: 'start_fresh' });
             addConsoleLog('🔄 Starting fresh training...', 'warning');
         }, 500);
     } else {
-        socket.emit('control', { action: 'start_fresh' });
+        emitControl({ action: 'start_fresh' });
         addConsoleLog('🔄 Starting fresh training...', 'warning');
     }
 }
@@ -1540,7 +1664,7 @@ function saveAndQuit() {
         btn.disabled = true;
     }
 
-    socket.emit('control', { action: 'save_and_quit' });
+    emitControl({ action: 'save_and_quit' });
     addConsoleLog('💾 Saving and shutting down...', 'warning');
 
     // Show shutdown message after a delay
@@ -1607,7 +1731,7 @@ function updateSpeed(value) {
     
     // Display as integer
     document.getElementById('speed-value').textContent = speed + 'x';
-    socket.emit('control', { action: 'speed', value: speed });
+    emitControl({ action: 'speed', value: speed });
 }
 
 /**
@@ -1792,8 +1916,7 @@ function showLoadModal() {
                 
                 // Escape model name and path to prevent XSS
                 const safeName = escapeHtml(model.name);
-                // For onclick, escape backslashes and single quotes for JS string context
-                const safePathForJs = model.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const safePath = escapeHtml(model.path);
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
                 
                 // Reason badge (reason is from our own metadata, but escape anyway)
@@ -1802,7 +1925,7 @@ function showLoadModal() {
                 
                 return `
                     <div class="model-item">
-                        <div class="model-item-content" onclick="loadModel('${safePathForJs}')">
+                        <div class="model-item-content" data-action="load-model" data-model-path="${safePath}">
                             <div class="model-header">
                                 <div class="model-name">
                                     📁 ${safeName}
@@ -1830,7 +1953,7 @@ function showLoadModal() {
                             </div>
                             <div class="model-date">${safeModifiedStr}</div>
                         </div>
-                        <button class="model-delete-btn" onclick="event.stopPropagation(); deleteModel('${safePathForJs}', '${safeName}')" title="Delete this model">
+                        <button class="model-delete-btn" data-action="delete-model" data-model-path="${safePath}" data-model-name="${safeName}" title="Delete this model">
                             🗑️
                         </button>
                     </div>
@@ -1855,7 +1978,7 @@ function hideLoadModal() {
  * Load a specific model
  */
 function loadModel(path) {
-    socket.emit('control', { action: 'load_model', path: path });
+    emitControl({ action: 'load_model', path: path });
     hideLoadModal();
     addConsoleLog(`Loading model: ${path.split('/').pop()}`, 'action');
 }
@@ -1874,7 +1997,8 @@ function deleteModel(path, name) {
     fetchWithTimeout(`/api/models/${encodedPath}`, {
         method: 'DELETE',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Dashboard-Token': DASHBOARD_CONTROL_TOKEN
         }
     })
     .then(response => response.json())
@@ -1989,7 +2113,7 @@ document.addEventListener('keydown', (e) => {
  */
 function setPerformanceMode(mode) {
     currentPerformanceMode = mode;
-    socket.emit('control', { action: 'performance_mode', mode: mode });
+    emitControl({ action: 'performance_mode', mode: mode });
     updatePerformanceModeUI(mode);
     
     // Update settings inputs to match the mode
@@ -2183,7 +2307,7 @@ function applySettings() {
         gradient_steps: parseInt(document.getElementById('setting-grad-steps').value)
     };
 
-    socket.emit('control', { action: 'config_change', config: config });
+    emitControl({ action: 'config_change', config: config });
     addConsoleLog('Settings updated', 'action', null, config);
 
     // Visual feedback
@@ -2380,7 +2504,7 @@ function saveModelAs() {
         filename = 'custom_save';
     }
     
-    socket.emit('control', { action: 'save_as', filename: filename });
+    emitControl({ action: 'save_as', filename: filename });
     addConsoleLog(`Saving as: ${filename}.pth`, 'action');
     
     // Clear input and show feedback
@@ -2477,7 +2601,7 @@ function switchGame(gameId) {
         addConsoleLog(`💾 Saving current progress...`, 'info');
         
         // Request game switch - server will save and restart
-        socket.emit('control', { action: 'restart_with_game', game: gameId });
+        emitControl({ action: 'restart_with_game', game: gameId });
     } else {
         // Reset dropdown to current game
         loadGames();
@@ -2496,7 +2620,7 @@ function goToLauncher() {
     if (confirmed) {
         addConsoleLog('🎮 Returning to launcher...', 'warning');
         // Tell server to switch back to launcher mode
-        socket.emit('control', { action: 'go_to_launcher' });
+        emitControl({ action: 'go_to_launcher' });
     }
 }
 
@@ -2622,7 +2746,7 @@ function showRestartBanner(game, command) {
             <code id="restart-command" style="color: #64b5f6; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; word-break: break-all;">${escapeHtml(command)}</code>
         </div>
         <div style="display: flex; gap: 12px; justify-content: center;">
-            <button onclick="copyRestartCommand(event)" style="
+            <button data-action="copy-restart-command" style="
                 background: #4caf50;
                 border: none;
                 color: white;
@@ -2631,7 +2755,7 @@ function showRestartBanner(game, command) {
                 cursor: pointer;
                 font-weight: 500;
             ">📋 Copy Command</button>
-            <button onclick="closeRestartBanner()" style="
+            <button data-action="close-restart-banner" style="
                 background: #2a2e3d;
                 border: 1px solid #3a3e4d;
                 color: #e4e6f0;
@@ -2654,7 +2778,7 @@ function showRestartBanner(game, command) {
         background: rgba(0,0,0,0.7);
         z-index: 9999;
     `;
-    overlay.onclick = closeRestartBanner;
+    overlay.addEventListener('click', closeRestartBanner);
     
     document.body.appendChild(overlay);
     document.body.appendChild(banner);
@@ -2929,7 +3053,7 @@ class NeuralNetworkVisualizer {
         const html = `
             <div class="neuron-header">
                 <h3>${neuronData.layer_name} - Neuron #${neuronData.neuron_idx}</h3>
-                <button class="close-btn" onclick="closeNeuronInspection()">×</button>
+                <button class="close-btn" data-action="close-neuron-inspection">×</button>
             </div>
 
             <div class="neuron-content">
@@ -3109,7 +3233,7 @@ class NeuralNetworkVisualizer {
         const html = `
             <div class="layer-header">
                 <h3>${layerData.layer_name || `Layer ${layerData.layer_idx}`}</h3>
-                <button class="close-btn" onclick="closeLayerAnalysis()">×</button>
+                <button class="close-btn" data-action="close-layer-analysis">×</button>
             </div>
 
             <div class="layer-content">

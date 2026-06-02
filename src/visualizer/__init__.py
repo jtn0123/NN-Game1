@@ -11,10 +11,9 @@ Classes:
     PauseMenu           - Interactive pause menu
 """
 
-from .nn_visualizer import NeuralNetVisualizer
 from .dashboard import Dashboard
 from .hud import TrainingHUD
+from .nn_visualizer import NeuralNetVisualizer
 from .pause_menu import PauseMenu
 
-__all__ = ['NeuralNetVisualizer', 'Dashboard', 'TrainingHUD', 'PauseMenu']
-
+__all__ = ["NeuralNetVisualizer", "Dashboard", "TrainingHUD", "PauseMenu"]

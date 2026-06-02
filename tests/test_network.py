@@ -8,11 +8,11 @@ These tests verify:
     - Weight access
 """
 
-import pytest
-import numpy as np
-import torch
-import sys
 import os
+import sys
+
+import pytest
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -29,33 +29,25 @@ def config():
 @pytest.fixture
 def network(config):
     """Create network instance."""
-    return DQN(
-        state_size=config.STATE_SIZE,
-        action_size=config.ACTION_SIZE,
-        config=config
-    )
+    return DQN(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
 
 class TestNetworkInitialization:
     """Test network initialization."""
-    
+
     def test_network_creates_successfully(self, config):
         """Network should initialize without errors."""
-        net = DQN(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
-        )
+        net = DQN(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
         assert net is not None
-    
+
     def test_correct_input_size(self, network, config):
         """Network should have correct input size."""
         assert network.state_size == config.STATE_SIZE
-    
+
     def test_correct_output_size(self, network, config):
         """Network should have correct output size."""
         assert network.action_size == config.ACTION_SIZE
-    
+
     def test_layers_created(self, network, config):
         """All layers should be created."""
         expected_layers = len(config.HIDDEN_LAYERS) + 1  # Hidden + output
@@ -64,123 +56,123 @@ class TestNetworkInitialization:
 
 class TestForwardPass:
     """Test forward pass."""
-    
+
     def test_forward_single_input(self, network, config):
         """Forward pass with single input."""
         x = torch.randn(1, config.STATE_SIZE)
         output = network(x)
         assert output.shape == (1, config.ACTION_SIZE)
-    
+
     def test_forward_batch_input(self, network, config):
         """Forward pass with batch input."""
         batch_size = 32
         x = torch.randn(batch_size, config.STATE_SIZE)
         output = network(x)
         assert output.shape == (batch_size, config.ACTION_SIZE)
-    
+
     def test_output_not_all_same(self, network, config):
         """Different inputs should produce different outputs."""
         x1 = torch.randn(1, config.STATE_SIZE)
         x2 = torch.randn(1, config.STATE_SIZE)
-        
+
         y1 = network(x1)
         y2 = network(x2)
-        
+
         assert not torch.allclose(y1, y2)
-    
+
     def test_deterministic_output(self, network, config):
         """Same input should produce same output."""
         network.eval()
         x = torch.randn(1, config.STATE_SIZE)
-        
+
         y1 = network(x)
         y2 = network(x)
-        
+
         assert torch.allclose(y1, y2)
 
 
 class TestActivationCapture:
     """Test activation capture for visualization."""
-    
+
     def test_activations_captured(self, network, config):
         """Activations should be captured after forward pass when enabled."""
         network.capture_activations = True  # Enable capture
         x = torch.randn(1, config.STATE_SIZE)
         _ = network(x)
-        
+
         activations = network.get_activations()
         assert len(activations) > 0
-    
+
     def test_activation_shapes(self, network, config):
         """Captured activations should have correct shapes."""
         network.capture_activations = True  # Enable capture
         x = torch.randn(1, config.STATE_SIZE)
         _ = network(x)
-        
+
         activations = network.get_activations()
-        
+
         # Check each hidden layer activation
         for i, hidden_size in enumerate(config.HIDDEN_LAYERS):
-            key = f'layer_{i}'
+            key = f"layer_{i}"
             if key in activations:
                 assert activations[key].shape[1] == hidden_size
 
 
 class TestWeights:
     """Test weight access."""
-    
+
     def test_get_weights(self, network, config):
         """Should be able to get weight matrices."""
         weights = network.get_weights()
         assert len(weights) == len(config.HIDDEN_LAYERS) + 1
-    
+
     def test_weight_shapes(self, network, config):
         """Weight matrices should have correct shapes."""
         weights = network.get_weights()
-        
+
         # First layer: input -> hidden1
         assert weights[0].shape == (config.HIDDEN_LAYERS[0], config.STATE_SIZE)
-        
+
         # Output layer: last_hidden -> output
         assert weights[-1].shape == (config.ACTION_SIZE, config.HIDDEN_LAYERS[-1])
 
 
 class TestLayerInfo:
     """Test layer info for visualization."""
-    
+
     def test_get_layer_info(self, network):
         """Should return layer information."""
         info = network.get_layer_info()
         assert len(info) > 0
-    
+
     def test_layer_info_format(self, network):
         """Layer info should have expected format."""
         info = network.get_layer_info()
-        
+
         for layer in info:
-            assert 'name' in layer
-            assert 'neurons' in layer
-            assert 'type' in layer
-    
+            assert "name" in layer
+            assert "neurons" in layer
+            assert "type" in layer
+
     def test_input_and_output_layers(self, network, config):
         """Should have input and output layer info."""
         info = network.get_layer_info()
-        
-        assert info[0]['type'] == 'input'
-        assert info[0]['neurons'] == config.STATE_SIZE
-        
-        assert info[-1]['type'] == 'output'
-        assert info[-1]['neurons'] == config.ACTION_SIZE
+
+        assert info[0]["type"] == "input"
+        assert info[0]["neurons"] == config.STATE_SIZE
+
+        assert info[-1]["type"] == "output"
+        assert info[-1]["neurons"] == config.ACTION_SIZE
 
 
 class TestParameterCount:
     """Test parameter counting."""
-    
+
     def test_count_parameters(self, network):
         """Should count all trainable parameters."""
         count = network.count_parameters()
         assert count > 0
-    
+
     def test_parameter_count_matches(self, network):
         """Count should match PyTorch's count."""
         counted = network.count_parameters()
@@ -190,7 +182,7 @@ class TestParameterCount:
 
 class TestCustomArchitecture:
     """Test custom network architectures."""
-    
+
     def test_custom_hidden_layers(self, config):
         """Should work with custom hidden layer sizes."""
         custom_hidden = [512, 256, 128, 64]
@@ -198,25 +190,25 @@ class TestCustomArchitecture:
             state_size=config.STATE_SIZE,
             action_size=config.ACTION_SIZE,
             config=config,
-            hidden_layers=custom_hidden
+            hidden_layers=custom_hidden,
         )
-        
+
         assert net.hidden_sizes == custom_hidden
-        
+
         # Verify with forward pass
         x = torch.randn(1, config.STATE_SIZE)
         output = net(x)
         assert output.shape == (1, config.ACTION_SIZE)
-    
+
     def test_single_hidden_layer(self, config):
         """Should work with single hidden layer."""
         net = DQN(
             state_size=config.STATE_SIZE,
             action_size=config.ACTION_SIZE,
             config=config,
-            hidden_layers=[64]
+            hidden_layers=[64],
         )
-        
+
         x = torch.randn(1, config.STATE_SIZE)
         output = net(x)
         assert output.shape == (1, config.ACTION_SIZE)
@@ -229,17 +221,13 @@ class TestDuelingDQN:
     def dueling_network(self, config):
         """Create DuelingDQN instance."""
         return DuelingDQN(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
+            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
         )
 
     def test_dueling_dqn_creates_successfully(self, config):
         """DuelingDQN should initialize without errors."""
         net = DuelingDQN(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
+            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
         )
         assert net is not None
 
@@ -253,9 +241,7 @@ class TestDuelingDQN:
     def test_dueling_dqn_advantage_mean_subtraction(self, config):
         """Q = V + (A - mean(A)) should hold."""
         net = DuelingDQN(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
+            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
         )
         net.eval()
 
@@ -300,9 +286,7 @@ class TestDuelingDQN:
         # Disable NoisyNets for this test to ensure standard Linear layers
         config.USE_NOISY_NETWORKS = False
         net = DuelingDQN(
-            state_size=config.STATE_SIZE,
-            action_size=config.ACTION_SIZE,
-            config=config
+            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
         )
 
         x = torch.randn(4, config.STATE_SIZE, requires_grad=True)
@@ -376,7 +360,9 @@ class TestNoisyLinear:
         noisy_layer.reset_noise()
 
         # Compute expected weight using the noisy formula
-        expected_weight = noisy_layer.weight_mu + noisy_layer.weight_sigma * noisy_layer.weight_epsilon
+        expected_weight = (
+            noisy_layer.weight_mu + noisy_layer.weight_sigma * noisy_layer.weight_epsilon
+        )
         expected_bias = noisy_layer.bias_mu + noisy_layer.bias_sigma * noisy_layer.bias_epsilon
 
         # Verify the formula by computing output manually vs using forward pass
@@ -389,8 +375,9 @@ class TestNoisyLinear:
         actual_output = noisy_layer(x)
 
         # Outputs should match since we computed with the same noise values
-        assert torch.allclose(actual_output, expected_output, atol=1e-5), \
-            f"Output mismatch: expected {expected_output}, got {actual_output}"
+        assert torch.allclose(
+            actual_output, expected_output, atol=1e-5
+        ), f"Output mismatch: expected {expected_output}, got {actual_output}"
 
         # Also verify shape consistency
         assert noisy_layer.weight_mu.shape == noisy_layer.weight_sigma.shape
@@ -403,15 +390,16 @@ class TestNoisyLinear:
         layer = NoisyLinear(in_features, out_features, std_init=0.5)
 
         # mu should be initialized uniformly in [-1/sqrt(in), 1/sqrt(in)]
-        mu_range = 1 / (in_features ** 0.5)
+        mu_range = 1 / (in_features**0.5)
         assert layer.weight_mu.min() >= -mu_range - 0.01
         assert layer.weight_mu.max() <= mu_range + 0.01
 
         # sigma should be initialized to std_init / sqrt(in_features)
-        expected_sigma = 0.5 / (in_features ** 0.5)
-        assert torch.allclose(layer.weight_sigma, torch.full_like(layer.weight_sigma, expected_sigma))
+        expected_sigma = 0.5 / (in_features**0.5)
+        assert torch.allclose(
+            layer.weight_sigma, torch.full_like(layer.weight_sigma, expected_sigma)
+        )
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

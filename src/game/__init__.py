@@ -15,16 +15,16 @@ Game Registry:
     Use get_game_info(name) to get metadata about a game
 """
 
-from typing import Dict, List, Type, Optional, Any
-from .breakout import Breakout
-from .space_invaders import SpaceInvaders, VecSpaceInvaders
+from typing import Any, Dict, List, Optional, Type, cast
+
+from .asteroids import Asteroids, VecAsteroids
+from .base_game import BaseGame, BaseVecGame
+from .breakout import Breakout, VecBreakout
+from .menu import GameMenu
+from .particles import ParticleSystem, TrailRenderer
 from .pong import Pong, VecPong
 from .snake import Snake, VecSnake
-from .asteroids import Asteroids, VecAsteroids
-from .base_game import BaseGame
-from .particles import ParticleSystem, TrailRenderer
-from .menu import GameMenu
-
+from .space_invaders import SpaceInvaders, VecSpaceInvaders
 
 # =============================================================================
 # GAME REGISTRY
@@ -36,50 +36,55 @@ from .menu import GameMenu
 #   3. The game will automatically appear in menus and CLI
 
 GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
-    'breakout': {
-        'class': Breakout,
-        'name': 'Breakout',
-        'description': 'Classic brick-breaking arcade game',
-        'actions': ['LEFT', 'STAY', 'RIGHT'],
-        'difficulty': 'Medium',
-        'color': (52, 152, 219),  # Blue theme
-        'icon': '🧱',
+    "breakout": {
+        "class": Breakout,
+        "vec_class": VecBreakout,
+        "name": "Breakout",
+        "description": "Classic brick-breaking arcade game",
+        "actions": ["LEFT", "STAY", "RIGHT"],
+        "difficulty": "Medium",
+        "color": (52, 152, 219),  # Blue theme
+        "icon": "🧱",
     },
-    'space_invaders': {
-        'class': SpaceInvaders,
-        'name': 'Space Invaders',
-        'description': 'Defend Earth from alien invasion',
-        'actions': ['LEFT', 'STAY', 'RIGHT', 'SHOOT'],
-        'difficulty': 'Medium-Hard',
-        'color': (0, 255, 100),  # Green CRT theme
-        'icon': '👾',
+    "space_invaders": {
+        "class": SpaceInvaders,
+        "vec_class": VecSpaceInvaders,
+        "name": "Space Invaders",
+        "description": "Defend Earth from alien invasion",
+        "actions": ["LEFT", "STAY", "RIGHT", "SHOOT"],
+        "difficulty": "Medium-Hard",
+        "color": (0, 255, 100),  # Green CRT theme
+        "icon": "👾",
     },
-    'pong': {
-        'class': Pong,
-        'name': 'Pong',
-        'description': 'Classic paddle vs AI opponent',
-        'actions': ['UP', 'STAY', 'DOWN'],
-        'difficulty': 'Easy',
-        'color': (255, 255, 255),  # White retro theme
-        'icon': '🏓',
+    "pong": {
+        "class": Pong,
+        "vec_class": VecPong,
+        "name": "Pong",
+        "description": "Classic paddle vs AI opponent",
+        "actions": ["UP", "STAY", "DOWN"],
+        "difficulty": "Easy",
+        "color": (255, 255, 255),  # White retro theme
+        "icon": "🏓",
     },
-    'snake': {
-        'class': Snake,
-        'name': 'Snake',
-        'description': 'Grow the snake by eating food',
-        'actions': ['UP', 'DOWN', 'LEFT', 'RIGHT'],
-        'difficulty': 'Medium',
-        'color': (100, 255, 100),  # Green modern theme
-        'icon': '🐍',
+    "snake": {
+        "class": Snake,
+        "vec_class": VecSnake,
+        "name": "Snake",
+        "description": "Grow the snake by eating food",
+        "actions": ["UP", "DOWN", "LEFT", "RIGHT"],
+        "difficulty": "Medium",
+        "color": (100, 255, 100),  # Green modern theme
+        "icon": "🐍",
     },
-    'asteroids': {
-        'class': Asteroids,
-        'name': 'Asteroids',
-        'description': 'Destroy asteroids with your spaceship',
-        'actions': ['ROTATE_LEFT', 'ROTATE_RIGHT', 'THRUST', 'SHOOT', 'NOTHING'],
-        'difficulty': 'Hard',
-        'color': (200, 200, 200),  # Vector gray theme
-        'icon': '🚀',
+    "asteroids": {
+        "class": Asteroids,
+        "vec_class": VecAsteroids,
+        "name": "Asteroids",
+        "description": "Destroy asteroids with your spaceship",
+        "actions": ["ROTATE_LEFT", "ROTATE_RIGHT", "THRUST", "SHOOT", "NOTHING"],
+        "difficulty": "Hard",
+        "color": (200, 200, 200),  # Vector gray theme
+        "icon": "🚀",
     },
 }
 
@@ -87,30 +92,46 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
 def get_game(name: str) -> Optional[Type[BaseGame]]:
     """
     Get a game class by name.
-    
+
     Args:
         name: Game identifier (e.g., 'breakout', 'space_invaders')
-        
+
     Returns:
         The game class, or None if not found
-        
+
     Example:
         >>> GameClass = get_game('breakout')
         >>> game = GameClass(config)
     """
     entry = GAME_REGISTRY.get(name.lower())
     if entry:
-        return entry['class']
+        return cast(Type[BaseGame], entry["class"])
+    return None
+
+
+def get_vec_game(name: str) -> Optional[Type[BaseVecGame]]:
+    """
+    Get a vectorized game environment class by name.
+
+    Args:
+        name: Game identifier (e.g., 'breakout', 'space_invaders')
+
+    Returns:
+        The vectorized environment class, or None if not supported
+    """
+    entry = GAME_REGISTRY.get(name.lower())
+    if entry and entry.get("vec_class"):
+        return cast(Type[BaseVecGame], entry["vec_class"])
     return None
 
 
 def list_games() -> List[str]:
     """
     Get a list of all available game names.
-    
+
     Returns:
         List of game identifiers
-        
+
     Example:
         >>> games = list_games()
         >>> print(games)  # ['breakout', 'space_invaders']
@@ -121,13 +142,13 @@ def list_games() -> List[str]:
 def get_game_info(name: str) -> Optional[Dict[str, Any]]:
     """
     Get metadata about a game.
-    
+
     Args:
         name: Game identifier
-        
+
     Returns:
         Dictionary with game info, or None if not found
-        
+
     Info includes:
         - name: Display name
         - description: Short description
@@ -138,14 +159,14 @@ def get_game_info(name: str) -> Optional[Dict[str, Any]]:
     """
     entry = GAME_REGISTRY.get(name.lower())
     if entry:
-        return {k: v for k, v in entry.items() if k != 'class'}
+        return {k: v for k, v in entry.items() if k not in {"class", "vec_class"}}
     return None
 
 
 def get_all_game_info() -> Dict[str, Dict[str, Any]]:
     """
     Get metadata for all registered games.
-    
+
     Returns:
         Dictionary mapping game IDs to their info
     """
@@ -159,23 +180,26 @@ def get_all_game_info() -> Dict[str, Dict[str, Any]]:
 
 __all__ = [
     # Classes
-    'Breakout',
-    'SpaceInvaders',
-    'VecSpaceInvaders',
-    'Pong',
-    'VecPong',
-    'Snake',
-    'VecSnake',
-    'Asteroids',
-    'VecAsteroids',
-    'BaseGame',
-    'ParticleSystem',
-    'TrailRenderer',
-    'GameMenu',
+    "Breakout",
+    "VecBreakout",
+    "SpaceInvaders",
+    "VecSpaceInvaders",
+    "Pong",
+    "VecPong",
+    "Snake",
+    "VecSnake",
+    "Asteroids",
+    "VecAsteroids",
+    "BaseGame",
+    "BaseVecGame",
+    "ParticleSystem",
+    "TrailRenderer",
+    "GameMenu",
     # Registry functions
-    'GAME_REGISTRY',
-    'get_game',
-    'list_games',
-    'get_game_info',
-    'get_all_game_info',
+    "GAME_REGISTRY",
+    "get_game",
+    "get_vec_game",
+    "list_games",
+    "get_game_info",
+    "get_all_game_info",
 ]

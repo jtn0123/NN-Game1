@@ -7,12 +7,12 @@ These tests verify end-to-end functionality:
     - Device compatibility
 """
 
-import pytest
-import numpy as np
-import torch
-import tempfile
 import os
 import sys
+import tempfile
+
+import pytest
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -124,8 +124,8 @@ class TestSaveLoadIntegration:
 
             # Get a weight key from the network (first layer)
             state_dict = agent.policy_net.state_dict()
-            weight_key = [k for k in state_dict.keys() if 'weight' in k][0]
-            initial_weights = state_dict[weight_key].clone()
+            weight_key = [k for k in state_dict.keys() if "weight" in k][0]
+            state_dict[weight_key].clone()
 
             # Train briefly to potentially change weights
             state = game.reset()
@@ -197,7 +197,7 @@ class TestDeviceCompatibility:
         action = agent.select_action(state, training=True)
 
         assert 0 <= action < game.action_size
-        assert agent.device.type == 'cpu'
+        assert agent.device.type == "cpu"
 
     def test_state_tensor_device_matches_agent(self, game, agent):
         """State tensors should be on the same device as agent."""

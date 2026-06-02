@@ -5,9 +5,10 @@ These tests verify that invalid configurations are caught early
 rather than causing cryptic runtime errors during training.
 """
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -123,14 +124,13 @@ class TestConfigDevice:
         """FORCE_CPU=True should return CPU device."""
         cfg = Config()
         cfg.FORCE_CPU = True
-        assert cfg.DEVICE.type == 'cpu'
+        assert cfg.DEVICE.type == "cpu"
 
     def test_device_is_valid(self):
         """Default DEVICE should be a valid torch device."""
         cfg = Config()
-        import torch
         # Should be one of: cpu, cuda, mps
-        assert cfg.DEVICE.type in ['cpu', 'cuda', 'mps']
+        assert cfg.DEVICE.type in ["cpu", "cuda", "mps"]
 
 
 if __name__ == "__main__":

@@ -7,16 +7,16 @@ These tests verify:
     - Trainer initialization
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.trainer import Trainer, TrainingMetrics, EpisodeStats
 from src.ai.agent import Agent
+from src.ai.trainer import EpisodeStats, Trainer, TrainingMetrics
 from src.game.breakout import Breakout
 
 
@@ -70,7 +70,7 @@ class TestTrainingMetrics:
             avg_loss=0.01,
             duration=1.5,
             bricks_broken=10,
-            won=False
+            won=False,
         )
         metrics.add(stats)
         assert len(metrics.scores) == 1
@@ -81,18 +81,25 @@ class TestTrainingMetrics:
     def test_get_recent_average_empty(self):
         """get_recent_average should return None for empty history."""
         metrics = TrainingMetrics()
-        result = metrics.get_recent_average('scores', n=100)
+        result = metrics.get_recent_average("scores", n=100)
         assert result is None
 
     def test_get_recent_average_single_value(self):
         """get_recent_average should work with single value."""
         metrics = TrainingMetrics()
         stats = EpisodeStats(
-            episode=0, score=100, steps=50, total_reward=25.0,
-            epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=10, won=False
+            episode=0,
+            score=100,
+            steps=50,
+            total_reward=25.0,
+            epsilon=0.5,
+            avg_loss=0.01,
+            duration=1.0,
+            bricks_broken=10,
+            won=False,
         )
         metrics.add(stats)
-        result = metrics.get_recent_average('scores', n=100)
+        result = metrics.get_recent_average("scores", n=100)
         assert result == 100.0
 
     def test_get_recent_average_multiple_values(self):
@@ -100,12 +107,19 @@ class TestTrainingMetrics:
         metrics = TrainingMetrics()
         for i in range(5):
             stats = EpisodeStats(
-                episode=i, score=i * 10, steps=50, total_reward=float(i),
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=i, won=False
+                episode=i,
+                score=i * 10,
+                steps=50,
+                total_reward=float(i),
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=i,
+                won=False,
             )
             metrics.add(stats)
         # Scores: 0, 10, 20, 30, 40 -> avg = 20
-        result = metrics.get_recent_average('scores', n=100)
+        result = metrics.get_recent_average("scores", n=100)
         assert result == 20.0
 
     def test_get_recent_average_last_n(self):
@@ -113,12 +127,19 @@ class TestTrainingMetrics:
         metrics = TrainingMetrics()
         for i in range(10):
             stats = EpisodeStats(
-                episode=i, score=i * 10, steps=50, total_reward=float(i),
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=i, won=False
+                episode=i,
+                score=i * 10,
+                steps=50,
+                total_reward=float(i),
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=i,
+                won=False,
             )
             metrics.add(stats)
         # Last 3 scores: 70, 80, 90 -> avg = 80
-        result = metrics.get_recent_average('scores', n=3)
+        result = metrics.get_recent_average("scores", n=3)
         assert result == 80.0
 
     def test_get_best_score_empty(self):
@@ -131,8 +152,15 @@ class TestTrainingMetrics:
         metrics = TrainingMetrics()
         for score in [10, 50, 30, 20]:
             stats = EpisodeStats(
-                episode=0, score=score, steps=50, total_reward=0.0,
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=0, won=False
+                episode=0,
+                score=score,
+                steps=50,
+                total_reward=0.0,
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=0,
+                won=False,
             )
             metrics.add(stats)
         assert metrics.get_best_score() == 50
@@ -147,8 +175,15 @@ class TestTrainingMetrics:
         metrics = TrainingMetrics()
         for won in [True, False, True, True, False]:
             stats = EpisodeStats(
-                episode=0, score=100, steps=50, total_reward=0.0,
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=0, won=won
+                episode=0,
+                score=100,
+                steps=50,
+                total_reward=0.0,
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=0,
+                won=won,
             )
             metrics.add(stats)
         # 3 wins out of 5 = 60%
@@ -160,15 +195,29 @@ class TestTrainingMetrics:
         # First 5: all losses
         for _ in range(5):
             stats = EpisodeStats(
-                episode=0, score=100, steps=50, total_reward=0.0,
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=0, won=False
+                episode=0,
+                score=100,
+                steps=50,
+                total_reward=0.0,
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=0,
+                won=False,
             )
             metrics.add(stats)
         # Last 5: all wins
         for _ in range(5):
             stats = EpisodeStats(
-                episode=0, score=100, steps=50, total_reward=0.0,
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=0, won=True
+                episode=0,
+                score=100,
+                steps=50,
+                total_reward=0.0,
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=0,
+                won=True,
             )
             metrics.add(stats)
         # Last 5 should be 100% wins
@@ -179,8 +228,15 @@ class TestTrainingMetrics:
         metrics = TrainingMetrics(history_length=5)
         for i in range(10):
             stats = EpisodeStats(
-                episode=i, score=i, steps=50, total_reward=0.0,
-                epsilon=0.5, avg_loss=0.01, duration=1.0, bricks_broken=0, won=False
+                episode=i,
+                score=i,
+                steps=50,
+                total_reward=0.0,
+                epsilon=0.5,
+                avg_loss=0.01,
+                duration=1.0,
+                bricks_broken=0,
+                won=False,
             )
             metrics.add(stats)
         assert len(metrics.scores) == 5
@@ -212,6 +268,18 @@ class TestTrainerInitialization:
         assert trainer.current_episode == 0
         assert trainer.total_steps == 0
 
+    def test_episode_progress_count_uses_breakout_remaining_bricks(self, trainer, config):
+        """Breakout progress should still derive from remaining bricks."""
+        total_bricks = config.BRICK_ROWS * config.BRICK_COLS
+
+        assert trainer._episode_progress_count({"bricks_remaining": total_bricks - 7}) == 7
+
+    def test_episode_progress_count_uses_generic_kill_counts(self, trainer):
+        """Non-Breakout games should not be forced through brick math."""
+        assert trainer._episode_progress_count({"total_aliens_killed": 11}) == 11
+        assert trainer._episode_progress_count({"asteroids_destroyed": 4}) == 4
+        assert trainer._episode_progress_count({"score": 3}) == 0
+
 
 class TestRunEpisode:
     """Test Trainer.run_episode method."""
@@ -224,15 +292,15 @@ class TestRunEpisode:
     def test_run_episode_stats_have_correct_fields(self, trainer):
         """EpisodeStats should have all required fields."""
         stats = trainer.run_episode(render=False)
-        assert hasattr(stats, 'episode')
-        assert hasattr(stats, 'score')
-        assert hasattr(stats, 'steps')
-        assert hasattr(stats, 'total_reward')
-        assert hasattr(stats, 'epsilon')
-        assert hasattr(stats, 'avg_loss')
-        assert hasattr(stats, 'duration')
-        assert hasattr(stats, 'bricks_broken')
-        assert hasattr(stats, 'won')
+        assert hasattr(stats, "episode")
+        assert hasattr(stats, "score")
+        assert hasattr(stats, "steps")
+        assert hasattr(stats, "total_reward")
+        assert hasattr(stats, "epsilon")
+        assert hasattr(stats, "avg_loss")
+        assert hasattr(stats, "duration")
+        assert hasattr(stats, "bricks_broken")
+        assert hasattr(stats, "won")
 
     def test_run_episode_increments_steps(self, trainer):
         """run_episode should increment total_steps."""
@@ -256,8 +324,8 @@ class TestTrainSavesCheckpoints:
 
     def test_train_saves_best_model(self, game, agent, config):
         """Training should save best model when score improves."""
-        import tempfile
         import os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.MODEL_DIR = tmpdir
@@ -270,13 +338,13 @@ class TestTrainSavesCheckpoints:
             trainer.train(num_episodes=3)
 
             # Check that best model was saved
-            best_model_path = os.path.join(tmpdir, f'{config.GAME_NAME}_best.pth')
+            best_model_path = os.path.join(tmpdir, f"{config.GAME_NAME}_best.pth")
             assert os.path.exists(best_model_path), "Best model should be saved during training"
 
     def test_train_saves_final_model(self, game, agent, config):
         """Training should save final model at end."""
-        import tempfile
         import os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.MODEL_DIR = tmpdir
@@ -287,7 +355,7 @@ class TestTrainSavesCheckpoints:
             trainer.train(num_episodes=2)
 
             # Check that final model was saved
-            final_model_path = os.path.join(tmpdir, f'{config.GAME_NAME}_final.pth')
+            final_model_path = os.path.join(tmpdir, f"{config.GAME_NAME}_final.pth")
             assert os.path.exists(final_model_path), "Final model should be saved at training end"
 
 
@@ -300,7 +368,7 @@ class TestEvaluateResetsEpsilon:
         trainer.agent.epsilon = 0.5
 
         # Run evaluation
-        results = trainer.evaluate(num_episodes=2, render=False)
+        trainer.evaluate(num_episodes=2, render=False)
 
         # Epsilon should be restored after evaluation
         assert trainer.agent.epsilon == 0.5
@@ -313,24 +381,24 @@ class TestEvaluateResetsEpsilon:
         # verify the results are reasonable (evaluation ran without error)
         results = trainer.evaluate(num_episodes=2, render=False)
 
-        assert 'mean_score' in results
-        assert 'max_score' in results
-        assert 'min_score' in results
-        assert 'win_rate' in results
-        assert results['mean_score'] >= 0
+        assert "mean_score" in results
+        assert "max_score" in results
+        assert "min_score" in results
+        assert "win_rate" in results
+        assert results["mean_score"] >= 0
 
     def test_evaluate_returns_correct_statistics(self, trainer):
         """Evaluate should return correct statistics structure."""
         results = trainer.evaluate(num_episodes=3, render=False)
 
-        assert isinstance(results['mean_score'], float)
-        assert isinstance(results['max_score'], (int, float))
-        assert isinstance(results['min_score'], (int, float))
-        assert 0.0 <= results['win_rate'] <= 1.0
+        assert isinstance(results["mean_score"], float)
+        assert isinstance(results["max_score"], (int, float))
+        assert isinstance(results["min_score"], (int, float))
+        assert 0.0 <= results["win_rate"] <= 1.0
 
         # Max should be >= mean >= min
-        assert results['max_score'] >= results['mean_score']
-        assert results['mean_score'] >= results['min_score']
+        assert results["max_score"] >= results["mean_score"]
+        assert results["mean_score"] >= results["min_score"]
 
 
 if __name__ == "__main__":

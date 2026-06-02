@@ -122,6 +122,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Generated experiment outputs
+experiments/run_*/
+
 # Model files (large binary files)
 *.pth
 *.pt
@@ -215,4 +218,3 @@ checkpoints/
 runs/
 wandb/
 tensorboard_logs/
-

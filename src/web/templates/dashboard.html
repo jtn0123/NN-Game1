@@ -7,6 +7,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>window.DASHBOARD_CONTROL_TOKEN = {{ control_token|tojson }};</script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,11 +20,13 @@
             <div class="header-left">
                 <h1>🧠 Neural Network AI</h1>
                 <div class="game-selector" data-tooltip="Select which game to train" data-tooltip-position="bottom">
-                    <select id="game-select" onchange="switchGame(this.value)">
-                        <option value="breakout">🧱 Breakout</option>
+                    <select id="game-select" data-action="switch-game">
+                        {% for game in game_options %}
+                        <option value="{{ game.id }}" {% if game.id == current_game %}selected{% endif %}>{{ game.icon }} {{ game.name }}</option>
+                        {% endfor %}
                     </select>
                     <span class="subtitle" id="game-subtitle">Training Dashboard</span>
-                    <button class="change-game-btn" onclick="goToLauncher()" title="Go back to game selection">
+                    <button class="change-game-btn" data-action="go-to-launcher" title="Go back to game selection">
                         🎮 Change Game
                     </button>
                 </div>
@@ -54,7 +57,7 @@
                                 <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes">● Average</span>
                                 <span class="legend-item best" data-tooltip="Best average so far - can only go UP! If this is flat, you're oscillating. If rising, you're improving.">● Best Avg</span>
                             </div>
-                            <button class="chart-reset-btn" onclick="resetChartView('score')" title="Reset view to latest episodes">↻</button>
+                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="score" title="Reset view to latest episodes">↻</button>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -73,7 +76,7 @@
                     <div class="chart-card half">
                         <div class="card-header">
                             <h2 data-tooltip="Measures prediction error (log scale). Spikes are normal during exploration. Generally should trend downward as the AI improves its value estimates. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="right">📉 Loss</h2>
-                            <button class="chart-reset-btn" onclick="resetChartView('loss')" title="Reset view to latest episodes">↻</button>
+                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="loss" title="Reset view to latest episodes">↻</button>
                         </div>
                         <div class="chart-container small">
                             <canvas id="lossChart"></canvas>
@@ -89,7 +92,7 @@
                     <div class="chart-card half">
                         <div class="card-header">
                             <h2 data-tooltip="Average expected future reward. Rising Q-values mean the AI is learning to recognize valuable game states. Stable or slowly increasing = healthy learning. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="left">📈 Avg Q-Value</h2>
-                            <button class="chart-reset-btn" onclick="resetChartView('qvalue')" title="Reset view to latest episodes">↻</button>
+                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="qvalue" title="Reset view to latest episodes">↻</button>
                         </div>
                         <div class="chart-container small">
                             <canvas id="qvalueChart"></canvas>
@@ -104,13 +107,13 @@
 
                 <!-- Neural Network Visualization -->
                 <div class="nn-viz-card" id="nn-viz-card" data-tooltip="Real-time visualization of the neural network's internal state. Shows how neurons activate and how information flows through the network as it makes decisions." data-tooltip-position="right">
-                    <div class="card-header clickable" onclick="toggleNNPanel()">
+                    <div class="card-header clickable" data-action="toggle-nn-panel">
                         <div class="nn-viz-header-left">
                             <h3>🧠 Neural Network</h3>
                             <span class="nn-viz-status" id="nn-viz-status">● LIVE</span>
                         </div>
                         <div class="nn-viz-header-right">
-                            <button class="nn-viz-toggle" onclick="event.stopPropagation(); toggleNNVisualization()">⏸️</button>
+                            <button class="nn-viz-toggle" data-action="toggle-nn-visualization">⏸️</button>
                             <span class="collapse-icon" id="nn-viz-icon">▲</span>
                         </div>
                     </div>
@@ -156,14 +159,14 @@
                         <h2>📋 Console Log</h2>
                         <div class="console-controls">
                             <div class="filter-buttons">
-                                <button class="filter-btn active" data-filter="all" onclick="setLogFilter('all')">All</button>
-                                <button class="filter-btn" data-filter="info" onclick="setLogFilter('info')">Info</button>
-                                <button class="filter-btn" data-filter="metric" onclick="setLogFilter('metric')">Metrics</button>
-                                <button class="filter-btn" data-filter="action" onclick="setLogFilter('action')">Actions</button>
-                                <button class="filter-btn" data-filter="warning" onclick="setLogFilter('warning')">Warnings</button>
+                                <button class="filter-btn active" data-action="set-log-filter" data-filter="all">All</button>
+                                <button class="filter-btn" data-action="set-log-filter" data-filter="info">Info</button>
+                                <button class="filter-btn" data-action="set-log-filter" data-filter="metric">Metrics</button>
+                                <button class="filter-btn" data-action="set-log-filter" data-filter="action">Actions</button>
+                                <button class="filter-btn" data-action="set-log-filter" data-filter="warning">Warnings</button>
                             </div>
-                            <button class="copy-btn" onclick="copyLogsToClipboard()" title="Copy logs to clipboard">📋 Copy</button>
-                            <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
+                            <button class="copy-btn" data-action="copy-logs" title="Copy logs to clipboard">📋 Copy</button>
+                            <button class="clear-btn" data-action="clear-logs">🗑️ Clear</button>
                         </div>
                     </div>
                     <div class="console-container" id="console-container">
@@ -291,7 +294,7 @@
                 <div class="preview-card">
                     <div class="card-header">
                         <h3>🎮 Game Preview</h3>
-                        <button class="refresh-btn" onclick="refreshScreenshot()">↻</button>
+                        <button class="refresh-btn" data-action="refresh-screenshot">↻</button>
                     </div>
                     <div class="preview-container">
                         <img id="game-preview" src="" alt="Game Preview">
@@ -311,38 +314,38 @@
                     <div class="performance-modes" data-tooltip="Performance presets control how often the AI learns. Faster modes skip some learning steps for higher throughput.">
                         <label class="mode-label">⚡ Performance Mode</label>
                         <div class="mode-buttons">
-                            <button class="mode-btn active" id="mode-normal" onclick="setPerformanceMode('normal')" data-tooltip="Learn every step. Best for watching learning in detail. ~200-300 steps/sec">
+                            <button class="mode-btn active" id="mode-normal" data-action="set-performance-mode" data-mode="normal" data-tooltip="Learn every step. Best for watching learning in detail. ~200-300 steps/sec">
                                 Normal
                             </button>
-                            <button class="mode-btn" id="mode-fast" onclick="setPerformanceMode('fast')" data-tooltip="Learn every 4 steps. ~4x faster training with minimal learning impact. ~800-1200 steps/sec">
+                            <button class="mode-btn" id="mode-fast" data-action="set-performance-mode" data-mode="fast" data-tooltip="Learn every 4 steps. ~4x faster training with minimal learning impact. ~800-1200 steps/sec">
                                 Fast
                             </button>
-                            <button class="mode-btn turbo" id="mode-turbo" onclick="setPerformanceMode('turbo')" data-tooltip="Learn every 8 steps + 2 gradient updates. Maximum training speed. ~5000 steps/sec on M4">
+                            <button class="mode-btn turbo" id="mode-turbo" data-action="set-performance-mode" data-mode="turbo" data-tooltip="Learn every 8 steps + 2 gradient updates. Maximum training speed. ~5000 steps/sec on M4">
                                 🚀 Turbo
                             </button>
-                            <button class="mode-btn ultra" id="mode-ultra" onclick="setPerformanceMode('ultra')" data-tooltip="Learn every 16 steps + 4 gradient updates + batch 256. Extreme throughput. ~8000+ steps/sec">
+                            <button class="mode-btn ultra" id="mode-ultra" data-action="set-performance-mode" data-mode="ultra" data-tooltip="Learn every 16 steps + 4 gradient updates + batch 256. Extreme throughput. ~8000+ steps/sec">
                                 ⚡ Ultra
                             </button>
                         </div>
                     </div>
                     
                     <div class="controls-grid">
-                        <button class="control-btn pause" id="pause-btn" onclick="togglePause()" data-tooltip="Pause or resume training. Keyboard: P" data-tooltip-position="bottom">
+                        <button class="control-btn pause" id="pause-btn" data-action="toggle-pause" data-tooltip="Pause or resume training. Keyboard: P" data-tooltip-position="bottom">
                             ⏸️ Pause
                         </button>
-                        <button class="control-btn save" onclick="saveModel()" data-tooltip="Save current neural network weights to file. Keyboard: Ctrl+S" data-tooltip-position="bottom">
+                        <button class="control-btn save" data-action="save-model" data-tooltip="Save current neural network weights to file. Keyboard: Ctrl+S" data-tooltip-position="bottom">
                             💾 Save
                         </button>
-                        <button class="control-btn reset" onclick="resetEpisode()" data-tooltip="Reset current episode only - ends the current game and starts a new one. Does not reset training progress. Keyboard: Ctrl+R" data-tooltip-position="bottom">
+                        <button class="control-btn reset" data-action="reset-episode" data-tooltip="Reset current episode only - ends the current game and starts a new one. Does not reset training progress. Keyboard: Ctrl+R" data-tooltip-position="bottom">
                             🔄 Reset Episode
                         </button>
-                        <button class="control-btn load" onclick="showLoadModal()" data-tooltip="Load a previously saved model to continue training or evaluate performance." data-tooltip-position="bottom">
+                        <button class="control-btn load" data-action="show-load-modal" data-tooltip="Load a previously saved model to continue training or evaluate performance." data-tooltip-position="bottom">
                             📂 Load
                         </button>
-                        <button class="control-btn fresh" onclick="startFresh()" data-tooltip="Start completely fresh - resets the neural network, clears all training memory, and resets all progress. Saved models on disk are preserved. Keyboard: Ctrl+Shift+R" data-tooltip-position="bottom">
+                        <button class="control-btn fresh" data-action="start-fresh" data-tooltip="Start completely fresh - resets the neural network, clears all training memory, and resets all progress. Saved models on disk are preserved. Keyboard: Ctrl+Shift+R" data-tooltip-position="bottom">
                             🆕 Start Fresh
                         </button>
-                        <button class="control-btn quit" onclick="saveAndQuit()" data-tooltip="Save current progress and exit the training application. Keyboard: Ctrl+Q" data-tooltip-position="bottom">
+                        <button class="control-btn quit" data-action="save-and-quit" data-tooltip="Save current progress and exit the training application. Keyboard: Ctrl+Q" data-tooltip-position="bottom">
                             🚪 Save & Quit
                         </button>
                     </div>
@@ -359,7 +362,7 @@
                                max="1000" 
                                step="1" 
                                value="1"
-                               oninput="updateSpeed(this.value)">
+                               data-action="update-speed">
                         <div class="speed-marks">
                             <span>1x</span>
                             <span>100x</span>
@@ -396,15 +399,15 @@
                     <div class="save-actions">
                         <div class="save-as-row">
                             <input type="text" id="save-as-name" placeholder="custom_name" maxlength="30">
-                            <button class="save-as-btn" onclick="saveModelAs()" title="Save with custom name">Save As</button>
+                            <button class="save-as-btn" data-action="save-model-as" title="Save with custom name">Save As</button>
                         </div>
-                        <button class="browse-models-btn" onclick="showLoadModal()">📂 Browse All Models</button>
+                        <button class="browse-models-btn" data-action="show-load-modal">📂 Browse All Models</button>
                     </div>
                 </div>
 
                 <!-- Settings Panel -->
                 <div class="settings-card collapsed" id="settings-card">
-                    <div class="card-header clickable" onclick="toggleSettings()">
+                    <div class="card-header clickable" data-action="toggle-settings">
                         <h3>⚙️ Settings</h3>
                         <span class="collapse-icon" id="settings-icon">▼</span>
                     </div>
@@ -451,7 +454,7 @@
                             <div class="setting-row" data-tooltip="Learn every N steps. 1=every step (detailed), 4=every 4th step (~4x faster). Higher values increase throughput but may slow convergence.">
                                 <label for="setting-learn-every">Learn Every</label>
                                 <div class="range-input">
-                                    <input type="range" id="setting-learn-every" value="1" min="1" max="16" step="1" oninput="updateLearnEveryLabel(this.value)">
+                                    <input type="range" id="setting-learn-every" value="1" min="1" max="16" step="1" data-action="update-learn-every-label">
                                     <span id="learn-every-value">1 step</span>
                                 </div>
                             </div>
@@ -468,13 +471,13 @@
                             </div>
                         </div>
 
-                        <button class="apply-btn" onclick="applySettings()">Apply Changes</button>
+                        <button class="apply-btn" data-action="apply-settings">Apply Changes</button>
                     </div>
                 </div>
 
                 <!-- Game Comparison Panel -->
                 <div class="comparison-card collapsed" id="comparison-card">
-                    <div class="card-header clickable" onclick="toggleComparison()">
+                    <div class="card-header clickable" data-action="toggle-comparison">
                         <h3>📊 Game Comparison</h3>
                         <span class="collapse-icon" id="comparison-icon">▼</span>
                     </div>
@@ -482,7 +485,7 @@
                         <div class="comparison-grid" id="comparison-grid">
                             <div class="loading">Loading game stats...</div>
                         </div>
-                        <button class="refresh-btn" onclick="refreshGameStats()">↻ Refresh</button>
+                        <button class="refresh-btn" data-action="refresh-game-stats">↻ Refresh</button>
                     </div>
                 </div>
             </div>
@@ -503,7 +506,7 @@
         <div class="modal-content modal-wide">
             <div class="modal-header">
                 <h3>📂 Model Browser</h3>
-                <button class="close-btn" onclick="hideLoadModal()">×</button>
+                <button class="close-btn" data-action="hide-load-modal">×</button>
             </div>
             <div class="modal-body">
                 <div class="model-list" id="model-list">

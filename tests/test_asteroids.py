@@ -9,15 +9,16 @@ These tests verify:
     - Reward system
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.game.asteroids import Asteroids, VecAsteroids, Asteroid, Ship
+from src.game.asteroids import Asteroid, Asteroids, Ship, VecAsteroids
 
 
 @pytest.fixture
@@ -177,6 +178,7 @@ class TestAsteroidsCollisions:
             asteroid = game.asteroids[0]
             game.bullets.clear()
             from src.game.asteroids import Bullet
+
             bullet = Bullet(asteroid.x, asteroid.y, 0)
             game.bullets.append(bullet)
 
@@ -242,17 +244,17 @@ class TestAsteroidsGameOver:
     def test_info_contains_score(self, game):
         """Info dict should contain score."""
         _, _, _, info = game.step(4)
-        assert 'score' in info
+        assert "score" in info
 
     def test_info_contains_lives(self, game):
         """Info dict should contain lives."""
         _, _, _, info = game.step(4)
-        assert 'lives' in info
+        assert "lives" in info
 
     def test_info_contains_level(self, game):
         """Info dict should contain level."""
         _, _, _, info = game.step(4)
-        assert 'level' in info
+        assert "level" in info
 
 
 class TestShip:

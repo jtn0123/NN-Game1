@@ -5,10 +5,11 @@ These tests verify that game events produce correct rewards,
 catching reward bugs that silently break training.
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -132,7 +133,7 @@ class TestBreakoutRewards:
         for _ in range(50):
             _, reward, done, info = game.step(1)
             total_reward += reward
-            if info.get('won', False):
+            if info.get("won", False):
                 break
 
         # Should have received win reward (plus brick hit)

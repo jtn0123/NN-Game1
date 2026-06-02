@@ -9,25 +9,25 @@ Tests cover:
 - HUD state tracking
 """
 
-import pytest
-import numpy as np
-from unittest.mock import MagicMock, patch
 import os
-import sys
+from unittest.mock import patch
+
+import pytest
 
 # Set SDL_VIDEODRIVER before importing pygame to avoid display errors in CI
-os.environ.setdefault('SDL_VIDEODRIVER', 'dummy')
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 # Mock pygame.display.init before importing modules
-with patch.dict('os.environ', {'SDL_VIDEODRIVER': 'dummy'}):
+with patch.dict("os.environ", {"SDL_VIDEODRIVER": "dummy"}):
     import pygame
+
     pygame.init()
 
 
 from config import Config
-from src.visualizer.nn_visualizer import NeuralNetVisualizer, DataFlowPulse
 from src.visualizer.dashboard import Dashboard
 from src.visualizer.hud import TrainingHUD
+from src.visualizer.nn_visualizer import DataFlowPulse, NeuralNetVisualizer
 
 
 class TestDataFlowPulse:
@@ -35,12 +35,7 @@ class TestDataFlowPulse:
 
     def test_initialization(self):
         """DataFlowPulse should initialize with correct properties."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0),
-            end_pos=(100, 100),
-            color=(255, 0, 0),
-            speed=0.1
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.1)
         assert pulse.start == (0, 0)
         assert pulse.end == (100, 100)
         assert pulse.color == (255, 0, 0)
@@ -50,24 +45,14 @@ class TestDataFlowPulse:
 
     def test_update_increments_progress(self):
         """Update should increment progress by speed."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0),
-            end_pos=(100, 100),
-            color=(255, 0, 0),
-            speed=0.1
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.1)
         pulse.update()
         assert pulse.progress == pytest.approx(0.1)
         assert pulse.alive is True
 
     def test_pulse_dies_at_end(self):
         """Pulse should die when progress reaches 1.0."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0),
-            end_pos=(100, 100),
-            color=(255, 0, 0),
-            speed=0.5
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.5)
         pulse.update()  # 0.5
         assert pulse.alive is True
         pulse.update()  # 1.0
@@ -75,12 +60,7 @@ class TestDataFlowPulse:
 
     def test_position_interpolation(self):
         """Position should interpolate between start and end."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0),
-            end_pos=(100, 100),
-            color=(255, 0, 0),
-            speed=0.5
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.5)
         # At start
         assert pulse.position == (0, 0)
 
@@ -100,13 +80,7 @@ class TestNeuralNetVisualizer:
     @pytest.fixture
     def visualizer(self, config):
         """Create a NeuralNetVisualizer instance."""
-        return NeuralNetVisualizer(
-            config=config,
-            x=0,
-            y=0,
-            width=300,
-            height=500
-        )
+        return NeuralNetVisualizer(config=config, x=0, y=0, width=300, height=500)
 
     def test_initialization(self, visualizer, config):
         """Visualizer should initialize with correct config values."""
@@ -156,10 +130,10 @@ class TestNeuralNetVisualizer:
         """Visualizer should calculate layer positions correctly."""
         # Create mock layer_info matching the format from network.get_layer_info()
         layer_info = [
-            {'name': 'input', 'neurons': 55, 'type': 'input'},
-            {'name': 'hidden1', 'neurons': 128, 'type': 'hidden'},
-            {'name': 'hidden2', 'neurons': 64, 'type': 'hidden'},
-            {'name': 'output', 'neurons': 3, 'type': 'output'}
+            {"name": "input", "neurons": 55, "type": "input"},
+            {"name": "hidden1", "neurons": 128, "type": "hidden"},
+            {"name": "hidden2", "neurons": 64, "type": "hidden"},
+            {"name": "output", "neurons": 3, "type": "output"},
         ]
 
         # Calculate layer positions
@@ -170,8 +144,8 @@ class TestNeuralNetVisualizer:
 
         # Each layer should have position info
         for pos in positions:
-            assert 'x' in pos
-            assert 'neurons' in pos
+            assert "x" in pos
+            assert "neurons" in pos
 
     def test_activation_history(self, visualizer):
         """Visualizer should track activation history."""
@@ -191,13 +165,7 @@ class TestDashboard:
     @pytest.fixture
     def dashboard(self, config):
         """Create a Dashboard instance."""
-        return Dashboard(
-            config=config,
-            x=0,
-            y=0,
-            width=800,
-            height=150
-        )
+        return Dashboard(config=config, x=0, y=0, width=800, height=150)
 
     def test_initialization(self, dashboard):
         """Dashboard should initialize with correct properties."""
@@ -234,7 +202,6 @@ class TestDashboard:
             dashboard.update(episode=i, score=100, epsilon=0.5, loss=0.1)
 
         # Record the smoothed loss before spike
-        smoothed_before = dashboard.smoothed_loss
 
         # Add a spike (10x increase) - should trigger internal spike timer
         dashboard.update(episode=10, score=100, epsilon=0.5, loss=1.0)
@@ -249,7 +216,7 @@ class TestDashboard:
             dashboard.update(episode=i, score=i * 10, epsilon=0.5, loss=0.1)
 
         # MetricCard tracks trend via history
-        score_card = dashboard.cards['score']
+        score_card = dashboard.cards["score"]
         assert len(score_card.history) > 0
         # Trend should show improvement (↑)
         assert score_card.trend in ("↑", "→", "↓")
@@ -280,8 +247,8 @@ class TestTrainingHUD:
     def test_initialization(self, hud, config):
         """HUD should initialize with correct properties."""
         assert hud.config == config
-        assert hud.enabled == getattr(config, 'HUD_ENABLED', True)
-        assert hud.opacity == getattr(config, 'HUD_OPACITY', 0.8)
+        assert hud.enabled == getattr(config, "HUD_ENABLED", True)
+        assert hud.opacity == getattr(config, "HUD_OPACITY", 0.8)
 
     def test_fonts_initialized(self, hud):
         """HUD should initialize fonts correctly."""
@@ -300,7 +267,7 @@ class TestTrainingHUD:
     def test_smooth_color_transition_state(self, hud):
         """HUD should track color transition state for smooth animations."""
         # Bug 90: Smooth score color transition
-        assert hasattr(hud, '_current_score_color')
+        assert hasattr(hud, "_current_score_color")
         assert len(hud._current_score_color) == 3
         assert hud._color_lerp_speed == 0.1
 
@@ -317,16 +284,12 @@ class TestColorUtils:
         """Activation colors should diverge for positive/negative values."""
         # Positive activation should give warm color
         pos_color = visualizer._interpolate_color(
-            visualizer.inactive_color,
-            visualizer.color_positive,
-            0.8
+            visualizer.inactive_color, visualizer.color_positive, 0.8
         )
 
         # Negative activation should give cool color
         neg_color = visualizer._interpolate_color(
-            visualizer.inactive_color,
-            visualizer.color_negative,
-            0.8
+            visualizer.inactive_color, visualizer.color_negative, 0.8
         )
 
         # Colors should be different

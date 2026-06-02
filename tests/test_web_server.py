@@ -8,30 +8,30 @@ Tests cover:
 - Training state management
 """
 
-import pytest
 import json
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Try to import web server components
 try:
     from src.web.server import (
+        FLASK_AVAILABLE,
+        LogMessage,
         MetricsPublisher,
         TrainingState,
-        LogMessage,
+        WebDashboard,
         _make_json_safe,
-        FLASK_AVAILABLE,
+        _metadata_sidecar_path,
     )
+
     WEB_AVAILABLE = FLASK_AVAILABLE
 except ImportError:
     WEB_AVAILABLE = False
 
 
 # Skip all tests if Flask is not available
-pytestmark = pytest.mark.skipif(
-    not WEB_AVAILABLE,
-    reason="Flask/SocketIO not installed"
-)
+pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
 
 
 class TestMakeJsonSafe:
@@ -48,12 +48,14 @@ class TestMakeJsonSafe:
     def test_numpy_int_converted(self):
         """NumPy integer types should be converted to native Python int."""
         import numpy as np
+
         assert _make_json_safe(np.int64(42)) == 42
         assert isinstance(_make_json_safe(np.int64(42)), int)
 
     def test_numpy_float_converted(self):
         """NumPy float types should be converted to native Python float."""
         import numpy as np
+
         assert _make_json_safe(np.float64(3.14)) == pytest.approx(3.14)
         assert isinstance(_make_json_safe(np.float64(3.14)), float)
 
@@ -70,15 +72,10 @@ class TestMakeJsonSafe:
         """Nested dictionaries with NumPy values should be converted."""
         import numpy as np
 
-        data = {
-            'score': np.float64(100.0),
-            'nested': {
-                'values': np.array([1, 2, 3])
-            }
-        }
+        data = {"score": np.float64(100.0), "nested": {"values": np.array([1, 2, 3])}}
         result = _make_json_safe(data)
-        assert result['score'] == 100.0
-        assert result['nested']['values'] == [1, 2, 3]
+        assert result["score"] == 100.0
+        assert result["nested"]["values"] == [1, 2, 3]
 
     def test_list_with_numpy_converted(self):
         """Lists containing NumPy values should be converted."""
@@ -132,25 +129,17 @@ class TestLogMessage:
 
     def test_creation(self):
         """LogMessage should store message and level."""
-        msg = LogMessage(
-            timestamp=datetime.now().isoformat(),
-            message="Test message",
-            level="info"
-        )
+        msg = LogMessage(timestamp=datetime.now().isoformat(), message="Test message", level="info")
         assert msg.message == "Test message"
         assert msg.level == "info"
 
     def test_to_dict(self):
         """LogMessage should convert to dictionary correctly."""
-        msg = LogMessage(
-            timestamp="2024-01-01T00:00:00",
-            message="Test",
-            level="warning"
-        )
+        msg = LogMessage(timestamp="2024-01-01T00:00:00", message="Test", level="warning")
         data = msg.to_dict()
-        assert data['message'] == "Test"
-        assert data['level'] == "warning"
-        assert data['timestamp'] == "2024-01-01T00:00:00"
+        assert data["message"] == "Test"
+        assert data["level"] == "warning"
+        assert data["timestamp"] == "2024-01-01T00:00:00"
 
     def test_data_field(self):
         """LogMessage should support optional data field."""
@@ -158,10 +147,10 @@ class TestLogMessage:
             timestamp="2024-01-01T00:00:00",
             message="With data",
             level="info",
-            data={'key': 'value'}
+            data={"key": "value"},
         )
         data = msg.to_dict()
-        assert data['data'] == {'key': 'value'}
+        assert data["data"] == {"key": "value"}
 
 
 class TestMetricsPublisher:
@@ -178,12 +167,7 @@ class TestMetricsPublisher:
         """MetricsPublisher.update should update state correctly."""
         publisher = MetricsPublisher(history_length=100)
 
-        publisher.update(
-            episode=10,
-            score=100,
-            epsilon=0.5,
-            loss=0.01
-        )
+        publisher.update(episode=10, score=100, epsilon=0.5, loss=0.01)
 
         assert publisher.state.episode == 10
         assert publisher.state.score == 100
@@ -195,12 +179,7 @@ class TestMetricsPublisher:
         publisher = MetricsPublisher(history_length=100)
 
         for i in range(5):
-            publisher.update(
-                episode=i,
-                score=i * 10,
-                epsilon=1.0 - i * 0.1,
-                loss=1.0 / (i + 1)
-            )
+            publisher.update(episode=i, score=i * 10, epsilon=1.0 - i * 0.1, loss=1.0 / (i + 1))
 
         assert len(publisher.scores) == 5
         assert len(publisher.losses) == 5
@@ -260,9 +239,9 @@ class TestMetricsPublisher:
         publisher.update(episode=5, score=25, epsilon=0.8, loss=0.05)
         snapshot = publisher.get_snapshot()
 
-        assert 'state' in snapshot
-        assert snapshot['state']['episode'] == 5
-        assert snapshot['state']['score'] == 25
+        assert "state" in snapshot
+        assert snapshot["state"]["episode"] == 5
+        assert snapshot["state"]["score"] == 25
 
     def test_screenshot_handling(self):
         """MetricsPublisher should handle screenshot retrieval."""
@@ -286,9 +265,9 @@ class TestMetricsPublisher:
         publisher = MetricsPublisher(history_length=100)
 
         # Action frequency dict should exist
-        assert 'left' in publisher.action_frequency
-        assert 'stay' in publisher.action_frequency
-        assert 'right' in publisher.action_frequency
+        assert "left" in publisher.action_frequency
+        assert "stay" in publisher.action_frequency
+        assert "right" in publisher.action_frequency
 
 
 class TestWebDashboardIntegration:
@@ -298,10 +277,11 @@ class TestWebDashboardIntegration:
     def web_dashboard(self):
         """Create a WebDashboard instance for testing."""
         try:
-            from src.web.server import WebDashboard
             from config import Config
+            from src.web.server import WebDashboard
+
             config = Config()
-            config.GAME_NAME = 'breakout'
+            config.GAME_NAME = "breakout"
 
             dashboard = WebDashboard(port=5099, config=config)
             yield dashboard
@@ -317,17 +297,12 @@ class TestWebDashboardIntegration:
     def test_initialization(self, web_dashboard):
         """WebDashboard should initialize with correct config."""
         assert web_dashboard.port == 5099
-        assert web_dashboard.config.GAME_NAME == 'breakout'
+        assert web_dashboard.config.GAME_NAME == "breakout"
         assert web_dashboard.publisher is not None
 
     def test_emit_metrics(self, web_dashboard):
         """WebDashboard.emit_metrics should update publisher."""
-        web_dashboard.emit_metrics(
-            episode=10,
-            score=100,
-            epsilon=0.5,
-            loss=0.01
-        )
+        web_dashboard.emit_metrics(episode=10, score=100, epsilon=0.5, loss=0.01)
 
         assert web_dashboard.publisher.state.episode == 10
         assert web_dashboard.publisher.state.score == 100
@@ -347,7 +322,7 @@ class TestWebDashboardIntegration:
                 episode=episode,
                 score=episode * 10,
                 epsilon=1.0 - (episode * 0.09),
-                loss=1.0 / episode
+                loss=1.0 / episode,
             )
 
         state = web_dashboard.publisher.state
@@ -359,41 +334,191 @@ class TestWebDashboardIntegration:
         """GET /api/status should return current training state."""
         web_dashboard.emit_metrics(episode=5, score=50, epsilon=0.8, loss=0.05)
 
-        web_dashboard.app.config['TESTING'] = True
+        web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get('/api/status')
+            response = client.get("/api/status")
             assert response.status_code == 200
 
             data = json.loads(response.data)
             # Status endpoint returns nested state
-            assert 'state' in data or 'episode' in data
-            if 'state' in data:
-                assert data['state']['episode'] == 5
+            assert "state" in data or "episode" in data
+            if "state" in data:
+                assert data["state"]["episode"] == 5
             else:
-                assert data['episode'] == 5
+                assert data["episode"] == 5
 
     def test_api_models_endpoint(self, web_dashboard):
         """GET /api/models should return available models."""
-        web_dashboard.app.config['TESTING'] = True
+        web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get('/api/models')
+            response = client.get("/api/models")
             assert response.status_code == 200
 
             data = json.loads(response.data)
-            assert 'models' in data
-            assert 'current_game' in data
+            assert "models" in data
+            assert "current_game" in data
+
+    def test_api_models_uses_metadata_sidecar_without_checkpoint_load(self, tmp_path):
+        """GET /api/models should read JSON sidecars and tolerate opaque .pth files."""
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        model_dir = tmp_path / "models" / "breakout"
+        model_dir.mkdir(parents=True)
+        model_path = model_dir / "metadata_only.pth"
+        model_path.write_text("not a torch checkpoint", encoding="utf-8")
+        sidecar_path = _metadata_sidecar_path(str(model_path))
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "has_metadata": True,
+                    "metadata": {"episode": 12, "best_score": 345},
+                    "steps": 999,
+                    "epsilon": 0.42,
+                    "state_size": 10,
+                    "action_size": 3,
+                },
+                f,
+            )
+
+        dashboard = WebDashboard(port=5101, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.get("/api/models")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        model = data["models"][0]
+        assert model["name"] == "metadata_only.pth"
+        assert model["has_metadata"] is True
+        assert model["metadata"]["best_score"] == 345
+        assert model["state_size"] == 10
+
+    def test_api_delete_model_removes_server_resolved_model_and_sidecar(self, tmp_path):
+        """DELETE /api/models should delete only a discovered model plus its sidecar."""
+        from urllib.parse import quote
+
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        model_dir = tmp_path / "models" / "breakout"
+        model_dir.mkdir(parents=True)
+        model_path = model_dir / "delete_me.pth"
+        model_path.write_text("checkpoint", encoding="utf-8")
+        sidecar_path = f"{model_path}.metadata.json"
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump({"has_metadata": True}, f)
+
+        dashboard = WebDashboard(port=5102, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.delete(
+                f"/api/models/{quote(model_path.name, safe='')}",
+                headers={"X-Dashboard-Token": dashboard.control_token},
+            )
+
+        assert response.status_code == 200
+        assert not model_path.exists()
+        assert not (model_dir / "delete_me.pth.metadata.json").exists()
+
+    def test_api_delete_model_rejects_undiscovered_path(self, tmp_path):
+        """DELETE /api/models should not delete files outside configured model dirs."""
+        from urllib.parse import quote
+
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        (tmp_path / "models" / "breakout").mkdir(parents=True)
+        outside_path = tmp_path / "outside.pth"
+        outside_path.write_text("checkpoint", encoding="utf-8")
+
+        dashboard = WebDashboard(port=5103, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.delete(
+                f"/api/models/{quote(outside_path.name, safe='')}",
+                headers={"X-Dashboard-Token": dashboard.control_token},
+            )
+
+        assert response.status_code == 404
+        assert outside_path.exists()
 
     def test_api_config_endpoint(self, web_dashboard):
         """GET /api/config should return configuration."""
-        web_dashboard.app.config['TESTING'] = True
+        web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get('/api/config')
+            response = client.get("/api/config")
             assert response.status_code == 200
 
             data = json.loads(response.data)
             # Config returns training hyperparameters
-            assert 'batch_size' in data or 'learning_rate' in data
-            assert 'device' in data
+            assert "batch_size" in data or "learning_rate" in data
+            assert "device" in data
+
+    def test_dashboard_index_renders_registered_game_options(self, web_dashboard):
+        """Initial HTML should reflect the registry before client-side JS runs."""
+        web_dashboard.app.config["TESTING"] = True
+        with web_dashboard.app.test_client() as client:
+            response = client.get("/")
+
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert 'option value="breakout"' in html
+        assert 'option value="space_invaders"' in html
+        assert 'option value="pong"' in html
+
+    def test_control_payload_validation_rejects_bad_speed(self, web_dashboard):
+        """Speed controls should be finite and bounded before callbacks run."""
+        validated, error = web_dashboard._validate_control_payload(
+            {"action": "speed", "value": float("nan")}
+        )
+
+        assert validated is None
+        assert "finite" in error
+
+    def test_control_payload_validation_normalizes_config(self, web_dashboard):
+        """Config controls should reject unknown keys and normalize supported values."""
+        validated, error = web_dashboard._validate_control_payload(
+            {
+                "action": "config_change",
+                "config": {"gamma": "0.95", "batch_size": "16", "learn_every": 4},
+            }
+        )
+
+        assert error == ""
+        assert validated == {
+            "action": "config_change",
+            "config": {"gamma": 0.95, "batch_size": 16, "learn_every": 4},
+        }
+
+    def test_control_payload_validation_rejects_unknown_config_key(self, web_dashboard):
+        """Dashboard controls should not pass arbitrary config keys to callbacks."""
+        validated, error = web_dashboard._validate_control_payload(
+            {"action": "config_change", "config": {"__dict__": {}}}
+        )
+
+        assert validated is None
+        assert "Unknown config key" in error
+
+    def test_control_payload_validation_rejects_model_path_outside_model_dir(
+        self, web_dashboard, tmp_path
+    ):
+        """Model load controls should stay inside configured model directories."""
+        external_model = tmp_path / "external.pth"
+        external_model.write_text("checkpoint", encoding="utf-8")
+
+        validated, error = web_dashboard._validate_control_payload(
+            {"action": "load_model", "path": str(external_model)}
+        )
+
+        assert validated is None
+        assert "not allowed" in error
 
     def test_logging_during_training(self, web_dashboard):
         """Logging should work during training simulation."""

@@ -1,10 +1,8 @@
-# 🧠 Neural Network Game AI - Breakout & Space Invaders
+# 🧠 Neural Network Game AI - Classic Arcade Games
 
 A complete, educational implementation of a Deep Q-Learning (DQN) agent that learns to play classic arcade games **in real-time** with a **live neural network visualizer**.
 
-**Supported Games:** 🎮 Breakout | 👾 Space Invaders
-
-![Project Architecture](docs/architecture.png)
+**Supported Games:** 🎮 Breakout | 👾 Space Invaders | 🏓 Pong | 🐍 Snake | 🚀 Asteroids
 
 ---
 
@@ -115,7 +113,7 @@ NN-Game1/
 
 ### Prerequisites
 
-- Python 3.9+ (tested with 3.11)
+- Python 3.10-3.12 (tested with 3.11)
 - pip package manager
 
 ### Setup Steps
@@ -128,8 +126,9 @@ cd /Users/justin/Documents/Github/NN-Game1
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# 3. Install dependencies
+# 3. Install dependencies and dev tools
 pip install -r requirements.txt
+# or: make setup
 
 # 4. Verify installation
 python -c "import torch; import pygame; print('Ready!')"
@@ -710,4 +709,3 @@ MIT License - Use this for learning and teaching!
 ---
 
 **Happy Learning! 🚀**
-

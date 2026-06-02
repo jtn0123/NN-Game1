@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[web,test,dev]"
+
+      - name: Compile Python sources
+        run: make compile PYTHON=python
+
+      - name: Check formatting
+        run: make format-check PYTHON=python
+
+      - name: Lint
+        run: make lint PYTHON=python
+
+      - name: Type check
+        run: make typecheck PYTHON=python
+
+      - name: Run tests
+        run: make test PYTHON=python

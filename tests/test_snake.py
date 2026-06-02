@@ -9,10 +9,11 @@ These tests verify:
     - Reward system
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -220,12 +221,12 @@ class TestSnakeGameOver:
     def test_info_contains_score(self, game):
         """Info dict should contain score."""
         _, _, _, info = game.step(Snake.RIGHT)
-        assert 'score' in info
+        assert "score" in info
 
     def test_info_contains_length(self, game):
         """Info dict should contain snake length."""
         _, _, _, info = game.step(Snake.RIGHT)
-        assert 'length' in info
+        assert "length" in info
 
 
 class TestVecSnake:
