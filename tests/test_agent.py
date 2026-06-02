@@ -85,6 +85,26 @@ class TestActionSelection:
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
         action = agent.select_action(state)
         assert 0 <= action < config.ACTION_SIZE
+
+    def test_select_action_rejects_wrong_state_size(self, agent, config):
+        """Wrong-sized states should fail before torch copy errors."""
+        state = np.random.randn(config.STATE_SIZE + 1).astype(np.float32)
+        with pytest.raises(ValueError, match="State size mismatch"):
+            agent.select_action(state, training=False)
+
+    def test_select_actions_batch_handles_empty_batch(self, agent, config):
+        """Empty batches should return an empty action array."""
+        states = np.empty((0, config.STATE_SIZE), dtype=np.float32)
+        actions, explored, exploited = agent.select_actions_batch(states, training=False)
+        assert actions.shape == (0,)
+        assert explored == 0
+        assert exploited == 0
+
+    def test_select_actions_batch_rejects_wrong_state_size(self, agent, config):
+        """Batch feature mismatches should fail with a clear error."""
+        states = np.empty((2, config.STATE_SIZE + 1), dtype=np.float32)
+        with pytest.raises(ValueError, match="State batch size mismatch"):
+            agent.select_actions_batch(states, training=False)
     
     def test_greedy_action_selection(self, agent, config):
         """With epsilon=0, should always select best action."""
@@ -916,4 +936,3 @@ class TestArchitectureMismatchOnLoad:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

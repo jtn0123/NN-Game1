@@ -10,8 +10,11 @@ Tests cover:
 
 import pytest
 import json
+import re
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+
+import numpy as np
 
 # Try to import web server components
 try:
@@ -228,6 +231,14 @@ class TestMetricsPublisher:
         assert len(publisher.console_logs) == 1
         assert publisher.console_logs[0].message == "Test message"
 
+    def test_log_timestamp_uses_milliseconds(self):
+        """Log timestamps should keep three fractional-second digits."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.log("Test message", level="info")
+
+        assert re.match(r"^\d{2}:\d{2}:\d{2}\.\d{3}$", publisher.console_logs[0].timestamp)
+
     def test_log_level_parsing(self):
         """MetricsPublisher.log should handle different log levels."""
         publisher = MetricsPublisher(history_length=100)
@@ -289,6 +300,35 @@ class TestMetricsPublisher:
         assert 'left' in publisher.action_frequency
         assert 'stay' in publisher.action_frequency
         assert 'right' in publisher.action_frequency
+
+    def test_layer_analysis_handles_empty_arrays(self):
+        """Layer analysis should not crash on empty activation, weight, or gradient arrays."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update_layer_analysis(
+            layer_idx=0,
+            layer_name="empty",
+            neuron_count=0,
+            activations=np.array([], dtype=np.float32),
+            weights=np.array([], dtype=np.float32),
+            gradients=np.array([], dtype=np.float32),
+        )
+
+        analysis = publisher.get_layer_analysis(0)
+        assert analysis['avg_activation'] == 0.0
+        assert analysis['activation_histogram'] == [0] * 20
+        assert analysis['weight_histogram'] == [0] * 20
+        assert analysis['gradient_max_magnitude'] == 0.0
+
+    def test_all_layer_analysis_is_sorted(self):
+        """All layer analysis should return layers in index order."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update_layer_analysis(2, "layer_2", 1, np.array([0.2], dtype=np.float32))
+        publisher.update_layer_analysis(1, "layer_1", 1, np.array([0.1], dtype=np.float32))
+
+        layers = publisher.get_all_layer_analysis()
+        assert [layer['layer_idx'] for layer in layers] == [1, 2]
 
 
 class TestWebDashboardIntegration:
@@ -394,6 +434,25 @@ class TestWebDashboardIntegration:
             # Config returns training hyperparameters
             assert 'batch_size' in data or 'learning_rate' in data
             assert 'device' in data
+
+    def test_api_layers_endpoint(self, web_dashboard):
+        """GET /api/layers should return all layer analysis data."""
+        web_dashboard.publisher.update_layer_analysis(
+            layer_idx=0,
+            layer_name="input",
+            neuron_count=2,
+            activations=np.array([0.1, 0.2], dtype=np.float32),
+        )
+
+        web_dashboard.app.config['TESTING'] = True
+        with web_dashboard.app.test_client() as client:
+            response = client.get('/api/layers')
+            assert response.status_code == 200
+
+            data = json.loads(response.data)
+            assert isinstance(data, list)
+            assert data[0]['layer_idx'] == 0
+            assert data[0]['layer_name'] == "input"
 
     def test_logging_during_training(self, web_dashboard):
         """Logging should work during training simulation."""

@@ -340,6 +340,11 @@ class Agent:
             After calling this method, check `agent._last_action_explored` to
             determine if the action was exploration (random) or exploitation (greedy).
         """
+        if state.size != self.state_size:
+            raise ValueError(
+                f"State size mismatch: expected {self.state_size} values, got {state.size}"
+            )
+
         # Epsilon-greedy exploration (works alongside NoisyNets as fallback)
         # Only skip if epsilon is exactly 0 (pure NoisyNets mode)
         if training and self.epsilon > 0 and random.random() < self.epsilon:
@@ -394,8 +399,15 @@ class Agent:
         # Ensure states is 2D (handle 1D input gracefully)
         if states.ndim == 1:
             states = states.reshape(1, -1)
+        if states.shape[1] != self.state_size:
+            raise ValueError(
+                f"State batch size mismatch: expected {self.state_size} features, got {states.shape[1]}"
+            )
 
         batch_size = states.shape[0]
+        if batch_size == 0:
+            return np.empty(0, dtype=np.int64), 0, 0
+
         actions = np.empty(batch_size, dtype=np.int64)
         num_explored = 0
         num_exploited = 0

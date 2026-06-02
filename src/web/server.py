@@ -583,7 +583,7 @@ class MetricsPublisher:
     ) -> None:
         """Add a log message to the console."""
         log_entry = LogMessage(
-            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:12],  # Properly format with milliseconds
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
             level=level,
             message=message,
             data=data
@@ -926,37 +926,59 @@ class MetricsPublisher:
         data = self._layer_analysis_data[layer_idx]
 
         # Update activation statistics
-        data.avg_activation = float(np.mean(activations))
-        data.activation_std = float(np.std(activations))
-        data.activation_min = float(np.min(activations))
-        data.activation_max = float(np.max(activations))
+        activations = np.asarray(activations)
+        if activations.size > 0:
+            data.avg_activation = float(np.mean(activations))
+            data.activation_std = float(np.std(activations))
+            data.activation_min = float(np.min(activations))
+            data.activation_max = float(np.max(activations))
 
-        # Count dead and saturated neurons
-        data.dead_neuron_count = int(np.sum(np.abs(activations) < 0.01))
-        data.saturated_neuron_count = int(np.sum(np.abs(activations) > 0.95))
+            # Count dead and saturated neurons
+            data.dead_neuron_count = int(np.sum(np.abs(activations) < 0.01))
+            data.saturated_neuron_count = int(np.sum(np.abs(activations) > 0.95))
 
-        # Create activation histogram
-        hist, _ = np.histogram(activations, bins=20)
-        data.activation_histogram = hist.tolist()
+            # Create activation histogram
+            hist, _ = np.histogram(activations, bins=20)
+            data.activation_histogram = hist.tolist()
+        else:
+            data.avg_activation = 0.0
+            data.activation_std = 0.0
+            data.activation_min = 0.0
+            data.activation_max = 0.0
+            data.dead_neuron_count = 0
+            data.saturated_neuron_count = 0
+            data.activation_histogram = [0] * 20
 
         # Update weight statistics if provided
         if weights is not None:
-            flat_weights = weights.flatten()
-            data.weight_mean = float(np.mean(flat_weights))
-            data.weight_std = float(np.std(flat_weights))
-            data.weight_min = float(np.min(flat_weights))
-            data.weight_max = float(np.max(flat_weights))
+            flat_weights = np.asarray(weights).flatten()
+            if flat_weights.size > 0:
+                data.weight_mean = float(np.mean(flat_weights))
+                data.weight_std = float(np.std(flat_weights))
+                data.weight_min = float(np.min(flat_weights))
+                data.weight_max = float(np.max(flat_weights))
 
-            # Weight histogram
-            hist, _ = np.histogram(flat_weights, bins=20)
-            data.weight_histogram = hist.tolist()
+                # Weight histogram
+                hist, _ = np.histogram(flat_weights, bins=20)
+                data.weight_histogram = hist.tolist()
+            else:
+                data.weight_mean = 0.0
+                data.weight_std = 0.0
+                data.weight_min = 0.0
+                data.weight_max = 0.0
+                data.weight_histogram = [0] * 20
 
         # Update gradient statistics if provided
         if gradients is not None:
-            flat_grads = gradients.flatten()
-            data.gradient_mean = float(np.mean(np.abs(flat_grads)))
-            data.gradient_std = float(np.std(flat_grads))
-            data.gradient_max_magnitude = float(np.max(np.abs(flat_grads)))
+            flat_grads = np.asarray(gradients).flatten()
+            if flat_grads.size > 0:
+                data.gradient_mean = float(np.mean(np.abs(flat_grads)))
+                data.gradient_std = float(np.std(flat_grads))
+                data.gradient_max_magnitude = float(np.max(np.abs(flat_grads)))
+            else:
+                data.gradient_mean = 0.0
+                data.gradient_std = 0.0
+                data.gradient_max_magnitude = 0.0
 
     def get_layer_analysis(self, layer_idx: int) -> Dict[str, Any]:
         """
@@ -1390,6 +1412,12 @@ class WebDashboard:
         def api_layer_analysis(layer_idx):
             """Phase 2: Get analysis data for a specific layer."""
             analysis = self.publisher.get_layer_analysis(layer_idx)
+            return jsonify(_make_json_safe(analysis))
+
+        @self.app.route('/api/layers')
+        def api_layers_analysis():
+            """Phase 2: Get analysis data for all layers."""
+            analysis = self.publisher.get_all_layer_analysis()
             return jsonify(_make_json_safe(analysis))
 
     def _register_socket_events(self) -> None:

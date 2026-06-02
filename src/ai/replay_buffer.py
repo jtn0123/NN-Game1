@@ -419,6 +419,11 @@ class PrioritizedReplayBuffer:
         Returns:
             Tuple: (states, actions, rewards, next_states, dones, indices, weights)
         """
+        if not self._initialized:
+            raise RuntimeError(f"Cannot sample from uninitialized {self.__class__.__name__}. Call push() first.")
+        if self._size == 0:
+            raise RuntimeError(f"Cannot sample from empty {self.__class__.__name__}.")
+
         # Anneal beta
         self._frame_count += 1
         beta_progress = min(1.0, self._frame_count / self.beta_frames)

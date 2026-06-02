@@ -685,10 +685,16 @@ class SpaceInvaders(BaseGame):
         
         self._max_player_bullets = self.config.SI_MAX_PLAYER_BULLETS
         self._max_tracked_alien_bullets = 5  # Track top 5 nearest alien bullets
-        # Enhanced state: ship_x, player_bullets, aliens, movement, danger metrics
-        # + alien bullets (x,y for each) + shoot_cooldown, active_bullets, aliens_ratio, lives, level, ufo
-        self._state_size = (1 + self._max_player_bullets * 2 + self._num_aliens + 5 
-                          + self._max_tracked_alien_bullets * 2 + 5)  # +5 for cooldown, active, ratio, lives, level
+        movement_feature_count = 3  # alien offset, direction, lowest alien y
+        status_feature_count = 5  # cooldown, active bullets, aliens ratio, lives, level
+        self._state_size = (
+            1
+            + self._max_player_bullets * 2
+            + self._num_aliens
+            + movement_feature_count
+            + self._max_tracked_alien_bullets * 2
+            + status_feature_count
+        )
         self._state_array = np.zeros(self._state_size, dtype=np.float32)
         self._alien_states = np.ones(self._num_aliens, dtype=np.float32)
         
@@ -974,9 +980,8 @@ class SpaceInvaders(BaseGame):
         if self._aliens_remaining == 0:
             reward += self.config.SI_REWARD_LEVEL_CLEAR
             
-            # Check win condition: complete SI_WIN_LEVELS levels to win
-            # Level starts at 1, so after completing level N, level becomes N+1
-            # We win when we've completed SI_WIN_LEVELS levels (i.e., level > SI_WIN_LEVELS)
+            # Check win condition: complete SI_WIN_LEVELS levels to win.
+            # This block runs after clearing the current level, before incrementing it.
             # (0 means endless mode, no wins possible)
             if self.config.SI_WIN_LEVELS > 0 and self.level >= self.config.SI_WIN_LEVELS:
                 # We've completed enough levels - win!
@@ -1361,6 +1366,10 @@ class SpaceInvaders(BaseGame):
         # Level (difficulty awareness)
         self._state_array[idx] = min(self.level / 10.0, 1.0)
         idx += 1
+
+        assert idx == self._state_size, (
+            f"Space Invaders state writer filled {idx} values, expected {self._state_size}"
+        )
 
         return self._state_array.copy()
     

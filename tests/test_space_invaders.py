@@ -47,6 +47,18 @@ class TestSpaceInvadersInitialization:
         assert state.shape == (game.state_size,)
         assert game.state_size > 0
 
+    def test_state_size_matches_named_components(self, game, config):
+        """State size should match the fields written by get_state()."""
+        expected = (
+            1
+            + config.SI_MAX_PLAYER_BULLETS * 2
+            + config.SI_ALIEN_ROWS * config.SI_ALIEN_COLS
+            + 3
+            + game._max_tracked_alien_bullets * 2
+            + 5
+        )
+        assert game.state_size == expected
+
     def test_initial_score(self, game):
         """Game should start with zero score."""
         assert game.score == 0

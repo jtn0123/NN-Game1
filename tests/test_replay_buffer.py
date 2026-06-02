@@ -594,9 +594,17 @@ class TestPrioritizedReplayBufferEdgeCases:
         buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
         buffer._initialized = True  # Force initialization
         buffer._size = 0
+        with pytest.raises(RuntimeError, match="Cannot sample from empty"):
+            buffer.sample(16)
         # Match either "empty buffer" or "empty PrioritizedReplayBuffer"
         with pytest.raises(RuntimeError, match="Cannot sample from empty"):
             buffer.sample_no_copy(16)
+
+    def test_per_sample_uninitialized_raises(self):
+        """PER sample should fail with a clear message before first push."""
+        buffer = PrioritizedReplayBuffer(capacity=100)
+        with pytest.raises(RuntimeError, match="uninitialized PrioritizedReplayBuffer"):
+            buffer.sample(16)
 
     def test_per_negative_capacity_raises(self):
         """Creating PER buffer with negative capacity should raise ValueError."""

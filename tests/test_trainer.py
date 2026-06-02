@@ -58,6 +58,13 @@ class TestTrainingMetrics:
         assert len(metrics.rewards) == 0
         assert len(metrics.wins) == 0
 
+    def test_rejects_non_positive_history_length(self):
+        """Invalid history lengths should fail before slicing behaves strangely."""
+        with pytest.raises(ValueError, match="history_length must be positive"):
+            TrainingMetrics(history_length=0)
+        with pytest.raises(ValueError, match="history_length must be positive"):
+            TrainingMetrics(history_length=-1)
+
     def test_add_episode_stats(self):
         """Adding stats should update all lists."""
         metrics = TrainingMetrics()

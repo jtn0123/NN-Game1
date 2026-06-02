@@ -57,6 +57,9 @@ class TrainingMetrics:
         Args:
             history_length: Maximum history to store
         """
+        if history_length <= 0:
+            raise ValueError(f"history_length must be positive, got {history_length}")
+
         self.history_length = history_length
         
         self.scores: List[int] = []
@@ -352,4 +355,3 @@ class Trainer:
 # Testing
 if __name__ == "__main__":
     print("Trainer module - import and use with game and agent")
-
