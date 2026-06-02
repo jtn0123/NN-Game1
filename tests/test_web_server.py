@@ -488,6 +488,69 @@ class TestWebDashboardIntegration:
         assert called == ["pause"]
         client.disconnect()
 
+    def test_socket_control_acknowledges_destructive_workflows(self, web_dashboard):
+        """Dashboard controls should return explicit success acks for UI gating."""
+        called = []
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+        web_dashboard.on_save_callback = lambda: called.append("save")
+        web_dashboard.on_start_fresh_callback = lambda: called.append("start_fresh")
+
+        save_ack = client.emit(
+            "control",
+            {"action": "save", "token": web_dashboard.access_token},
+            callback=True,
+        )
+        fresh_ack = client.emit(
+            "control",
+            {"action": "start_fresh", "token": web_dashboard.access_token},
+            callback=True,
+        )
+
+        assert save_ack == {"success": True, "action": "save"}
+        assert fresh_ack == {"success": True, "action": "start_fresh"}
+        assert called == ["save", "start_fresh"]
+        assert any(event["name"] == "training_reset" for event in client.get_received())
+        client.disconnect()
+
+    def test_socket_control_rejects_unknown_or_invalid_model_actions(
+        self, web_dashboard
+    ):
+        """Bad control actions should fail through the same ack path as success."""
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        unknown_ack = client.emit(
+            "control",
+            {"action": "not_real", "token": web_dashboard.access_token},
+            callback=True,
+        )
+        load_ack = client.emit(
+            "control",
+            {
+                "action": "load_model",
+                "id": "breakout:../bad.pth",
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert unknown_ack == {
+            "success": False,
+            "action": "not_real",
+            "error": "Unknown action",
+        }
+        assert load_ack == {
+            "success": False,
+            "action": "load_model",
+            "error": "Invalid model id",
+        }
+        client.disconnect()
+
     def test_api_config_endpoint(self, web_dashboard):
         """GET /api/config should return configuration."""
         web_dashboard.app.config["TESTING"] = True

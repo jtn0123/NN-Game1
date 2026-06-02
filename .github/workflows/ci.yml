@@ -34,6 +34,9 @@ jobs:
       - name: Type check focused core
         run: make typecheck
 
+      - name: Dashboard JavaScript tests
+        run: make dashboard-test
+
       - name: Test with coverage
         run: make coverage
 

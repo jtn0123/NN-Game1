@@ -32,6 +32,24 @@ def test_model_service_resolves_ids_and_rejects_traversal(tmp_path):
     assert service.resolve("legacy:best.pth") is None
 
 
+def test_model_service_resolves_legacy_absolute_paths_only_inside_allowed_dirs(
+    tmp_path,
+):
+    model_dir = tmp_path / "models" / "breakout"
+    outside_dir = tmp_path / "outside"
+    model_dir.mkdir(parents=True)
+    outside_dir.mkdir()
+    allowed_model = model_dir / "best.pth"
+    outside_model = outside_dir / "best.pth"
+    allowed_model.write_bytes(b"checkpoint")
+    outside_model.write_bytes(b"checkpoint")
+
+    service = ModelService([(str(model_dir), "breakout")])
+
+    assert service.resolve(str(allowed_model)) == os.path.realpath(allowed_model)
+    assert service.resolve(str(outside_model)) is None
+
+
 def test_model_service_delete_rejects_symlink_path(tmp_path):
     model_dir = tmp_path / "models" / "breakout"
     target_dir = tmp_path / "target"

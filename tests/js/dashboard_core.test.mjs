@@ -16,6 +16,24 @@ test('withDashboardToken preserves headers and adds token', () => {
   assert.equal(options.headers['X-Dashboard-Token'], 'secret-token');
 });
 
+test('readToken reads dashboard token from meta tag', () => {
+  const documentRef = {
+    querySelector(selector) {
+      assert.equal(selector, 'meta[name="dashboard-token"]');
+      return { content: 'meta-token' };
+    },
+  };
+
+  assert.equal(DashboardCore.readToken(documentRef), 'meta-token');
+});
+
+test('authorizedControlPayload preserves existing payload fields', () => {
+  assert.deepEqual(
+    DashboardCore.authorizedControlPayload({ action: 'save_as', filename: 'x.pth' }, 'token'),
+    { action: 'save_as', filename: 'x.pth', token: 'token' },
+  );
+});
+
 test('createAuthorizedSocket injects token into mutating events only', () => {
   const emitted = [];
   const socket = DashboardCore.createAuthorizedSocket((options) => ({
