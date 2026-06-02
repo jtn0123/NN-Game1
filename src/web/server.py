@@ -1333,61 +1333,15 @@ class WebDashboard:
             if request.headers.get("X-Dashboard-Token") != self.control_token:
                 return jsonify({"error": "Unauthorized"}), 403
 
-            # Security: ensure path is within model directory
-            # Check both game-specific and legacy model directories
-            game_model_dir = os.path.realpath(self.config.GAME_MODEL_DIR)
-            legacy_model_dir = os.path.realpath(self.config.MODEL_DIR)
-            # Join filepath with model_dir first to prevent absolute path injection
-            full_path = os.path.realpath(os.path.join(legacy_model_dir, filepath))
-
-            # Check if path is within either allowed directory
-            is_valid = False
-            try:
-                # Check game-specific directory
-                common_game = os.path.commonpath([game_model_dir, full_path])
-                if common_game == game_model_dir:
-                    is_valid = True
-            except ValueError:
-                # Expected when paths are on different drives (Windows) or incompatible
-                _logger.debug(f"Path {full_path} not in game model dir (different root)")
-
-            try:
-                # Check legacy directory
-                common_legacy = os.path.commonpath([legacy_model_dir, full_path])
-                if common_legacy == legacy_model_dir:
-                    is_valid = True
-            except ValueError:
-                # Expected when paths are on different drives (Windows) or incompatible
-                _logger.debug(f"Path {full_path} not in legacy model dir (different root)")
-
-            if not is_valid:
-                return jsonify({"error": "Invalid path - model must be in model directory"}), 403
-
-            if not os.path.exists(full_path):
+            model_paths = self._resolve_deletable_model_paths(filepath)
+            if model_paths is None:
                 return jsonify({"error": "Model not found"}), 404
-
-            # Security: Reject symlinks in ANY path component to prevent symlink-based attacks
-            # Even though realpath resolves them and the containment check catches external targets,
-            # it's safer to explicitly reject symlinks in all path components
-            path_to_check = os.path.join(legacy_model_dir, filepath)
-            current_path = path_to_check
-            while current_path and current_path != legacy_model_dir:
-                if os.path.islink(current_path):
-                    return (
-                        jsonify({"error": "Cannot delete files with symbolic links in path"}),
-                        403,
-                    )
-                current_path = os.path.dirname(current_path)
-
-            # Ensure it's a .pth file
-            if not full_path.endswith(".pth"):
-                return jsonify({"error": "Invalid file type"}), 400
+            full_path, sidecar_path = model_paths
 
             try:
                 filename = os.path.basename(full_path)
                 os.remove(full_path)
-                sidecar_path = _metadata_sidecar_path(full_path)
-                if os.path.exists(sidecar_path):
+                if sidecar_path and os.path.exists(sidecar_path):
                     os.remove(sidecar_path)
                 self.publisher.log(f"🗑️ Deleted model: {filename}", level="action")
                 return jsonify(
@@ -1397,8 +1351,9 @@ class WebDashboard:
                         "filename": filename,
                     }
                 )
-            except Exception as e:
-                return jsonify({"error": f"Failed to delete model: {str(e)}"}), 500
+            except Exception:
+                _logger.exception("Failed to delete model %s", os.path.basename(full_path))
+                return jsonify({"error": "Failed to delete model"}), 500
 
         @self.app.route("/api/save-status")
         def api_save_status():
@@ -1500,6 +1455,60 @@ class WebDashboard:
             except ValueError:
                 continue
         return False
+
+    def _resolve_deletable_model_paths(self, filepath: str) -> Optional[Tuple[str, Optional[str]]]:
+        """Resolve a model deletion request to server-discovered model paths only."""
+        if not filepath or not filepath.endswith(".pth"):
+            return None
+
+        requested_path = os.path.realpath(filepath)
+        requested_name = os.path.basename(filepath)
+        allow_basename_match = requested_name == filepath
+
+        for configured_dir in (self.config.GAME_MODEL_DIR, self.config.MODEL_DIR):
+            model_dir = os.path.realpath(configured_dir)
+            if not os.path.isdir(model_dir):
+                continue
+
+            try:
+                entries = os.listdir(model_dir)
+            except OSError:
+                continue
+
+            for filename in entries:
+                if not filename.endswith(".pth"):
+                    continue
+
+                candidate = os.path.realpath(os.path.join(model_dir, filename))
+                try:
+                    if os.path.commonpath([model_dir, candidate]) != model_dir:
+                        continue
+                except ValueError:
+                    continue
+                if os.path.islink(candidate):
+                    continue
+
+                matches_absolute_path = requested_path == candidate
+                matches_unique_filename = allow_basename_match and requested_name == filename
+                if not matches_absolute_path and not matches_unique_filename:
+                    continue
+
+                sidecar_candidate = os.path.realpath(
+                    os.path.join(model_dir, f"{filename}.metadata.json")
+                )
+                sidecar_path = None
+                try:
+                    sidecar_is_allowed = (
+                        os.path.commonpath([model_dir, sidecar_candidate]) == model_dir
+                    )
+                except ValueError:
+                    sidecar_is_allowed = False
+                if sidecar_is_allowed and not os.path.islink(sidecar_candidate):
+                    sidecar_path = sidecar_candidate
+
+                return candidate, sidecar_path
+
+        return None
 
     def _validate_control_payload(
         self, data: Dict[str, Any]

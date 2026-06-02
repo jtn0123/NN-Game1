@@ -396,6 +396,59 @@ class TestWebDashboardIntegration:
         assert model["metadata"]["best_score"] == 345
         assert model["state_size"] == 10
 
+    def test_api_delete_model_removes_server_resolved_model_and_sidecar(self, tmp_path):
+        """DELETE /api/models should delete only a discovered model plus its sidecar."""
+        from urllib.parse import quote
+
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        model_dir = tmp_path / "models" / "breakout"
+        model_dir.mkdir(parents=True)
+        model_path = model_dir / "delete_me.pth"
+        model_path.write_text("checkpoint", encoding="utf-8")
+        sidecar_path = f"{model_path}.metadata.json"
+        with open(sidecar_path, "w", encoding="utf-8") as f:
+            json.dump({"has_metadata": True}, f)
+
+        dashboard = WebDashboard(port=5102, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.delete(
+                f"/api/models/{quote(str(model_path), safe='')}",
+                headers={"X-Dashboard-Token": dashboard.control_token},
+            )
+
+        assert response.status_code == 200
+        assert not model_path.exists()
+        assert not (model_dir / "delete_me.pth.metadata.json").exists()
+
+    def test_api_delete_model_rejects_undiscovered_path(self, tmp_path):
+        """DELETE /api/models should not delete files outside configured model dirs."""
+        from urllib.parse import quote
+
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        (tmp_path / "models" / "breakout").mkdir(parents=True)
+        outside_path = tmp_path / "outside.pth"
+        outside_path.write_text("checkpoint", encoding="utf-8")
+
+        dashboard = WebDashboard(port=5103, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.delete(
+                f"/api/models/{quote(str(outside_path), safe='')}",
+                headers={"X-Dashboard-Token": dashboard.control_token},
+            )
+
+        assert response.status_code == 404
+        assert outside_path.exists()
+
     def test_api_config_endpoint(self, web_dashboard):
         """GET /api/config should return configuration."""
         web_dashboard.app.config["TESTING"] = True
