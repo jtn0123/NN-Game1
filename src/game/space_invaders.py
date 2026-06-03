@@ -12,18 +12,14 @@ Key Features:
 - Particle explosions and screen effects
 """
 
-import heapq
-import math
-import random
-import sys
-from typing import List, Optional, Tuple
-
 import numpy as np
 import pygame
+from typing import Tuple, List, Optional
+import math
+import random
+import heapq
 
 from .base_game import BaseGame
-
-sys.path.append("..")
 from config import Config
 
 # Classic Space Invader pixel patterns (8x8)
@@ -123,7 +119,7 @@ class Particle:
     def draw(self, screen: pygame.Surface) -> None:
         if self.life <= 0:
             return
-        int(255 * self.life)
+        alpha = int(255 * self.life)
         color = tuple(min(255, int(c * self.life)) for c in self.color)
         size = int(self.size * self.life)
         if size > 0:
@@ -152,7 +148,7 @@ class ScorePopup:
             return
 
         font = pygame.font.Font(None, 24)
-        int(255 * self.life)
+        alpha = int(255 * self.life)
 
         # Create text with current alpha
         text = f"+{self.score}"
@@ -255,7 +251,12 @@ class Bullet:
     """A bullet (player or alien)."""
 
     def __init__(
-        self, x: float, y: float, speed: float, is_player: bool, color: Tuple[int, int, int]
+        self,
+        x: float,
+        y: float,
+        speed: float,
+        is_player: bool,
+        color: Tuple[int, int, int],
     ):
         self.x = x
         self.y = y
@@ -270,7 +271,10 @@ class Bullet:
     @property
     def rect(self) -> pygame.Rect:
         return pygame.Rect(
-            int(self.x - self.width // 2), int(self.y - self.height // 2), self.width, self.height
+            int(self.x - self.width // 2),
+            int(self.y - self.height // 2),
+            self.width,
+            self.height,
         )
 
     def update(self) -> None:
@@ -311,7 +315,13 @@ class Alien:
     """An alien invader with pixel art sprite."""
 
     def __init__(
-        self, x: int, y: int, width: int, height: int, alien_type: int, color: Tuple[int, int, int]
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        alien_type: int,
+        color: Tuple[int, int, int],
     ):
         self.x = x
         self.y = y
@@ -368,7 +378,13 @@ class Ship:
     """The player's ship with detailed design."""
 
     def __init__(
-        self, x: int, y: int, width: int, height: int, speed: int, color: Tuple[int, int, int]
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        speed: int,
+        color: Tuple[int, int, int],
     ):
         self.x = x
         self.y = y
@@ -403,7 +419,10 @@ class Ship:
                 int((255 - i * 40) * thrust_intensity),
             )
             glow_rect = pygame.Rect(
-                rect.centerx - glow_width // 2, rect.bottom - 3 + i * 2, glow_width, glow_height
+                rect.centerx - glow_width // 2,
+                rect.bottom - 3 + i * 2,
+                glow_width,
+                glow_height,
             )
             pygame.draw.ellipse(screen, glow_color, glow_rect)
 
@@ -423,7 +442,11 @@ class Ship:
         # Hull detail lines
         detail_color = tuple(max(0, c - 40) for c in self.color)
         pygame.draw.line(
-            screen, detail_color, (rect.centerx, rect.top + 5), (rect.centerx, rect.bottom - 5), 2
+            screen,
+            detail_color,
+            (rect.centerx, rect.top + 5),
+            (rect.centerx, rect.bottom - 5),
+            2,
         )
         pygame.draw.line(
             screen,
@@ -458,7 +481,11 @@ class Ship:
         # Wing highlights
         highlight = tuple(min(255, c + 40) for c in self.color)
         pygame.draw.line(
-            screen, highlight, (rect.left + 5, rect.bottom - 6), (rect.left - 3, rect.bottom - 3), 2
+            screen,
+            highlight,
+            (rect.left + 5, rect.bottom - 6),
+            (rect.left - 3, rect.bottom - 3),
+            2,
         )
         pygame.draw.line(
             screen,
@@ -699,16 +726,16 @@ class SpaceInvaders(BaseGame):
 
         self._max_player_bullets = self.config.SI_MAX_PLAYER_BULLETS
         self._max_tracked_alien_bullets = 5  # Track top 5 nearest alien bullets
-        # Enhanced state: ship_x, player_bullets, aliens, movement, danger metrics
-        # + alien bullets (x,y for each) + shoot_cooldown, active_bullets, aliens_ratio, lives, level, ufo
+        movement_feature_count = 3  # alien offset, direction, lowest alien y
+        status_feature_count = 5  # cooldown, active bullets, aliens ratio, lives, level
         self._state_size = (
             1
             + self._max_player_bullets * 2
             + self._num_aliens
-            + 5
+            + movement_feature_count
             + self._max_tracked_alien_bullets * 2
-            + 5
-        )  # +5 for cooldown, active, ratio, lives, level
+            + status_feature_count
+        )
         self._state_array = np.zeros(self._state_size, dtype=np.float32)
         self._alien_states = np.ones(self._num_aliens, dtype=np.float32)
 
@@ -955,7 +982,12 @@ class SpaceInvaders(BaseGame):
                 )
 
                 alien = Alien(
-                    x, y, self.config.SI_ALIEN_WIDTH, self.config.SI_ALIEN_HEIGHT, alien_type, color
+                    x,
+                    y,
+                    self.config.SI_ALIEN_WIDTH,
+                    self.config.SI_ALIEN_HEIGHT,
+                    alien_type,
+                    color,
                 )
                 self.aliens.append(alien)
 
@@ -1003,9 +1035,8 @@ class SpaceInvaders(BaseGame):
         if self._aliens_remaining == 0:
             reward += self.config.SI_REWARD_LEVEL_CLEAR
 
-            # Check win condition: complete SI_WIN_LEVELS levels to win
-            # Level starts at 1, so after completing level N, level becomes N+1
-            # We win when we've completed SI_WIN_LEVELS levels (i.e., level > SI_WIN_LEVELS)
+            # Check win condition: complete SI_WIN_LEVELS levels to win.
+            # This block runs after clearing the current level, before incrementing it.
             # (0 means endless mode, no wins possible)
             if self.config.SI_WIN_LEVELS > 0 and self.level >= self.config.SI_WIN_LEVELS:
                 # We've completed enough levels - win!
@@ -1170,7 +1201,10 @@ class SpaceInvaders(BaseGame):
                     bullet.alive = False
                     # Small particle effect when hitting shield
                     self._spawn_explosion(
-                        int(bullet.x), int(bullet.y), self.config.SI_COLOR_SHIELD, count=5
+                        int(bullet.x),
+                        int(bullet.y),
+                        self.config.SI_COLOR_SHIELD,
+                        count=5,
                     )
                     break
 
@@ -1210,7 +1244,12 @@ class SpaceInvaders(BaseGame):
                     # Score popup
                     if not self.headless:
                         self.score_popups.append(
-                            ScorePopup(alien_rect.centerx, alien_rect.centery, points, alien.color)
+                            ScorePopup(
+                                alien_rect.centerx,
+                                alien_rect.centery,
+                                points,
+                                alien.color,
+                            )
                         )
 
                     self.screen_shake = 3
@@ -1230,7 +1269,10 @@ class SpaceInvaders(BaseGame):
                 if bullet.rect.colliderect(self.ufo.rect):
                     bullet.alive = False
                     self._spawn_explosion(
-                        self.ufo.rect.centerx, self.ufo.rect.centery, self.ufo.color, count=30
+                        self.ufo.rect.centerx,
+                        self.ufo.rect.centery,
+                        self.ufo.color,
+                        count=30,
                     )
                     self.ufo.alive = False
 
@@ -1387,6 +1429,10 @@ class SpaceInvaders(BaseGame):
         # Level (difficulty awareness)
         self._state_array[idx] = min(self.level / 10.0, 1.0)
         idx += 1
+
+        assert (
+            idx == self._state_size
+        ), f"Space Invaders state writer filled {idx} values, expected {self._state_size}"
 
         return self._state_array.copy()
 
@@ -1789,8 +1835,8 @@ class VecSpaceInvaders:
         dones_to_return = self._dones.copy()
 
         # NOW update state array for next iteration
-        for i, done_flag in enumerate(self._dones):
-            if bool(done_flag):
+        for i, done in enumerate(self._dones):
+            if done:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

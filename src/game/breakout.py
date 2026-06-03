@@ -17,16 +17,12 @@ Game Rules:
 - 3 lives per game
 """
 
-import sys
-from typing import List, Optional, Tuple
-
 import numpy as np
 import pygame
+from typing import Tuple, List, Optional
 
 from .base_game import BaseGame
 from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
-
-sys.path.append("..")
 from config import Config
 
 
@@ -167,7 +163,7 @@ class Breakout(BaseGame):
         self._max_speed = max(self.config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
         self._inv_max_speed = 1.0 / self._max_speed
         # Guard against paddle width >= screen width
-        paddle_range = max(1.0, self.width - self.config.PADDLE_WIDTH)
+        paddle_range = max(1.0, self.width - config.PADDLE_WIDTH)
         self._inv_paddle_range = 1.0 / paddle_range
 
         # For reward shaping (tracking ball)
@@ -335,7 +331,10 @@ class Breakout(BaseGame):
         if not self.headless:
             self.ball_trail.update(self.ball.x, self.ball.y)
             self.particles.emit_ball_trail(
-                self.ball.x, self.ball.y, self.config.COLOR_BALL, (self.ball.dx, self.ball.dy)
+                self.ball.x,
+                self.ball.y,
+                self.config.COLOR_BALL,
+                (self.ball.dx, self.ball.dy),
             )
 
         # Handle collisions
@@ -694,7 +693,10 @@ class Breakout(BaseGame):
         # Draw paddle with offset
         paddle_color = self.config.COLOR_PADDLE
         paddle_rect = pygame.Rect(
-            self.paddle.x + shake_x, self.paddle.y + shake_y, self.paddle.width, self.paddle.height
+            self.paddle.x + shake_x,
+            self.paddle.y + shake_y,
+            self.paddle.width,
+            self.paddle.height,
         )
         pygame.draw.rect(screen, paddle_color, paddle_rect, border_radius=5)
         # Paddle highlight
@@ -864,8 +866,8 @@ class VecBreakout:
         dones_to_return = self._dones.copy()
 
         # NOW update state array for next iteration (after returning terminal states)
-        for i, done_flag in enumerate(self._dones):
-            if bool(done_flag):
+        for i, done in enumerate(self._dones):
+            if done:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

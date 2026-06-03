@@ -9,11 +9,10 @@ These tests verify:
     - Reward system
 """
 
-import os
-import sys
-
-import numpy as np
 import pytest
+import numpy as np
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -214,6 +213,7 @@ class TestBallBrickCollisionPhysics:
         game.ball.dy = 0.5  # Slight downward to ensure collision
 
         initial_dx = game.ball.dx
+        initial_dy = game.ball.dy
 
         # Step the game
         game.step(1)

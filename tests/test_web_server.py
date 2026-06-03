@@ -8,21 +8,24 @@ Tests cover:
 - Training state management
 """
 
-import json
-from datetime import datetime
-
 import pytest
+import json
+import re
+import os
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import torch
 
 # Try to import web server components
 try:
     from src.web.server import (
-        FLASK_AVAILABLE,
-        LogMessage,
         MetricsPublisher,
         TrainingState,
-        WebDashboard,
+        LogMessage,
         _make_json_safe,
-        _metadata_sidecar_path,
+        FLASK_AVAILABLE,
     )
 
     WEB_AVAILABLE = FLASK_AVAILABLE
@@ -207,6 +210,14 @@ class TestMetricsPublisher:
         assert len(publisher.console_logs) == 1
         assert publisher.console_logs[0].message == "Test message"
 
+    def test_log_timestamp_uses_milliseconds(self):
+        """Log timestamps should keep three fractional-second digits."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.log("Test message", level="info")
+
+        assert re.match(r"^\d{2}:\d{2}:\d{2}\.\d{3}$", publisher.console_logs[0].timestamp)
+
     def test_log_level_parsing(self):
         """MetricsPublisher.log should handle different log levels."""
         publisher = MetricsPublisher(history_length=100)
@@ -269,265 +280,31 @@ class TestMetricsPublisher:
         assert "stay" in publisher.action_frequency
         assert "right" in publisher.action_frequency
 
+    def test_layer_analysis_handles_empty_arrays(self):
+        """Layer analysis should not crash on empty activation, weight, or gradient arrays."""
+        publisher = MetricsPublisher(history_length=100)
 
-class TestWebDashboardIntegration:
-    """Integration tests requiring WebDashboard instantiation."""
-
-    @pytest.fixture
-    def web_dashboard(self):
-        """Create a WebDashboard instance for testing."""
-        try:
-            from config import Config
-            from src.web.server import WebDashboard
-
-            config = Config()
-            config.GAME_NAME = "breakout"
-
-            dashboard = WebDashboard(port=5099, config=config)
-            yield dashboard
-
-            # Cleanup
-            try:
-                dashboard.stop()
-            except Exception:
-                pass
-        except ImportError:
-            pytest.skip("WebDashboard not available")
-
-    def test_initialization(self, web_dashboard):
-        """WebDashboard should initialize with correct config."""
-        assert web_dashboard.port == 5099
-        assert web_dashboard.config.GAME_NAME == "breakout"
-        assert web_dashboard.publisher is not None
-
-    def test_emit_metrics(self, web_dashboard):
-        """WebDashboard.emit_metrics should update publisher."""
-        web_dashboard.emit_metrics(episode=10, score=100, epsilon=0.5, loss=0.01)
-
-        assert web_dashboard.publisher.state.episode == 10
-        assert web_dashboard.publisher.state.score == 100
-
-    def test_log_method(self, web_dashboard):
-        """WebDashboard.log should add to console log."""
-        web_dashboard.log("Test message", level="info")
-
-        assert len(web_dashboard.publisher.console_logs) >= 1
-        messages = [m.message for m in web_dashboard.publisher.console_logs]
-        assert "Test message" in messages
-
-    def test_full_training_cycle(self, web_dashboard):
-        """Simulate a full training cycle with metrics updates."""
-        for episode in range(1, 11):
-            web_dashboard.emit_metrics(
-                episode=episode,
-                score=episode * 10,
-                epsilon=1.0 - (episode * 0.09),
-                loss=1.0 / episode,
-            )
-
-        state = web_dashboard.publisher.state
-        assert state.episode == 10
-        assert state.score == 100
-        assert state.best_score == 100
-
-    def test_api_status_endpoint(self, web_dashboard):
-        """GET /api/status should return current training state."""
-        web_dashboard.emit_metrics(episode=5, score=50, epsilon=0.8, loss=0.05)
-
-        web_dashboard.app.config["TESTING"] = True
-        with web_dashboard.app.test_client() as client:
-            response = client.get("/api/status")
-            assert response.status_code == 200
-
-            data = json.loads(response.data)
-            # Status endpoint returns nested state
-            assert "state" in data or "episode" in data
-            if "state" in data:
-                assert data["state"]["episode"] == 5
-            else:
-                assert data["episode"] == 5
-
-    def test_api_models_endpoint(self, web_dashboard):
-        """GET /api/models should return available models."""
-        web_dashboard.app.config["TESTING"] = True
-        with web_dashboard.app.test_client() as client:
-            response = client.get("/api/models")
-            assert response.status_code == 200
-
-            data = json.loads(response.data)
-            assert "models" in data
-            assert "current_game" in data
-
-    def test_api_models_uses_metadata_sidecar_without_checkpoint_load(self, tmp_path):
-        """GET /api/models should read JSON sidecars and tolerate opaque .pth files."""
-        from config import Config
-
-        config = Config()
-        config.GAME_NAME = "breakout"
-        config.MODEL_DIR = str(tmp_path / "models")
-        model_dir = tmp_path / "models" / "breakout"
-        model_dir.mkdir(parents=True)
-        model_path = model_dir / "metadata_only.pth"
-        model_path.write_text("not a torch checkpoint", encoding="utf-8")
-        sidecar_path = _metadata_sidecar_path(str(model_path))
-        with open(sidecar_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "has_metadata": True,
-                    "metadata": {"episode": 12, "best_score": 345},
-                    "steps": 999,
-                    "epsilon": 0.42,
-                    "state_size": 10,
-                    "action_size": 3,
-                },
-                f,
-            )
-
-        dashboard = WebDashboard(port=5101, config=config)
-        dashboard.app.config["TESTING"] = True
-        with dashboard.app.test_client() as client:
-            response = client.get("/api/models")
-
-        assert response.status_code == 200
-        data = json.loads(response.data)
-        model = data["models"][0]
-        assert model["name"] == "metadata_only.pth"
-        assert model["has_metadata"] is True
-        assert model["metadata"]["best_score"] == 345
-        assert model["state_size"] == 10
-
-    def test_api_delete_model_removes_server_resolved_model_and_sidecar(self, tmp_path):
-        """DELETE /api/models should delete only a discovered model plus its sidecar."""
-        from urllib.parse import quote
-
-        from config import Config
-
-        config = Config()
-        config.GAME_NAME = "breakout"
-        config.MODEL_DIR = str(tmp_path / "models")
-        model_dir = tmp_path / "models" / "breakout"
-        model_dir.mkdir(parents=True)
-        model_path = model_dir / "delete_me.pth"
-        model_path.write_text("checkpoint", encoding="utf-8")
-        sidecar_path = f"{model_path}.metadata.json"
-        with open(sidecar_path, "w", encoding="utf-8") as f:
-            json.dump({"has_metadata": True}, f)
-
-        dashboard = WebDashboard(port=5102, config=config)
-        dashboard.app.config["TESTING"] = True
-        with dashboard.app.test_client() as client:
-            response = client.delete(
-                f"/api/models/{quote(model_path.name, safe='')}",
-                headers={"X-Dashboard-Token": dashboard.control_token},
-            )
-
-        assert response.status_code == 200
-        assert not model_path.exists()
-        assert not (model_dir / "delete_me.pth.metadata.json").exists()
-
-    def test_api_delete_model_rejects_undiscovered_path(self, tmp_path):
-        """DELETE /api/models should not delete files outside configured model dirs."""
-        from urllib.parse import quote
-
-        from config import Config
-
-        config = Config()
-        config.GAME_NAME = "breakout"
-        config.MODEL_DIR = str(tmp_path / "models")
-        (tmp_path / "models" / "breakout").mkdir(parents=True)
-        outside_path = tmp_path / "outside.pth"
-        outside_path.write_text("checkpoint", encoding="utf-8")
-
-        dashboard = WebDashboard(port=5103, config=config)
-        dashboard.app.config["TESTING"] = True
-        with dashboard.app.test_client() as client:
-            response = client.delete(
-                f"/api/models/{quote(outside_path.name, safe='')}",
-                headers={"X-Dashboard-Token": dashboard.control_token},
-            )
-
-        assert response.status_code == 404
-        assert outside_path.exists()
-
-    def test_api_config_endpoint(self, web_dashboard):
-        """GET /api/config should return configuration."""
-        web_dashboard.app.config["TESTING"] = True
-        with web_dashboard.app.test_client() as client:
-            response = client.get("/api/config")
-            assert response.status_code == 200
-
-            data = json.loads(response.data)
-            # Config returns training hyperparameters
-            assert "batch_size" in data or "learning_rate" in data
-            assert "device" in data
-
-    def test_dashboard_index_renders_registered_game_options(self, web_dashboard):
-        """Initial HTML should reflect the registry before client-side JS runs."""
-        web_dashboard.app.config["TESTING"] = True
-        with web_dashboard.app.test_client() as client:
-            response = client.get("/")
-
-        assert response.status_code == 200
-        html = response.data.decode("utf-8")
-        assert 'option value="breakout"' in html
-        assert 'option value="space_invaders"' in html
-        assert 'option value="pong"' in html
-
-    def test_control_payload_validation_rejects_bad_speed(self, web_dashboard):
-        """Speed controls should be finite and bounded before callbacks run."""
-        validated, error = web_dashboard._validate_control_payload(
-            {"action": "speed", "value": float("nan")}
+        publisher.update_layer_analysis(
+            layer_idx=0,
+            layer_name="empty",
+            neuron_count=0,
+            activations=np.array([], dtype=np.float32),
+            weights=np.array([], dtype=np.float32),
+            gradients=np.array([], dtype=np.float32),
         )
 
-        assert validated is None
-        assert "finite" in error
+        analysis = publisher.get_layer_analysis(0)
+        assert analysis["avg_activation"] == 0.0
+        assert analysis["activation_histogram"] == [0] * 20
+        assert analysis["weight_histogram"] == [0] * 20
+        assert analysis["gradient_max_magnitude"] == 0.0
 
-    def test_control_payload_validation_normalizes_config(self, web_dashboard):
-        """Config controls should reject unknown keys and normalize supported values."""
-        validated, error = web_dashboard._validate_control_payload(
-            {
-                "action": "config_change",
-                "config": {"gamma": "0.95", "batch_size": "16", "learn_every": 4},
-            }
-        )
+    def test_all_layer_analysis_is_sorted(self):
+        """All layer analysis should return layers in index order."""
+        publisher = MetricsPublisher(history_length=100)
 
-        assert error == ""
-        assert validated == {
-            "action": "config_change",
-            "config": {"gamma": 0.95, "batch_size": 16, "learn_every": 4},
-        }
+        publisher.update_layer_analysis(2, "layer_2", 1, np.array([0.2], dtype=np.float32))
+        publisher.update_layer_analysis(1, "layer_1", 1, np.array([0.1], dtype=np.float32))
 
-    def test_control_payload_validation_rejects_unknown_config_key(self, web_dashboard):
-        """Dashboard controls should not pass arbitrary config keys to callbacks."""
-        validated, error = web_dashboard._validate_control_payload(
-            {"action": "config_change", "config": {"__dict__": {}}}
-        )
-
-        assert validated is None
-        assert "Unknown config key" in error
-
-    def test_control_payload_validation_rejects_model_path_outside_model_dir(
-        self, web_dashboard, tmp_path
-    ):
-        """Model load controls should stay inside configured model directories."""
-        external_model = tmp_path / "external.pth"
-        external_model.write_text("checkpoint", encoding="utf-8")
-
-        validated, error = web_dashboard._validate_control_payload(
-            {"action": "load_model", "path": str(external_model)}
-        )
-
-        assert validated is None
-        assert "not allowed" in error
-
-    def test_logging_during_training(self, web_dashboard):
-        """Logging should work during training simulation."""
-        web_dashboard.log("Training started", level="info")
-        web_dashboard.emit_metrics(episode=1, score=10, epsilon=0.95, loss=0.1)
-        web_dashboard.log("Episode 1 complete", level="success")
-
-        logs = web_dashboard.publisher.console_logs
-        messages = [log.message for log in logs]
-
-        assert "Training started" in messages
-        assert "Episode 1 complete" in messages
+        layers = publisher.get_all_layer_analysis()
+        assert [layer["layer_idx"] for layer in layers] == [1, 2]

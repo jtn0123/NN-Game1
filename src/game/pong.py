@@ -17,15 +17,11 @@ Game Rules:
 - Ball bounces off paddles and top/bottom walls
 """
 
-import sys
-from typing import List, Optional, Tuple
-
 import numpy as np
 import pygame
+from typing import Tuple, List, Optional
 
 from .base_game import BaseGame, step_vector_env_no_copy
-
-sys.path.append("..")
 from config import Config
 
 
@@ -139,7 +135,10 @@ class Pong(BaseGame):
     }
 
     def __init__(
-        self, config: Optional[Config] = None, headless: bool = False, ai_difficulty: str = "medium"
+        self,
+        config: Optional[Config] = None,
+        headless: bool = False,
+        ai_difficulty: str = "medium",
     ):
         """
         Initialize the Pong game.
@@ -173,7 +172,7 @@ class Pong(BaseGame):
         self.ai_score = 0
         self.game_over = False
         self.rally_count = 0  # Track hits in current rally
-        self.last_hit_by: Optional[str] = None  # 'player' or 'ai'
+        self.last_hit_by = None  # 'player' or 'ai'
 
         # Pre-allocated state array
         self._state_array = np.zeros(10, dtype=np.float32)
@@ -196,9 +195,6 @@ class Pong(BaseGame):
         self._hit_flash_timer = 0
 
         # Visual effects
-        self._font: Optional[pygame.font.Font]
-        self._small_font: Optional[pygame.font.Font]
-        self._label_font: Optional[pygame.font.Font]
         if not headless:
             pygame.font.init()
             self._font = pygame.font.Font(None, 72)
@@ -585,7 +581,12 @@ class Pong(BaseGame):
                 pygame.draw.rect(
                     screen,
                     trail_color,
-                    (int(tx) - trail_size, int(ty) - trail_size, trail_size * 2, trail_size * 2),
+                    (
+                        int(tx) - trail_size,
+                        int(ty) - trail_size,
+                        trail_size * 2,
+                        trail_size * 2,
+                    ),
                 )
 
         # Draw paddles
@@ -643,7 +644,10 @@ class Pong(BaseGame):
                 rally_text = self._small_font.render(
                     f"Rally: {self.rally_count}", True, (100, 100, 100)
                 )
-                screen.blit(rally_text, (center_x - rally_text.get_width() // 2, self.height - 30))
+                screen.blit(
+                    rally_text,
+                    (center_x - rally_text.get_width() // 2, self.height - 30),
+                )
 
         # Draw CRT scanline effect (lighter for less visual noise)
         for y in range(0, self.height, 3):
@@ -674,10 +678,13 @@ class Pong(BaseGame):
             # Final score
             if self._small_font:
                 final = self._small_font.render(
-                    f"Final: {self.player_score} - {self.ai_score}", True, (200, 200, 200)
+                    f"Final: {self.player_score} - {self.ai_score}",
+                    True,
+                    (200, 200, 200),
                 )
                 screen.blit(
-                    final, (self.width // 2 - final.get_width() // 2, self.height // 2 + 40)
+                    final,
+                    (self.width // 2 - final.get_width() // 2, self.height // 2 + 40),
                 )
 
     def close(self) -> None:
@@ -748,8 +755,8 @@ class VecPong:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done_flag in enumerate(self._dones):
-            if bool(done_flag):
+        for i, done in enumerate(self._dones):
+            if done:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

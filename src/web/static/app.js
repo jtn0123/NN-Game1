@@ -32,7 +32,7 @@ const MAX_CONSOLE_LOGS = 500;
 let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
-const DASHBOARD_CONTROL_TOKEN = window.DASHBOARD_CONTROL_TOKEN || '';
+const DASHBOARD_TOKEN = DashboardCore.readToken(document);
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -47,16 +47,10 @@ const FETCH_TIMEOUT_MS = 10000; // 10 second timeout for API calls
 function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const authorizedOptions = DashboardCore.withDashboardToken(options, DASHBOARD_TOKEN);
 
-    return fetch(url, { ...options, signal: controller.signal })
+    return fetch(url, { ...authorizedOptions, signal: controller.signal })
         .finally(() => clearTimeout(timeoutId));
-}
-
-function emitControl(payload) {
-    if (!socket) {
-        return;
-    }
-    socket.emit('control', { ...payload, token: DASHBOARD_CONTROL_TOKEN });
 }
 
 /**
@@ -145,7 +139,6 @@ const CHART_DOWNSAMPLE_TARGET = 500;
 
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
-    bindDashboardActions();
     initCharts();
     initNNVisualizer();
     connectSocket();
@@ -156,121 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadGames();
     loadGameStats();
 });
-
-function bindDashboardActions() {
-    document.addEventListener('click', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const target = event.target.closest('[data-action]');
-        if (!target) return;
-
-        const action = target.dataset.action;
-        switch (action) {
-            case 'go-to-launcher':
-                goToLauncher();
-                break;
-            case 'reset-chart':
-                resetChartView(target.dataset.chart || 'all');
-                break;
-            case 'toggle-nn-panel':
-                toggleNNPanel();
-                break;
-            case 'toggle-nn-visualization':
-                event.stopPropagation();
-                toggleNNVisualization();
-                break;
-            case 'set-log-filter':
-                setLogFilter(target.dataset.filter || 'all');
-                break;
-            case 'copy-logs':
-                copyLogsToClipboard();
-                break;
-            case 'clear-logs':
-                clearLogs();
-                break;
-            case 'refresh-screenshot':
-                refreshScreenshot();
-                break;
-            case 'set-performance-mode':
-                setPerformanceMode(target.dataset.mode || 'normal');
-                break;
-            case 'toggle-pause':
-                togglePause();
-                break;
-            case 'save-model':
-                saveModel();
-                break;
-            case 'reset-episode':
-                resetEpisode();
-                break;
-            case 'show-load-modal':
-                showLoadModal();
-                break;
-            case 'start-fresh':
-                startFresh();
-                break;
-            case 'save-and-quit':
-                saveAndQuit();
-                break;
-            case 'save-model-as':
-                saveModelAs();
-                break;
-            case 'toggle-settings':
-                toggleSettings();
-                break;
-            case 'apply-settings':
-                applySettings();
-                break;
-            case 'toggle-comparison':
-                toggleComparison();
-                break;
-            case 'refresh-game-stats':
-                refreshGameStats();
-                break;
-            case 'hide-load-modal':
-                hideLoadModal();
-                break;
-            case 'load-model':
-                loadModel(target.dataset.modelPath || '');
-                break;
-            case 'delete-model':
-                event.stopPropagation();
-                deleteModel(target.dataset.modelPath || '', target.dataset.modelName || '');
-                break;
-            case 'copy-restart-command':
-                copyRestartCommand(event);
-                break;
-            case 'close-restart-banner':
-                closeRestartBanner();
-                break;
-            case 'close-neuron-inspection':
-                closeNeuronInspection();
-                break;
-            case 'close-layer-analysis':
-                closeLayerAnalysis();
-                break;
-        }
-    });
-
-    document.addEventListener('change', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const target = event.target.closest('[data-action="switch-game"]');
-        if (target) {
-            switchGame(target.value);
-        }
-    });
-
-    document.addEventListener('input', (event) => {
-        if (!(event.target instanceof Element)) return;
-        const target = event.target.closest('[data-action]');
-        if (!target) return;
-
-        if (target.dataset.action === 'update-speed') {
-            updateSpeed(target.value);
-        } else if (target.dataset.action === 'update-learn-every-label') {
-            updateLearnEveryLabel(target.value);
-        }
-    });
-}
 
 /**
  * Initialize Chart.js charts
@@ -886,7 +764,7 @@ function resetChartView(chartName = 'all') {
  * Connect to SocketIO server
  */
 function connectSocket() {
-    socket = io();
+    socket = DashboardCore.createAuthorizedSocket(io, DASHBOARD_TOKEN);
 
     // Throttle dashboard updates to 60fps max (prevent excessive DOM manipulation)
     const throttledUpdateDashboard = throttle(updateDashboard, 16);  // ~60fps
@@ -1485,7 +1363,7 @@ function setLogFilter(filter) {
  */
 function clearLogs() {
     consoleLogs = [];
-    socket.emit('clear_logs', { token: DASHBOARD_CONTROL_TOKEN });
+    socket.emit('clear_logs', {});
     renderConsoleLogs();
     addConsoleLog('Console cleared', 'info');
 }
@@ -1544,6 +1422,10 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function escapeHtmlAttribute(text) {
+    return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ============================================================
 // CONTROL FUNCTIONS
 // ============================================================
@@ -1552,14 +1434,14 @@ function escapeHtml(text) {
  * Toggle pause state
  */
 function togglePause() {
-    emitControl({ action: 'pause' });
+    socket.emit('control', { action: 'pause' });
 }
 
 /**
  * Save model
  */
 function saveModel() {
-    emitControl({ action: 'save' });
+    socket.emit('control', { action: 'save' });
     
     // Visual feedback
     const btn = document.querySelector('.control-btn.save');
@@ -1576,7 +1458,7 @@ function saveModel() {
  * Reset current episode
  */
 function resetEpisode() {
-    emitControl({ action: 'reset' });
+    socket.emit('control', { action: 'reset' });
     addConsoleLog('Episode reset requested', 'action');
 }
 
@@ -1623,17 +1505,19 @@ function startFresh() {
     }
     
     if (saveFirst) {
-        // Save current model first, then reset after a short delay
-        emitControl({ action: 'save' });
+        // Save current model first, then reset after the server confirms handling it.
         addConsoleLog('💾 Saving current progress before reset...', 'action');
-        
-        // Wait for save to complete before resetting
-        setTimeout(() => {
-            emitControl({ action: 'start_fresh' });
-            addConsoleLog('🔄 Starting fresh training...', 'warning');
-        }, 500);
+
+        socket.emit('control', { action: 'save' }, (response) => {
+            if (response && response.success) {
+                socket.emit('control', { action: 'start_fresh' });
+                addConsoleLog('🔄 Starting fresh training...', 'warning');
+            } else {
+                addConsoleLog(`❌ Save before reset failed: ${response?.error || 'Unknown error'}`, 'error');
+            }
+        });
     } else {
-        emitControl({ action: 'start_fresh' });
+        socket.emit('control', { action: 'start_fresh' });
         addConsoleLog('🔄 Starting fresh training...', 'warning');
     }
 }
@@ -1664,7 +1548,7 @@ function saveAndQuit() {
         btn.disabled = true;
     }
 
-    emitControl({ action: 'save_and_quit' });
+    socket.emit('control', { action: 'save_and_quit' });
     addConsoleLog('💾 Saving and shutting down...', 'warning');
 
     // Show shutdown message after a delay
@@ -1731,7 +1615,7 @@ function updateSpeed(value) {
     
     // Display as integer
     document.getElementById('speed-value').textContent = speed + 'x';
-    emitControl({ action: 'speed', value: speed });
+    socket.emit('control', { action: 'speed', value: speed });
 }
 
 /**
@@ -1914,9 +1798,11 @@ function showLoadModal() {
                 // Format episode and best score
                 const episodeStr = typeof episode === 'number' ? episode.toLocaleString() : episode;
                 
-                // Escape model name and path to prevent XSS
+                // Escape model name and id to prevent XSS
                 const safeName = escapeHtml(model.name);
-                const safePath = escapeHtml(model.path);
+                const safeNameForAttr = escapeHtmlAttribute(model.name);
+                const modelId = DashboardCore.modelId(model);
+                const safeIdForAttr = escapeHtmlAttribute(modelId);
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
                 
                 // Reason badge (reason is from our own metadata, but escape anyway)
@@ -1925,7 +1811,7 @@ function showLoadModal() {
                 
                 return `
                     <div class="model-item">
-                        <div class="model-item-content" data-action="load-model" data-model-path="${safePath}">
+                        <div class="model-item-content" data-action="load-model" data-model-id="${safeIdForAttr}">
                             <div class="model-header">
                                 <div class="model-name">
                                     📁 ${safeName}
@@ -1953,7 +1839,7 @@ function showLoadModal() {
                             </div>
                             <div class="model-date">${safeModifiedStr}</div>
                         </div>
-                        <button class="model-delete-btn" data-action="delete-model" data-model-path="${safePath}" data-model-name="${safeName}" title="Delete this model">
+                        <button class="model-delete-btn" data-action="delete-model" data-model-id="${safeIdForAttr}" data-model-name="${safeNameForAttr}" title="Delete this model">
                             🗑️
                         </button>
                     </div>
@@ -1977,28 +1863,27 @@ function hideLoadModal() {
 /**
  * Load a specific model
  */
-function loadModel(path) {
-    emitControl({ action: 'load_model', path: path });
+function loadModel(modelId) {
+    socket.emit('control', { action: 'load_model', id: modelId });
     hideLoadModal();
-    addConsoleLog(`Loading model: ${path.split('/').pop()}`, 'action');
+    addConsoleLog(`Loading model: ${DashboardCore.modelDisplayName(modelId)}`, 'action');
 }
 
 /**
  * Delete a model file
  */
-function deleteModel(path, name) {
+function deleteModel(modelId, name) {
     if (!confirm(`Are you sure you want to delete "${name}"?\n\nThis action cannot be undone.`)) {
         return;
     }
     
     // Encode path for URL (handle special characters)
-    const encodedPath = encodeURIComponent(path);
+    const encodedPath = encodeURIComponent(modelId);
     
     fetchWithTimeout(`/api/models/${encodedPath}`, {
         method: 'DELETE',
         headers: {
-            'Content-Type': 'application/json',
-            'X-Dashboard-Token': DASHBOARD_CONTROL_TOKEN
+            'Content-Type': 'application/json'
         }
     })
     .then(response => response.json())
@@ -2018,6 +1903,36 @@ function deleteModel(path, name) {
 
 // Close modal on outside click (click on backdrop, not content)
 document.addEventListener('click', (e) => {
+    const actionTarget = e.target.closest('[data-action]');
+    if (actionTarget) {
+        const action = actionTarget.dataset.action;
+        if (action === 'load-model') {
+            loadModel(actionTarget.dataset.modelId);
+            return;
+        }
+        if (action === 'delete-model') {
+            e.stopPropagation();
+            deleteModel(actionTarget.dataset.modelId, actionTarget.dataset.modelName);
+            return;
+        }
+        if (action === 'copy-restart-command') {
+            copyRestartCommand(e);
+            return;
+        }
+        if (action === 'close-restart-banner') {
+            closeRestartBanner();
+            return;
+        }
+        if (action === 'close-neuron-inspection') {
+            closeNeuronInspection();
+            return;
+        }
+        if (action === 'close-layer-analysis') {
+            closeLayerAnalysis();
+            return;
+        }
+    }
+
     // Check if click was directly on an element with 'modal' class
     if (e.target.classList && e.target.classList.contains('modal')) {
         hideLoadModal();
@@ -2113,7 +2028,7 @@ document.addEventListener('keydown', (e) => {
  */
 function setPerformanceMode(mode) {
     currentPerformanceMode = mode;
-    emitControl({ action: 'performance_mode', mode: mode });
+    socket.emit('control', { action: 'performance_mode', mode: mode });
     updatePerformanceModeUI(mode);
     
     // Update settings inputs to match the mode
@@ -2307,7 +2222,7 @@ function applySettings() {
         gradient_steps: parseInt(document.getElementById('setting-grad-steps').value)
     };
 
-    emitControl({ action: 'config_change', config: config });
+    socket.emit('control', { action: 'config_change', config: config });
     addConsoleLog('Settings updated', 'action', null, config);
 
     // Visual feedback
@@ -2504,7 +2419,7 @@ function saveModelAs() {
         filename = 'custom_save';
     }
     
-    emitControl({ action: 'save_as', filename: filename });
+    socket.emit('control', { action: 'save_as', filename: filename });
     addConsoleLog(`Saving as: ${filename}.pth`, 'action');
     
     // Clear input and show feedback
@@ -2601,7 +2516,7 @@ function switchGame(gameId) {
         addConsoleLog(`💾 Saving current progress...`, 'info');
         
         // Request game switch - server will save and restart
-        emitControl({ action: 'restart_with_game', game: gameId });
+        socket.emit('control', { action: 'restart_with_game', game: gameId });
     } else {
         // Reset dropdown to current game
         loadGames();
@@ -2620,7 +2535,7 @@ function goToLauncher() {
     if (confirmed) {
         addConsoleLog('🎮 Returning to launcher...', 'warning');
         // Tell server to switch back to launcher mode
-        emitControl({ action: 'go_to_launcher' });
+        socket.emit('control', { action: 'go_to_launcher' });
     }
 }
 

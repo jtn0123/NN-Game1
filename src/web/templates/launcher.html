@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="dashboard-token" content="{{ access_token }}">
     <title>🧠 Neural Network AI - Game Launcher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
-    <script>window.DASHBOARD_CONTROL_TOKEN = {{ control_token|tojson }};</script>
     <style>
         :root {
             --bg-dark: #0a0a0f;
@@ -313,20 +313,28 @@
         let socket = null;
         let selectedGame = null;
         let selectedMode = 'ai';  // Default to AI training
+        const DASHBOARD_TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
 
-	        // Initialize socket connection
-	        try {
-	            socket = io();
-	            document.getElementById('status-msg').textContent = 'Connecting...';
-	        } catch (e) {
-	            document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
-	            console.error('Socket.IO initialization error:', e);
-	        }
+        // Initialize socket connection
+        try {
+            socket = io({ auth: { token: DASHBOARD_TOKEN } });
+            const emit = socket.emit.bind(socket);
+            socket.emit = (event, payload = {}, ...args) => {
+                if (event === 'control' && payload && typeof payload === 'object') {
+                    payload = { ...payload, token: DASHBOARD_TOKEN };
+                }
+                return emit(event, payload, ...args);
+            };
+            document.getElementById('status-msg').textContent = 'Connecting...';
+        } catch (e) {
+            document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
+            console.error('Socket.IO initialization error:', e);
+        }
 
-	        document.querySelectorAll('.mode-btn[data-mode]').forEach((button) => {
-	            button.addEventListener('click', () => selectMode(button.dataset.mode));
-	        });
-	        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.querySelectorAll('.mode-btn[data-mode]').forEach((button) => {
+            button.addEventListener('click', () => selectMode(button.dataset.mode));
+        });
+        document.getElementById('start-btn').addEventListener('click', startGame);
 
         function selectMode(mode) {
             selectedMode = mode;
@@ -361,15 +369,15 @@
                 data.games.forEach(game => {
                     const card = document.createElement('div');
                     card.className = 'game-card';
-	                    card.setAttribute('role', 'button');
-	                    card.setAttribute('tabindex', '0');
-	                    card.setAttribute('aria-label', `Select ${game.name}`);
-	                    card.addEventListener('click', () => selectGame(game.id, card));
-	                    card.addEventListener('keydown', (e) => {
-	                        if (e.key === 'Enter' || e.key === ' ') {
-	                            selectGame(game.id, card);
-	                        }
-	                    });
+                    card.setAttribute('role', 'button');
+                    card.setAttribute('tabindex', '0');
+                    card.setAttribute('aria-label', `Select ${game.name}`);
+                    card.addEventListener('click', () => selectGame(game.id, card));
+                    card.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            selectGame(game.id, card);
+                        }
+                    });
                     
                     // Determine difficulty class
                     let diffClass = 'medium';
@@ -434,12 +442,7 @@
             }
 
             // Send game selection with mode to server
-            socket.emit('control', {
-                action: 'select_game',
-                game: selectedGame,
-                mode: selectedMode,
-                token: window.DASHBOARD_CONTROL_TOKEN
-            });
+            socket.emit('control', { action: 'select_game', game: selectedGame, mode: selectedMode });
         }
 
         // Only set up socket handlers if socket was initialized

@@ -1,8 +1,10 @@
-# 🧠 Neural Network Game AI - Classic Arcade Games
+# 🧠 Neural Network Game AI
 
 A complete, educational implementation of a Deep Q-Learning (DQN) agent that learns to play classic arcade games **in real-time** with a **live neural network visualizer**.
 
-**Supported Games:** 🎮 Breakout | 👾 Space Invaders | 🏓 Pong | 🐍 Snake | 🚀 Asteroids
+**Supported Games:** 🎮 Breakout | 👾 Space Invaders | 🏓 Pong | 🐍 Snake | ☄️ Asteroids
+
+![Project Architecture](docs/architecture.png)
 
 ---
 
@@ -17,8 +19,10 @@ A complete, educational implementation of a Deep Q-Learning (DQN) agent that lea
 7. [Advanced DQN Features](#-advanced-dqn-features)
 8. [Space Invaders Configuration](#-space-invaders-configuration)
 9. [Benchmarking & Performance](#-benchmarking--performance)
-10. [Extending to Other Games](#-extending-to-other-games)
-11. [Troubleshooting](#-troubleshooting)
+10. [Safety Notes](#-safety-notes)
+11. [Developer Checks](#-developer-checks)
+12. [Extending to Other Games](#-extending-to-other-games)
+13. [Troubleshooting](#-troubleshooting)
 
 ---
 
@@ -28,7 +32,7 @@ A complete, educational implementation of a Deep Q-Learning (DQN) agent that lea
 
 This project demonstrates **reinforcement learning** by training a neural network to play classic arcade games:
 
-1. **The Games** (`src/game/`) - Complete implementations of Breakout and Space Invaders
+1. **The Games** (`src/game/`) - Complete implementations of Breakout, Space Invaders, Pong, Snake, and Asteroids
 2. **The AI Brain** (`src/ai/`) - Advanced DQN with modern enhancements (Dueling, NoisyNets, PER, N-step)
 3. **The Visualizer** (`src/visualizer/`) - Real-time neural network activity visualization
 
@@ -59,7 +63,10 @@ NN-Game1/
 │   │   ├── __init__.py
 │   │   ├── base_game.py         # Abstract base class for games
 │   │   ├── breakout.py          # Breakout game logic
-│   │   └── space_invaders.py    # Space Invaders game logic
+│   │   ├── space_invaders.py    # Space Invaders game logic
+│   │   ├── pong.py              # Pong game logic
+│   │   ├── snake.py             # Snake game logic
+│   │   └── asteroids.py         # Asteroids game logic
 │   │
 │   ├── ai/
 │   │   ├── __init__.py
@@ -113,7 +120,7 @@ NN-Game1/
 
 ### Prerequisites
 
-- Python 3.10-3.12 (tested with 3.11)
+- Python 3.9+ (tested with 3.11)
 - pip package manager
 
 ### Setup Steps
@@ -126,9 +133,8 @@ cd /Users/justin/Documents/Github/NN-Game1
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# 3. Install dependencies and dev tools
+# 3. Install dependencies
 pip install -r requirements.txt
-# or: make setup
 
 # 4. Verify installation
 python -c "import torch; import pygame; print('Ready!')"
@@ -137,6 +143,16 @@ python -c "import torch; import pygame; print('Ready!')"
 ---
 
 ## 🚀 Quick Start
+
+### Choose a Game in the Web Launcher
+
+```bash
+# Start the web launcher on localhost
+python main.py --web
+
+# Expose the dashboard only when the network is trusted
+python main.py --web --host 0.0.0.0 --port 5000
+```
 
 ### Watch AI Learn from Scratch
 
@@ -590,6 +606,44 @@ Buffer Size    Steps/sec    Sampling Method
        5,000      2,500     random.sample (fast for large)
       50,000      2,100     random.sample (30x faster than np.random.choice)
      100,000      2,400     random.sample (35x faster than np.random.choice)
+```
+
+---
+
+## 🔒 Safety Notes
+
+The web dashboard starts on `127.0.0.1` by default. Use `--host 0.0.0.0` only on a trusted network because the dashboard can pause training, save models, start fresh, load checkpoints, and delete saved model files.
+
+Each dashboard session generates an access token and prints a tokenized dashboard URL. Open that full URL; anonymous requests to `/` are rejected before the page can bootstrap control access. If you need a stable token for automation, set `NN_GAME_DASHBOARD_TOKEN` before launching.
+
+Checkpoint loading uses PyTorch's restricted loader first. Legacy checkpoints that require unrestricted pickle loading should only be loaded from model directories you trust.
+
+---
+
+## 🛠️ Developer Checks
+
+```bash
+# Fast test run
+make test
+
+# Coverage with the current ratcheting threshold
+make coverage
+
+# Focused type check for the AI/utils core
+make typecheck
+
+# Formatting
+make format
+make format-check
+
+# Combined local gate used by CI
+make check
+```
+
+Install with pinned constraints when you want reproducible local behavior:
+
+```bash
+pip install -r requirements.txt -c constraints.txt
 ```
 
 ---

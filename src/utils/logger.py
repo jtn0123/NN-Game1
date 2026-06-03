@@ -19,6 +19,7 @@ Configuration:
 """
 
 import logging
+import os
 import sys
 from datetime import datetime
 from enum import Enum

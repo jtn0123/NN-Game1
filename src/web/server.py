@@ -21,18 +21,19 @@ Usage:
     >>> dashboard.stop()
 """
 
-import base64
-import io
-import json
-import math
 import os
 import threading
 import time
-from collections import deque
-from dataclasses import asdict, dataclass, field
+import json
 from datetime import datetime
+from typing import Optional, Dict, Any, List, Deque, Callable, Tuple
+from dataclasses import dataclass, asdict, field
+from collections import deque
 from enum import Enum
-from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
+import base64
+import io
+import secrets
+from urllib.parse import urlencode
 
 import numpy as np
 
@@ -43,7 +44,7 @@ try:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     logging.getLogger("werkzeug").disabled = True
 
-    from flask import Flask, jsonify, make_response, render_template, request
+    from flask import Flask, render_template, jsonify, request, make_response
     from flask_socketio import SocketIO, emit
 
     FLASK_AVAILABLE = True
@@ -52,11 +53,10 @@ except ImportError:
     print("Warning: Flask not installed. Web dashboard unavailable.")
     print("Install with: pip install flask flask-socketio eventlet")
 
-import sys
-
-sys.path.append("../..")
 from config import Config
 from src.utils.logger import get_logger
+from src.web.game_stats_service import build_game_stats
+from src.web.model_service import ModelService
 
 # Module logger
 _logger = get_logger(__name__)
@@ -86,52 +86,6 @@ def _make_json_safe(obj: Any) -> Any:
     elif isinstance(obj, list):
         return [_make_json_safe(item) for item in obj]
     return obj
-
-
-def _metadata_sidecar_path(filepath: str) -> str:
-    """Return the lightweight metadata sidecar path for a checkpoint."""
-    return f"{filepath}.metadata.json"
-
-
-def _read_model_metadata_sidecar(filepath: str) -> Dict[str, Any]:
-    """Read checkpoint metadata without deserializing the PyTorch checkpoint."""
-    sidecar_path = _metadata_sidecar_path(filepath)
-    if not os.path.exists(sidecar_path):
-        return {}
-    try:
-        with open(sidecar_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError) as e:
-        _logger.debug(f"Could not read metadata sidecar for {filepath}: {e}")
-        return {}
-
-
-def _build_model_info(path: str, source: str) -> Dict[str, Any]:
-    """Build dashboard model info from filesystem metadata and JSON sidecar data."""
-    sidecar = _read_model_metadata_sidecar(path)
-    return {
-        "name": os.path.basename(path),
-        "path": path,
-        "source": source,
-        "size": os.path.getsize(path),
-        "modified": os.path.getmtime(path),
-        "modified_str": datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M"),
-        "has_metadata": bool(sidecar.get("has_metadata")),
-        "metadata": sidecar.get("metadata"),
-        "steps": sidecar.get("steps"),
-        "epsilon": sidecar.get("epsilon"),
-        "state_size": sidecar.get("state_size"),
-        "action_size": sidecar.get("action_size"),
-    }
-
-
-def _is_finite_number(value: Any) -> bool:
-    """Return True when value can be safely treated as a finite number."""
-    try:
-        return math.isfinite(float(value))
-    except (TypeError, ValueError):
-        return False
 
 
 class LogLevel(Enum):
@@ -647,9 +601,7 @@ class MetricsPublisher:
     def log(self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None) -> None:
         """Add a log message to the console."""
         log_entry = LogMessage(
-            timestamp=datetime.now().strftime("%H:%M:%S.%f")[
-                :12
-            ],  # Properly format with milliseconds
+            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
             level=level,
             message=message,
             data=data,
@@ -758,7 +710,11 @@ class MetricsPublisher:
         self.state.performance_mode = mode
 
     def set_system_info(
-        self, device: str, torch_compiled: bool, target_episodes: int, headless: bool = False
+        self,
+        device: str,
+        torch_compiled: bool,
+        target_episodes: int,
+        headless: bool = False,
     ) -> None:
         """Set system information."""
         self.state.device = device
@@ -842,7 +798,7 @@ class MetricsPublisher:
         current_time = time.time()
 
         # Throttle updates to ~10 FPS
-        if current_time - self._last_nn_update_time < self._nn_update_interval:
+        if not self.should_update_nn_visualization(current_time):
             return
 
         self._last_nn_update_time = current_time
@@ -864,6 +820,11 @@ class MetricsPublisher:
             callbacks = self._on_nn_update_callbacks.copy()
         for callback in callbacks:
             callback(nn_dict)
+
+    def should_update_nn_visualization(self, current_time: Optional[float] = None) -> bool:
+        """Return whether a neural-network visualization update should run."""
+        check_time = time.time() if current_time is None else current_time
+        return check_time - self._last_nn_update_time >= self._nn_update_interval
 
     def get_nn_visualization(self, include_weights: bool = False) -> Dict[str, Any]:
         """
@@ -920,25 +881,25 @@ class MetricsPublisher:
             data.activation_history = list(activation_history)[-500:]  # Keep last 500
 
         if incoming_weights is not None:
-            incoming_arr = np.asarray(incoming_weights)
-            if incoming_arr.size > 0:
-                data.incoming_weights = incoming_arr.tolist()
+            incoming_weights = np.asarray(incoming_weights)
+            if incoming_weights.size > 0:
+                data.incoming_weights = incoming_weights.tolist()
                 data.incoming_weight_stats = {
-                    "mean": float(np.mean(incoming_arr)),
-                    "std": float(np.std(incoming_arr)),
-                    "min": float(np.min(incoming_arr)),
-                    "max": float(np.max(incoming_arr)),
+                    "mean": float(np.mean(incoming_weights)),
+                    "std": float(np.std(incoming_weights)),
+                    "min": float(np.min(incoming_weights)),
+                    "max": float(np.max(incoming_weights)),
                 }
 
         if outgoing_weights is not None:
-            outgoing_arr = np.asarray(outgoing_weights)
-            if outgoing_arr.size > 0:
-                data.outgoing_weights = outgoing_arr.tolist()
+            outgoing_weights = np.asarray(outgoing_weights)
+            if outgoing_weights.size > 0:
+                data.outgoing_weights = outgoing_weights.tolist()
                 data.outgoing_weight_stats = {
-                    "mean": float(np.mean(outgoing_arr)),
-                    "std": float(np.std(outgoing_arr)),
-                    "min": float(np.min(outgoing_arr)),
-                    "max": float(np.max(outgoing_arr)),
+                    "mean": float(np.mean(outgoing_weights)),
+                    "std": float(np.std(outgoing_weights)),
+                    "min": float(np.min(outgoing_weights)),
+                    "max": float(np.max(outgoing_weights)),
                 }
 
         if q_contributions:
@@ -990,37 +951,59 @@ class MetricsPublisher:
         data = self._layer_analysis_data[layer_idx]
 
         # Update activation statistics
-        data.avg_activation = float(np.mean(activations))
-        data.activation_std = float(np.std(activations))
-        data.activation_min = float(np.min(activations))
-        data.activation_max = float(np.max(activations))
+        activations = np.asarray(activations)
+        if activations.size > 0:
+            data.avg_activation = float(np.mean(activations))
+            data.activation_std = float(np.std(activations))
+            data.activation_min = float(np.min(activations))
+            data.activation_max = float(np.max(activations))
 
-        # Count dead and saturated neurons
-        data.dead_neuron_count = int(np.sum(np.abs(activations) < 0.01))
-        data.saturated_neuron_count = int(np.sum(np.abs(activations) > 0.95))
+            # Count dead and saturated neurons
+            data.dead_neuron_count = int(np.sum(np.abs(activations) < 0.01))
+            data.saturated_neuron_count = int(np.sum(np.abs(activations) > 0.95))
 
-        # Create activation histogram
-        hist, _ = np.histogram(activations, bins=20)
-        data.activation_histogram = hist.tolist()
+            # Create activation histogram
+            hist, _ = np.histogram(activations, bins=20)
+            data.activation_histogram = hist.tolist()
+        else:
+            data.avg_activation = 0.0
+            data.activation_std = 0.0
+            data.activation_min = 0.0
+            data.activation_max = 0.0
+            data.dead_neuron_count = 0
+            data.saturated_neuron_count = 0
+            data.activation_histogram = [0] * 20
 
         # Update weight statistics if provided
         if weights is not None:
-            flat_weights = weights.flatten()
-            data.weight_mean = float(np.mean(flat_weights))
-            data.weight_std = float(np.std(flat_weights))
-            data.weight_min = float(np.min(flat_weights))
-            data.weight_max = float(np.max(flat_weights))
+            flat_weights = np.asarray(weights).flatten()
+            if flat_weights.size > 0:
+                data.weight_mean = float(np.mean(flat_weights))
+                data.weight_std = float(np.std(flat_weights))
+                data.weight_min = float(np.min(flat_weights))
+                data.weight_max = float(np.max(flat_weights))
 
-            # Weight histogram
-            hist, _ = np.histogram(flat_weights, bins=20)
-            data.weight_histogram = hist.tolist()
+                # Weight histogram
+                hist, _ = np.histogram(flat_weights, bins=20)
+                data.weight_histogram = hist.tolist()
+            else:
+                data.weight_mean = 0.0
+                data.weight_std = 0.0
+                data.weight_min = 0.0
+                data.weight_max = 0.0
+                data.weight_histogram = [0] * 20
 
         # Update gradient statistics if provided
         if gradients is not None:
-            flat_grads = gradients.flatten()
-            data.gradient_mean = float(np.mean(np.abs(flat_grads)))
-            data.gradient_std = float(np.std(flat_grads))
-            data.gradient_max_magnitude = float(np.max(np.abs(flat_grads)))
+            flat_grads = np.asarray(gradients).flatten()
+            if flat_grads.size > 0:
+                data.gradient_mean = float(np.mean(np.abs(flat_grads)))
+                data.gradient_std = float(np.std(flat_grads))
+                data.gradient_max_magnitude = float(np.max(np.abs(flat_grads)))
+            else:
+                data.gradient_mean = 0.0
+                data.gradient_std = 0.0
+                data.gradient_max_magnitude = 0.0
 
     def get_layer_analysis(self, layer_idx: int) -> Dict[str, Any]:
         """
@@ -1137,7 +1120,7 @@ class WebDashboard:
         Args:
             config: Configuration object
             port: Port to run the server on
-            host: Host address (default 127.0.0.1; use 0.0.0.0 only for LAN exposure)
+            host: Host address (0.0.0.0 for all interfaces)
             launcher_mode: If True, show game selection instead of training dashboard
         """
         if not FLASK_AVAILABLE:
@@ -1149,7 +1132,8 @@ class WebDashboard:
         self.port = port
         self.host = host
         self.launcher_mode = launcher_mode
-        self.control_token = base64.urlsafe_b64encode(os.urandom(32)).decode("utf-8")
+        self.access_token = os.environ.get("NN_GAME_DASHBOARD_TOKEN") or secrets.token_urlsafe(24)
+        self.model_service = ModelService(self._model_search_dirs())
         self.on_game_selected_callback: Optional[Callable[[str, str], None]] = None  # (game, mode)
         self.on_restart_with_game_callback: Optional[Callable[[str], None]] = None
 
@@ -1167,14 +1151,12 @@ class WebDashboard:
         # Generate secure random secret key (not hardcoded for security)
         self.app.config["SECRET_KEY"] = base64.b64encode(os.urandom(24)).decode("utf-8")
 
-        allowed_origins = [
-            f"http://127.0.0.1:{self.port}",
-            f"http://localhost:{self.port}",
-        ]
-        if self.host not in ("127.0.0.1", "localhost", "0.0.0.0"):
-            allowed_origins.append(f"http://{self.host}:{self.port}")
-
         # SocketIO setup
+        allowed_origins = [
+            f"http://{self.host}:{self.port}",
+            f"http://localhost:{self.port}",
+            f"http://127.0.0.1:{self.port}",
+        ]
         self.socketio = SocketIO(
             self.app, cors_allowed_origins=allowed_origins, async_mode="threading"
         )
@@ -1199,23 +1181,157 @@ class WebDashboard:
         self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
         self.on_save_and_quit_callback: Optional[Callable[[], None]] = None
 
+    def _is_authorized_token(self, token: Optional[str]) -> bool:
+        """Validate a dashboard mutation token."""
+        return bool(token) and secrets.compare_digest(str(token), self.access_token)
+
+    def _is_authorized_request(self) -> bool:
+        """Validate mutating HTTP requests from the served dashboard."""
+        token = request.headers.get("X-Dashboard-Token") or request.args.get("token")
+        return self._is_authorized_token(token)
+
+    def dashboard_url(self) -> str:
+        """Return the tokenized URL needed to open the dashboard page."""
+        query = urlencode({"token": self.access_token})
+        return f"http://{self.host}:{self.port}/?{query}"
+
+    def _model_search_dirs(self) -> List[Tuple[str, str]]:
+        """Return allowed model directories as (directory, source) pairs."""
+        return [
+            (self.config.GAME_MODEL_DIR, self.config.GAME_NAME),
+            (self.config.MODEL_DIR, "legacy"),
+        ]
+
+    @staticmethod
+    def _model_id(source: str, filename: str) -> str:
+        """Create a browser-safe model identifier without exposing local paths."""
+        return ModelService.model_id(source, filename)
+
+    def _resolve_model_ref(self, model_ref: str) -> Optional[str]:
+        """Resolve a model id, or a legacy absolute path, to an allowed .pth file."""
+        return self.model_service.resolve(model_ref)
+
+    @staticmethod
+    def _success_ack(action: str) -> Dict[str, Any]:
+        return {"success": True, "action": action}
+
+    @staticmethod
+    def _error_ack(action: str, error: str) -> Dict[str, Any]:
+        return {"success": False, "action": action, "error": error}
+
+    def _callback_ack(
+        self,
+        action: str,
+        callback: Optional[Callable[..., Any]],
+        *args: Any,
+        failure_message: str,
+    ) -> Dict[str, Any]:
+        """Run a control callback and translate its return value into an ack."""
+        if callback is None:
+            return self._success_ack(action)
+        try:
+            result = callback(*args)
+        except Exception as exc:
+            return self._error_ack(action, str(exc))
+
+        if isinstance(result, dict):
+            success = bool(result.get("success", False))
+            if success:
+                return self._success_ack(action)
+            return self._error_ack(action, str(result.get("error", failure_message)))
+        if result is False:
+            return self._error_ack(action, failure_message)
+        return self._success_ack(action)
+
+    def _handle_save_control(self) -> Dict[str, Any]:
+        return self._callback_ack("save", self.on_save_callback, failure_message="Save failed")
+
+    def _handle_save_as_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        filename = data.get("filename", "custom_save.pth")
+        return self._callback_ack(
+            "save_as",
+            self.on_save_as_callback,
+            filename,
+            failure_message="Save failed",
+        )
+
+    def _handle_start_fresh_control(self) -> Dict[str, Any]:
+        ack = self._callback_ack(
+            "start_fresh",
+            self.on_start_fresh_callback,
+            failure_message="Start fresh failed",
+        )
+        if ack["success"]:
+            emit("training_reset", {"message": "Training reset - starting fresh"})
+        return ack
+
+    def _handle_load_model_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        model_ref = data.get("id") or data.get("path")
+        if not model_ref:
+            return self._error_ack("load_model", "Invalid model id")
+
+        model_path = self._resolve_model_ref(model_ref)
+        if not model_path:
+            return self._error_ack("load_model", "Invalid model id")
+        if not os.path.exists(model_path):
+            return self._error_ack("load_model", "Model not found")
+        return self._callback_ack(
+            "load_model",
+            self.on_load_model_callback,
+            model_path,
+            failure_message="Load model failed",
+        )
+
+    def _handle_restart_with_game_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        game_name = data.get("game")
+        if not game_name or not self.on_restart_with_game_callback:
+            return self._error_ack("restart_with_game", "Invalid game")
+
+        self.publisher.log(f"🔄 Switching to {game_name}...", level="warning")
+        save_ack = self._handle_save_control()
+        if not save_ack["success"]:
+            return self._error_ack("restart_with_game", save_ack["error"])
+        emit(
+            "restarting",
+            {"game": game_name, "message": f"Restarting with {game_name}..."},
+        )
+        self.on_restart_with_game_callback(game_name)
+        return self._success_ack("restart_with_game")
+
+    def _handle_go_to_launcher_control(self) -> Dict[str, Any]:
+        self.publisher.log("🎮 Returning to launcher...", level="warning")
+        save_ack = self._handle_save_control()
+        if not save_ack["success"]:
+            return self._error_ack("go_to_launcher", save_ack["error"])
+
+        self.launcher_mode = True
+        emit("redirect_to_launcher", {"message": "Returning to game launcher..."})
+        if self.on_save_and_quit_callback:
+            self.on_save_and_quit_callback()
+        return self._success_ack("go_to_launcher")
+
     def _register_routes(self) -> None:
         """Register Flask routes."""
 
         @self.app.route("/")
         def index():
-            game_options = self._dashboard_game_options()
+            if not self._is_authorized_request():
+                response = make_response("Dashboard token required", 401)
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                return response
+
             if self.launcher_mode:
                 response = make_response(
-                    render_template("launcher.html", control_token=self.control_token)
+                    render_template("launcher.html", access_token=self.access_token)
                 )
             else:
                 response = make_response(
                     render_template(
                         "dashboard.html",
-                        control_token=self.control_token,
-                        game_options=game_options,
-                        current_game=self.config.GAME_NAME,
+                        access_token=self.access_token,
+                        control_token=self.access_token,
                     )
                 )
             # Prevent browser caching to ensure fresh content
@@ -1257,7 +1373,7 @@ class WebDashboard:
         @self.app.route("/api/games")
         def api_games():
             """List all available games with their metadata."""
-            from src.game import get_game_info, list_games
+            from src.game import list_games, get_game_info
 
             games = []
             for game_id in list_games():
@@ -1294,55 +1410,30 @@ class WebDashboard:
 
             Searches both game-specific directory and legacy models directory.
             """
-            # Search both game-specific and legacy directories
-            search_dirs = [
-                (self.config.GAME_MODEL_DIR, self.config.GAME_NAME),
-                (self.config.MODEL_DIR, "legacy"),
-            ]
+            return jsonify(
+                {
+                    "models": self.model_service.list_models(),
+                    "current_game": self.config.GAME_NAME,
+                }
+            )
 
-            models = []
-            seen_paths = set()  # Avoid duplicates
-
-            for model_dir, source in search_dirs:
-                if not os.path.exists(model_dir):
-                    continue
-
-                for f in os.listdir(model_dir):
-                    if f.endswith(".pth"):
-                        path = os.path.join(model_dir, f)
-
-                        # Skip if we've already seen this file
-                        if path in seen_paths:
-                            continue
-                        seen_paths.add(path)
-
-                        models.append(_build_model_info(path, source))
-
-            models.sort(key=lambda x: x["modified"], reverse=True)
-            return jsonify({"models": models, "current_game": self.config.GAME_NAME})
-
-        @self.app.route("/api/models/<path:filepath>", methods=["DELETE"])
-        def api_delete_model(filepath):
+        @self.app.route("/api/models/<path:model_id>", methods=["DELETE"])
+        def api_delete_model(model_id):
             """Delete a model file.
 
             Security: Validates that the path is within the model directory
             to prevent path traversal attacks.
             """
-            import os
-
-            if request.headers.get("X-Dashboard-Token") != self.control_token:
-                return jsonify({"error": "Unauthorized"}), 403
-
-            model_paths = self._resolve_deletable_model_paths(filepath)
-            if model_paths is None:
-                return jsonify({"error": "Model not found"}), 404
-            full_path, sidecar_path = model_paths
+            if not self._is_authorized_request():
+                return jsonify({"error": "Unauthorized"}), 401
 
             try:
-                filename = os.path.basename(full_path)
-                os.remove(full_path)
-                if sidecar_path and os.path.exists(sidecar_path):
-                    os.remove(sidecar_path)
+                success, filename, error = self.model_service.delete(model_id)
+                if not success:
+                    status = 404 if error == "Model not found" else 403
+                    if error == "Invalid file type":
+                        status = 400
+                    return jsonify({"error": error}), status
                 self.publisher.log(f"🗑️ Deleted model: {filename}", level="action")
                 return jsonify(
                     {
@@ -1352,7 +1443,7 @@ class WebDashboard:
                     }
                 )
             except Exception:
-                _logger.exception("Failed to delete model %s", os.path.basename(full_path))
+                _logger.exception("Failed to delete model")
                 return jsonify({"error": "Failed to delete model"}), 500
 
         @self.app.route("/api/save-status")
@@ -1363,48 +1454,7 @@ class WebDashboard:
         @self.app.route("/api/game-stats")
         def api_game_stats():
             """Get training statistics for all games (for comparison panel)."""
-            from src.game import get_game_info, list_games
-
-            stats = {}
-            for game_id in list_games():
-                game_info = get_game_info(game_id)
-                game_model_dir = os.path.join(self.config.MODEL_DIR, game_id)
-
-                game_stats = {
-                    "name": (
-                        game_info.get("name", game_id.title()) if game_info else game_id.title()
-                    ),
-                    "icon": game_info.get("icon", "🎮") if game_info else "🎮",
-                    "color": (
-                        game_info.get("color", (100, 100, 100)) if game_info else (100, 100, 100)
-                    ),
-                    "best_score": 0,
-                    "total_episodes": 0,
-                    "total_training_time": 0,
-                    "model_count": 0,
-                    "best_model": None,
-                }
-
-                # Scan models for this game
-                if os.path.exists(game_model_dir):
-                    for f in os.listdir(game_model_dir):
-                        if f.endswith(".pth"):
-                            game_stats["model_count"] += 1
-                            path = os.path.join(game_model_dir, f)
-                            sidecar = _read_model_metadata_sidecar(path)
-                            meta = sidecar.get("metadata") if sidecar else None
-                            if isinstance(meta, dict):
-                                if meta.get("best_score", 0) > game_stats["best_score"]:
-                                    game_stats["best_score"] = meta["best_score"]
-                                    game_stats["best_model"] = f
-                                if meta.get("episode", 0) > game_stats["total_episodes"]:
-                                    game_stats["total_episodes"] = meta["episode"]
-                                game_stats["total_training_time"] += meta.get(
-                                    "total_training_time_seconds", 0
-                                )
-
-                stats[game_id] = game_stats
-
+            stats = build_game_stats(self.config)
             return jsonify({"stats": stats, "current_game": self.config.GAME_NAME})
 
         # ===== Phase 2: Neuron Inspection & Layer Analysis Endpoints =====
@@ -1421,205 +1471,27 @@ class WebDashboard:
             analysis = self.publisher.get_layer_analysis(layer_idx)
             return jsonify(_make_json_safe(analysis))
 
-    def _dashboard_game_options(self) -> List[Dict[str, Any]]:
-        """Return registered game options suitable for server-rendered templates."""
-        from src.game import get_game_info, list_games
-
-        options = []
-        for game_id in list_games():
-            info = get_game_info(game_id) or {}
-            options.append(
-                {
-                    "id": game_id,
-                    "name": info.get("name", game_id.title()),
-                    "icon": info.get("icon", ""),
-                }
-            )
-        return options
-
-    def _path_in_allowed_model_dir(self, filepath: str) -> bool:
-        """Validate that a model path resolves inside an expected model directory."""
-        if not filepath or not filepath.endswith(".pth"):
-            return False
-
-        full_path = os.path.realpath(filepath)
-        allowed_dirs = [
-            os.path.realpath(self.config.GAME_MODEL_DIR),
-            os.path.realpath(self.config.MODEL_DIR),
-        ]
-
-        for model_dir in allowed_dirs:
-            try:
-                if os.path.commonpath([model_dir, full_path]) == model_dir:
-                    return os.path.exists(full_path)
-            except ValueError:
-                continue
-        return False
-
-    def _resolve_deletable_model_paths(self, filepath: str) -> Optional[Tuple[str, Optional[str]]]:
-        """Resolve a model deletion request to server-discovered model paths only."""
-        if not filepath or not filepath.endswith(".pth"):
-            return None
-
-        requested_path = os.path.realpath(filepath)
-        requested_name = os.path.basename(filepath)
-        allow_basename_match = requested_name == filepath
-
-        for configured_dir in (self.config.GAME_MODEL_DIR, self.config.MODEL_DIR):
-            model_dir = os.path.realpath(configured_dir)
-            if not os.path.isdir(model_dir):
-                continue
-
-            try:
-                entries = os.listdir(model_dir)
-            except OSError:
-                continue
-
-            for filename in entries:
-                if not filename.endswith(".pth"):
-                    continue
-
-                candidate = os.path.realpath(os.path.join(model_dir, filename))
-                try:
-                    if os.path.commonpath([model_dir, candidate]) != model_dir:
-                        continue
-                except ValueError:
-                    continue
-                if os.path.islink(candidate):
-                    continue
-
-                matches_absolute_path = requested_path == candidate
-                matches_unique_filename = allow_basename_match and requested_name == filename
-                if not matches_absolute_path and not matches_unique_filename:
-                    continue
-
-                sidecar_candidate = os.path.realpath(
-                    os.path.join(model_dir, f"{filename}.metadata.json")
-                )
-                sidecar_path = None
-                try:
-                    sidecar_is_allowed = (
-                        os.path.commonpath([model_dir, sidecar_candidate]) == model_dir
-                    )
-                except ValueError:
-                    sidecar_is_allowed = False
-                if sidecar_is_allowed and not os.path.islink(sidecar_candidate):
-                    sidecar_path = sidecar_candidate
-
-                return candidate, sidecar_path
-
-        return None
-
-    def _validate_control_payload(
-        self, data: Dict[str, Any]
-    ) -> Tuple[Optional[Dict[str, Any]], str]:
-        """Validate and normalize an authorized Socket.IO control payload."""
-        action = data.get("action")
-        if not isinstance(action, str):
-            return None, "Missing control action"
-
-        simple_actions = {
-            "pause",
-            "save",
-            "reset",
-            "start_fresh",
-            "save_and_quit",
-            "go_to_launcher",
-        }
-        if action in simple_actions:
-            return {"action": action}, ""
-
-        if action == "save_as":
-            filename = data.get("filename")
-            if not isinstance(filename, str):
-                return None, "Filename must be a string"
-            filename = filename.strip()
-            if not filename or len(filename) > 120:
-                return None, "Filename must be 1-120 characters"
-            if (
-                os.path.basename(filename) != filename
-                or os.path.altsep
-                and os.path.altsep in filename
-            ):
-                return None, "Filename cannot contain path separators"
-            return {"action": action, "filename": filename}, ""
-
-        if action == "speed":
-            value = data.get("value", 1.0)
-            if not _is_finite_number(value):
-                return None, "Speed must be a finite number"
-            speed = float(value)
-            if speed < 1.0 or speed > 1000.0:
-                return None, "Speed must be between 1 and 1000"
-            return {"action": action, "value": speed}, ""
-
-        if action == "load_model":
-            path = data.get("path")
-            if not isinstance(path, str) or not self._path_in_allowed_model_dir(path):
-                return None, "Model path is not allowed"
-            return {"action": action, "path": os.path.realpath(path)}, ""
-
-        if action == "config_change":
-            config_data = data.get("config")
-            if not isinstance(config_data, dict):
-                return None, "Config payload must be an object"
-            validated_config: Dict[str, Any] = {}
-            validators = {
-                "learning_rate": (float, 0.0, 1.0, False),
-                "epsilon": (float, 0.0, 1.0, True),
-                "epsilon_decay": (float, 0.0, 1.0, False),
-                "gamma": (float, 0.0, 1.0, True),
-                "batch_size": (int, 1, self.config.MEMORY_SIZE, True),
-                "learn_every": (int, 1, 10000, True),
-                "gradient_steps": (int, 1, 1000, True),
-            }
-            unknown_keys = set(config_data) - set(validators)
-            if unknown_keys:
-                return None, f"Unknown config key: {sorted(unknown_keys)[0]}"
-            for key, (caster, minimum, maximum, inclusive_min) in validators.items():
-                if key not in config_data:
-                    continue
-                value = config_data[key]
-                if not _is_finite_number(value):
-                    return None, f"{key} must be finite"
-                cast_value = caster(value)
-                above_minimum = cast_value >= minimum if inclusive_min else cast_value > minimum
-                if not above_minimum or cast_value > maximum:
-                    bracket = "[" if inclusive_min else "("
-                    return None, f"{key} must be in {bracket}{minimum}, {maximum}]"
-                validated_config[key] = cast_value
-            return {"action": action, "config": validated_config}, ""
-
-        if action == "performance_mode":
-            mode = data.get("mode", "normal")
-            if mode not in {"normal", "fast", "turbo", "ultra"}:
-                return None, "Unknown performance mode"
-            return {"action": action, "mode": mode}, ""
-
-        if action in {"select_game", "restart_with_game"}:
-            from src.game import list_games
-
-            game_name = data.get("game")
-            if game_name not in set(list_games()):
-                return None, "Unknown game"
-            if action == "select_game":
-                mode = data.get("mode", "ai")
-                if mode not in {"ai", "human"}:
-                    return None, "Unknown play mode"
-                return {"action": action, "game": game_name, "mode": mode}, ""
-            return {"action": action, "game": game_name}, ""
-
-        return None, "Unknown control action"
+        @self.app.route("/api/layers")
+        def api_layers_analysis():
+            """Phase 2: Get analysis data for all layers."""
+            analysis = self.publisher.get_all_layer_analysis()
+            return jsonify(_make_json_safe(analysis))
 
     def _register_socket_events(self) -> None:
         """Register SocketIO events."""
 
         @self.socketio.on("connect")
-        def handle_connect():
+        def handle_connect(auth=None):
+            auth = auth or {}
+            if not self._is_authorized_token(auth.get("token")):
+                return False
             # Send current state on connect (convert NumPy types for JSON serialization)
             emit("state_update", _make_json_safe(self.publisher.get_snapshot()))
             # Send recent logs
-            emit("console_logs", {"logs": _make_json_safe(self.publisher.get_console_logs(100))})
+            emit(
+                "console_logs",
+                {"logs": _make_json_safe(self.publisher.get_console_logs(100))},
+            )
             # Send current NN visualization data if available
             nn_data = self.publisher.get_nn_visualization()
             if nn_data.get("layer_info"):
@@ -1627,29 +1499,23 @@ class WebDashboard:
 
         @self.socketio.on("control")
         def handle_control(data):
-            if not isinstance(data, dict) or data.get("token") != self.control_token:
+            data = data if isinstance(data, dict) else {}
+            if not self._is_authorized_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
-                return
+                return {"success": False, "error": "Unauthorized"}
 
-            validated, error = self._validate_control_payload(data)
-            if validated is None:
-                emit("control_error", {"error": error})
-                return
-
-            action = validated["action"]
+            action = data.get("action")
+            handled = True
 
             if action == "pause":
                 if self.on_pause_callback:
                     self.on_pause_callback()
             elif action == "save":
-                if self.on_save_callback:
-                    self.on_save_callback()
+                return self._handle_save_control()
             elif action == "save_as":
-                filename = validated["filename"]
-                if self.on_save_as_callback:
-                    self.on_save_as_callback(filename)
+                return self._handle_save_as_control(data)
             elif action == "speed":
-                speed = validated["value"]
+                speed = data.get("value", 1.0)
                 if self.on_speed_callback:
                     self.on_speed_callback(speed)
                 self.publisher.set_speed(speed)
@@ -1657,21 +1523,16 @@ class WebDashboard:
                 if self.on_reset_callback:
                     self.on_reset_callback()
             elif action == "start_fresh":
-                if self.on_start_fresh_callback:
-                    self.on_start_fresh_callback()
-                # Notify frontend to clear charts and reset UI
-                emit("training_reset", {"message": "Training reset - starting fresh"})
+                return self._handle_start_fresh_control()
             elif action == "load_model":
-                model_path = validated["path"]
-                if model_path and self.on_load_model_callback:
-                    self.on_load_model_callback(model_path)
+                return self._handle_load_model_control(data)
             elif action == "config_change":
-                config_data = validated["config"]
+                config_data = data.get("config", {})
                 if self.on_config_change_callback:
                     self.on_config_change_callback(config_data)
                 self.publisher.update_config(config_data)
             elif action == "performance_mode":
-                mode = validated["mode"]
+                mode = data.get("mode", "normal")
                 if self.on_performance_mode_callback:
                     self.on_performance_mode_callback(mode)
                 self.publisher.set_performance_mode(mode)
@@ -1680,50 +1541,39 @@ class WebDashboard:
                     self.on_save_and_quit_callback()
             elif action == "select_game":
                 # Launcher mode: user selected a game to start
-                game_name = validated["game"]
-                mode = validated["mode"]  # 'ai' or 'human'
+                game_name = data.get("game")
+                mode = data.get("mode", "ai")  # 'ai' or 'human'
                 if game_name and self.on_game_selected_callback:
                     mode_text = "Playing" if mode == "human" else "Training"
                     emit(
                         "game_starting",
-                        {"game": game_name, "mode": mode, "message": f"{mode_text} {game_name}..."},
+                        {
+                            "game": game_name,
+                            "mode": mode,
+                            "message": f"{mode_text} {game_name}...",
+                        },
                     )
                     self.on_game_selected_callback(game_name, mode)
             elif action == "restart_with_game":
-                # Training mode: restart with a different game
-                game_name = validated["game"]
-                if game_name and self.on_restart_with_game_callback:
-                    self.publisher.log(f"🔄 Switching to {game_name}...", level="warning")
-                    # Save first
-                    if self.on_save_callback:
-                        self.on_save_callback()
-                    emit(
-                        "restarting",
-                        {"game": game_name, "message": f"Restarting with {game_name}..."},
-                    )
-                    # Trigger restart (will replace process)
-                    self.on_restart_with_game_callback(game_name)
+                return self._handle_restart_with_game_control(data)
             elif action == "go_to_launcher":
-                # Return to launcher mode for game/mode selection
-                self.publisher.log("🎮 Returning to launcher...", level="warning")
-                # Save current progress
-                if self.on_save_callback:
-                    self.on_save_callback()
-                # Switch back to launcher mode
-                self.launcher_mode = True
-                # Tell browser to redirect to launcher
-                emit("redirect_to_launcher", {"message": "Returning to game launcher..."})
-                # Trigger shutdown callback if set
-                if self.on_save_and_quit_callback:
-                    self.on_save_and_quit_callback()
+                return self._handle_go_to_launcher_control()
+            else:
+                handled = False
+
+            if not handled:
+                return {"success": False, "action": action, "error": "Unknown action"}
+            return {"success": True, "action": action}
 
         @self.socketio.on("clear_logs")
         def handle_clear_logs(data=None):
-            if not isinstance(data, dict) or data.get("token") != self.control_token:
+            data = data or {}
+            if not self._is_authorized_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
-                return
+                return {"success": False, "error": "Unauthorized"}
             self.publisher.console_logs.clear()
             emit("console_logs", {"logs": []})
+            return {"success": True, "action": "clear_logs"}
 
         # Auto-emit on metric updates
         # Bug 65 fix: Add null/running checks to prevent AttributeError during shutdown
@@ -1765,6 +1615,7 @@ class WebDashboard:
 
         # Suppress Flask/werkzeug logging COMPLETELY - do this BEFORE starting server
         import logging
+        import sys
 
         # Disable werkzeug request logging completely
         werkzeug_log = logging.getLogger("werkzeug")
@@ -1799,7 +1650,7 @@ class WebDashboard:
             _logger.debug("click module not available, skipping echo suppression")
 
         def run_server():
-            _logger.info(f"Web Dashboard running at http://localhost:{self.port}")
+            _logger.info(f"Web Dashboard running at {self.dashboard_url()}")
 
             try:
                 self.socketio.run(
@@ -1812,8 +1663,10 @@ class WebDashboard:
                     allow_unsafe_werkzeug=True,
                 )
             # Bug 76 fix: Catch broader exceptions to prevent silent thread crashes
-            except (OSError, RuntimeError, ConnectionError, Exception):
-                _logger.exception("Failed to start web dashboard on port %s", self.port)
+            except (OSError, RuntimeError, ConnectionError, Exception) as e:
+                _logger.error(
+                    f"Failed to start web dashboard on port {self.port}: {type(e).__name__}: {e}"
+                )
                 _logger.error(
                     f"Port {self.port} may already be in use. Try a different port with --port"
                 )
@@ -1862,6 +1715,9 @@ class WebDashboard:
         weights: List[List[List[float]]],
         step: int,
         action_labels: Optional[List[str]] = None,
+        input_state: Optional[List[float]] = None,
+        analysis_activations: Optional[Dict[str, List[float]]] = None,
+        analysis_weights: Optional[List[List[List[float]]]] = None,
     ) -> None:
         """
         Emit neural network visualization data to connected clients.
@@ -1878,6 +1734,18 @@ class WebDashboard:
             step: Current training step
             action_labels: Labels for each action (e.g., ["LEFT", "STAY", "RIGHT"])
         """
+        if not self.publisher.should_update_nn_visualization():
+            return
+
+        self._sync_phase2_inspection(
+            layer_info=layer_info,
+            activations=(analysis_activations if analysis_activations is not None else activations),
+            q_values=q_values,
+            weights=analysis_weights if analysis_weights is not None else weights,
+            input_state=input_state,
+            action_labels=action_labels,
+        )
+
         self.publisher.update_nn_visualization(
             layer_info=layer_info,
             activations=activations,
@@ -1887,6 +1755,157 @@ class WebDashboard:
             step=step,
             action_labels=action_labels,
         )
+
+    def _sync_phase2_inspection(
+        self,
+        layer_info: List[Dict[str, Any]],
+        activations: Dict[str, List[float]],
+        q_values: List[float],
+        weights: List[List[List[float]]],
+        input_state: Optional[List[float]],
+        action_labels: Optional[List[str]],
+    ) -> None:
+        """Populate neuron and layer inspection data from live NN snapshots."""
+        weight_arrays = [np.asarray(weight) for weight in weights]
+        linear_keys = self._sorted_linear_activation_keys(activations)
+        hidden_weight_count = sum(1 for info in layer_info if info.get("type") == "hidden")
+        hidden_weight_idx = 0
+        value_weight_idx = hidden_weight_count
+        advantage_weight_idx = hidden_weight_count + 1
+        value_output_weight_idx = hidden_weight_count + 2
+        advantage_output_weight_idx = hidden_weight_count + 3
+
+        def weight_at(index: int) -> Optional[np.ndarray]:
+            if 0 <= index < len(weight_arrays):
+                return weight_arrays[index]
+            return None
+
+        def output_weights() -> Optional[np.ndarray]:
+            value_output = weight_at(value_output_weight_idx)
+            advantage_output = weight_at(advantage_output_weight_idx)
+            if value_output is None and advantage_output is None:
+                return None
+            if value_output is None:
+                return advantage_output
+            if advantage_output is None:
+                return value_output
+            if value_output.ndim < 2 or advantage_output.ndim < 2:
+                return None
+            repeated_value = np.repeat(value_output, advantage_output.shape[0], axis=0)
+            return np.concatenate([repeated_value, advantage_output], axis=1)
+
+        for layer_idx, info in enumerate(layer_info):
+            layer_type = info.get("type", "")
+            layer_name = info.get("name", f"Layer {layer_idx}")
+            neuron_count = int(info.get("neurons", 0))
+
+            if layer_type == "input":
+                layer_acts = np.asarray(input_state if input_state is not None else [])
+            elif layer_type == "value_stream":
+                layer_acts = np.asarray(activations.get("value_hidden", []))
+            elif layer_type == "advantage_stream":
+                layer_acts = np.asarray(activations.get("advantage_hidden", []))
+            elif hidden_weight_idx < len(linear_keys):
+                layer_acts = np.asarray(activations.get(linear_keys[hidden_weight_idx], []))
+            elif layer_type == "output":
+                layer_acts = np.asarray(q_values)
+            else:
+                layer_acts = np.asarray([])
+
+            if layer_acts.ndim > 1:
+                layer_acts = layer_acts[0]
+            layer_acts = layer_acts.reshape(-1)
+
+            incoming_weights = None
+            next_weights = None
+            if layer_type == "hidden":
+                incoming_weights = weight_at(hidden_weight_idx)
+                hidden_weight_idx += 1
+                if hidden_weight_idx < hidden_weight_count:
+                    next_weights = weight_at(hidden_weight_idx)
+                else:
+                    branch_weights = [
+                        candidate
+                        for candidate in (
+                            weight_at(value_weight_idx),
+                            weight_at(advantage_weight_idx),
+                        )
+                        if candidate is not None
+                    ]
+                    next_weights = (
+                        np.concatenate(branch_weights, axis=0) if branch_weights else None
+                    )
+            elif layer_type == "value_stream":
+                incoming_weights = weight_at(value_weight_idx)
+                next_weights = weight_at(value_output_weight_idx)
+            elif layer_type == "advantage_stream":
+                incoming_weights = weight_at(advantage_weight_idx)
+                next_weights = weight_at(advantage_output_weight_idx)
+            elif layer_type == "output":
+                incoming_weights = (
+                    output_weights()
+                    if value_output_weight_idx < len(weight_arrays)
+                    else weight_at(hidden_weight_idx)
+                )
+
+            self.publisher.update_layer_analysis(
+                layer_idx=layer_idx,
+                layer_name=layer_name,
+                neuron_count=neuron_count,
+                activations=layer_acts,
+                weights=incoming_weights,
+            )
+
+            for neuron_idx, activation in enumerate(layer_acts[:neuron_count]):
+                neuron_incoming = None
+                if (
+                    incoming_weights is not None
+                    and incoming_weights.ndim >= 2
+                    and neuron_idx < incoming_weights.shape[0]
+                ):
+                    neuron_incoming = incoming_weights[neuron_idx].tolist()
+
+                neuron_outgoing = None
+                if (
+                    next_weights is not None
+                    and next_weights.ndim >= 2
+                    and neuron_idx < next_weights.shape[1]
+                ):
+                    neuron_outgoing = next_weights[:, neuron_idx].tolist()
+
+                q_contributions = None
+                if layer_type == "output" and neuron_idx < len(q_values):
+                    label = (
+                        action_labels[neuron_idx]
+                        if action_labels and neuron_idx < len(action_labels)
+                        else f"action_{neuron_idx}"
+                    )
+                    q_contributions = {label: float(q_values[neuron_idx])}
+
+                self.publisher.update_neuron_inspection(
+                    layer_idx=layer_idx,
+                    neuron_idx=neuron_idx,
+                    layer_name=layer_name,
+                    current_activation=float(activation),
+                    incoming_weights=neuron_incoming,
+                    outgoing_weights=neuron_outgoing,
+                    q_contributions=q_contributions,
+                )
+
+    @staticmethod
+    def _sorted_linear_activation_keys(
+        activations: Dict[str, List[float]],
+    ) -> List[str]:
+        """Return valid layer_<n> activation keys in numeric order."""
+        parsed_keys: List[Tuple[int, str]] = []
+        for key in activations:
+            if not key.startswith("layer_"):
+                continue
+            suffix = key.split("_", 1)[1]
+            if not suffix.isdigit():
+                continue
+            parsed_keys.append((int(suffix), key))
+        return [key for _, key in sorted(parsed_keys)]
 
 
 # Create templates directory structure

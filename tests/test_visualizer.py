@@ -9,10 +9,11 @@ Tests cover:
 - HUD state tracking
 """
 
-import os
-from unittest.mock import patch
-
 import pytest
+import numpy as np
+from unittest.mock import MagicMock, patch
+import os
+import sys
 
 # Set SDL_VIDEODRIVER before importing pygame to avoid display errors in CI
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -25,9 +26,9 @@ with patch.dict("os.environ", {"SDL_VIDEODRIVER": "dummy"}):
 
 
 from config import Config
+from src.visualizer.nn_visualizer import NeuralNetVisualizer, DataFlowPulse
 from src.visualizer.dashboard import Dashboard
 from src.visualizer.hud import TrainingHUD
-from src.visualizer.nn_visualizer import DataFlowPulse, NeuralNetVisualizer
 
 
 class TestDataFlowPulse:
@@ -153,6 +154,24 @@ class TestNeuralNetVisualizer:
         assert isinstance(visualizer.activation_history, dict)
         assert visualizer.history_length == 30
 
+    def test_render_one_frame_smoke(self, config):
+        """Rendering a real NN frame should not crash in headless pygame."""
+        from src.ai.agent import Agent
+
+        config.HIDDEN_LAYERS = [16]
+        config.USE_DUELING = False
+        config.USE_NOISY_NETWORKS = False
+        config.USE_N_STEP_RETURNS = False
+        config.USE_PRIORITIZED_REPLAY = False
+        agent = Agent(config.STATE_SIZE, config.ACTION_SIZE, config=config)
+        state = np.zeros(config.STATE_SIZE, dtype=np.float32)
+        surface = pygame.Surface((320, 240))
+        visualizer = NeuralNetVisualizer(config=config, x=0, y=0, width=320, height=240)
+
+        visualizer.render(surface, agent, state, selected_action=0)
+
+        assert visualizer._cached_positions is not None
+
 
 class TestDashboard:
     """Tests for the Dashboard class."""
@@ -202,6 +221,7 @@ class TestDashboard:
             dashboard.update(episode=i, score=100, epsilon=0.5, loss=0.1)
 
         # Record the smoothed loss before spike
+        smoothed_before = dashboard.smoothed_loss
 
         # Add a spike (10x increase) - should trigger internal spike timer
         dashboard.update(episode=10, score=100, epsilon=0.5, loss=1.0)
@@ -229,6 +249,15 @@ class TestDashboard:
 
         # Should be limited to max_history
         assert len(dashboard.scores) <= dashboard.max_history
+
+    def test_render_one_frame_smoke(self, dashboard):
+        """Dashboard should render one frame after receiving metrics."""
+        surface = pygame.Surface((800, 200))
+        dashboard.update(episode=1, score=10, epsilon=0.5, loss=0.1)
+
+        dashboard.render(surface)
+
+        assert dashboard.pulse_phase > 0
 
 
 class TestTrainingHUD:
@@ -270,6 +299,25 @@ class TestTrainingHUD:
         assert hasattr(hud, "_current_score_color")
         assert len(hud._current_score_color) == 3
         assert hud._color_lerp_speed == 0.1
+
+    def test_render_one_frame_smoke(self, hud):
+        """HUD should render all major widgets without crashing."""
+        surface = pygame.Surface((800, 600))
+
+        hud.render(
+            surface,
+            episode=3,
+            score=20,
+            best_score=30,
+            epsilon=0.25,
+            loss=0.1,
+            speed=2.0,
+            max_episodes=10,
+            selected_action=1,
+            action_labels=["LEFT", "STAY", "RIGHT"],
+        )
+
+        assert hud._current_score_color
 
 
 class TestColorUtils:

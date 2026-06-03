@@ -12,15 +12,12 @@ Orchestrates the training process:
 This module ties together the game, agent, and visualizer.
 """
 
-import os
-import sys
-import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-
 import numpy as np
+import time
+from typing import Optional, List, Dict, Tuple
+from dataclasses import dataclass
+import os
 
-sys.path.append("../..")
 from config import Config
 
 
@@ -59,6 +56,9 @@ class TrainingMetrics:
         Args:
             history_length: Maximum history to store
         """
+        if history_length <= 0:
+            raise ValueError(f"history_length must be positive, got {history_length}")
+
         self.history_length = history_length
 
         self.scores: List[int] = []
@@ -158,41 +158,6 @@ class Trainer:
         # Create model directory
         os.makedirs(self.config.MODEL_DIR, exist_ok=True)
 
-    def _episode_progress_count(self, info: Dict[str, Any]) -> int:
-        """Extract a generic per-episode progress count from game info."""
-        for key in (
-            "bricks",
-            "bricks_broken",
-            "total_aliens_killed",
-            "aliens_destroyed",
-            "asteroids_destroyed",
-            "food_eaten",
-        ):
-            value = info.get(key)
-            if value is not None:
-                try:
-                    return max(0, int(value))
-                except (TypeError, ValueError):
-                    return 0
-
-        if "bricks_remaining" in info:
-            initial_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
-            try:
-                remaining = int(info.get("bricks_remaining", initial_bricks))
-            except (TypeError, ValueError):
-                remaining = initial_bricks
-            return max(0, initial_bricks - remaining)
-
-        if "aliens_remaining" in info:
-            try:
-                remaining = int(info["aliens_remaining"])
-                total = self.config.SI_ALIEN_ROWS * self.config.SI_ALIEN_COLS
-                return max(0, total - remaining)
-            except (TypeError, ValueError):
-                return 0
-
-        return 0
-
     def run_episode(self, render: bool = False, screen=None) -> EpisodeStats:
         """
         Run a single training episode.
@@ -219,7 +184,7 @@ class Trainer:
             self.agent.remember(state, action, reward, next_state, done)
 
             # Learn from experience
-            self.agent.learn()
+            loss = self.agent.learn()
 
             # Update state
             state = next_state
@@ -241,7 +206,9 @@ class Trainer:
 
         duration = time.time() - start_time
 
-        progress_count = self._episode_progress_count(info)
+        # Calculate bricks broken
+        initial_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
+        bricks_broken = initial_bricks - info.get("bricks_remaining", initial_bricks)
 
         return EpisodeStats(
             episode=self.current_episode,
@@ -251,12 +218,15 @@ class Trainer:
             epsilon=self.agent.epsilon,
             avg_loss=self.agent.get_average_loss(100),
             duration=duration,
-            bricks_broken=progress_count,
+            bricks_broken=bricks_broken,
             won=info.get("won", False),
         )
 
     def train(
-        self, num_episodes: Optional[int] = None, render_callback=None, progress_callback=None
+        self,
+        num_episodes: Optional[int] = None,
+        render_callback=None,
+        progress_callback=None,
     ) -> TrainingMetrics:
         """
         Run the training loop.
@@ -299,7 +269,7 @@ class Trainer:
             # Log progress
             if episode % self.config.LOG_EVERY == 0:
                 avg_score = self.metrics.get_recent_average("scores", 100)
-                self.metrics.get_recent_average("rewards", 100)
+                avg_reward = self.metrics.get_recent_average("rewards", 100)
                 win_rate = self.metrics.get_win_rate(100)
 
                 # Handle None values from get_recent_average (returns None if no data)
@@ -323,7 +293,10 @@ class Trainer:
 
             if episode % self.config.SAVE_EVERY == 0 and episode > 0:
                 self.agent.save(
-                    os.path.join(self.config.MODEL_DIR, f"{self.config.GAME_NAME}_ep{episode}.pth")
+                    os.path.join(
+                        self.config.MODEL_DIR,
+                        f"{self.config.GAME_NAME}_ep{episode}.pth",
+                    )
                 )
 
             # Progress callback

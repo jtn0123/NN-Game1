@@ -17,14 +17,14 @@ Game Registry:
 
 from typing import Any, Dict, List, Optional, Type, cast
 
-from .asteroids import Asteroids, VecAsteroids
-from .base_game import BaseGame, BaseVecGame
 from .breakout import Breakout, VecBreakout
-from .menu import GameMenu
-from .particles import ParticleSystem, TrailRenderer
+from .space_invaders import SpaceInvaders, VecSpaceInvaders
 from .pong import Pong, VecPong
 from .snake import Snake, VecSnake
-from .space_invaders import SpaceInvaders, VecSpaceInvaders
+from .asteroids import Asteroids, VecAsteroids
+from .base_game import BaseGame, BaseVecGame
+from .particles import ParticleSystem, TrailRenderer
+from .menu import GameMenu
 
 # =============================================================================
 # GAME REGISTRY

@@ -12,12 +12,12 @@ The system is designed to be lightweight and integrate
 seamlessly with the pygame rendering loop.
 """
 
-import math
-import random
-from dataclasses import dataclass
-from typing import List, Tuple
-
 import pygame
+import numpy as np
+from typing import List, Tuple, Optional
+from dataclasses import dataclass
+import random
+import math
 
 
 @dataclass
@@ -61,7 +61,7 @@ class Particle:
             return
 
         # Calculate alpha based on remaining life
-        int(255 * min(1.0, self.life * 2))
+        alpha = int(255 * min(1.0, self.life * 2))
 
         # Create color with alpha effect (darken as it dies)
         r = int(self.color[0] * self.life)
@@ -276,7 +276,11 @@ class ParticleSystem:
             self._add_particle(particle)
 
     def emit_sparkle(
-        self, x: float, y: float, color: Tuple[int, int, int] = (255, 255, 200), count: int = 3
+        self,
+        x: float,
+        y: float,
+        color: Tuple[int, int, int] = (255, 255, 200),
+        count: int = 3,
     ) -> None:
         """
         Emit ambient sparkle effect.
@@ -366,7 +370,10 @@ class TrailRenderer:
 
 # Convenience function for creating gradient surfaces
 def create_gradient_surface(
-    width: int, height: int, top_color: Tuple[int, int, int], bottom_color: Tuple[int, int, int]
+    width: int,
+    height: int,
+    top_color: Tuple[int, int, int],
+    bottom_color: Tuple[int, int, int],
 ) -> pygame.Surface:
     """
     Create a vertical gradient surface.

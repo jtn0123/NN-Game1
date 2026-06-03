@@ -17,17 +17,13 @@ Game Rules:
 - Maximize score by eating as much food as possible
 """
 
-import sys
-from collections import deque
-from typing import Deque, List, Optional, Tuple
-
 import numpy as np
 import pygame
+from typing import Tuple, List, Optional, Deque
+from collections import deque
 
 from .base_game import BaseGame, step_vector_env_no_copy
 from .particles import ParticleSystem
-
-sys.path.append("..")
 from config import Config
 
 
@@ -131,9 +127,6 @@ class Snake(BaseGame):
         self._death_timer = 0
 
         # Visual effects (only in visual mode)
-        self._font: Optional[pygame.font.Font]
-        self._small_font: Optional[pygame.font.Font]
-        self._background: Optional[pygame.Surface]
         if not headless:
             self.particles = ParticleSystem(max_particles=300)
             pygame.font.init()
@@ -578,7 +571,9 @@ class Snake(BaseGame):
             # Final stats
             if self._small_font:
                 final_text = self._small_font.render(
-                    f"Final Length: {len(self.snake)} | Score: {self.score}", True, (180, 180, 180)
+                    f"Final Length: {len(self.snake)} | Score: {self.score}",
+                    True,
+                    (180, 180, 180),
                 )
                 screen.blit(
                     final_text,
@@ -660,8 +655,8 @@ class VecSnake:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done_flag in enumerate(self._dones):
-            if bool(done_flag):
+        for i, done in enumerate(self._dones):
+            if done:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

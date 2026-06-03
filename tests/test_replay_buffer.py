@@ -9,15 +9,18 @@ These tests verify:
     - Prioritized replay buffer
 """
 
-import os
-import sys
-
-import numpy as np
 import pytest
+import numpy as np
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.ai.replay_buffer import NStepReplayBuffer, PrioritizedReplayBuffer, ReplayBuffer
+from src.ai.replay_buffer import (
+    ReplayBuffer,
+    PrioritizedReplayBuffer,
+    NStepReplayBuffer,
+)
 
 
 @pytest.fixture
@@ -587,9 +590,17 @@ class TestPrioritizedReplayBufferEdgeCases:
         buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
         buffer._initialized = True  # Force initialization
         buffer._size = 0
+        with pytest.raises(RuntimeError, match="Cannot sample from empty"):
+            buffer.sample(16)
         # Match either "empty buffer" or "empty PrioritizedReplayBuffer"
         with pytest.raises(RuntimeError, match="Cannot sample from empty"):
             buffer.sample_no_copy(16)
+
+    def test_per_sample_uninitialized_raises(self):
+        """PER sample should fail with a clear message before first push."""
+        buffer = PrioritizedReplayBuffer(capacity=100)
+        with pytest.raises(RuntimeError, match="uninitialized PrioritizedReplayBuffer"):
+            buffer.sample(16)
 
     def test_per_negative_capacity_raises(self):
         """Creating PER buffer with negative capacity should raise ValueError."""

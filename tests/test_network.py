@@ -8,11 +8,11 @@ These tests verify:
     - Weight access
 """
 
-import os
-import sys
-
 import pytest
+import numpy as np
 import torch
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -300,6 +300,26 @@ class TestDuelingDQN:
         # Output layers should have gradients
         assert net.value_output.weight.grad is not None
         assert net.advantage_output.weight.grad is not None
+
+    def test_dueling_dqn_get_weights_includes_output_streams(self, dueling_network, config):
+        """Dueling visualization weights should include stream output layers."""
+        weights = dueling_network.get_weights()
+        expected_count = len(dueling_network.feature_layers) + 4
+
+        assert len(weights) == expected_count
+        assert weights[-2].shape == (1, config.HIDDEN_LAYERS[-1])
+        assert weights[-1].shape == (config.ACTION_SIZE, config.HIDDEN_LAYERS[-1])
+
+    def test_dueling_dqn_captures_stream_output_activations(self, dueling_network, config):
+        """Dueling output stream activations should be available for inspection."""
+        dueling_network.capture_activations = True
+        _ = dueling_network(torch.randn(1, config.STATE_SIZE))
+
+        activations = dueling_network.get_activations()
+        assert "value_output" in activations
+        assert "advantage_output" in activations
+        assert activations["value_output"].shape == (1, 1)
+        assert activations["advantage_output"].shape == (1, config.ACTION_SIZE)
 
 
 class TestNoisyLinear:

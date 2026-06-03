@@ -17,16 +17,12 @@ Game Rules:
 - Don't collide with asteroids
 """
 
-import sys
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
-
 import numpy as np
 import pygame
+from typing import Tuple, List, Optional
+from dataclasses import dataclass
 
 from .base_game import BaseGame, step_vector_env_no_copy
-
-sys.path.append("..")
 from config import Config
 
 
@@ -82,7 +78,8 @@ class Ship:
     def thrust(self) -> None:
         """Apply thrust in the direction the ship is facing."""
         thrust_vec = Vector2(
-            np.cos(self.angle) * self.thrust_power, np.sin(self.angle) * self.thrust_power
+            np.cos(self.angle) * self.thrust_power,
+            np.sin(self.angle) * self.thrust_power,
         )
         self.velocity = self.velocity + thrust_vec
 
@@ -324,8 +321,6 @@ class Asteroids(BaseGame):
         # Bug 105: Track game time for smooth animations (not affected by pause)
         self._game_time = 0.0
 
-        self._font: Optional[pygame.font.Font]
-        self._small_font: Optional[pygame.font.Font]
         if not headless:
             pygame.font.init()
             self._font = pygame.font.Font(None, 48)
@@ -390,7 +385,7 @@ class Asteroids(BaseGame):
     def _spawn_asteroids(self, count: int) -> None:
         """Spawn asteroids away from the ship (safe spawn zone)."""
         self.asteroids.clear()
-        _center_x, _center_y = self.width / 2, self.height / 2
+        center_x, center_y = self.width / 2, self.height / 2
 
         for _ in range(count):
             # Spawn at edges of screen, never too close to center
@@ -629,10 +624,10 @@ class Asteroids(BaseGame):
         idx += 5
 
         # Sort asteroids by distance to ship
-        ship = self.ship
         if self.asteroids:
             sorted_asteroids = sorted(
-                self.asteroids, key=lambda a: (a.x - ship.x) ** 2 + (a.y - ship.y) ** 2
+                self.asteroids,
+                key=lambda a: (a.x - self.ship.x) ** 2 + (a.y - self.ship.y) ** 2,
             )
         else:
             sorted_asteroids = []
@@ -799,6 +794,7 @@ class Asteroids(BaseGame):
 
             # Glow effect (draw multiple times with decreasing alpha)
             for glow in range(3):
+                offset = glow * 2
                 glow_verts = [(v[0], v[1]) for v in verts]
                 alpha = 100 - glow * 30
                 pygame.draw.polygon(screen, (alpha, alpha, alpha), glow_verts, 1)
@@ -896,7 +892,9 @@ class Asteroids(BaseGame):
         # Human controls helper (bottom of screen)
         if self.show_controls and self._small_font:
             controls_text = self._small_font.render(
-                "ARROWS: Move/Rotate  SPACE: Shoot  (Multiple keys OK)", True, (80, 80, 80)
+                "ARROWS: Move/Rotate  SPACE: Shoot  (Multiple keys OK)",
+                True,
+                (80, 80, 80),
             )
             text_rect = controls_text.get_rect(centerx=self.width // 2, bottom=self.height - 10)
             screen.blit(controls_text, text_rect)
@@ -974,8 +972,8 @@ class VecAsteroids:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done_flag in enumerate(self._dones):
-            if bool(done_flag):
+        for i, done in enumerate(self._dones):
+            if done:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

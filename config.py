@@ -12,8 +12,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
-
+from typing import List, Tuple, Optional
 import torch
 
 
@@ -152,7 +151,11 @@ class Config:
             {"alien_rows": 2, "alien_shoot_chance": 0.0005, "episodes": 500},
             {"alien_rows": 3, "alien_shoot_chance": 0.0008, "episodes": 500},
             {"alien_rows": 4, "alien_shoot_chance": 0.001, "episodes": 500},
-            {"alien_rows": 5, "alien_shoot_chance": 0.001, "episodes": None},  # Full game
+            {
+                "alien_rows": 5,
+                "alien_shoot_chance": 0.001,
+                "episodes": None,
+            },  # Full game
         ]
     )
 
@@ -549,15 +552,15 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"\n📺 Game: {cfg.SCREEN_WIDTH}x{cfg.SCREEN_HEIGHT}")
     print(f"🧱 Bricks: {cfg.BRICK_ROWS}x{cfg.BRICK_COLS} = {cfg.BRICK_ROWS * cfg.BRICK_COLS}")
-    print("\n🧠 Neural Network:")
+    print(f"\n🧠 Neural Network:")
     print(f"   Input size: {cfg.STATE_SIZE}")
     print(f"   Hidden layers: {cfg.HIDDEN_LAYERS}")
     print(f"   Output size: {cfg.ACTION_SIZE}")
-    print("\n📊 Training:")
+    print(f"\n📊 Training:")
     print(f"   Learning rate: {cfg.LEARNING_RATE}")
     print(f"   Batch size: {cfg.BATCH_SIZE}")
     print(f"   Gamma: {cfg.GAMMA}")
-    print("\n🎲 Exploration:")
+    print(f"\n🎲 Exploration:")
     print(f"   Epsilon: {cfg.EPSILON_START} → {cfg.EPSILON_END}")
     print(f"   Decay: {cfg.EPSILON_DECAY}")
     print(f"\n💻 Device: {cfg.DEVICE}")

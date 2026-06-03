@@ -11,10 +11,9 @@ Features:
     - Styled action buttons
 """
 
-import math
-from typing import Any, Dict, List, Optional, Tuple
-
 import pygame
+from typing import Optional, Tuple, List, Dict, Any
+import math
 
 
 def draw_breakout_icon(
@@ -79,7 +78,9 @@ def draw_space_invaders_icon(
     # Player ship at bottom
     ship_y = cy + 30
     pygame.draw.polygon(
-        surface, (100, 200, 255), [(cx, ship_y - 8), (cx - 12, ship_y + 5), (cx + 12, ship_y + 5)]
+        surface,
+        (100, 200, 255),
+        [(cx, ship_y - 8), (cx - 12, ship_y + 5), (cx + 12, ship_y + 5)],
     )
 
 
@@ -181,7 +182,15 @@ def draw_asteroids_icon(
 class GameCard:
     """A single game selection card."""
 
-    def __init__(self, game_id: str, x: int, y: int, width: int, height: int, info: Dict[str, Any]):
+    def __init__(
+        self,
+        game_id: str,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        info: Dict[str, Any],
+    ):
         self.game_id = game_id
         self.x = x
         self.y = y
@@ -228,7 +237,10 @@ class GameCard:
                 glow_surface = pygame.Surface(glow_rect.size, pygame.SRCALPHA)
                 glow_color = (*self.base_color, max(0, glow_alpha - i * 20))
                 pygame.draw.rect(
-                    glow_surface, glow_color, glow_surface.get_rect(), border_radius=16 + i * 4
+                    glow_surface,
+                    glow_color,
+                    glow_surface.get_rect(),
+                    border_radius=16 + i * 4,
                 )
                 screen.blit(glow_surface, glow_rect)
 
@@ -295,7 +307,7 @@ class GameCard:
         # Wrap description to fit card width
         words = desc.split()
         lines = []
-        current_line: List[str] = []
+        current_line = []
         max_width = rect.width - 20
 
         for word in words:
@@ -337,10 +349,17 @@ class GameCard:
         badge_rect = diff_rect.inflate(20, 8)
         badge_surface = pygame.Surface(badge_rect.size, pygame.SRCALPHA)
         pygame.draw.rect(
-            badge_surface, (*badge_color, 40), badge_surface.get_rect(), border_radius=10
+            badge_surface,
+            (*badge_color, 40),
+            badge_surface.get_rect(),
+            border_radius=10,
         )
         pygame.draw.rect(
-            badge_surface, (*badge_color, 100), badge_surface.get_rect(), 1, border_radius=10
+            badge_surface,
+            (*badge_color, 100),
+            badge_surface.get_rect(),
+            1,
+            border_radius=10,
         )
         screen.blit(badge_surface, badge_rect)
         screen.blit(diff_text, diff_rect)
@@ -459,7 +478,7 @@ class GameMenu:
 
     def _build_cards(self) -> None:
         """Build game cards from registry."""
-        from . import get_game_info, list_games
+        from . import list_games, get_game_info
 
         games = list_games()
         num_games = len(games)
@@ -638,7 +657,7 @@ class GameMenu:
             end = (offset - self.screen_height, self.screen_height)
 
             line_surface = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
-            pygame.draw.line(line_surface, (255, 255, 255, int(line["alpha"])), start, end, 1)
+            pygame.draw.line(line_surface, (255, 255, 255, line["alpha"]), start, end, 1)
             screen.blit(line_surface, (0, 0))
 
         # Particles (stars)

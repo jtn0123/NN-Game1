@@ -5,9 +5,8 @@ Pause Menu
 Interactive pause overlay with button options.
 """
 
-from typing import Dict, List, Optional, Tuple
-
 import pygame
+from typing import Optional, List, Tuple, Dict
 
 
 class PauseButton:
@@ -317,7 +316,11 @@ class PauseMenu:
             )
             surface.blit(box_surface, (box_x, box_y))
             pygame.draw.rect(
-                surface, (255, 100, 100), (box_x, box_y, box_width, box_height), 2, border_radius=10
+                surface,
+                (255, 100, 100),
+                (box_x, box_y, box_width, box_height),
+                2,
+                border_radius=10,
             )
 
             # Confirmation text

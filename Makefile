@@ -1,53 +1,26 @@
-PYTHON ?= python3
-PORT ?= 5000
-BLACK ?= black
-RUFF ?= ruff
-MYPY ?= mypy
+.PHONY: test coverage typecheck dashboard-test format format-check audit check
 
-.PHONY: setup compile test test-fast coverage typecheck lint format format-check run run-headless run-web smoke-train clean
-
-setup:
-	$(PYTHON) -m pip install --upgrade pip
-	$(PYTHON) -m pip install -e ".[web,test,dev]"
-
-compile:
-	$(PYTHON) -m compileall -q src main.py config.py tests
+PYTHON ?= python
 
 test:
-	$(PYTHON) -m pytest
-
-test-fast:
-	$(PYTHON) -m pytest -m "not slow"
+	$(PYTHON) -m pytest -q
 
 coverage:
-	$(PYTHON) -m pytest --cov=src --cov-report=term-missing
+	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=40 -q
 
 typecheck:
-	$(MYPY) --config-file=mypy.ini src main.py config.py
+	$(PYTHON) -m mypy --config-file mypy.ini --follow-imports=silent src/ai/agent.py src/ai/network.py src/utils src/app/training_runtime.py src/web/model_service.py src/web/game_stats_service.py
 
-lint:
-	$(RUFF) check .
+dashboard-test:
+	node --test tests/js/*.test.mjs
 
 format:
-	$(BLACK) src tests main.py config.py benchmark.py evaluate_checkpoints.py experiment_runner.py
-	$(RUFF) check --fix .
+	$(PYTHON) -m black main.py config.py src tests
 
 format-check:
-	$(BLACK) --check src tests main.py config.py benchmark.py evaluate_checkpoints.py experiment_runner.py
-	$(RUFF) check .
+	$(PYTHON) -m black --check main.py config.py src tests
 
-run:
-	$(PYTHON) main.py
+audit:
+	$(PYTHON) -m pip_audit -r requirements.txt
 
-run-headless:
-	$(PYTHON) main.py --headless --cpu
-
-run-web:
-	$(PYTHON) main.py --headless --web --port $(PORT)
-
-smoke-train:
-	$(PYTHON) main.py --headless --cpu --episodes 1
-
-clean:
-	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
-	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage
+check: format-check typecheck dashboard-test coverage

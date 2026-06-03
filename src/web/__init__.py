@@ -10,6 +10,6 @@ Components:
     static/      - CSS and JavaScript
 """
 
-from .server import MetricsPublisher, WebDashboard
+from .server import WebDashboard, MetricsPublisher
 
 __all__ = ["WebDashboard", "MetricsPublisher"]

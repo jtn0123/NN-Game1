@@ -60,36 +60,40 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 
+import pygame
+import numpy as np
 import argparse
-import math
-import os
 import sys
+import os
 import time
+import math
 from collections import deque
 from dataclasses import dataclass
+from typing import Optional, Callable, Any, Type, Union, List
 from enum import Enum, auto
-from typing import Any, List, Optional, Type, cast
-
-import numpy as np
-import pygame
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
+from src.utils.logger import setup_logging, get_logger, LogLevel
+from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
+from src.game.breakout import Breakout, VecBreakout
+from src.game.space_invaders import VecSpaceInvaders
+from src.game.pong import VecPong
+from src.game.snake import VecSnake
+from src.game.asteroids import VecAsteroids
 from src.ai.agent import Agent, TrainingHistory
-from src.ai.evaluator import Evaluator  # Deterministic performance tracking
-from src.app import ModelService
-from src.game import (
-    BaseGame,
-    BaseVecGame,
-    GameMenu,
-    get_game,
-    get_game_info,
-    get_vec_game,
-    list_games,
+from src.app.cli import parse_args
+from src.app.training_runtime import (
+    build_nn_snapshot,
+    emit_nn_snapshot_to_dashboard,
+    request_save_and_stop,
+    resolve_model_path,
 )
-from src.utils.logger import LogLevel, get_logger, setup_logging
+from src.ai.trainer import Trainer
+from src.ai.evaluator import Evaluator  # Deterministic performance tracking
+from src.utils.checkpoint_loader import load_checkpoint
 from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
 from src.visualizer.hud import TrainingHUD
 from src.visualizer.pause_menu import PauseMenu
@@ -142,7 +146,10 @@ class GameApp:
     """
 
     def __init__(
-        self, config: Config, args: argparse.Namespace, existing_dashboard: Optional[Any] = None
+        self,
+        config: Config,
+        args: argparse.Namespace,
+        existing_dashboard: Optional[Any] = None,
     ):
         """
         Initialize the application.
@@ -154,7 +161,6 @@ class GameApp:
         """
         self.config = config
         self.args = args
-        self.model_service = ModelService(config)
 
         # Update config from args
         if args.lr:
@@ -223,17 +229,25 @@ class GameApp:
 
         # Create AI agent
         self.agent = Agent(
-            state_size=self.game.state_size, action_size=self.game.action_size, config=config
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=config,
         )
 
         # Load model if specified, or auto-load most recent save
         self._initial_model_path = self._resolve_model_path(
-            args.model, state_size=self.game.state_size, action_size=self.game.action_size
+            args.model,
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
         )
 
         # Create dashboard for internal tracking (rendering moved to web dashboard)
         self.dashboard = Dashboard(
-            config=config, x=0, y=0, width=400, height=100  # Position doesn't matter, not rendered
+            config=config,
+            x=0,
+            y=0,
+            width=400,
+            height=100,  # Position doesn't matter, not rendered
         )
 
         # Create HUD and PauseMenu
@@ -268,8 +282,6 @@ class GameApp:
 
         # Full training history for save/restore (allows dashboard restoration)
         self.episode_history: deque[EpisodeMetrics] = deque(maxlen=100000)
-        self._last_nn_visualization_error_log = 0.0
-        self._last_nn_visualization_error_type = ""
 
         # Current state
         self.state = self.game.reset()
@@ -313,7 +325,9 @@ class GameApp:
             self._log_startup_info()
         elif hasattr(args, "web") and args.web and WEB_AVAILABLE and WebDashboard is not None:
             # Create new dashboard
-            self.web_dashboard = WebDashboard(config, port=args.port)
+            self.web_dashboard = WebDashboard(
+                config, port=args.port, host=getattr(args, "host", "127.0.0.1")
+            )
             self.web_dashboard.on_pause_callback = self._toggle_pause
             self.web_dashboard.on_save_callback = lambda: self._save_model(
                 f"{config.GAME_NAME}_web_save.pth", save_reason="manual"
@@ -333,7 +347,7 @@ class GameApp:
 
             # Show URL prominently
             print("\n" + "=" * 60)
-            print(f"🌐 WEB DASHBOARD: http://localhost:{args.port}")
+            print(f"🌐 WEB DASHBOARD: {self.web_dashboard.dashboard_url()}")
             print("=" * 60 + "\n")
 
             # Send system info to dashboard
@@ -347,35 +361,31 @@ class GameApp:
             self._load_model(self._initial_model_path)
             if self.web_dashboard:
                 self.web_dashboard.log(
-                    f"📂 Auto-loaded: {os.path.basename(self._initial_model_path)}", "success"
+                    f"📂 Auto-loaded: {os.path.basename(self._initial_model_path)}",
+                    "success",
                 )
 
     def _resolve_model_path(
         self, explicit_path: Optional[str], state_size: int, action_size: int
     ) -> Optional[str]:
-        """
-        Resolve which model to load on startup.
-
-        Priority:
-        1. Explicitly specified --model path (if compatible)
-        2. Most recently modified .pth file in game-specific directory
-
-        Args:
-            explicit_path: Path from --model argument, or None
-            state_size: Expected state size for compatibility check
-            action_size: Expected action size for compatibility check
-
-        Returns:
-            Path to model file, or None if no model found
-        """
-        return self.model_service.resolve_model_path(explicit_path, state_size, action_size)
+        """Resolve which model to load on startup."""
+        return resolve_model_path(
+            explicit_path=explicit_path,
+            state_size=state_size,
+            action_size=action_size,
+            config=self.config,
+            inspect_model=Agent.inspect_model,
+        )
 
     def _restore_training_history(self, filepath: str) -> None:
         """Restore training history from a saved model (called after dashboard is ready)."""
         try:
-            import torch
-
-            checkpoint = torch.load(filepath, map_location=self.config.DEVICE, weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.config.DEVICE,
+                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
+                allow_unsafe_fallback=True,
+            )
 
             if "training_history" in checkpoint:
                 history_data = checkpoint["training_history"]
@@ -471,12 +481,16 @@ class GameApp:
         self.web_dashboard.log("🚀 Training session started", "success")
         self.web_dashboard.log(f"Device: {self.config.DEVICE}", "info")
         self.web_dashboard.log(
-            f"State size: {self.game.state_size}, Action size: {self.game.action_size}", "info"
+            f"State size: {self.game.state_size}, Action size: {self.game.action_size}",
+            "info",
         )
         self.web_dashboard.log(
             f"Network: {self.config.HIDDEN_LAYERS}",
             "info",
-            {"hidden_layers": self.config.HIDDEN_LAYERS, "activation": self.config.ACTIVATION},
+            {
+                "hidden_layers": self.config.HIDDEN_LAYERS,
+                "activation": self.config.ACTIVATION,
+            },
         )
         self.web_dashboard.log(
             f"Learning rate: {self.config.LEARNING_RATE}",
@@ -534,12 +548,15 @@ class GameApp:
             self.web_dashboard.publisher.console_logs.clear()
             self.web_dashboard.publisher.reset_all_state()
             self.web_dashboard.log(
-                "🔄 Starting fresh training - resetting agent and clearing memory", "warning"
+                "🔄 Starting fresh training - resetting agent and clearing memory",
+                "warning",
             )
 
         # Create a new agent (fresh neural network)
         self.agent = Agent(
-            state_size=self.game.state_size, action_size=self.game.action_size, config=self.config
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=self.config,
         )
 
         # Clear replay buffer
@@ -605,36 +622,15 @@ class GameApp:
 
     def _save_and_quit(self) -> None:
         """Save the model and exit the application gracefully."""
-        if self.web_dashboard:
-            self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
-
-        # Save the model and verify it completed
-        save_success = self._save_model(
-            f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown"
+        request_save_and_stop(
+            game_name=self.config.GAME_NAME,
+            save_model=lambda filename, reason: self._save_model(filename, save_reason=reason),
+            set_running=self._set_running,
+            dashboard=self.web_dashboard,
         )
 
-        if save_success:
-            if self.web_dashboard:
-                self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
-            print("\n👋 Save & Quit requested. Model saved. Exiting...")
-        else:
-            if self.web_dashboard:
-                self.web_dashboard.log("⚠️ Save may have failed. Shutting down...", "warning")
-            print("\n⚠️ Save & Quit requested. Save may have failed. Exiting...")
-
-        # Flush output buffers to ensure messages are written
-        import sys
-
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        # Give time for the save event to propagate to clients
-        time.sleep(0.5)
-
-        # Exit gracefully - use os._exit() because this is called from SocketIO thread
-        self.running = False
-        pygame.quit()
-        os._exit(0)  # Terminates process from any thread
+    def _set_running(self, running: bool) -> None:
+        self.running = running
 
     def _load_model(self, filepath: str) -> None:
         """Load a model from file and restore training history."""
@@ -1039,7 +1035,12 @@ class GameApp:
         import time
 
         self._notifications.append(
-            {"text": text, "color": color, "start_time": time.time(), "duration": duration}
+            {
+                "text": text,
+                "color": color,
+                "start_time": time.time(),
+                "duration": duration,
+            }
         )
 
     def _update_notifications(self) -> None:
@@ -1078,7 +1079,10 @@ class GameApp:
             bg_height = text_surface.get_height() + 10
             bg_surface = pygame.Surface((bg_width, bg_height), pygame.SRCALPHA)
             pygame.draw.rect(
-                bg_surface, (0, 0, 0, int(alpha * 0.7)), bg_surface.get_rect(), border_radius=5
+                bg_surface,
+                (0, 0, 0, int(alpha * 0.7)),
+                bg_surface.get_rect(),
+                border_radius=5,
             )
 
             # Position at top-center
@@ -1101,6 +1105,7 @@ class GameApp:
     def _set_speed(self, speed: float, force_log: bool = False) -> None:
         """Set game speed (for web dashboard control)."""
         new_speed = max(1.0, min(1000.0, speed))
+        old_speed = self.game_speed
         self.game_speed = new_speed
 
         if self.web_dashboard:
@@ -1184,10 +1189,10 @@ class GameApp:
             if game_name == "asteroids" and hasattr(self.game, "step_human"):
                 # Asteroids supports simultaneous actions via step_human
                 state, reward, done, info = self.game.step_human(keys_dict)
-                action = cast(Any, self.game).get_human_action(keys_dict)  # For display purposes
+                action = self.game.get_human_action(keys_dict)  # For display purposes
             elif hasattr(self.game, "get_human_action"):
                 # Use game's built-in human action helper
-                action = cast(Any, self.game).get_human_action(keys_dict)
+                action = self.game.get_human_action(keys_dict)
                 state, reward, done, info = self.game.step(action)
             else:
                 # Fallback: generic control mapping
@@ -1222,7 +1227,10 @@ class GameApp:
         state = self.game.reset()
         episode_reward = 0.0
         total_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
-        info: dict = {"score": 0, "bricks_remaining": total_bricks}  # Default info for paused state
+        info: dict = {
+            "score": 0,
+            "bricks_remaining": total_bricks,
+        }  # Default info for paused state
 
         while self.running:
             self._handle_events()
@@ -1274,12 +1282,12 @@ class GameApp:
         print(f"   Batch Size:     {self.config.BATCH_SIZE}")
         print(f"   Learn Every:    {self.config.LEARN_EVERY} steps")
         print(f"   Gradient Steps: {self.config.GRADIENT_STEPS}")
-        print("\n   Controls:")
-        print("   - P: Pause/Resume")
-        print("   - S: Save model")
-        print("   - +/-: Speed up/down")
-        print("   - F: Toggle fullscreen")
-        print("   - Q/ESC: Quit")
+        print(f"\n   Controls:")
+        print(f"   - P: Pause/Resume")
+        print(f"   - S: Save model")
+        print(f"   - +/-: Speed up/down")
+        print(f"   - F: Toggle fullscreen")
+        print(f"   - Q/ESC: Quit")
         print("=" * 60 + "\n")
 
         state = self.game.reset()
@@ -1296,6 +1304,7 @@ class GameApp:
         # At 1000x: 1000 training steps per render (~60000 steps/sec!)
 
         # Track step time for performance logging (bounded deque)
+        avg_step_time = 0.001
         step_time_samples: deque[float] = deque(maxlen=100)
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
@@ -1343,7 +1352,7 @@ class GameApp:
                     self.agent.remember(state, action, reward, next_state, done)
 
                     # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
-                    self.agent.learn()
+                    loss = self.agent.learn()
 
                     # Track target network updates
                     if (
@@ -1356,7 +1365,10 @@ class GameApp:
                             self.web_dashboard.log(
                                 f"🎯 Target network updated (#{self.target_updates})",
                                 "metric",
-                                {"step": self.agent.steps, "update_number": self.target_updates},
+                                {
+                                    "step": self.agent.steps,
+                                    "update_number": self.target_updates,
+                                },
                             )
 
                     # Update state
@@ -1393,13 +1405,11 @@ class GameApp:
                         # Update web dashboard if enabled (throttled to every 5 episodes for performance)
                         # Always emit on: first 10 episodes, new best score, or every 5th episode
                         is_new_best = info["score"] > self.best_score_ever
-                        should_emit = self.web_dashboard is not None and (
+                        should_emit = self.web_dashboard and (
                             self.episode <= 10 or is_new_best or self.episode % 5 == 0
                         )
                         if should_emit:
-                            dashboard = self.web_dashboard
-                            assert dashboard is not None
-                            dashboard.emit_metrics(
+                            self.web_dashboard.emit_metrics(
                                 episode=self.episode,
                                 score=info["score"],
                                 epsilon=self.agent.epsilon,
@@ -1416,9 +1426,11 @@ class GameApp:
                                 episode_length=episode_steps,
                             )
                             # Update performance settings in dashboard state
-                            dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
-                            dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
-                            dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
+                            self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
+                            self.web_dashboard.publisher.state.gradient_steps = (
+                                self.config.GRADIENT_STEPS
+                            )
+                            self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
 
                             # Log episode completion
                             self._log_episode_complete(
@@ -1479,7 +1491,9 @@ class GameApp:
                         if info["score"] > self.best_score_ever:
                             self.best_score_ever = info["score"]
                             self._save_model(
-                                f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=False
+                                f"{self.config.GAME_NAME}_best.pth",
+                                save_reason="best",
+                                quiet=False,
                             )
                             # Bug 97: Show on-screen notification for new best score
                             self._show_notification(
@@ -1487,7 +1501,7 @@ class GameApp:
                             )
                             if self.web_dashboard:
                                 avg_score = (
-                                    np.mean(list(self.recent_scores)[-100:])
+                                    np.mean(self.recent_scores[-100:])
                                     if self.recent_scores
                                     else 0.0
                                 )
@@ -1518,6 +1532,7 @@ class GameApp:
                     frame_training_time = time.time() - training_start
                     measured_step_time = frame_training_time / steps_this_frame
                     step_time_samples.append(measured_step_time)  # deque auto-trims to maxlen=100
+                    avg_step_time = sum(step_time_samples) / len(step_time_samples)
 
                     # Log performance occasionally
                     if self.steps % 500 == 0 and self.web_dashboard:
@@ -1680,6 +1695,7 @@ class GameApp:
                 elapsed_since_report >= self.config.REPORT_INTERVAL_SECONDS
                 or episode % self.config.LOG_EVERY == 0
             ):
+                elapsed_total = current_time - start_time
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
@@ -1748,7 +1764,8 @@ class GameApp:
                     )
                     if self.web_dashboard:
                         self.web_dashboard.log(
-                            f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success"
+                            f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth",
+                            "success",
                         )
                 elif action == "menu":
                     # Save current progress before returning to menu
@@ -1757,7 +1774,8 @@ class GameApp:
                         self.web_dashboard.log("🏠 Returning to game selector...", "warning")
                         self.web_dashboard.launcher_mode = True
                         self.web_dashboard.socketio.emit(
-                            "redirect_to_launcher", {"message": "Returning to game selector..."}
+                            "redirect_to_launcher",
+                            {"message": "Returning to game selector..."},
                         )
                     self.return_to_menu = True
                     self.running = False
@@ -1782,7 +1800,8 @@ class GameApp:
                         self._show_notification("Save Failed", (255, 100, 100), 2.0)
                     if self.web_dashboard:
                         self.web_dashboard.log(
-                            f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth", "success"
+                            f"💾 Manual save: {self.config.GAME_NAME}_manual_save.pth",
+                            "success",
                         )
 
                 elif event.key == pygame.K_r:
@@ -1965,78 +1984,16 @@ class GameApp:
             return
 
         try:
-            # Enable activation capture temporarily
-            self.agent.policy_net.capture_activations = True
-
-            # Get layer info
-            layer_info = self.agent.policy_net.get_layer_info()
-
-            # Get Q-values (this forward pass captures activations)
-            q_values = self.agent.get_q_values(state)
-
-            # Get activations
-            raw_activations = self.agent.policy_net.get_activations()
-
-            # Get weights (sampled for performance)
-            raw_weights = self.agent.policy_net.get_weights()
-
-            # Disable activation capture
-            self.agent.policy_net.capture_activations = False
-
-            # Format activations for JSON (convert numpy arrays to lists, limit neurons)
-            max_neurons = 15  # Match the pygame visualizer limit
-            activations: dict[str, list[float]] = {}
-            for key, act in raw_activations.items():
-                if len(act.shape) > 1:
-                    act = act[0]  # Take first batch item
-                # Normalize and limit to max_neurons
-                act_list = act[: min(max_neurons, len(act))].tolist()
-                activations[key] = act_list
-
-            # Format weights for JSON (sample connections for performance)
-            weights: list[list[list[float]]] = []
-            for i, w in enumerate(raw_weights):
-                if w is not None:
-                    # Sample weights: take first 15 rows and first 15 columns
-                    sampled_w = w[: min(15, w.shape[0]), : min(15, w.shape[1])]
-                    weights.append(sampled_w.tolist())
-
-            # Get action labels from game if available
-            action_labels = ["LEFT", "STAY", "RIGHT"]  # Default for Breakout
-            if hasattr(self.game, "get_action_labels"):
-                action_labels = self.game.get_action_labels()
-
-            # Emit to web dashboard (throttling handled by publisher)
-            self.web_dashboard.emit_nn_visualization(
-                layer_info=layer_info,
-                activations=activations,
-                q_values=q_values.tolist(),
+            snapshot = build_nn_snapshot(self.agent, self.game, state)
+            emit_nn_snapshot_to_dashboard(
+                self.web_dashboard,
+                snapshot,
                 selected_action=selected_action,
-                weights=weights,
                 step=self.agent.steps,
-                action_labels=action_labels,
             )
-        except Exception as e:
-            self._record_nn_visualization_error(e)
-
-    def _record_nn_visualization_error(self, error: Exception) -> None:
-        """Log neural-visualization failures without crashing or spamming training."""
-        now = time.time()
-        error_type = type(error).__name__
-        if (
-            error_type != self._last_nn_visualization_error_type
-            or now - self._last_nn_visualization_error_log > 30.0
-        ):
-            get_logger(__name__).warning(
-                "Neural visualization emit failed: %s: %s", error_type, error
-            )
-            if self.web_dashboard:
-                self.web_dashboard.log(
-                    f"Neural visualization update failed ({error_type}); training continues.",
-                    "warning",
-                )
-            self._last_nn_visualization_error_type = error_type
-            self._last_nn_visualization_error_log = now
+        except Exception:
+            # Don't crash training on visualization errors - silently ignore
+            pass
 
     def _save_model(self, filename: str, save_reason: str = "manual", quiet: bool = False) -> bool:
         """Save the current model with rich metadata.
@@ -2044,17 +2001,24 @@ class GameApp:
         Returns:
             True if save succeeded, False otherwise
         """
-        filename = self.model_service.normalize_checkpoint_filename(filename)
-        filepath = self.model_service.checkpoint_path(filename)
+        # Ensure game-specific model directory exists
+        os.makedirs(self.config.GAME_MODEL_DIR, exist_ok=True)
+        filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
 
         # Calculate metrics for metadata
-        avg_score = self.model_service.average_last_100(self.recent_scores)
+        avg_score = np.mean(list(self.recent_scores)[-100:]) if self.recent_scores else 0.0
         win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, "get_win_rate") else 0.0
 
         # Build training history for dashboard restoration from episode_history
-        training_history = self.model_service.build_visual_history(
-            self.episode_history,
-            self.agent.losses if self.agent.losses else [],
+        training_history = TrainingHistory(
+            scores=[ep.score for ep in self.episode_history],
+            rewards=[ep.reward for ep in self.episode_history],
+            steps=[ep.steps for ep in self.episode_history],
+            epsilons=[ep.epsilon for ep in self.episode_history],
+            bricks=[ep.bricks_hit for ep in self.episode_history],
+            wins=[ep.won for ep in self.episode_history],
+            losses=list(self.agent.losses)[-1000:] if self.agent.losses else [],
+            q_values=[],  # Q-values not tracked per-episode currently
         )
 
         result = self.agent.save(
@@ -2082,7 +2046,20 @@ class GameApp:
 
     def _save_model_as(self, filename: str) -> None:
         """Save model with a custom filename (from web dashboard)."""
-        filename = self.model_service.normalize_checkpoint_filename(filename)
+        # Remove .pth extension if present (we'll add it back later)
+        if filename.endswith(".pth"):
+            filename = filename[:-4]
+
+        # Sanitize filename (only alphanumeric, underscore, hyphen)
+        filename = "".join(c for c in filename if c.isalnum() or c in "_-").strip()
+
+        # Ensure we have a valid base name (not empty or just dots)
+        if not filename or filename.replace(".", "") == "":
+            filename = "custom_save"
+
+        # Add .pth extension
+        filename = filename + ".pth"
+
         self._save_model(filename, save_reason="manual")
         if self.web_dashboard:
             self.web_dashboard.log(f"💾 Saved as: {filename}", "success")
@@ -2091,7 +2068,30 @@ class GameApp:
         """
         Delete old periodic checkpoint saves, keeping only the most recent ones.
         """
-        self.model_service.cleanup_old_periodic_saves(keep_last)
+        import glob
+        import re
+
+        model_dir = self.config.GAME_MODEL_DIR
+        game_name = self.config.GAME_NAME
+
+        pattern = os.path.join(model_dir, f"{game_name}_ep*.pth")
+        periodic_saves = glob.glob(pattern)
+
+        if len(periodic_saves) <= keep_last:
+            return
+
+        def get_episode_num(path: str) -> int:
+            match = re.search(r"_ep(\d+)\.pth$", path)
+            return int(match.group(1)) if match else 0
+
+        periodic_saves.sort(key=get_episode_num)
+        to_delete = periodic_saves[:-keep_last]
+
+        for filepath in to_delete:
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
 
 
 class HeadlessTrainer:
@@ -2111,7 +2111,10 @@ class HeadlessTrainer:
     """
 
     def __init__(
-        self, config: Config, args: argparse.Namespace, existing_dashboard: Optional[Any] = None
+        self,
+        config: Config,
+        args: argparse.Namespace,
+        existing_dashboard: Optional[Any] = None,
     ):
         """
         Initialize headless trainer.
@@ -2124,7 +2127,7 @@ class HeadlessTrainer:
         self.config = config
         self.args = args
         self._existing_dashboard = existing_dashboard
-        self.model_service = ModelService(config)
+        self.running = True
 
         # Apply CLI overrides to config
         if args.lr:
@@ -2161,19 +2164,36 @@ class HeadlessTrainer:
             sys.exit(1)
 
         # Type annotations for game and vec_env
-        self.vec_env: Optional[BaseVecGame] = None
+        self.vec_env: Optional[
+            Union[VecBreakout, VecSpaceInvaders, VecPong, VecSnake, VecAsteroids]
+        ] = None
         self.game: BaseGame
 
         if self.num_envs > 1:
             # Create vectorized environment for parallel game execution
-            VecGameClass = get_vec_game(config.GAME_NAME)
-            if VecGameClass is not None:
-                self.vec_env = VecGameClass(self.num_envs, config, headless=True)  # type: ignore[call-arg]
+            if config.GAME_NAME == "breakout":
+                self.vec_env = VecBreakout(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == "space_invaders":
+                self.vec_env = VecSpaceInvaders(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == "pong":
+                self.vec_env = VecPong(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == "snake":
+                self.vec_env = VecSnake(self.num_envs, config, headless=True)
+                self.game = self.vec_env.envs[0]  # Reference for state/action size
+                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
+            elif config.GAME_NAME == "asteroids":
+                self.vec_env = VecAsteroids(self.num_envs, config, headless=True)
                 self.game = self.vec_env.envs[0]  # Reference for state/action size
                 print(f"🎮 Vectorized: {self.num_envs} parallel environments")
             else:
                 print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
-                print("   Falling back to single environment")
+                print(f"   Falling back to single environment")
                 # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
                 self.game = GameClass(config, headless=True)  # type: ignore[call-arg]
                 self.num_envs = 1
@@ -2184,7 +2204,9 @@ class HeadlessTrainer:
 
         # Create AI agent
         self.agent = Agent(
-            state_size=self.game.state_size, action_size=self.game.action_size, config=config
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=config,
         )
 
         # Load model if specified (headless mode - just restore agent state)
@@ -2212,15 +2234,15 @@ class HeadlessTrainer:
         self.exploitation_actions = 0
         self.target_updates = 0
         self.last_target_update_step = 0
-        self._last_nn_visualization_error_log = 0.0
-        self._last_nn_visualization_error_type = ""
 
         # Web dashboard (initialize early so _load_model can use it)
         self.web_dashboard: Optional[Any] = None
 
         # Auto-load most recent model if no explicit model specified
         initial_model_path = self._resolve_model_path(
-            args.model, state_size=self.game.state_size, action_size=self.game.action_size
+            args.model,
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
         )
         if initial_model_path:
             self._load_model(initial_model_path)
@@ -2241,13 +2263,15 @@ class HeadlessTrainer:
                 # Sync history to dashboard NOW that dashboard is ready
                 self._sync_history_to_dashboard_after_load(initial_model_path)
         elif hasattr(args, "web") and args.web and WEB_AVAILABLE and WebDashboard is not None:
-            self.web_dashboard = WebDashboard(config, port=args.port)
+            self.web_dashboard = WebDashboard(
+                config, port=args.port, host=getattr(args, "host", "127.0.0.1")
+            )
             self._setup_web_callbacks()
             self.web_dashboard.start()
 
             # Show URL prominently
             print("\n" + "=" * 60)
-            print(f"🌐 WEB DASHBOARD: http://localhost:{args.port}")
+            print(f"🌐 WEB DASHBOARD: {self.web_dashboard.dashboard_url()}")
             print("=" * 60 + "\n")
 
             self._send_system_info()
@@ -2285,9 +2309,12 @@ class HeadlessTrainer:
             return
 
         try:
-            import torch
-
-            checkpoint = torch.load(filepath, map_location=self.config.DEVICE, weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.config.DEVICE,
+                trusted_dirs=[self.config.MODEL_DIR, self.config.GAME_MODEL_DIR],
+                allow_unsafe_fallback=True,
+            )
 
             if "training_history" in checkpoint:
                 training_history = TrainingHistory.from_dict(checkpoint["training_history"])
@@ -2306,22 +2333,14 @@ class HeadlessTrainer:
     def _resolve_model_path(
         self, explicit_path: Optional[str], state_size: int, action_size: int
     ) -> Optional[str]:
-        """
-        Resolve which model to load on startup.
-
-        Priority:
-        1. Explicitly specified --model path (if compatible)
-        2. Most recently modified .pth file in game-specific directory
-
-        Args:
-            explicit_path: Path from --model argument, or None
-            state_size: Expected state size for compatibility check
-            action_size: Expected action size for compatibility check
-
-        Returns:
-            Path to model file, or None if no model found
-        """
-        return self.model_service.resolve_model_path(explicit_path, state_size, action_size)
+        """Resolve which model to load on startup."""
+        return resolve_model_path(
+            explicit_path=explicit_path,
+            state_size=state_size,
+            action_size=action_size,
+            config=self.config,
+            inspect_model=Agent.inspect_model,
+        )
 
     def _setup_web_callbacks(self) -> None:
         """Set up web dashboard control callbacks."""
@@ -2377,7 +2396,8 @@ class HeadlessTrainer:
         self.web_dashboard.log("🚀 Headless training started", "success")
         self.web_dashboard.log(f"Device: {self.config.DEVICE}", "info")
         self.web_dashboard.log(
-            f"State size: {self.game.state_size}, Action size: {self.game.action_size}", "info"
+            f"State size: {self.game.state_size}, Action size: {self.game.action_size}",
+            "info",
         )
         self.web_dashboard.log(f"Network: {self.config.HIDDEN_LAYERS}", "info")
         self.web_dashboard.log(
@@ -2412,12 +2432,15 @@ class HeadlessTrainer:
             self.web_dashboard.publisher.console_logs.clear()
             self.web_dashboard.publisher.reset_all_state()
             self.web_dashboard.log(
-                "🔄 Starting fresh training - resetting agent and clearing memory", "warning"
+                "🔄 Starting fresh training - resetting agent and clearing memory",
+                "warning",
             )
 
         # Create a new agent (fresh neural network)
         self.agent = Agent(
-            state_size=self.game.state_size, action_size=self.game.action_size, config=self.config
+            state_size=self.game.state_size,
+            action_size=self.game.action_size,
+            config=self.config,
         )
 
         # Clear replay buffer
@@ -2631,7 +2654,8 @@ class HeadlessTrainer:
 
     def _save_model_as(self, filename: str) -> bool:
         """Save model with custom filename."""
-        filename = self.model_service.normalize_checkpoint_filename(filename)
+        if not filename.endswith(".pth"):
+            filename += ".pth"
         success = self._save_model(filename, save_reason="manual")
         if success and self.web_dashboard:
             self.web_dashboard.log(f"💾 Saved as: {filename}", "success")
@@ -2649,78 +2673,16 @@ class HeadlessTrainer:
             return
 
         try:
-            # Enable activation capture temporarily
-            self.agent.policy_net.capture_activations = True
-
-            # Get layer info
-            layer_info = self.agent.policy_net.get_layer_info()
-
-            # Get Q-values (this forward pass captures activations)
-            q_values = self.agent.get_q_values(state)
-
-            # Get activations
-            raw_activations = self.agent.policy_net.get_activations()
-
-            # Get weights (sampled for performance)
-            raw_weights = self.agent.policy_net.get_weights()
-
-            # Disable activation capture
-            self.agent.policy_net.capture_activations = False
-
-            # Format activations for JSON (convert numpy arrays to lists, limit neurons)
-            max_neurons = 15  # Match the pygame visualizer limit
-            activations: dict[str, list[float]] = {}
-            for key, act in raw_activations.items():
-                if len(act.shape) > 1:
-                    act = act[0]  # Take first batch item
-                # Normalize and limit to max_neurons
-                act_list = act[: min(max_neurons, len(act))].tolist()
-                activations[key] = act_list
-
-            # Format weights for JSON (sample connections for performance)
-            weights: list[list[list[float]]] = []
-            for i, w in enumerate(raw_weights):
-                if w is not None:
-                    # Sample weights: take first 15 rows and first 15 columns
-                    sampled_w = w[: min(15, w.shape[0]), : min(15, w.shape[1])]
-                    weights.append(sampled_w.tolist())
-
-            # Get action labels from game if available
-            action_labels = ["LEFT", "STAY", "RIGHT"]  # Default for Breakout
-            if hasattr(self.game, "get_action_labels"):
-                action_labels = self.game.get_action_labels()
-
-            # Emit to web dashboard (throttling handled by publisher)
-            self.web_dashboard.emit_nn_visualization(
-                layer_info=layer_info,
-                activations=activations,
-                q_values=q_values.tolist(),
+            snapshot = build_nn_snapshot(self.agent, self.game, state)
+            emit_nn_snapshot_to_dashboard(
+                self.web_dashboard,
+                snapshot,
                 selected_action=selected_action,
-                weights=weights,
                 step=self.agent.steps,
-                action_labels=action_labels,
             )
-        except Exception as e:
-            self._record_nn_visualization_error(e)
-
-    def _record_nn_visualization_error(self, error: Exception) -> None:
-        """Log neural-visualization failures without crashing or spamming training."""
-        now = time.time()
-        error_type = type(error).__name__
-        if (
-            error_type != self._last_nn_visualization_error_type
-            or now - self._last_nn_visualization_error_log > 30.0
-        ):
-            get_logger(__name__).warning(
-                "Neural visualization emit failed: %s: %s", error_type, error
-            )
-            if self.web_dashboard:
-                self.web_dashboard.log(
-                    f"Neural visualization update failed ({error_type}); training continues.",
-                    "warning",
-                )
-            self._last_nn_visualization_error_type = error_type
-            self._last_nn_visualization_error_log = now
+        except Exception:
+            # Don't crash training on visualization errors - silently ignore
+            pass
 
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
@@ -2846,39 +2808,15 @@ class HeadlessTrainer:
 
     def _save_and_quit(self) -> None:
         """Save the model and exit the application gracefully."""
-        if self.web_dashboard:
-            self.web_dashboard.log("💾 Saving model before shutdown...", "warning")
-
-        # Save the model and verify it completed
-        save_success = self._save_model(
-            f"{self.config.GAME_NAME}_final.pth", save_reason="shutdown"
+        request_save_and_stop(
+            game_name=self.config.GAME_NAME,
+            save_model=lambda filename, reason: self._save_model(filename, save_reason=reason),
+            set_running=self._set_running,
+            dashboard=self.web_dashboard,
         )
 
-        if save_success:
-            if self.web_dashboard:
-                self.web_dashboard.log("✅ Model saved. Shutting down...", "success")
-            print("\n👋 Save & Quit requested. Model saved. Exiting...")
-        else:
-            if self.web_dashboard:
-                self.web_dashboard.log("⚠️ Save may have failed. Shutting down...", "warning")
-            print("\n⚠️ Save & Quit requested. Save may have failed. Exiting...")
-
-        # Flush output buffers to ensure messages are written
-        import sys
-
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-        # Give time for the save event to propagate to clients
-        import time
-
-        time.sleep(0.5)
-
-        # Exit gracefully - use os._exit() because this is called from SocketIO thread
-        self.running = False
-        import os
-
-        os._exit(0)  # Terminates process from any thread
+    def _set_running(self, running: bool) -> None:
+        self.running = running
 
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
@@ -2916,12 +2854,14 @@ class HeadlessTrainer:
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         episode = start_episode
-        while config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES:
+        while self.running and (config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES):
             self.current_episode = episode
 
             # Handle pause (only if web dashboard is active)
-            while self.paused:
+            while self.running and self.paused:
                 time.sleep(0.1)
+            if not self.running:
+                break
 
             state = self.game.reset()
             episode_reward = 0.0
@@ -2962,7 +2902,10 @@ class HeadlessTrainer:
                         self.web_dashboard.log(
                             f"🎯 Target network updated (#{self.target_updates})",
                             "metric",
-                            {"step": self.agent.steps, "update_number": self.target_updates},
+                            {
+                                "step": self.agent.steps,
+                                "update_number": self.target_updates,
+                            },
                         )
 
                 # Update state
@@ -2988,19 +2931,15 @@ class HeadlessTrainer:
             # Update web dashboard metrics (throttled to every 5 episodes for performance)
             # Always emit on: first 10 episodes, new best score, or every 5th episode
             is_new_best = info["score"] > getattr(self, "best_score", 0)
-            should_emit = self.web_dashboard is not None and (
-                episode <= 10 or is_new_best or episode % 5 == 0
-            )
+            should_emit = self.web_dashboard and (episode <= 10 or is_new_best or episode % 5 == 0)
             if should_emit:
-                dashboard = self.web_dashboard
-                assert dashboard is not None
                 avg_loss = self.agent.get_average_loss(100)
 
                 # Calculate average Q-value for current state (was missing from headless)
                 q_values = self.agent.get_q_values(state)
                 avg_q_value = float(np.mean(q_values))
 
-                dashboard.emit_metrics(
+                self.web_dashboard.emit_metrics(
                     episode=episode,
                     score=info["score"],
                     epsilon=self.agent.epsilon,
@@ -3017,9 +2956,9 @@ class HeadlessTrainer:
                     episode_length=episode_steps,
                 )
                 # Update performance settings in dashboard state
-                dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
 
                 # Emit NN visualization data (throttled by server to ~10 FPS)
                 self._emit_nn_visualization(state, action)
@@ -3169,10 +3108,14 @@ class HeadlessTrainer:
         last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
-        while config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES:
+        while self.running and (
+            config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES
+        ):
             # Handle pause (only if web dashboard is active)
-            while self.paused:
+            while self.running and self.paused:
                 time.sleep(0.1)
+            if not self.running:
+                break
 
             # Batch action selection for all environments
             actions, num_explored, num_exploited = self.agent.select_actions_batch(
@@ -3182,7 +3125,7 @@ class HeadlessTrainer:
             self.exploitation_actions += num_exploited
 
             # Step all environments simultaneously
-            next_states, rewards, dones, infos = cast(Any, self.vec_env).step_no_copy(actions)
+            next_states, rewards, dones, infos = self.vec_env.step_no_copy(actions)
 
             # Store experiences from all environments
             self.agent.remember_batch(states, actions, rewards, next_states, dones)
@@ -3222,7 +3165,9 @@ class HeadlessTrainer:
                     if score > self.best_score:
                         self.best_score = score
                         self._save_model(
-                            f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True
+                            f"{self.config.GAME_NAME}_best.pth",
+                            save_reason="best",
+                            quiet=True,
                         )
                         if self.web_dashboard:
                             self.web_dashboard.log(
@@ -3237,18 +3182,16 @@ class HeadlessTrainer:
                     # Update web dashboard metrics (throttled to every 5 episodes for performance)
                     # Always emit on: first 10 episodes, new best score, or every 5th episode
                     is_new_best = score > self.best_score
-                    should_emit_metrics = self.web_dashboard is not None and (
+                    should_emit_metrics = self.web_dashboard and (
                         self.current_episode <= 10 or is_new_best or self.current_episode % 5 == 0
                     )
                     if should_emit_metrics:
-                        dashboard = self.web_dashboard
-                        assert dashboard is not None
                         initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
                         bricks_broken = initial_bricks - infos[i].get(
                             "bricks_remaining", initial_bricks
                         )
 
-                        dashboard.emit_metrics(
+                        self.web_dashboard.emit_metrics(
                             episode=self.current_episode,
                             score=score,
                             epsilon=self.agent.epsilon,
@@ -3265,9 +3208,9 @@ class HeadlessTrainer:
                             episode_length=int(env_episode_steps[i]),
                         )
                         # Update performance settings in dashboard state
-                        dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                        dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                        dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                        self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                        self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                        self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
 
                         # Emit NN visualization data (throttled by server to ~10 FPS)
                         # Convert numpy int64 to Python int for JSON serialization
@@ -3336,7 +3279,7 @@ class HeadlessTrainer:
                                 f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
                                 f"max level {eval_results.max_level}, "
                                 f"{eval_results.win_rate*100:.0f}% wins{plateau_str}",
-                                "info" if not self.evaluator.is_plateau() else "warning",
+                                ("info" if not self.evaluator.is_plateau() else "warning"),
                             )
 
             # Decay epsilon once per step if any episodes completed
@@ -3355,7 +3298,8 @@ class HeadlessTrainer:
                     )
                     if self.web_dashboard:
                         self.web_dashboard.log(
-                            f"✓ Exploration boost ended, ε → {self.agent.epsilon:.3f}", "info"
+                            f"✓ Exploration boost ended, ε → {self.agent.epsilon:.3f}",
+                            "info",
                         )
                     # Reset plateau counter so we can detect new plateaus
                     if self.evaluator:
@@ -3388,15 +3332,17 @@ class HeadlessTrainer:
             if self.current_episode > last_logged_episode and (
                 should_log_by_episode or should_log_by_time
             ):
+                elapsed_total = current_time - self.training_start_time
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
+                eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
 
                 # Get level reached from last completed episode
-                last_info.get("level", 1) if last_info else 1
+                level_reached = last_info.get("level", 1) if last_info else 1
 
                 progress_msg = (
                     f"Ep {self.current_episode:5d} | "
@@ -3459,23 +3405,28 @@ class HeadlessTrainer:
         Returns:
             True if save succeeded, False otherwise
         """
-        filename = self.model_service.normalize_checkpoint_filename(filename)
-        filepath = self.model_service.checkpoint_path(filename)
+        # Ensure game-specific model directory exists
+        os.makedirs(self.config.GAME_MODEL_DIR, exist_ok=True)
+        filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
 
         # Calculate metrics for metadata
-        avg_score = self.model_service.average_last_100(self.scores)
-        win_rate = self.model_service.win_rate_last_100(self.wins)
-        max_level = self.model_service.max_recent_level(self.levels)
+        avg_score = np.mean(self.scores[-100:]) if self.scores else 0.0
+        recent_wins = self.wins[-100:]
+        win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0.0
+        max_level = max(self.levels[-100:]) if self.levels else 1
 
         # Build training history for dashboard restoration
         # Keep last 100000 episodes for full chart history
-        training_history = self.model_service.build_headless_history(
-            scores=self.scores,
-            rewards=self.rewards,
-            epsilons=self.epsilons,
-            wins=self.wins,
-            losses=self.losses,
-            q_values=self.q_values,
+        history_limit = 100000
+        training_history = TrainingHistory(
+            scores=self.scores[-history_limit:],
+            rewards=self.rewards[-history_limit:],
+            steps=[],  # Not tracked per-episode in vectorized mode
+            epsilons=self.epsilons[-history_limit:],
+            bricks=[],  # Not tracked in Space Invaders
+            wins=self.wins[-history_limit:],
+            losses=self.losses[-history_limit:],
+            q_values=self.q_values[-history_limit:],
             exploration_actions=self.exploration_actions,
             exploitation_actions=self.exploitation_actions,
             target_updates=self.target_updates,
@@ -3519,159 +3470,40 @@ class HeadlessTrainer:
         Args:
             keep_last: Number of recent periodic saves to keep
         """
-        self.model_service.cleanup_old_periodic_saves(keep_last)
+        import glob
+        import re
 
+        model_dir = self.config.GAME_MODEL_DIR
+        game_name = self.config.GAME_NAME
 
-def parse_args():
-    """Parse command line arguments."""
-    # Import game registry for --game choices
-    from src.game import list_games
+        # Find all periodic saves (e.g., space_invaders_ep100.pth, space_invaders_ep200.pth)
+        pattern = os.path.join(model_dir, f"{game_name}_ep*.pth")
+        periodic_saves = glob.glob(pattern)
 
-    available_games = list_games()
+        if len(periodic_saves) <= keep_last:
+            return  # Nothing to clean up
 
-    parser = argparse.ArgumentParser(
-        description="DQN Game AI - Train neural networks to play classic arcade games",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-EXAMPLES
-========
+        # Extract episode numbers and sort
+        def get_episode_num(path: str) -> int:
+            match = re.search(r"_ep(\d+)\.pth$", path)
+            return int(match.group(1)) if match else 0
 
-Getting Started:
-    python main.py                    Train with visual display (shows game selection)
-    python main.py --human            Play a game yourself to test it
-    python main.py --game pong        Train a specific game directly
+        # Sort by episode number (oldest first)
+        periodic_saves.sort(key=get_episode_num)
 
-Fast Training (Recommended):
-    python main.py --headless --turbo          ~5000 steps/sec on M4 Mac
-    python main.py --headless --turbo --web    With web dashboard at localhost:5000
-    python main.py --headless --vec-envs 8     Parallel training (~12,000 steps/sec)
+        # Delete all but the last `keep_last` saves
+        to_delete = periodic_saves[:-keep_last]
 
-Watch Trained Agent:
-    python main.py --play --model models/pong_best.pth
-
-Model Management:
-    python main.py --list-models               Show all saved models
-    python main.py --inspect models/best.pth   Inspect model metadata
-
-AVAILABLE GAMES: {', '.join(available_games)}
-
-TIPS
-====
-- Use --headless for 10x faster training (no display overhead)
-- Add --turbo for optimized batch settings (~4x faster)
-- Add --vec-envs 8 for parallel environments (~2-3x faster)
-- Use --web to monitor training in browser at http://localhost:5000
-- Press Ctrl+C to gracefully stop training (model auto-saves)
-        """,
-    )
-
-    # Mode selection
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--play", action="store_true", help="Play mode: watch trained agent without training"
-    )
-    mode_group.add_argument(
-        "--human", action="store_true", help="Human mode: play the game yourself"
-    )
-    mode_group.add_argument(
-        "--headless", action="store_true", help="Headless training: no visualization (faster)"
-    )
-    mode_group.add_argument(
-        "--inspect",
-        type=str,
-        metavar="MODEL_PATH",
-        help="Inspect a model file and show its metadata",
-    )
-    mode_group.add_argument(
-        "--list-models", action="store_true", help="List all saved models with their metadata"
-    )
-
-    # Game selection
-    parser.add_argument(
-        "--game",
-        type=str,
-        default=None,
-        choices=available_games,
-        help=f'Game to train/play. If not specified, shows game selection. Available: {", ".join(available_games)}',
-    )
-    parser.add_argument(
-        "--menu",
-        action="store_true",
-        help="Show game selection menu on launch (interactive game picker)",
-    )
-
-    # Model options
-    parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
-
-    # Training parameters
-    parser.add_argument(
-        "--episodes",
-        type=int,
-        default=None,
-        help="Number of training episodes (default: unlimited, trains until stopped)",
-    )
-    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-    parser.add_argument(
-        "--device",
-        type=str,
-        choices=["cpu", "cuda", "mps"],
-        default=None,
-        help="Device to use for training",
-    )
-
-    # Web dashboard
-    parser.add_argument(
-        "--web",
-        action="store_true",
-        help="Enable web dashboard for remote monitoring (http://localhost:5000)",
-    )
-    parser.add_argument(
-        "--port", type=int, default=5000, help="Port for web dashboard (default: 5000)"
-    )
-
-    # Performance tuning
-    parser.add_argument(
-        "--learn-every",
-        type=int,
-        default=None,
-        help="Learn every N steps (default: 1, try 4 for ~4x speedup)",
-    )
-    parser.add_argument(
-        "--gradient-steps",
-        type=int,
-        default=None,
-        help="Number of gradient updates per learning call (default: 1)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Training batch size (default: 128, try 256 for M4)",
-    )
-    parser.add_argument(
-        "--turbo",
-        action="store_true",
-        help="Turbo mode preset: learn-every 8, batch 128, 2 grad steps (~5000 steps/sec on M4)",
-    )
-    parser.add_argument(
-        "--vec-envs",
-        type=int,
-        default=1,
-        help="Number of parallel environments for vectorized training (default: 1, try 8 for ~3x speedup)",
-    )
-    parser.add_argument(
-        "--torch-compile",
-        action="store_true",
-        help="Enable torch.compile() for ~20-50%% speedup (PyTorch 2.0+)",
-    )
-    parser.add_argument(
-        "--cpu", action="store_true", help="Force CPU (faster than MPS for small models on M4)"
-    )
-
-    # Other options
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
-
-    return parser.parse_args()
+        for filepath in to_delete:
+            try:
+                os.remove(filepath)
+                if self.web_dashboard:
+                    self.web_dashboard.log(
+                        f"🗑️ Cleaned up old checkpoint: {os.path.basename(filepath)}",
+                        "info",
+                    )
+            except Exception as e:
+                print(f"⚠️ Could not delete {filepath}: {e}")
 
 
 def inspect_model(filepath: str) -> None:
@@ -3702,8 +3534,8 @@ def inspect_model(filepath: str) -> None:
 
     if info["has_metadata"] and info["metadata"]:
         meta = info["metadata"]
-        print("\n   📊 Training Metadata:")
-        print("   ─────────────────────")
+        print(f"\n   📊 Training Metadata:")
+        print(f"   ─────────────────────")
         print(f"   Save Reason:    {meta.get('save_reason', 'unknown')}")
         print(
             f"   Episode:        {meta.get('episode', 'unknown'):,}"
@@ -3721,23 +3553,23 @@ def inspect_model(filepath: str) -> None:
             minutes = int((training_time % 3600) // 60)
             print(f"   Training Time:  {hours}h {minutes}m")
 
-        print("\n   ⚙️ Config Snapshot:")
-        print("   ─────────────────────")
+        print(f"\n   ⚙️ Config Snapshot:")
+        print(f"   ─────────────────────")
         print(f"   Learning Rate:  {meta.get('learning_rate', 'unknown')}")
         print(f"   Gamma:          {meta.get('gamma', 'unknown')}")
         print(f"   Batch Size:     {meta.get('batch_size', 'unknown')}")
         print(f"   Hidden Layers:  {meta.get('hidden_layers', 'unknown')}")
         print(f"   Dueling DQN:    {meta.get('use_dueling', 'unknown')}")
     else:
-        print("\n   ⚠️ No detailed metadata (legacy save format)")
+        print(f"\n   ⚠️ No detailed metadata (legacy save format)")
 
     print("=" * 60 + "\n")
 
 
 def list_models(model_dir: str = "models") -> None:
     """List all model files in the models directory."""
-
     from src.ai.agent import Agent
+    from datetime import datetime
 
     models = Agent.list_models(model_dir)
 
@@ -3780,7 +3612,7 @@ def list_models(model_dir: str = "models") -> None:
         print(f"{filename:<35} {ep_str:>8} {steps_str:>12} {best_str:>6} {eps_str:>8} {size_mb:>8}")
 
     print("=" * 80)
-    print("\nUse --inspect <path> to see detailed info about a specific model.\n")
+    print(f"\nUse --inspect <path> to see detailed info about a specific model.\n")
 
 
 def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
@@ -3789,6 +3621,7 @@ def restart_with_game(game_name: str, args: argparse.Namespace) -> None:
     This spawns a new process with the specified game and exits the current one.
     Using subprocess + exit instead of os.execv ensures proper port release.
     """
+    import subprocess
     import sys
     import time
 
@@ -3828,8 +3661,9 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
     - If game specified: starts immediately with web dashboard
     - If no game: shows web launcher for game selection, then starts training
     """
-    import socket
     import threading
+
+    import socket
 
     try:
         from src.web.server import WebDashboard
@@ -3871,7 +3705,9 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
         selection_event.set()
 
     # Start web dashboard in launcher mode
-    dashboard = WebDashboard(config, port=port, launcher_mode=True)
+    dashboard = WebDashboard(
+        config, port=port, host=getattr(args, "host", "127.0.0.1"), launcher_mode=True
+    )
     dashboard.on_game_selected_callback = on_game_selected  # Set callback BEFORE start
     dashboard.start()
 
@@ -4028,27 +3864,32 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     print("\n" + "=" * 60)
     print("🎮 NEURAL NETWORK AI - GAME LAUNCHER")
     print("=" * 60)
-    print(f"\n🌐 Open http://localhost:{args.port} to select a game\n")
 
     # Track selected game
     selected_game = None
     selection_event = threading.Event()
 
-    def on_game_selected(game_name: str, mode: str = "ai") -> None:
+    def on_game_selected(game_name: str) -> None:
         """Called when user selects a game from web UI."""
         nonlocal selected_game
         selected_game = game_name
         selection_event.set()
 
     # Create web dashboard in launcher mode
-    dashboard = WebDashboard(config, port=args.port, launcher_mode=True)
+    dashboard = WebDashboard(
+        config,
+        port=args.port,
+        host=getattr(args, "host", "127.0.0.1"),
+        launcher_mode=True,
+    )
     dashboard.on_game_selected_callback = on_game_selected
+    print(f"\n🌐 Open {dashboard.dashboard_url()} to select a game\n")
 
     # Start web server in background thread
     server_thread = threading.Thread(
         target=lambda: dashboard.socketio.run(
             dashboard.app,
-            host="127.0.0.1",
+            host=getattr(args, "host", "127.0.0.1"),
             port=args.port,
             debug=False,
             use_reloader=False,
@@ -4131,7 +3972,7 @@ def terminal_game_selector() -> Optional[str]:
         else:
             print(f"\n  [{i}] {game_name}")
 
-    print("\n  [0] Exit")
+    print(f"\n  [0] Exit")
     print("\n" + "=" * 60)
 
     while True:
@@ -4195,7 +4036,7 @@ def main():
         console_output=config.LOG_TO_CONSOLE,
         file_output=config.LOG_TO_FILE,
     )
-    get_logger(__name__)
+    logger = get_logger(__name__)
 
     # Web mode: use web interface for everything
     if hasattr(args, "web") and args.web and WEB_AVAILABLE:

@@ -24,27 +24,24 @@ References:
     Mnih et al., 2015 - "Human-level control through deep reinforcement learning"
 """
 
-import json
-import os
-import random
-import sys
-import threading
-import time
-from collections import deque
-from dataclasses import asdict, dataclass
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
+import numpy as np
+from typing import Optional, Tuple, List, Dict, Any, Union
+from dataclasses import dataclass, asdict
+from collections import deque
+from datetime import datetime
+import random
+import os
+import time
+import threading
 
 from .network import DQN, DuelingDQN
-from .replay_buffer import PrioritizedReplayBuffer, ReplayBuffer
+from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from src.utils.checkpoint_loader import load_checkpoint
 
-sys.path.append("../..")
 from config import Config
 
 
@@ -221,7 +218,8 @@ class Agent:
 
         # Optimizer
         self.optimizer = optim.Adam(
-            self.policy_net.parameters(), lr=self.config.LEARNING_RATE  # type: ignore[attr-defined]
+            self.policy_net.parameters(),  # type: ignore[attr-defined]
+            lr=self.config.LEARNING_RATE,
         )
 
         # Learning rate scheduler
@@ -232,7 +230,9 @@ class Agent:
                 from torch.optim.lr_scheduler import CosineAnnealingLR
 
                 self.scheduler = CosineAnnealingLR(  # type: ignore[assignment]
-                    self.optimizer, T_max=2000, eta_min=getattr(self.config, "LR_MIN", 1e-5)
+                    self.optimizer,
+                    T_max=2000,
+                    eta_min=getattr(self.config, "LR_MIN", 1e-5),
                 )
                 print(
                     f"✓ Cosine LR scheduler enabled (T_max=2000, eta_min={getattr(self.config, 'LR_MIN', 1e-5)})"
@@ -287,6 +287,7 @@ class Agent:
 
         # Training step counter (counts total gradient updates)
         self.steps = 0
+        self._optimizer_steps_since_scheduler = 0
 
         # Learn step counter (for LEARN_EVERY skipping)
         self._learn_step = 0
@@ -351,6 +352,11 @@ class Agent:
             After calling this method, check `agent._last_action_explored` to
             determine if the action was exploration (random) or exploitation (greedy).
         """
+        if state.size != self.state_size:
+            raise ValueError(
+                f"State size mismatch: expected {self.state_size} values, got {state.size}"
+            )
+
         # Epsilon-greedy exploration (works alongside NoisyNets as fallback)
         # Only skip if epsilon is exactly 0 (pure NoisyNets mode)
         if training and self.epsilon > 0 and random.random() < self.epsilon:
@@ -407,8 +413,15 @@ class Agent:
         # Ensure states is 2D (handle 1D input gracefully)
         if states.ndim == 1:
             states = states.reshape(1, -1)
+        if states.shape[1] != self.state_size:
+            raise ValueError(
+                f"State batch size mismatch: expected {self.state_size} features, got {states.shape[1]}"
+            )
 
         batch_size = states.shape[0]
+        if batch_size == 0:
+            return np.empty(0, dtype=np.int64), 0, 0
+
         actions = np.empty(batch_size, dtype=np.int64)
         num_explored = 0
         num_exploited = 0
@@ -491,6 +504,11 @@ class Agent:
         Returns:
             Array of Q-values for each action
         """
+        if state.size != self.state_size:
+            raise ValueError(
+                f"State size mismatch: expected {self.state_size} values, got {state.size}"
+            )
+
         with torch.inference_mode():
             # Reuse pre-allocated tensor to avoid allocation overhead
             # copy_() handles CPU→device transfer automatically (no .to(device) needed)
@@ -499,7 +517,12 @@ class Agent:
             return q_values.cpu().numpy()[0]
 
     def remember(
-        self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, done: bool
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
     ) -> None:
         """
         Store experience in replay buffer.
@@ -588,9 +611,15 @@ class Agent:
         if self._use_per:
             # PER sampling returns indices and importance sampling weights
             assert isinstance(self.memory, PrioritizedReplayBuffer)
-            states_np, actions_np, rewards_np, next_states_np, dones_np, indices, weights_np = (
-                self.memory.sample_no_copy(batch_size)
-            )
+            (
+                states_np,
+                actions_np,
+                rewards_np,
+                next_states_np,
+                dones_np,
+                indices,
+                weights_np,
+            ) = self.memory.sample_no_copy(batch_size)
             weights = torch.from_numpy(weights_np).to(self.device)
         else:
             # Uniform sampling (no-copy is safe since we consume immediately)
@@ -677,10 +706,12 @@ class Agent:
         # Gradient clipping for stability
         if self.config.GRAD_CLIP > 0:
             torch.nn.utils.clip_grad_norm_(
-                self.policy_net.parameters(), self.config.GRAD_CLIP  # type: ignore[attr-defined]
+                self.policy_net.parameters(),  # type: ignore[attr-defined]
+                self.config.GRAD_CLIP,
             )
 
         self.optimizer.step()
+        self._optimizer_steps_since_scheduler += 1
 
         # Update PER priorities with TD errors
         if self._use_per and indices is not None:
@@ -784,8 +815,9 @@ class Agent:
 
     def step_scheduler(self) -> None:
         """Step the learning rate scheduler after each episode."""
-        if self.scheduler is not None:
+        if self.scheduler is not None and self._optimizer_steps_since_scheduler > 0:
             self.scheduler.step()
+            self._optimizer_steps_since_scheduler = 0
 
     def save(
         self,
@@ -902,19 +934,6 @@ class Agent:
             if file_size < 1000:  # Less than 1KB is suspicious
                 print(f"⚠️ Warning: Saved file seems too small ({file_size} bytes)")
 
-            try:
-                self.write_model_metadata_sidecar(
-                    filepath=filepath,
-                    metadata=metadata.to_dict(),
-                    steps=self.steps,
-                    epsilon=self.epsilon,
-                    state_size=self.state_size,
-                    action_size=self.action_size,
-                )
-            except Exception as e:
-                if not quiet:
-                    print(f"⚠️ Warning: Could not write metadata sidecar: {e}")
-
             # Format output
             if not quiet:
                 size_mb = file_size / (1024 * 1024)
@@ -941,52 +960,6 @@ class Agent:
 
         except Exception as e:
             print(f"❌ Save FAILED: {e}")
-            return None
-
-    @staticmethod
-    def metadata_sidecar_path(filepath: str) -> str:
-        """Return the JSON sidecar path for a checkpoint."""
-        return f"{filepath}.metadata.json"
-
-    @staticmethod
-    def write_model_metadata_sidecar(
-        filepath: str,
-        metadata: Dict[str, Any],
-        steps: int,
-        epsilon: float,
-        state_size: int,
-        action_size: int,
-    ) -> None:
-        """Write lightweight model metadata for safe dashboard listing."""
-        sidecar_path = Agent.metadata_sidecar_path(filepath)
-        payload = {
-            "checkpoint": os.path.basename(filepath),
-            "steps": steps,
-            "epsilon": epsilon,
-            "state_size": state_size,
-            "action_size": action_size,
-            "has_metadata": True,
-            "metadata": metadata,
-        }
-        dir_path = os.path.dirname(sidecar_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-        tmp_path = f"{sidecar_path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, sort_keys=True)
-        os.replace(tmp_path, sidecar_path)
-
-    @staticmethod
-    def read_model_metadata_sidecar(filepath: str) -> Optional[Dict[str, Any]]:
-        """Read lightweight model metadata without deserializing the checkpoint."""
-        sidecar_path = Agent.metadata_sidecar_path(filepath)
-        if not os.path.exists(sidecar_path):
-            return None
-        try:
-            with open(sidecar_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else None
-        except (OSError, json.JSONDecodeError):
             return None
 
     def _adapt_state_dict_for_compile(
@@ -1028,6 +1001,14 @@ class Agent:
 
         return adapted
 
+    def _trusted_checkpoint_dirs(self) -> List[str]:
+        """Return local directories that may contain app-created checkpoints."""
+        dirs = [self.config.MODEL_DIR]
+        game_model_dir = getattr(self.config, "GAME_MODEL_DIR", None)
+        if game_model_dir:
+            dirs.append(game_model_dir)
+        return dirs
+
     def load(
         self, filepath: str, quiet: bool = False
     ) -> Tuple[Optional[SaveMetadata], Optional["TrainingHistory"]]:
@@ -1046,7 +1027,12 @@ class Agent:
             return None, None
 
         try:
-            checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.device,
+                trusted_dirs=self._trusted_checkpoint_dirs(),
+                allow_unsafe_fallback=True,
+            )
         except Exception as e:
             print(f"❌ Failed to load model: {e}")
             return None, None
@@ -1066,7 +1052,7 @@ class Agent:
                     print(
                         f"⚠️  Model incompatible: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})"
                     )
-                print("❌ Cannot load model - architecture mismatch. Starting fresh training.")
+                print(f"❌ Cannot load model - architecture mismatch. Starting fresh training.")
             return None, None
 
         # Adapt state dicts for torch.compile() compatibility
@@ -1119,7 +1105,7 @@ class Agent:
             size_mb = file_size / (1024 * 1024)
 
             print(f"\n{'='*60}")
-            print("📂 Resuming Training")
+            print(f"📂 Resuming Training")
             print(f"{'='*60}")
             print(f"   Model: {os.path.basename(filepath)} ({size_mb:.2f} MB)")
 
@@ -1160,26 +1146,30 @@ class Agent:
             else:
                 # Old format - show basic info
                 print(f"\n   Steps: {self.steps:,} | Epsilon: {self.epsilon:.4f}")
-                print("   (Legacy save - no detailed metadata)")
+                print(f"   (Legacy save - no detailed metadata)")
 
             # Report training history status
             if training_history and len(training_history.scores) > 0:
                 print(f"   Training History: {len(training_history.scores)} episodes restored")
             else:
-                print("   Training History: Not available (older save format)")
+                print(f"   Training History: Not available (older save format)")
 
             # Report replay buffer status
             if replay_buffer_loaded:
                 print(f"   Replay Buffer: {len(self.memory):,} experiences restored")
             else:
-                print("   Replay Buffer: Starting fresh (not saved or incompatible)")
+                print(f"   Replay Buffer: Starting fresh (not saved or incompatible)")
 
             print(f"{'='*60}\n")
 
         return metadata, training_history
 
     @staticmethod
-    def inspect_model(filepath: str) -> Optional[Dict[str, Any]]:
+    def inspect_model(
+        filepath: str,
+        trusted_dirs: Optional[List[str]] = None,
+        allow_unsafe_fallback: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         """
         Inspect a model file without loading it into an agent.
 
@@ -1193,32 +1183,19 @@ class Agent:
             print(f"❌ File not found: {filepath}")
             return None
 
+        try:
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location="cpu",
+                trusted_dirs=trusted_dirs,
+                allow_unsafe_fallback=allow_unsafe_fallback,
+            )
+        except Exception as e:
+            print(f"❌ Failed to read model: {e}")
+            return None
+
         file_size = os.path.getsize(filepath)
         file_mtime = os.path.getmtime(filepath)
-        sidecar = Agent.read_model_metadata_sidecar(filepath)
-
-        if sidecar is None:
-            try:
-                checkpoint = torch.load(filepath, map_location="cpu", weights_only=True)
-            except Exception as e:
-                print(f"❌ Failed to read model: {e}")
-                return None
-            if not isinstance(checkpoint, dict):
-                print("❌ Failed to read model metadata: checkpoint is not a dictionary")
-                return None
-            steps = checkpoint.get("steps", "unknown")
-            epsilon = checkpoint.get("epsilon", "unknown")
-            state_size = checkpoint.get("state_size", "unknown")
-            action_size = checkpoint.get("action_size", "unknown")
-            has_metadata = "metadata" in checkpoint
-            metadata = checkpoint.get("metadata", None)
-        else:
-            steps = sidecar.get("steps", "unknown")
-            epsilon = sidecar.get("epsilon", "unknown")
-            state_size = sidecar.get("state_size", "unknown")
-            action_size = sidecar.get("action_size", "unknown")
-            has_metadata = bool(sidecar.get("has_metadata"))
-            metadata = sidecar.get("metadata")
 
         info = {
             "filepath": filepath,
@@ -1226,12 +1203,12 @@ class Agent:
             "file_size_bytes": file_size,
             "file_size_mb": file_size / (1024 * 1024),
             "file_modified": datetime.fromtimestamp(file_mtime).isoformat(),
-            "steps": steps,
-            "epsilon": epsilon,
-            "state_size": state_size,
-            "action_size": action_size,
-            "has_metadata": has_metadata,
-            "metadata": metadata,
+            "steps": checkpoint.get("steps", "unknown"),
+            "epsilon": checkpoint.get("epsilon", "unknown"),
+            "state_size": checkpoint.get("state_size", "unknown"),
+            "action_size": checkpoint.get("action_size", "unknown"),
+            "has_metadata": "metadata" in checkpoint,
+            "metadata": checkpoint.get("metadata", None),
         }
 
         return info
@@ -1255,24 +1232,13 @@ class Agent:
         for filename in os.listdir(model_dir):
             if filename.endswith(".pth"):
                 filepath = os.path.join(model_dir, filename)
-                file_size = os.path.getsize(filepath)
-                file_mtime = os.path.getmtime(filepath)
-                sidecar = Agent.read_model_metadata_sidecar(filepath) or {}
-                models.append(
-                    {
-                        "filepath": filepath,
-                        "filename": os.path.basename(filepath),
-                        "file_size_bytes": file_size,
-                        "file_size_mb": file_size / (1024 * 1024),
-                        "file_modified": datetime.fromtimestamp(file_mtime).isoformat(),
-                        "steps": sidecar.get("steps", "unknown"),
-                        "epsilon": sidecar.get("epsilon", "unknown"),
-                        "state_size": sidecar.get("state_size", "unknown"),
-                        "action_size": sidecar.get("action_size", "unknown"),
-                        "has_metadata": bool(sidecar.get("has_metadata")),
-                        "metadata": sidecar.get("metadata", None),
-                    }
+                info = Agent.inspect_model(
+                    filepath,
+                    trusted_dirs=[model_dir],
+                    allow_unsafe_fallback=True,
                 )
+                if info:
+                    models.append(info)
 
         # Sort by file modified time, newest first
         models.sort(key=lambda x: x["file_modified"], reverse=True)
@@ -1301,7 +1267,7 @@ if __name__ == "__main__":
     config = Config()
     agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
-    print("\n📊 Agent Configuration:")
+    print(f"\n📊 Agent Configuration:")
     print(f"   State size: {agent.state_size}")
     print(f"   Action size: {agent.action_size}")
     print(f"   Device: {agent.device}")
@@ -1310,7 +1276,7 @@ if __name__ == "__main__":
     # Test action selection
     state = np.random.randn(config.STATE_SIZE).astype(np.float32)
     action = agent.select_action(state)
-    print("\n🎮 Test action selection:")
+    print(f"\n🎮 Test action selection:")
     print(f"   State shape: {state.shape}")
     print(f"   Selected action: {action}")
 

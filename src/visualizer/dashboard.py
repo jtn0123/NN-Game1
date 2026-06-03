@@ -16,15 +16,13 @@ This provides immediate feedback on training progress and helps
 diagnose issues (e.g., learning rate too high, epsilon not decaying).
 """
 
-import math
-import sys
-from collections import deque
-from typing import List, Optional, Tuple
-
-import numpy as np
 import pygame
+import numpy as np
+from typing import Optional, List, Tuple
+from collections import deque
+import math
+import time
 
-sys.path.append("../..")
 from config import Config
 
 
@@ -285,13 +283,7 @@ class Dashboard:
         rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
         # Blit cached gradient surface
-        gradient = self._cached_gradient
-        if gradient is None:
-            self._create_gradient_surface()
-            gradient = self._cached_gradient
-        if gradient is None:
-            return
-        screen.blit(gradient, (self.x, self.y))
+        screen.blit(self._cached_gradient, (self.x, self.y))
 
         # Border
         pygame.draw.rect(screen, (45, 50, 70), rect, 2, border_radius=5)
@@ -358,7 +350,13 @@ class Dashboard:
         if len(self.epsilons) >= 2:
             scaled_epsilon = [e * max_score for e in self.epsilons]
             self._draw_line_graph(
-                screen, rect, scaled_epsilon, max_score, self.epsilon_color, 1, dashed=True
+                screen,
+                rect,
+                scaled_epsilon,
+                max_score,
+                self.epsilon_color,
+                1,
+                dashed=True,
             )
 
         # Legend
@@ -486,7 +484,10 @@ class Dashboard:
         legend_bg = pygame.Rect(legend_x - 5, legend_y - 8, total_width, 18)
         legend_surface = pygame.Surface((legend_bg.width, legend_bg.height), pygame.SRCALPHA)
         pygame.draw.rect(
-            legend_surface, (15, 18, 28, 230), legend_surface.get_rect(), border_radius=4
+            legend_surface,
+            (15, 18, 28, 230),
+            legend_surface.get_rect(),
+            border_radius=4,
         )
         screen.blit(legend_surface, legend_bg.topleft)
         pygame.draw.rect(screen, (60, 65, 80), legend_bg, 1, border_radius=4)
@@ -498,7 +499,11 @@ class Dashboard:
                 # Draw dashed line for epsilon
                 for dx in range(0, 18, 5):
                     pygame.draw.line(
-                        screen, color, (legend_x + dx, line_y), (legend_x + dx + 3, line_y), 2
+                        screen,
+                        color,
+                        (legend_x + dx, line_y),
+                        (legend_x + dx + 3, line_y),
+                        2,
                     )
             else:
                 # Solid line
@@ -574,7 +579,7 @@ class Dashboard:
                 # Bug 111: Add subtle pulse animation to trend indicators
                 if indicator in ("↑", "↓"):
                     pulse = 0.7 + 0.3 * math.sin(self.pulse_phase * 2)
-                    trend_color = tuple(int(c * pulse) for c in trend_color)  # type: ignore[assignment]
+                    trend_color = tuple(int(c * pulse) for c in trend_color)
                 trend_text = self.font_small.render(indicator, True, trend_color)
                 trend_rect = trend_text.get_rect(right=x + card_width - 5, top=cy + 3)
                 screen.blit(trend_text, trend_rect)
@@ -622,7 +627,11 @@ class Dashboard:
         border_color = (70, 85, 110)
         if self.current_epsilon > 0.5:
             pulse = 0.7 + 0.3 * math.sin(self.pulse_phase * 2)
-            border_color = (int(70 + 30 * pulse), int(100 + 50 * pulse), int(140 + 50 * pulse))
+            border_color = (
+                int(70 + 30 * pulse),
+                int(100 + 50 * pulse),
+                int(140 + 50 * pulse),
+            )
         pygame.draw.rect(screen, border_color, bg_rect, 1, border_radius=6)
 
         # Percentage text inside/beside gauge

@@ -23,9 +23,9 @@ References:
     Mnih et al., 2015 - "Human-level control through deep reinforcement learning"
 """
 
-from typing import List, Tuple
-
 import numpy as np
+from typing import Tuple, Optional, List
+import random
 
 
 class ReplayBuffer:
@@ -82,7 +82,12 @@ class ReplayBuffer:
         self._initialized = True
 
     def push(
-        self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, done: bool
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
     ) -> None:
         """
         Add an experience to the buffer.
@@ -389,7 +394,12 @@ class PrioritizedReplayBuffer:
         self._initialized = True
 
     def push(
-        self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, done: bool
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
     ) -> None:
         """Add experience with maximum priority."""
         if not self._initialized:
@@ -412,15 +422,28 @@ class PrioritizedReplayBuffer:
         self._position = (self._position + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
 
-    def sample(
-        self, batch_size: int
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def sample(self, batch_size: int) -> Tuple[
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+    ]:
         """
         Sample batch with probability proportional to priority.
 
         Returns:
             Tuple: (states, actions, rewards, next_states, dones, indices, weights)
         """
+        if not self._initialized:
+            raise RuntimeError(
+                f"Cannot sample from uninitialized {self.__class__.__name__}. Call push() first."
+            )
+        if self._size == 0:
+            raise RuntimeError(f"Cannot sample from empty {self.__class__.__name__}.")
+
         # Anneal beta
         self._frame_count += 1
         beta_progress = min(1.0, self._frame_count / self.beta_frames)
@@ -460,9 +483,15 @@ class PrioritizedReplayBuffer:
             weights,
         )
 
-    def sample_no_copy(
-        self, batch_size: int
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def sample_no_copy(self, batch_size: int) -> Tuple[
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+    ]:
         """Sample without copying (faster, returns views)."""
         # Bug 8 fix: Check for empty buffer
         # Bug 82 fix: Use class name in error messages for clarity
@@ -736,7 +765,7 @@ if __name__ == "__main__":
     # Sample a batch
     states, actions, rewards, next_states, dones = buffer.sample(32)
 
-    print("\nSampled batch shapes:")
+    print(f"\nSampled batch shapes:")
     print(f"  States: {states.shape}")
     print(f"  Actions: {actions.shape}")
     print(f"  Rewards: {rewards.shape}")

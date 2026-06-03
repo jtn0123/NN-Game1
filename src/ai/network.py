@@ -21,16 +21,13 @@ Key Features:
     - Forward hooks for visualization
 """
 
-import math
-import sys
-from typing import Any, Callable, Dict, List, Optional, cast
-
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import List, Optional, Callable, Dict, Any, cast
+import numpy as np
+import math
 
-sys.path.append("../..")
 from config import Config
 
 
@@ -77,16 +74,20 @@ class NoisyLinear(nn.Module):
 
     def reset_noise(self):
         """Sample new noise for exploration."""
-        epsilon_in = self._scale_noise(self.in_features)
-        epsilon_out = self._scale_noise(self.out_features)
+        epsilon_in = self._scale_noise(self.in_features, self.weight_epsilon.device)
+        epsilon_out = self._scale_noise(self.out_features, self.bias_epsilon.device)
         self.weight_epsilon.copy_(epsilon_out.outer(epsilon_in))
         self.bias_epsilon.copy_(epsilon_out)
 
     @staticmethod
-    def _scale_noise(size: int) -> torch.Tensor:
+    def _scale_noise(size: int, device: torch.device) -> torch.Tensor:
         """Factorized Gaussian noise (more efficient than independent)."""
-        x = torch.randn(size)
+        x = torch.randn(size, device=device)
         return x.sign() * x.abs().sqrt()
+
+    def visualization_weight(self) -> np.ndarray:
+        """Return the deterministic weight matrix used for visualization."""
+        return self.weight_mu.detach().cpu().numpy()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with noisy weights during training."""
@@ -245,7 +246,11 @@ class DQN(nn.Module):
         # Hidden layers
         for i, layer in enumerate(self.layers[:-1]):
             info.append(
-                {"name": f"Hidden {i + 1}", "neurons": layer.out_features, "type": "hidden"}
+                {
+                    "name": f"Hidden {i + 1}",
+                    "neurons": layer.out_features,
+                    "type": "hidden",
+                }
             )
 
         # Output layer
@@ -380,7 +385,12 @@ class DuelingDQN(nn.Module):
         # For compatibility with DQN interface, create a layers list
         self.layers = nn.ModuleList(
             list(self.feature_layers)
-            + [self.value_hidden, self.value_output, self.advantage_hidden, self.advantage_output]
+            + [
+                self.value_hidden,
+                self.value_output,
+                self.advantage_hidden,
+                self.advantage_output,
+            ]
         )
 
     def _init_weights(self) -> None:
@@ -419,6 +429,8 @@ class DuelingDQN(nn.Module):
         # Register hooks on stream layers
         self.value_hidden.register_forward_hook(get_activation("value_hidden"))
         self.advantage_hidden.register_forward_hook(get_activation("advantage_hidden"))
+        self.value_output.register_forward_hook(get_activation("value_output"))
+        self.advantage_output.register_forward_hook(get_activation("advantage_output"))
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -472,12 +484,20 @@ class DuelingDQN(nn.Module):
         # Shared feature layers
         for i, layer in enumerate(self.feature_layers):
             info.append(
-                {"name": f"Shared {i + 1}", "neurons": layer.out_features, "type": "hidden"}
+                {
+                    "name": f"Shared {i + 1}",
+                    "neurons": layer.out_features,
+                    "type": "hidden",
+                }
             )
 
         # Value stream
         info.append(
-            {"name": "Value", "neurons": self.value_hidden.out_features, "type": "value_stream"}
+            {
+                "name": "Value",
+                "neurons": self.value_hidden.out_features,
+                "type": "value_stream",
+            }
         )
 
         # Advantage stream
@@ -501,12 +521,22 @@ class DuelingDQN(nn.Module):
         Returns:
             List of weight matrices (for visualization)
         """
+
+        def layer_weight(layer: nn.Module) -> np.ndarray:
+            if isinstance(layer, NoisyLinear):
+                return layer.visualization_weight()
+            if isinstance(layer, nn.Linear):
+                return layer.weight.detach().cpu().numpy()
+            raise TypeError(f"Unsupported layer type for visualization: {type(layer)!r}")
+
         weights = []
         for layer in self.feature_layers:
             if isinstance(layer, nn.Linear):
-                weights.append(layer.weight.detach().cpu().numpy())
-        weights.append(self.value_hidden.weight.detach().cpu().numpy())
-        weights.append(self.advantage_hidden.weight.detach().cpu().numpy())
+                weights.append(layer_weight(layer))
+        weights.append(layer_weight(self.value_hidden))
+        weights.append(layer_weight(self.advantage_hidden))
+        weights.append(layer_weight(self.value_output))
+        weights.append(layer_weight(self.advantage_output))
         return weights
 
     def get_activations(self) -> Dict[str, np.ndarray]:
@@ -545,12 +575,12 @@ if __name__ == "__main__":
     state = torch.randn(batch_size, config.STATE_SIZE)
     q_values = net(state)
 
-    print("\nTest forward pass:")
+    print(f"\nTest forward pass:")
     print(f"  Input shape: {state.shape}")
     print(f"  Output shape: {q_values.shape}")
 
     # Check activations
-    print("\nActivations captured:")
+    print(f"\nActivations captured:")
     for name, act in net.get_activations().items():
         print(f"  {name}: {act.shape}")
 

@@ -7,16 +7,16 @@ These tests verify:
     - Trainer initialization
 """
 
-import os
-import sys
-
 import pytest
+import numpy as np
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
+from src.ai.trainer import Trainer, TrainingMetrics, EpisodeStats
 from src.ai.agent import Agent
-from src.ai.trainer import EpisodeStats, Trainer, TrainingMetrics
 from src.game.breakout import Breakout
 
 
@@ -57,6 +57,13 @@ class TestTrainingMetrics:
         assert len(metrics.scores) == 0
         assert len(metrics.rewards) == 0
         assert len(metrics.wins) == 0
+
+    def test_rejects_non_positive_history_length(self):
+        """Invalid history lengths should fail before slicing behaves strangely."""
+        with pytest.raises(ValueError, match="history_length must be positive"):
+            TrainingMetrics(history_length=0)
+        with pytest.raises(ValueError, match="history_length must be positive"):
+            TrainingMetrics(history_length=-1)
 
     def test_add_episode_stats(self):
         """Adding stats should update all lists."""
@@ -268,18 +275,6 @@ class TestTrainerInitialization:
         assert trainer.current_episode == 0
         assert trainer.total_steps == 0
 
-    def test_episode_progress_count_uses_breakout_remaining_bricks(self, trainer, config):
-        """Breakout progress should still derive from remaining bricks."""
-        total_bricks = config.BRICK_ROWS * config.BRICK_COLS
-
-        assert trainer._episode_progress_count({"bricks_remaining": total_bricks - 7}) == 7
-
-    def test_episode_progress_count_uses_generic_kill_counts(self, trainer):
-        """Non-Breakout games should not be forced through brick math."""
-        assert trainer._episode_progress_count({"total_aliens_killed": 11}) == 11
-        assert trainer._episode_progress_count({"asteroids_destroyed": 4}) == 4
-        assert trainer._episode_progress_count({"score": 3}) == 0
-
 
 class TestRunEpisode:
     """Test Trainer.run_episode method."""
@@ -324,8 +319,8 @@ class TestTrainSavesCheckpoints:
 
     def test_train_saves_best_model(self, game, agent, config):
         """Training should save best model when score improves."""
-        import os
         import tempfile
+        import os
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.MODEL_DIR = tmpdir
@@ -343,8 +338,8 @@ class TestTrainSavesCheckpoints:
 
     def test_train_saves_final_model(self, game, agent, config):
         """Training should save final model at end."""
-        import os
         import tempfile
+        import os
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.MODEL_DIR = tmpdir
@@ -368,7 +363,7 @@ class TestEvaluateResetsEpsilon:
         trainer.agent.epsilon = 0.5
 
         # Run evaluation
-        trainer.evaluate(num_episodes=2, render=False)
+        results = trainer.evaluate(num_episodes=2, render=False)
 
         # Epsilon should be restored after evaluation
         assert trainer.agent.epsilon == 0.5

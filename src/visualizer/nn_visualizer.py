@@ -17,17 +17,14 @@ This creates a beautiful, informative visualization that helps you
 understand what the network is "thinking" in real-time.
 """
 
-import math
-import sys
-import time
-from collections import deque
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
 import pygame
 import pygame.gfxdraw
+import numpy as np
+from typing import Optional, List, Tuple, Dict, Any, Union
+from collections import deque
+import math
+import time
 
-sys.path.append("../..")
 from config import Config
 
 
@@ -279,13 +276,7 @@ class NeuralNetVisualizer:
         panel_rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
         # Blit cached gradient surface
-        gradient = self._cached_gradient
-        if gradient is None:
-            self._create_gradient_surface()
-            gradient = self._cached_gradient
-        if gradient is None:
-            return
-        screen.blit(gradient, (self.x, self.y))
+        screen.blit(self._cached_gradient, (self.x, self.y))
 
         # Animated border glow
         glow_intensity = int(20 + 10 * math.sin(self.pulse_phase))
@@ -341,7 +332,8 @@ class NeuralNetVisualizer:
 
             # Calculate vertical positions with proper bounds
             neuron_spacing = min(
-                self.config.VIS_NEURON_SPACING, available_height / max(num_neurons + 1, 1)
+                self.config.VIS_NEURON_SPACING,
+                available_height / max(num_neurons + 1, 1),
             )
 
             total_height = num_neurons * neuron_spacing
@@ -421,11 +413,15 @@ class NeuralNetVisualizer:
                             # Diverging color: blue (neg) -> gray -> orange (pos)
                             if norm_weight > 0:
                                 color = self._interpolate_color(
-                                    self.weight_neutral, self.weight_positive, abs(norm_weight)
+                                    self.weight_neutral,
+                                    self.weight_positive,
+                                    abs(norm_weight),
                                 )
                             else:
                                 color = self._interpolate_color(
-                                    self.weight_neutral, self.weight_negative, abs(norm_weight)
+                                    self.weight_neutral,
+                                    self.weight_negative,
+                                    abs(norm_weight),
                                 )
 
                             # Line thickness
@@ -576,7 +572,10 @@ class NeuralNetVisualizer:
                     self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
 
                     # Draw highlight (3D effect) with anti-aliasing
-                    highlight_pos = (int(pos[0] - radius * 0.3), int(pos[1] - radius * 0.3))
+                    highlight_pos = (
+                        int(pos[0] - radius * 0.3),
+                        int(pos[1] - radius * 0.3),
+                    )
                     highlight_radius = max(1, radius // 3)
                     highlight_color = (
                         min(255, color[0] + 50),
@@ -587,7 +586,11 @@ class NeuralNetVisualizer:
 
                     # Draw anti-aliased border
                     self._draw_aa_circle(
-                        screen, (80, 90, 110), (int(pos[0]), int(pos[1])), radius, border=1
+                        screen,
+                        (80, 90, 110),
+                        (int(pos[0]), int(pos[1])),
+                        radius,
+                        border=1,
                     )
 
             # Draw ellipsis for hidden neurons
@@ -600,7 +603,10 @@ class NeuralNetVisualizer:
                 screen.blit(text, text_rect)
 
     def _draw_layer_labels(
-        self, screen: pygame.Surface, layer_positions: List[Dict], layer_info: List[Dict]
+        self,
+        screen: pygame.Surface,
+        layer_positions: List[Dict],
+        layer_info: List[Dict],
     ) -> None:
         """Draw layer labels with neuron counts."""
         # Labels go in the header area, below the title
@@ -633,7 +639,10 @@ class NeuralNetVisualizer:
             screen.blit(count_text, count_rect)
 
     def _draw_q_values(
-        self, screen: pygame.Surface, q_values: np.ndarray, selected_action: Optional[int] = None
+        self,
+        screen: pygame.Surface,
+        q_values: np.ndarray,
+        selected_action: Optional[int] = None,
     ) -> None:
         """Draw enhanced Q-values visualization."""
         # Q-values panel at the bottom
@@ -721,7 +730,8 @@ class NeuralNetVisualizer:
             q_text_color = (180, 255, 200) if is_selected else (100, 100, 120)
             q_text = self.font_small.render(q_str, True, q_text_color)
             q_rect = q_text.get_rect(
-                centerx=int(bar_x + bar_width / 2 - 5), bottom=int(qv_y + 50 - bar_height - 2)
+                centerx=int(bar_x + bar_width / 2 - 5),
+                bottom=int(qv_y + 50 - bar_height - 2),
             )
             screen.blit(q_text, q_rect)
 

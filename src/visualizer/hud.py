@@ -5,10 +5,9 @@ Training HUD (Heads-Up Display)
 On-screen overlay showing training statistics and progress during AI training.
 """
 
-from typing import List, Optional
-
 import pygame
-
+import numpy as np
+from typing import List, Optional
 from config import Config
 
 
@@ -55,7 +54,7 @@ class TrainingHUD:
         self.bg_color = (0, 0, 0, bg_alpha)
 
         # Bug 90: Smooth score color transition state
-        self._current_score_color: List[float] = [float(c) for c in self.text_color]
+        self._current_score_color = list(self.text_color)
         self._color_lerp_speed = 0.1
 
     def render(
@@ -168,7 +167,10 @@ class TrainingHUD:
 
         # Bar background
         pygame.draw.rect(
-            surface, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height), border_radius=3
+            surface,
+            (40, 40, 40),
+            (bar_x, bar_y, bar_width, bar_height),
+            border_radius=3,
         )
 
         # Bar fill
@@ -176,7 +178,10 @@ class TrainingHUD:
         if fill_width > 0:
             fill_color = self.warn_color if epsilon > 0.5 else self.accent_color
             pygame.draw.rect(
-                surface, fill_color, (bar_x, bar_y, fill_width, bar_height), border_radius=3
+                surface,
+                fill_color,
+                (bar_x, bar_y, fill_width, bar_height),
+                border_radius=3,
             )
 
         # Percentage text
@@ -258,7 +263,10 @@ class TrainingHUD:
 
         # Bar background
         pygame.draw.rect(
-            surface, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height), border_radius=4
+            surface,
+            (40, 40, 40),
+            (bar_x, bar_y, bar_width, bar_height),
+            border_radius=4,
         )
 
         # Bar fill
@@ -273,7 +281,10 @@ class TrainingHUD:
                 fill_color = self.good_color
 
             pygame.draw.rect(
-                surface, fill_color, (bar_x, bar_y, fill_width, bar_height), border_radius=4
+                surface,
+                fill_color,
+                (bar_x, bar_y, fill_width, bar_height),
+                border_radius=4,
             )
 
         # Progress percentage (small text above bar)

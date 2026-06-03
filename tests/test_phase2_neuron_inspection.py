@@ -8,13 +8,12 @@ Tests verify:
 - Integration with MetricsPublisher
 """
 
-import numpy as np
 import pytest
-
+import numpy as np
 from src.web.server import (
-    LayerAnalysisData,
     MetricsPublisher,
     NeuronInspectionData,
+    LayerAnalysisData,
 )
 
 

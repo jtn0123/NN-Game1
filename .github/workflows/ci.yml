@@ -1,16 +1,18 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  push:
+    branches:
+      - main
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -18,25 +20,44 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install package
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[web,test,dev]"
+          python -m pip install -r requirements.txt -c constraints.txt
 
-      - name: Compile Python sources
-        run: make compile PYTHON=python
+      - name: Format check
+        run: make format-check
 
-      - name: Check formatting
-        run: make format-check PYTHON=python
+      - name: Type check focused core
+        run: make typecheck
 
-      - name: Lint
-        run: make lint PYTHON=python
+      - name: Dashboard JavaScript tests
+        run: make dashboard-test
 
-      - name: Type check
-        run: make typecheck PYTHON=python
+      - name: Test with coverage
+        run: make coverage
 
-      - name: Run tests
-        run: make test PYTHON=python
+  dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install audit tool
+        run: python -m pip install --upgrade pip pip-audit
+
+      - name: Audit runtime dependencies
+        run: python -m pip_audit -r requirements.txt

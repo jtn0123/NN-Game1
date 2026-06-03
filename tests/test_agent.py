@@ -9,18 +9,21 @@ These tests verify:
     - Save/Load functionality
 """
 
+import pytest
+import numpy as np
+import torch
+import tempfile
 import os
 import sys
-import tempfile
-
-import numpy as np
-import pytest
-import torch
+import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.ai.agent import Agent
+from src.ai.network import DQN
+from src.ai.replay_buffer import ReplayBuffer
+from src.utils.checkpoint_loader import load_checkpoint
 
 
 @pytest.fixture
@@ -76,6 +79,26 @@ class TestActionSelection:
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
         action = agent.select_action(state)
         assert 0 <= action < config.ACTION_SIZE
+
+    def test_select_action_rejects_wrong_state_size(self, agent, config):
+        """Wrong-sized states should fail before torch copy errors."""
+        state = np.random.randn(config.STATE_SIZE + 1).astype(np.float32)
+        with pytest.raises(ValueError, match="State size mismatch"):
+            agent.select_action(state, training=False)
+
+    def test_select_actions_batch_handles_empty_batch(self, agent, config):
+        """Empty batches should return an empty action array."""
+        states = np.empty((0, config.STATE_SIZE), dtype=np.float32)
+        actions, explored, exploited = agent.select_actions_batch(states, training=False)
+        assert actions.shape == (0,)
+        assert explored == 0
+        assert exploited == 0
+
+    def test_select_actions_batch_rejects_wrong_state_size(self, agent, config):
+        """Batch feature mismatches should fail with a clear error."""
+        states = np.empty((2, config.STATE_SIZE + 1), dtype=np.float32)
+        with pytest.raises(ValueError, match="State batch size mismatch"):
+            agent.select_actions_batch(states, training=False)
 
     def test_greedy_action_selection(self, agent, config):
         """With epsilon=0, should always select best action."""
@@ -289,7 +312,9 @@ class TestSaveLoad:
 
             # Create new agent and load
             new_agent = Agent(
-                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
+                state_size=config.STATE_SIZE,
+                action_size=config.ACTION_SIZE,
+                config=config,
             )
             new_agent.load(filepath)
 
@@ -507,7 +532,9 @@ class TestSaveLoadEdgeCases:
 
             # Load on same device (CPU)
             new_agent = Agent(
-                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
+                state_size=config.STATE_SIZE,
+                action_size=config.ACTION_SIZE,
+                config=config,
             )
             new_agent.load(filepath)
 
@@ -525,7 +552,7 @@ class TestSaveLoadEdgeCases:
             agent.save(filepath, episode=500, best_score=150)
 
             # Load the checkpoint directly to inspect metadata
-            checkpoint = torch.load(filepath, map_location="cpu", weights_only=False)
+            checkpoint = load_checkpoint(filepath, map_location="cpu")
 
             assert "epsilon" in checkpoint
             assert checkpoint["epsilon"] == 0.25
@@ -547,7 +574,9 @@ class TestSaveLoadEdgeCases:
 
             # Create new agent and load
             new_agent = Agent(
-                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
+                state_size=config.STATE_SIZE,
+                action_size=config.ACTION_SIZE,
+                config=config,
             )
             new_agent.load(filepath)
 
@@ -782,10 +811,36 @@ class TestLRSchedulerConfiguration:
         agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_lr = agent.optimizer.param_groups[0]["lr"]
-        agent.step_scheduler()
+        agent.optimizer.zero_grad()
+        loss = sum(param.sum() for param in agent.policy_net.parameters())
+        loss.backward()
+        agent.optimizer.step()
+        agent._optimizer_steps_since_scheduler = 1
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            warnings.simplefilter("always")
+            agent.step_scheduler()
         new_lr = agent.optimizer.param_groups[0]["lr"]
 
+        assert len(captured_warnings) == 0
         assert new_lr < initial_lr
+
+    def test_scheduler_does_not_step_before_optimizer(self, config):
+        """Scheduler should not step before a real optimizer update."""
+        config.USE_LR_SCHEDULER = True
+        config.LR_SCHEDULER_TYPE = "step"
+        config.LR_SCHEDULER_STEP = 1
+        config.LR_SCHEDULER_GAMMA = 0.5
+        config.LEARNING_RATE = 0.001
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
+        initial_lr = agent.optimizer.param_groups[0]["lr"]
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            warnings.simplefilter("always")
+            agent.step_scheduler()
+
+        assert len(captured_warnings) == 0
+        assert agent.optimizer.param_groups[0]["lr"] == initial_lr
 
 
 class TestArchitectureMismatchOnLoad:
