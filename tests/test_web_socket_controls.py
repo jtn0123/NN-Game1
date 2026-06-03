@@ -296,3 +296,92 @@ class TestWebDashboardSocketControls:
         }
         assert called == []
         client.disconnect()
+
+    def test_socket_speed_uses_clamped_value_for_callback_and_publisher(self, web_dashboard):
+        """Speed controls should publish the same clamped value the runtime receives."""
+        called = []
+        web_dashboard.on_speed_callback = lambda speed: called.append(speed)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "speed",
+                "value": 5000,
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {"success": True, "action": "speed"}
+        assert called == [1000.0]
+        assert web_dashboard.publisher.state.game_speed == 1000.0
+        client.disconnect()
+
+    def test_socket_config_change_publishes_only_normalized_values(self, web_dashboard):
+        """Dashboard config state should mirror accepted runtime config values."""
+        called = []
+        web_dashboard.on_config_change_callback = lambda config: called.append(config)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "config_change",
+                "config": {
+                    "learning_rate": "0.002",
+                    "batch_size": "64",
+                    "learn_every": "2",
+                    "gradient_steps": "3",
+                },
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {"success": True, "action": "config_change"}
+        assert called == [
+            {
+                "learning_rate": 0.002,
+                "batch_size": 64,
+                "learn_every": 2,
+                "gradient_steps": 3,
+            }
+        ]
+        assert web_dashboard.publisher.state.learning_rate == 0.002
+        assert web_dashboard.publisher.state.batch_size == 64
+        assert web_dashboard.publisher.state.learn_every == 2
+        assert web_dashboard.publisher.state.gradient_steps == 3
+        client.disconnect()
+
+    def test_socket_config_change_rejects_invalid_values_without_publishing(self, web_dashboard):
+        """Rejected config changes should not leak into dashboard state."""
+        called = []
+        original_lr = web_dashboard.publisher.state.learning_rate
+        web_dashboard.on_config_change_callback = lambda config: called.append(config)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "config_change",
+                "config": {"learning_rate": "not-a-number"},
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack["success"] is False
+        assert ack["action"] == "config_change"
+        assert called == []
+        assert web_dashboard.publisher.state.learning_rate == original_lr
+        client.disconnect()

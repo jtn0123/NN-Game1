@@ -57,6 +57,17 @@ class TestWebDashboardRoutes:
 
         assert dashboard.dashboard_url().startswith("http://127.0.0.1:5108/?token=")
 
+    def test_socket_origins_include_network_url_for_wildcard_bind(self, monkeypatch):
+        """The advertised LAN URL should be allowed to open the Socket.IO channel."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        monkeypatch.setattr("src.web.server.socket.gethostbyname", lambda _host: "10.0.0.5")
+        dashboard = WebDashboard(port=5112, host="0.0.0.0", config=Config())
+
+        assert dashboard.dashboard_network_url().startswith("http://10.0.0.5:5112/?token=")
+        assert "http://10.0.0.5:5112" in dashboard._socketio_allowed_origins()
+
     def test_emit_metrics(self, web_dashboard):
         """WebDashboard.emit_metrics should update publisher."""
         web_dashboard.emit_metrics(episode=10, score=100, epsilon=0.5, loss=0.01)

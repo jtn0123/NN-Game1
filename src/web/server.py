@@ -1154,11 +1154,7 @@ class WebDashboard:
         self.app.config["SECRET_KEY"] = base64.b64encode(os.urandom(24)).decode("utf-8")
 
         # SocketIO setup
-        allowed_origins = [
-            f"http://{self.host}:{self.port}",
-            f"http://localhost:{self.port}",
-            f"http://127.0.0.1:{self.port}",
-        ]
+        allowed_origins = self._socketio_allowed_origins()
         self.socketio = SocketIO(
             self.app, cors_allowed_origins=allowed_origins, async_mode="threading"
         )
@@ -1202,12 +1198,23 @@ class WebDashboard:
 
     def dashboard_network_url(self) -> str:
         """Return a best-effort LAN URL for dashboards bound to all interfaces."""
-        try:
-            display_host = socket.gethostbyname(socket.gethostname())
-        except OSError:
-            display_host = "127.0.0.1"
+        display_host = self._network_host()
         query = urlencode({"token": self.access_token})
         return f"http://{display_host}:{self.port}/?{query}"
+
+    def _network_host(self) -> str:
+        """Return a best-effort LAN host for wildcard dashboard bindings."""
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "127.0.0.1"
+
+    def _socketio_allowed_origins(self) -> List[str]:
+        """Return browser origins allowed to open the live Socket.IO channel."""
+        allowed_hosts = {self.host, "localhost", "127.0.0.1"}
+        if self.host in {"0.0.0.0", "::"}:
+            allowed_hosts.add(self._network_host())
+        return [f"http://{host}:{self.port}" for host in sorted(allowed_hosts)]
 
     def _model_search_dirs(self) -> List[Tuple[str, str]]:
         """Return allowed model directories as (directory, source) pairs."""
@@ -1337,7 +1344,68 @@ class WebDashboard:
             return None
         if not math.isfinite(speed) or speed <= 0:
             return None
-        return speed
+        return max(1.0, min(1000.0, speed))
+
+    def _normalize_config_change(
+        self, config_data: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any], str]:
+        """Validate dashboard config changes before publishing them back to clients."""
+        normalized: Dict[str, Any] = {}
+        try:
+            if "learning_rate" in config_data:
+                learning_rate = float(config_data["learning_rate"])
+                if not math.isfinite(learning_rate) or learning_rate <= 0:
+                    raise ValueError("Learning rate must be finite and positive")
+                if learning_rate > 10.0:
+                    raise ValueError("Learning rate is unreasonably large")
+                if learning_rate < 1e-10:
+                    raise ValueError("Learning rate is too small")
+                normalized["learning_rate"] = learning_rate
+
+            if "epsilon" in config_data:
+                epsilon = float(config_data["epsilon"])
+                if not math.isfinite(epsilon):
+                    raise ValueError("Epsilon must be finite")
+                normalized["epsilon"] = max(
+                    self.config.EPSILON_END,
+                    min(self.config.EPSILON_START, epsilon),
+                )
+
+            if "epsilon_decay" in config_data:
+                epsilon_decay = float(config_data["epsilon_decay"])
+                if not math.isfinite(epsilon_decay) or epsilon_decay <= 0 or epsilon_decay > 1:
+                    raise ValueError("Epsilon decay must be in (0, 1]")
+                normalized["epsilon_decay"] = epsilon_decay
+
+            if "gamma" in config_data:
+                gamma = float(config_data["gamma"])
+                if not math.isfinite(gamma) or gamma < 0 or gamma > 1:
+                    raise ValueError("Gamma must be in [0, 1]")
+                normalized["gamma"] = gamma
+
+            if "batch_size" in config_data:
+                batch_size = int(config_data["batch_size"])
+                if batch_size <= 0:
+                    raise ValueError("Batch size must be positive")
+                if batch_size > self.config.MEMORY_SIZE:
+                    raise ValueError("Batch size cannot exceed memory size")
+                normalized["batch_size"] = batch_size
+
+            if "learn_every" in config_data:
+                learn_every = int(config_data["learn_every"])
+                if learn_every <= 0:
+                    raise ValueError("Learn every must be positive")
+                normalized["learn_every"] = learn_every
+
+            if "gradient_steps" in config_data:
+                gradient_steps = int(config_data["gradient_steps"])
+                if gradient_steps <= 0:
+                    raise ValueError("Gradient steps must be positive")
+                normalized["gradient_steps"] = gradient_steps
+        except (TypeError, ValueError) as exc:
+            return False, {}, str(exc)
+
+        return True, normalized, ""
 
     def _handle_go_to_launcher_control(self) -> Dict[str, Any]:
         self.publisher.log("🎮 Returning to launcher...", level="warning")
@@ -1584,9 +1652,12 @@ class WebDashboard:
                 config_data = data.get("config", {})
                 if not isinstance(config_data, dict):
                     return self._error_ack("config_change", "Invalid config")
+                valid_config, normalized_config, error = self._normalize_config_change(config_data)
+                if not valid_config:
+                    return self._error_ack("config_change", error)
                 if self.on_config_change_callback:
-                    self.on_config_change_callback(config_data)
-                self.publisher.update_config(config_data)
+                    self.on_config_change_callback(normalized_config)
+                self.publisher.update_config(normalized_config)
             elif action == "performance_mode":
                 mode = data.get("mode", "normal")
                 if mode not in self._valid_performance_modes():

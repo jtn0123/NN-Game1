@@ -3225,10 +3225,7 @@ class HeadlessTrainer:
                         self.current_episode <= 10 or is_new_best or self.current_episode % 5 == 0
                     )
                     if should_emit_metrics:
-                        initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
-                        bricks_broken = initial_bricks - infos[i].get(
-                            "bricks_remaining", initial_bricks
-                        )
+                        bricks_broken = calculate_progress_count(infos[i], config)
 
                         self.web_dashboard.emit_metrics(
                             episode=self.current_episode,

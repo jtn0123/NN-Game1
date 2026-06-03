@@ -1805,7 +1805,7 @@ function showLoadModal() {
                 const modelId = DashboardCore.modelId(model);
                 const safeIdForAttr = escapeHtmlAttribute(modelId);
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
-                const safeLoadError = escapeHtml(model.load_error || 'Unreadable checkpoint');
+                const safeLoadError = escapeHtmlAttribute(model.load_error || 'Unreadable checkpoint');
                 const loadAttrs = isLoadable
                     ? `data-action="load-model" data-model-id="${safeIdForAttr}"`
                     : '';

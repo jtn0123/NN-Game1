@@ -393,6 +393,16 @@ class TestNStepReplayBuffer:
         assert buffer.n_steps == 3
         assert buffer.gamma == 0.99
 
+    def test_n_step_rejects_non_positive_n_steps(self, state_size):
+        """N-step return buffers need a positive lookahead window."""
+        with pytest.raises(ValueError, match="n_steps must be positive"):
+            NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=0)
+
+    def test_n_step_rejects_invalid_gamma(self, state_size):
+        """N-step discount factors should be finite and in the RL gamma range."""
+        with pytest.raises(ValueError, match="gamma must be finite"):
+            NStepReplayBuffer(capacity=100, state_size=state_size, gamma=float("nan"))
+
     def test_n_step_reward_accumulation(self, state_size):
         """N-step buffer should correctly accumulate discounted rewards."""
         buffer = NStepReplayBuffer(
@@ -696,16 +706,6 @@ class TestPrioritizedReplayBufferEdgeCases:
         wrong_state = np.ones(state_size + 5, dtype=np.float32)
         with pytest.raises(ValueError, match="State shape mismatch"):
             buffer.push(wrong_state, 0, 1.0, wrong_state, False)
-
-    def test_n_step_rejects_non_positive_n_steps(self, state_size):
-        """N-step return buffers need a positive lookahead window."""
-        with pytest.raises(ValueError, match="n_steps must be positive"):
-            NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=0)
-
-    def test_n_step_rejects_invalid_gamma(self, state_size):
-        """N-step discount factors should be finite and in the RL gamma range."""
-        with pytest.raises(ValueError, match="gamma must be finite"):
-            NStepReplayBuffer(capacity=100, state_size=state_size, gamma=float("nan"))
 
 
 class TestReplayBufferPersistence:
