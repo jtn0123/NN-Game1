@@ -106,11 +106,22 @@ class TestWebDashboardRoutes:
             assert "models" in data
             assert "current_game" in data
 
-    def test_dashboard_page_serves_tokenized_frontend_contract(self, web_dashboard):
-        """Dashboard HTML should expose the token and load core JS before app JS."""
+    def test_dashboard_page_requires_token_before_serving_frontend(self, web_dashboard):
+        """Dashboard HTML should not bootstrap anonymous clients with the token."""
         web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
             response = client.get("/")
+
+        html = response.data.decode("utf-8")
+
+        assert response.status_code == 401
+        assert web_dashboard.access_token not in html
+
+    def test_dashboard_page_serves_tokenized_frontend_contract(self, web_dashboard):
+        """Authorized dashboard HTML should expose the token and load core JS before app JS."""
+        web_dashboard.app.config["TESTING"] = True
+        with web_dashboard.app.test_client() as client:
+            response = client.get(f"/?token={web_dashboard.access_token}")
             core_response = client.get("/static/dashboard_core.js")
             app_response = client.get("/static/app.js")
 
@@ -133,10 +144,14 @@ class TestWebDashboardRoutes:
         dashboard = WebDashboard(port=5103, config=config, launcher_mode=True)
         dashboard.app.config["TESTING"] = True
         with dashboard.app.test_client() as client:
-            response = client.get("/")
+            unauthorized = client.get("/")
+            response = client.get(f"/?token={dashboard.access_token}")
 
         html = response.data.decode("utf-8")
+        unauthorized_html = unauthorized.data.decode("utf-8")
 
+        assert unauthorized.status_code == 401
+        assert dashboard.access_token not in unauthorized_html
         assert response.status_code == 200
         assert f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
         assert "auth: { token: DASHBOARD_TOKEN }" in html
@@ -187,6 +202,32 @@ class TestWebDashboardRoutes:
         assert unauthorized.status_code == 401
         assert authorized.status_code == 200
         assert not os.path.exists(model_path)
+
+    def test_delete_model_hides_internal_exception_details(self, tmp_path):
+        """Unexpected delete failures should not expose server internals to clients."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        os.makedirs(config.GAME_MODEL_DIR)
+
+        dashboard = WebDashboard(port=5107, config=config)
+        dashboard.model_service.delete = lambda _model_id: (_ for _ in ()).throw(
+            RuntimeError(f"secret path: {tmp_path}")
+        )
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.delete(
+                "/api/models/breakout:demo.pth",
+                headers={"X-Dashboard-Token": dashboard.access_token},
+            )
+
+        data = json.loads(response.data)
+        assert response.status_code == 500
+        assert data == {"error": "Failed to delete model"}
+        assert str(tmp_path) not in response.data.decode("utf-8")
 
     @pytest.mark.parametrize(
         "model_id",

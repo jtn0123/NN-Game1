@@ -347,7 +347,7 @@ class GameApp:
 
             # Show URL prominently
             print("\n" + "=" * 60)
-            print(f"🌐 WEB DASHBOARD: http://{getattr(args, 'host', '127.0.0.1')}:{args.port}")
+            print(f"🌐 WEB DASHBOARD: {self.web_dashboard.dashboard_url()}")
             print("=" * 60 + "\n")
 
             # Send system info to dashboard
@@ -2271,7 +2271,7 @@ class HeadlessTrainer:
 
             # Show URL prominently
             print("\n" + "=" * 60)
-            print(f"🌐 WEB DASHBOARD: http://{getattr(args, 'host', '127.0.0.1')}:{args.port}")
+            print(f"🌐 WEB DASHBOARD: {self.web_dashboard.dashboard_url()}")
             print("=" * 60 + "\n")
 
             self._send_system_info()
@@ -3864,7 +3864,6 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     print("\n" + "=" * 60)
     print("🎮 NEURAL NETWORK AI - GAME LAUNCHER")
     print("=" * 60)
-    print(f"\n🌐 Open http://{getattr(args, 'host', '127.0.0.1')}:{args.port} to select a game\n")
 
     # Track selected game
     selected_game = None
@@ -3884,6 +3883,7 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
         launcher_mode=True,
     )
     dashboard.on_game_selected_callback = on_game_selected
+    print(f"\n🌐 Open {dashboard.dashboard_url()} to select a game\n")
 
     # Start web server in background thread
     server_thread = threading.Thread(

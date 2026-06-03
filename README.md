@@ -614,7 +614,7 @@ Buffer Size    Steps/sec    Sampling Method
 
 The web dashboard starts on `127.0.0.1` by default. Use `--host 0.0.0.0` only on a trusted network because the dashboard can pause training, save models, start fresh, load checkpoints, and delete saved model files.
 
-Each dashboard session generates an access token and the browser sends it with mutating HTTP and Socket.IO actions. If you need a stable token for automation, set `NN_GAME_DASHBOARD_TOKEN` before launching.
+Each dashboard session generates an access token and prints a tokenized dashboard URL. Open that full URL; anonymous requests to `/` are rejected before the page can bootstrap control access. If you need a stable token for automation, set `NN_GAME_DASHBOARD_TOKEN` before launching.
 
 Checkpoint loading uses PyTorch's restricted loader first. Legacy checkpoints that require unrestricted pickle loading should only be loaded from model directories you trust.
 

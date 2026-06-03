@@ -33,6 +33,8 @@ from enum import Enum
 import base64
 import io
 import secrets
+from urllib.parse import urlencode
+
 import numpy as np
 
 try:
@@ -1188,6 +1190,11 @@ class WebDashboard:
         token = request.headers.get("X-Dashboard-Token") or request.args.get("token")
         return self._is_authorized_token(token)
 
+    def dashboard_url(self) -> str:
+        """Return the tokenized URL needed to open the dashboard page."""
+        query = urlencode({"token": self.access_token})
+        return f"http://{self.host}:{self.port}/?{query}"
+
     def _model_search_dirs(self) -> List[Tuple[str, str]]:
         """Return allowed model directories as (directory, source) pairs."""
         return [
@@ -1308,6 +1315,13 @@ class WebDashboard:
 
         @self.app.route("/")
         def index():
+            if not self._is_authorized_request():
+                response = make_response("Dashboard token required", 401)
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                return response
+
             if self.launcher_mode:
                 response = make_response(
                     render_template("launcher.html", access_token=self.access_token)
@@ -1428,8 +1442,9 @@ class WebDashboard:
                         "filename": filename,
                     }
                 )
-            except Exception as e:
-                return jsonify({"error": f"Failed to delete model: {str(e)}"}), 500
+            except Exception:
+                _logger.exception("Failed to delete model")
+                return jsonify({"error": "Failed to delete model"}), 500
 
         @self.app.route("/api/save-status")
         def api_save_status():
@@ -1635,7 +1650,7 @@ class WebDashboard:
             _logger.debug("click module not available, skipping echo suppression")
 
         def run_server():
-            _logger.info(f"Web Dashboard running at http://localhost:{self.port}")
+            _logger.info(f"Web Dashboard running at {self.dashboard_url()}")
 
             try:
                 self.socketio.run(
