@@ -1,4 +1,4 @@
-.PHONY: test coverage typecheck dashboard-test format format-check audit check
+.PHONY: test coverage typecheck dashboard-test format format-check audit build check
 
 PYTHON ?= python
 
@@ -22,5 +22,8 @@ format-check:
 
 audit:
 	$(PYTHON) -m pip_audit -r requirements.txt
+
+build:
+	$(PYTHON) -m build
 
 check: format-check typecheck dashboard-test coverage
