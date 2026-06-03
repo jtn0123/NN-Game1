@@ -21,6 +21,27 @@ from src.ai.evaluator import EvalResults, Evaluator
 from src.game.breakout import Breakout
 
 
+class StaticEvalGame:
+    state_size = 2
+    action_size = 1
+
+    def __init__(self, info):
+        self.info = info
+
+    def reset(self):
+        return [0.0, 0.0]
+
+    def step(self, action):
+        return [0.0, 0.0], 0.0, True, dict(self.info)
+
+
+class StaticEvalAgent:
+    epsilon = 0.5
+
+    def select_action(self, state, training=False):
+        return 0
+
+
 @pytest.fixture
 def config():
     """Create a test configuration."""
@@ -120,6 +141,26 @@ class TestEvaluate:
         assert len(evaluator.eval_history) == 0
         evaluator.evaluate(num_episodes=2, max_steps=50)
         assert len(evaluator.eval_history) == 1
+
+    def test_evaluate_rejects_zero_episodes(self, evaluator):
+        """Zero-episode evaluation should fail before NumPy reductions."""
+        with pytest.raises(ValueError, match="num_episodes"):
+            evaluator.evaluate(num_episodes=0, max_steps=50)
+
+    def test_evaluate_records_levels_above_ten(self, config):
+        """Level distribution should include every reached level."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            evaluator = Evaluator(
+                StaticEvalGame({"score": 1, "level": 12, "won": False}),
+                StaticEvalAgent(),
+                config,
+                log_dir=tmpdir,
+            )
+
+            results = evaluator.evaluate(num_episodes=1, max_steps=1)
+
+            assert results.max_level == 12
+            assert results.level_distribution[12] == 1
 
 
 class TestPlateauDetection:

@@ -218,3 +218,170 @@ class TestWebDashboardSocketControls:
         }
         assert called == []
         client.disconnect()
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            (
+                {"action": "speed", "value": "fast"},
+                {"success": False, "action": "speed", "error": "Invalid speed"},
+            ),
+            (
+                {"action": "config_change", "config": ["bad"]},
+                {"success": False, "action": "config_change", "error": "Invalid config"},
+            ),
+            (
+                {"action": "performance_mode", "mode": "warp"},
+                {
+                    "success": False,
+                    "action": "performance_mode",
+                    "error": "Invalid performance mode",
+                },
+            ),
+            (
+                {"action": "select_game", "game": "not_a_game"},
+                {"success": False, "action": "select_game", "error": "Invalid game"},
+            ),
+            (
+                {"action": "save_as", "filename": {"bad": "name"}},
+                {"success": False, "action": "save_as", "error": "Invalid filename"},
+            ),
+        ],
+    )
+    def test_socket_control_rejects_malformed_control_payloads(
+        self, web_dashboard, payload, expected
+    ):
+        """Malformed control payloads should fail without invoking app callbacks."""
+        called = []
+        web_dashboard.on_game_selected_callback = lambda game, mode: called.append((game, mode))
+        web_dashboard.on_save_as_callback = lambda filename: called.append(filename)
+        web_dashboard.on_speed_callback = lambda speed: called.append(speed)
+        web_dashboard.on_config_change_callback = lambda config: called.append(config)
+        web_dashboard.on_performance_mode_callback = lambda mode: called.append(mode)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+        payload = {**payload, "token": web_dashboard.access_token}
+
+        ack = client.emit("control", payload, callback=True)
+
+        assert ack == expected
+        assert called == []
+        client.disconnect()
+
+    def test_socket_control_rejects_invalid_restart_game_before_callback(self, web_dashboard):
+        """Invalid restart targets should not reach the restart callback."""
+        called = []
+        web_dashboard.on_restart_with_game_callback = lambda game: called.append(game)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "restart_with_game",
+                "game": "not_a_game",
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {
+            "success": False,
+            "action": "restart_with_game",
+            "error": "Invalid game",
+        }
+        assert called == []
+        client.disconnect()
+
+    def test_socket_speed_uses_clamped_value_for_callback_and_publisher(self, web_dashboard):
+        """Speed controls should publish the same clamped value the runtime receives."""
+        called = []
+        web_dashboard.on_speed_callback = lambda speed: called.append(speed)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "speed",
+                "value": 5000,
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {"success": True, "action": "speed"}
+        assert called == [1000.0]
+        assert web_dashboard.publisher.state.game_speed == 1000.0
+        client.disconnect()
+
+    def test_socket_config_change_publishes_only_normalized_values(self, web_dashboard):
+        """Dashboard config state should mirror accepted runtime config values."""
+        called = []
+        web_dashboard.on_config_change_callback = lambda config: called.append(config)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "config_change",
+                "config": {
+                    "learning_rate": "0.002",
+                    "batch_size": "64",
+                    "learn_every": "2",
+                    "gradient_steps": "3",
+                },
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {"success": True, "action": "config_change"}
+        assert called == [
+            {
+                "learning_rate": 0.002,
+                "batch_size": 64,
+                "learn_every": 2,
+                "gradient_steps": 3,
+            }
+        ]
+        assert web_dashboard.publisher.state.learning_rate == 0.002
+        assert web_dashboard.publisher.state.batch_size == 64
+        assert web_dashboard.publisher.state.learn_every == 2
+        assert web_dashboard.publisher.state.gradient_steps == 3
+        client.disconnect()
+
+    def test_socket_config_change_rejects_invalid_values_without_publishing(self, web_dashboard):
+        """Rejected config changes should not leak into dashboard state."""
+        called = []
+        original_lr = web_dashboard.publisher.state.learning_rate
+        web_dashboard.on_config_change_callback = lambda config: called.append(config)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "config_change",
+                "config": {"learning_rate": "not-a-number"},
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack["success"] is False
+        assert ack["action"] == "config_change"
+        assert called == []
+        assert web_dashboard.publisher.state.learning_rate == original_lr
+        client.disconnect()

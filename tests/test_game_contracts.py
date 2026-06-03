@@ -55,6 +55,19 @@ def test_registered_games_reset_and_step_valid_actions(game_id):
         assert isinstance(step_info, dict)
 
 
+@pytest.mark.parametrize("game_id", list_games())
+def test_registered_games_reject_invalid_actions(game_id):
+    """Every game should reject action ids outside its action space."""
+    config = _make_config(game_id)
+    game_cls = get_game(game_id)
+    assert game_cls is not None
+    game = game_cls(config, headless=True)
+    game.reset()
+
+    with pytest.raises(ValueError, match="action"):
+        game.step(game.action_size)
+
+
 def test_game_registry_metadata_is_complete_and_unique():
     """Registry metadata drives the CLI and dashboard game pickers."""
     game_ids = list_games()
@@ -103,3 +116,43 @@ def test_vectorized_game_envs_preserve_batch_contract(game_id, vec_cls):
     assert np.isfinite(next_states).all()
     assert np.isfinite(rewards).all()
     assert dones.dtype == np.bool_
+
+
+@pytest.mark.parametrize(
+    ("game_id", "vec_cls"),
+    [
+        ("breakout", VecBreakout),
+        ("space_invaders", VecSpaceInvaders),
+        ("pong", VecPong),
+        ("snake", VecSnake),
+        ("asteroids", VecAsteroids),
+    ],
+)
+def test_vectorized_game_envs_reject_wrong_action_batch_size(game_id, vec_cls):
+    """Vectorized envs need exactly one action per environment."""
+    config = _make_config(game_id)
+    env = vec_cls(num_envs=2, config=config, headless=True)
+    env.reset()
+
+    with pytest.raises(ValueError, match="expected 2 actions"):
+        env.step(np.zeros(1, dtype=np.int64))
+
+
+@pytest.mark.parametrize(
+    ("game_id", "vec_cls"),
+    [
+        ("breakout", VecBreakout),
+        ("space_invaders", VecSpaceInvaders),
+        ("pong", VecPong),
+        ("snake", VecSnake),
+        ("asteroids", VecAsteroids),
+    ],
+)
+def test_vectorized_game_envs_reject_invalid_action_values(game_id, vec_cls):
+    """Vectorized envs should reject out-of-range actions before stepping."""
+    config = _make_config(game_id)
+    env = vec_cls(num_envs=2, config=config, headless=True)
+    env.reset()
+
+    with pytest.raises(ValueError, match="outside valid range"):
+        env.step(np.array([0, env.action_size], dtype=np.int64))

@@ -2272,6 +2272,14 @@ body {
     border-color: var(--accent-primary);
 }
 
+.model-item-invalid {
+    opacity: 0.82;
+}
+
+.model-item-invalid .model-item-content {
+    cursor: default;
+}
+
 .model-item:last-child {
     margin-bottom: 0;
 }
@@ -2351,6 +2359,11 @@ body {
 .model-name .reason-badge.loaded {
     background: rgba(0, 188, 212, 0.2);
     color: var(--accent-cyan);
+}
+
+.model-name .reason-badge.error {
+    background: rgba(244, 67, 54, 0.16);
+    color: #f44336;
 }
 
 .model-size {

@@ -38,6 +38,6 @@ def test_build_game_stats_ignores_unreadable_checkpoints(tmp_path):
 
     stats = build_game_stats(config, checkpoint_loader=failing_loader)
 
-    assert stats["breakout"]["model_count"] == 1
+    assert stats["breakout"]["model_count"] == 0
     assert stats["breakout"]["best_score"] == 0
     assert stats["breakout"]["best_model"] is None

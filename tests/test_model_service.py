@@ -16,6 +16,22 @@ def test_model_service_lists_opaque_ids_without_paths(tmp_path):
 
     assert models[0]["id"] == "breakout:best.pth"
     assert models[0]["steps"] == 7
+    assert models[0]["is_loadable"] is True
+    assert "path" not in models[0]
+
+
+def test_model_service_marks_unreadable_checkpoints(tmp_path):
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    (model_dir / "broken.pth").write_bytes(b"not a checkpoint")
+
+    service = ModelService([(str(model_dir), "breakout")])
+    models = service.list_models()
+
+    assert models[0]["id"] == "breakout:broken.pth"
+    assert models[0]["is_loadable"] is False
+    assert models[0]["has_metadata"] is False
+    assert "load_error" in models[0]
     assert "path" not in models[0]
 
 

@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
     <meta name="dashboard-token" content="{{ access_token }}">
     <title>🧠 Neural Network AI - Game Launcher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -315,6 +316,16 @@
         let selectedMode = 'ai';  // Default to AI training
         const DASHBOARD_TOKEN = document.querySelector('meta[name="dashboard-token"]')?.content || '';
 
+        function authorizedFetch(url, options = {}) {
+            return fetch(url, {
+                ...options,
+                headers: {
+                    ...(options.headers || {}),
+                    'X-Dashboard-Token': DASHBOARD_TOKEN,
+                },
+            });
+        }
+
         // Initialize socket connection
         try {
             socket = io({ auth: { token: DASHBOARD_TOKEN } });
@@ -360,7 +371,7 @@
         }
 
         // Load available games
-        fetch('/api/games')
+        authorizedFetch('/api/games')
             .then(res => res.json())
             .then(data => {
                 const grid = document.getElementById('games-grid');

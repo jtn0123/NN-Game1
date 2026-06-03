@@ -19,7 +19,7 @@ import math
 import random
 import heapq
 
-from .base_game import BaseGame
+from .base_game import BaseGame, validate_action, validate_action_batch
 from config import Config
 
 # Classic Space Invader pixel patterns (8x8)
@@ -996,6 +996,7 @@ class SpaceInvaders(BaseGame):
         if self.game_over or self.won:
             return self.get_state(), 0.0, True, self._get_info()
 
+        action = validate_action(action, self.action_size, "SpaceInvaders")
         assert self.ship is not None
 
         self._time += 1.0 / 60.0
@@ -1815,6 +1816,9 @@ class VecSpaceInvaders:
             - dones: shape (num_envs,)
             - infos: list of info dicts
         """
+        actions = validate_action_batch(
+            actions, self.num_envs, self.action_size, "VecSpaceInvaders"
+        )
         infos = []
 
         for i, (env, action) in enumerate(zip(self.envs, actions)):
@@ -1853,6 +1857,9 @@ class VecSpaceInvaders:
         Returns:
             Tuple of (next_states, rewards, dones, infos) - arrays are views
         """
+        actions = validate_action_batch(
+            actions, self.num_envs, self.action_size, "VecSpaceInvaders"
+        )
         infos = []
 
         for i, (env, action) in enumerate(zip(self.envs, actions)):

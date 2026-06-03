@@ -18,6 +18,35 @@ from typing import List, Protocol, Sequence, Tuple
 import numpy as np
 
 
+def validate_action(action: int, action_size: int, game_name: str = "game") -> int:
+    """Return a valid integer action or raise a clear error."""
+    try:
+        action_int = int(action)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{game_name} action must be an integer") from exc
+
+    if action_int < 0 or action_int >= action_size:
+        raise ValueError(f"{game_name} action {action_int} outside valid range 0-{action_size - 1}")
+    return action_int
+
+
+def validate_action_batch(
+    actions: np.ndarray,
+    expected_size: int,
+    action_size: int,
+    game_name: str = "vectorized game",
+) -> np.ndarray:
+    """Return a 1D action array with exactly one valid action per environment."""
+    action_array = np.asarray(actions)
+    if action_array.ndim != 1:
+        raise ValueError(f"{game_name} actions must be a 1D array")
+    if len(action_array) != expected_size:
+        raise ValueError(f"{game_name} expected {expected_size} actions, got {len(action_array)}")
+    for action in action_array:
+        validate_action(int(action), action_size, game_name)
+    return action_array
+
+
 class BaseGame(ABC):
     """
     Abstract base class for games.
@@ -147,6 +176,14 @@ def step_vector_env_no_copy(
     actions: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
     """Step vectorized envs and return reusable internal buffers."""
+    if not envs:
+        return states, rewards, dones, []
+    actions = validate_action_batch(
+        actions,
+        expected_size=len(envs),
+        action_size=envs[0].action_size,
+        game_name=envs[0].__class__.__name__,
+    )
     infos = []
 
     for i, (env, action) in enumerate(zip(envs, actions)):

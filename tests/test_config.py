@@ -8,6 +8,7 @@ rather than causing cryptic runtime errors during training.
 import pytest
 import sys
 import os
+import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,28 +28,46 @@ class TestConfigValidation:
         """LEARNING_RATE=0 should fail validation."""
         cfg = Config()
         cfg.LEARNING_RATE = 0
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_learning_rate_negative(self):
         """Negative LEARNING_RATE should fail validation."""
         cfg = Config()
         cfg.LEARNING_RATE = -0.001
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
+
+    def test_validation_runs_under_optimized_python(self):
+        """Config validation should not disappear when Python runs with -O."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-O",
+                "-c",
+                "from config import Config; Config(LEARNING_RATE=-1)",
+            ],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "ValueError" in result.stderr
 
     def test_invalid_gamma_zero(self):
         """GAMMA=0 should fail validation (must be > 0)."""
         cfg = Config()
         cfg.GAMMA = 0
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_gamma_exceeds_one(self):
         """GAMMA > 1 should fail validation."""
         cfg = Config()
         cfg.GAMMA = 1.5
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_valid_gamma_exactly_one(self):
@@ -61,7 +80,7 @@ class TestConfigValidation:
         """BATCH_SIZE=0 should fail validation."""
         cfg = Config()
         cfg.BATCH_SIZE = 0
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_batch_exceeds_memory(self):
@@ -69,7 +88,7 @@ class TestConfigValidation:
         cfg = Config()
         cfg.BATCH_SIZE = 1000
         cfg.MEMORY_SIZE = 100
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_epsilon_inverted(self):
@@ -77,7 +96,7 @@ class TestConfigValidation:
         cfg = Config()
         cfg.EPSILON_START = 0.01
         cfg.EPSILON_END = 0.5
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_valid_epsilon_equal(self):
@@ -91,28 +110,75 @@ class TestConfigValidation:
         """LEARN_EVERY=0 should fail validation."""
         cfg = Config()
         cfg.LEARN_EVERY = 0
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_gradient_steps_zero(self):
         """GRADIENT_STEPS=0 should fail validation."""
         cfg = Config()
         cfg.GRADIENT_STEPS = 0
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
+            cfg.__post_init__()
+
+    def test_invalid_max_steps_zero(self):
+        """MAX_STEPS_PER_EPISODE=0 should fail validation."""
+        cfg = Config()
+        cfg.MAX_STEPS_PER_EPISODE = 0
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_screen_width_zero(self):
         """SCREEN_WIDTH=0 should fail validation."""
         cfg = Config()
         cfg.SCREEN_WIDTH = 0
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
     def test_invalid_hidden_layers_empty(self):
         """Empty HIDDEN_LAYERS should fail validation."""
         cfg = Config()
         cfg.HIDDEN_LAYERS = []
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
+            cfg.__post_init__()
+
+    @pytest.mark.parametrize(
+        ("field_name", "bad_value"),
+        [
+            ("MEMORY_SIZE", 0),
+            ("TARGET_UPDATE", 0),
+            ("GRAD_CLIP", 0),
+            ("MAX_EPISODES", -1),
+            ("SAVE_EVERY", 0),
+            ("RENDER_EVERY", -1),
+            ("LOG_EVERY", 0),
+            ("PLOT_HISTORY_LENGTH", 0),
+            ("EVAL_EVERY", -1),
+            ("EVAL_EPISODES", 0),
+            ("EVAL_MAX_STEPS", 0),
+            ("EVAL_PLATEAU_THRESHOLD", 0),
+            ("EVAL_PLATEAU_EPSILON_BOOST", -0.1),
+            ("EVAL_PLATEAU_EPSILON_BOOST", 1.1),
+            ("EVAL_PLATEAU_BOOST_EPISODES", 0),
+            ("PER_ALPHA", -0.1),
+            ("PER_BETA_START", 0),
+            ("PER_BETA_FRAMES", 0),
+            ("N_STEP_SIZE", 0),
+        ],
+    )
+    def test_invalid_runtime_numeric_settings(self, field_name, bad_value):
+        """Runtime settings that feed loops/buffers should reject unsafe values."""
+        cfg = Config()
+        setattr(cfg, field_name, bad_value)
+
+        with pytest.raises(ValueError):
+            cfg.__post_init__()
+
+    def test_invalid_hidden_layer_size(self):
+        """Network hidden layers should have positive integer sizes."""
+        cfg = Config()
+        cfg.HIDDEN_LAYERS = [128, 0]
+
+        with pytest.raises(ValueError):
             cfg.__post_init__()
 
 

@@ -46,6 +46,32 @@ def test_headless_save_and_quit_requests_loop_shutdown(monkeypatch):
     assert any("Shutting down" in message for message, _level, _data in trainer.web_dashboard.logs)
 
 
+def test_headless_apply_config_rejects_invalid_learning_rate():
+    """Headless dashboard config changes should not inject NaN into the optimizer."""
+    trainer = main.HeadlessTrainer.__new__(main.HeadlessTrainer)
+    trainer.config = SimpleNamespace(LEARNING_RATE=0.001)
+    trainer.agent = SimpleNamespace(optimizer=SimpleNamespace(param_groups=[{"lr": 0.001}]))
+    trainer.web_dashboard = FakeDashboard()
+
+    trainer._apply_config({"learning_rate": float("nan")})
+
+    assert trainer.config.LEARNING_RATE == 0.001
+    assert trainer.agent.optimizer.param_groups[0]["lr"] == 0.001
+    assert trainer.web_dashboard.logs == []
+
+
+def test_game_app_set_speed_rejects_non_numeric_values():
+    """Speed changes should ignore malformed values instead of raising."""
+    app = main.GameApp.__new__(main.GameApp)
+    app.game_speed = 5.0
+    app.web_dashboard = None
+    app._last_logged_speed = 5.0
+
+    app._set_speed("fast")
+
+    assert app.game_speed == 5.0
+
+
 @pytest.mark.parametrize("runtime_cls", [main.GameApp, main.HeadlessTrainer])
 def test_runtime_nn_visualization_uses_shared_snapshot_builder(runtime_cls, monkeypatch):
     """Both app modes should emit the same shared NN snapshot contract."""

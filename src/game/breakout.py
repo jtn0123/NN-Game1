@@ -21,7 +21,7 @@ import numpy as np
 import pygame
 from typing import Tuple, List, Optional
 
-from .base_game import BaseGame
+from .base_game import BaseGame, validate_action, validate_action_batch
 from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
 from config import Config
 
@@ -301,6 +301,7 @@ class Breakout(BaseGame):
         if self.game_over or self.won:
             return self.get_state(), 0.0, True, self._get_info()
 
+        action = validate_action(action, self.action_size, "Breakout")
         assert self.paddle is not None, "Paddle must be initialized"
         assert self.ball is not None, "Ball must be initialized"
 
@@ -845,6 +846,7 @@ class VecBreakout:
             - dones: shape (num_envs,)
             - infos: list of info dicts
         """
+        actions = validate_action_batch(actions, self.num_envs, self.action_size, "VecBreakout")
         infos = []
 
         for i, (env, action) in enumerate(zip(self.envs, actions)):
@@ -884,6 +886,7 @@ class VecBreakout:
         Returns:
             Tuple of (next_states, rewards, dones, infos) - arrays are views
         """
+        actions = validate_action_batch(actions, self.num_envs, self.action_size, "VecBreakout")
         # Process pending resets from previous step (after caller used terminal states)
         for i in range(self.num_envs):
             if self._pending_resets[i]:

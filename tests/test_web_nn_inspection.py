@@ -51,7 +51,10 @@ class TestWebDashboardNNInspection:
 
         web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get("/api/layers")
+            response = client.get(
+                "/api/layers",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
             assert response.status_code == 200
 
             data = json.loads(response.data)
