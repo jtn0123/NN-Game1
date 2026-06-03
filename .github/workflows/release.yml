@@ -1,0 +1,113 @@
+name: Release
+
+# Conventional-commits-driven release pipeline modeled after VoltTracker and
+# InkyPi. Merges to main with `feat:`, `fix:`, `perf:`, or a breaking-change
+# footer bump the version, tag `vX.Y.Z`, create a GitHub Release, and attach
+# Python wheel/sdist artifacts. Docs/chore/test/refactor-only merges stay green
+# but emit a visible "no release cut" warning.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.repository == 'jtn0123/NN-Game1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Validate release config
+        run: python .github/scripts/check_release_config.py
+
+      - name: Install release tooling
+        run: python -m pip install --upgrade pip build python-semantic-release==9.21.1
+
+      - name: Semantic Release - version and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          semantic-release version
+          semantic-release publish
+
+      - name: Resolve released tag
+        id: resolve_tag
+        run: |
+          TAG=$(
+            git tag --points-at HEAD \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$' \
+              | sort -V \
+              | tail -n1 \
+              || true
+          )
+          if [ -n "${TAG}" ]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "Release tag: ${TAG}"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "No new release tag on this run."
+          fi
+
+      - name: Warn loudly if no release was cut
+        if: steps.resolve_tag.outputs.released != 'true'
+        run: |
+          SUBJECT=$(git log -1 --pretty=%s)
+          {
+            echo "## No release cut"
+            echo ""
+            echo "\`semantic-release version\` found no bumpable commits since the last tag."
+            echo "Most recent commit subject:"
+            echo ""
+            echo "    ${SUBJECT}"
+            echo ""
+            echo "Use \`feat:\`, \`fix:\`, \`perf:\`, or a \`BREAKING CHANGE:\` footer for user-facing release bumps."
+          } >> "$GITHUB_STEP_SUMMARY"
+          ESCAPED=${SUBJECT//%/%25}
+          ESCAPED=${ESCAPED//$'\r'/%0D}
+          ESCAPED=${ESCAPED//$'\n'/%0A}
+          echo "::warning title=No release cut::semantic-release skipped this commit; subject: ${ESCAPED}"
+
+      - name: Build Python package artifacts
+        if: steps.resolve_tag.outputs.released == 'true'
+        run: python -m build
+
+      - name: Attach package artifacts to GitHub release
+        if: steps.resolve_tag.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.resolve_tag.outputs.tag }}"
+          gh release upload "${TAG}" dist/* --repo "${{ github.repository }}" --clobber
+
+      - name: Strip build-only files from GitHub release
+        if: steps.resolve_tag.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.resolve_tag.outputs.tag }}"
+          for asset in VERSION; do
+            if gh release view "${TAG}" --repo "${{ github.repository }}" \
+                 --json assets --jq '.assets[].name' \
+                 | grep -Fxq "${asset}"; then
+              gh release delete-asset "${TAG}" "${asset}" \
+                --repo "${{ github.repository }}" --yes
+              echo "Removed ${asset} from release ${TAG}"
+            fi
+          done

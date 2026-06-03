@@ -29,9 +29,11 @@ test = [
     "pytest-cov>=4.0.0",
 ]
 dev = [
+    "build>=1.2.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
     "pip-audit>=2.7.0",
+    "python-semantic-release>=9.21.0",
     "ruff>=0.4.0",
 ]
 
@@ -61,6 +63,37 @@ extend-exclude = [
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["E402", "E501"]
+
+[tool.semantic_release]
+# Keep Python package metadata and the plaintext VERSION file aligned. Release
+# commits are driven by Conventional Commit PR titles on main.
+version_toml = [
+    "pyproject.toml:project.version",
+    "pyproject.toml:tool.semantic_release.version",
+]
+version = "1.0.0"
+branch = "main"
+tag_format = "v{version}"
+upload_to_pypi = false
+assets = ["VERSION"]
+build_command = "printf '%s\\n' \"$NEW_VERSION\" > VERSION"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+    "feat",
+    "fix",
+    "perf",
+    "refactor",
+    "docs",
+    "style",
+    "test",
+    "build",
+    "ci",
+    "chore",
+    "revert",
+]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
