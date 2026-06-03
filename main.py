@@ -87,6 +87,7 @@ from src.ai.agent import Agent, TrainingHistory
 from src.app.cli import parse_args
 from src.app.training_runtime import (
     build_nn_snapshot,
+    emit_nn_snapshot_to_dashboard,
     request_save_and_stop,
     resolve_model_path,
 )
@@ -2103,19 +2104,11 @@ class GameApp:
 
         try:
             snapshot = build_nn_snapshot(self.agent, self.game, state)
-
-            # Emit to web dashboard (throttling handled by publisher)
-            self.web_dashboard.emit_nn_visualization(
-                layer_info=snapshot.layer_info,
-                activations=snapshot.activations,
-                q_values=snapshot.q_values,
+            emit_nn_snapshot_to_dashboard(
+                self.web_dashboard,
+                snapshot,
                 selected_action=selected_action,
-                weights=snapshot.weights,
                 step=self.agent.steps,
-                action_labels=snapshot.action_labels,
-                input_state=snapshot.input_state,
-                analysis_activations=snapshot.analysis_activations,
-                analysis_weights=snapshot.analysis_weights,
             )
         except Exception:
             # Don't crash training on visualization errors - silently ignore
@@ -2837,19 +2830,11 @@ class HeadlessTrainer:
 
         try:
             snapshot = build_nn_snapshot(self.agent, self.game, state)
-
-            # Emit to web dashboard (throttling handled by publisher)
-            self.web_dashboard.emit_nn_visualization(
-                layer_info=snapshot.layer_info,
-                activations=snapshot.activations,
-                q_values=snapshot.q_values,
+            emit_nn_snapshot_to_dashboard(
+                self.web_dashboard,
+                snapshot,
                 selected_action=selected_action,
-                weights=snapshot.weights,
                 step=self.agent.steps,
-                action_labels=snapshot.action_labels,
-                input_state=snapshot.input_state,
-                analysis_activations=snapshot.analysis_activations,
-                analysis_weights=snapshot.analysis_weights,
             )
         except Exception:
             # Don't crash training on visualization errors - silently ignore

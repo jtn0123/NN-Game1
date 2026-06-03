@@ -147,3 +147,25 @@ def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:
         analysis_activations=analysis_activations,
         analysis_weights=analysis_weights,
     )
+
+
+def emit_nn_snapshot_to_dashboard(
+    dashboard: Any,
+    snapshot: NNSnapshot,
+    *,
+    selected_action: int,
+    step: int,
+) -> None:
+    """Emit a prepared neural-network snapshot using the dashboard contract."""
+    dashboard.emit_nn_visualization(
+        layer_info=snapshot.layer_info,
+        activations=snapshot.activations,
+        q_values=snapshot.q_values,
+        selected_action=selected_action,
+        weights=snapshot.weights,
+        step=step,
+        action_labels=snapshot.action_labels,
+        input_state=snapshot.input_state,
+        analysis_activations=snapshot.analysis_activations,
+        analysis_weights=snapshot.analysis_weights,
+    )

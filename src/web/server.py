@@ -52,8 +52,8 @@ except ImportError:
     print("Install with: pip install flask flask-socketio eventlet")
 
 from config import Config
-from src.utils.checkpoint_loader import load_checkpoint
 from src.utils.logger import get_logger
+from src.web.game_stats_service import build_game_stats
 from src.web.model_service import ModelService
 
 # Module logger
@@ -1232,6 +1232,107 @@ class WebDashboard:
         """Resolve a model id, or a legacy absolute path, to an allowed .pth file."""
         return self.model_service.resolve(model_ref)
 
+    @staticmethod
+    def _success_ack(action: str) -> Dict[str, Any]:
+        return {"success": True, "action": action}
+
+    @staticmethod
+    def _error_ack(action: str, error: str) -> Dict[str, Any]:
+        return {"success": False, "action": action, "error": error}
+
+    def _callback_ack(
+        self,
+        action: str,
+        callback: Optional[Callable[..., Any]],
+        *args: Any,
+        failure_message: str,
+    ) -> Dict[str, Any]:
+        """Run a control callback and translate its return value into an ack."""
+        if callback is None:
+            return self._success_ack(action)
+        try:
+            result = callback(*args)
+        except Exception as exc:
+            return self._error_ack(action, str(exc))
+
+        if isinstance(result, dict):
+            success = bool(result.get("success", False))
+            if success:
+                return self._success_ack(action)
+            return self._error_ack(action, str(result.get("error", failure_message)))
+        if result is False:
+            return self._error_ack(action, failure_message)
+        return self._success_ack(action)
+
+    def _handle_save_control(self) -> Dict[str, Any]:
+        return self._callback_ack(
+            "save", self.on_save_callback, failure_message="Save failed"
+        )
+
+    def _handle_save_as_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        filename = data.get("filename", "custom_save.pth")
+        return self._callback_ack(
+            "save_as",
+            self.on_save_as_callback,
+            filename,
+            failure_message="Save failed",
+        )
+
+    def _handle_start_fresh_control(self) -> Dict[str, Any]:
+        ack = self._callback_ack(
+            "start_fresh",
+            self.on_start_fresh_callback,
+            failure_message="Start fresh failed",
+        )
+        if ack["success"]:
+            emit("training_reset", {"message": "Training reset - starting fresh"})
+        return ack
+
+    def _handle_load_model_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        model_ref = data.get("id") or data.get("path")
+        if not model_ref:
+            return self._error_ack("load_model", "Invalid model id")
+
+        model_path = self._resolve_model_ref(model_ref)
+        if not model_path:
+            return self._error_ack("load_model", "Invalid model id")
+        if not os.path.exists(model_path):
+            return self._error_ack("load_model", "Model not found")
+        return self._callback_ack(
+            "load_model",
+            self.on_load_model_callback,
+            model_path,
+            failure_message="Load model failed",
+        )
+
+    def _handle_restart_with_game_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        game_name = data.get("game")
+        if not game_name or not self.on_restart_with_game_callback:
+            return self._error_ack("restart_with_game", "Invalid game")
+
+        self.publisher.log(f"🔄 Switching to {game_name}...", level="warning")
+        save_ack = self._handle_save_control()
+        if not save_ack["success"]:
+            return self._error_ack("restart_with_game", save_ack["error"])
+        emit(
+            "restarting",
+            {"game": game_name, "message": f"Restarting with {game_name}..."},
+        )
+        self.on_restart_with_game_callback(game_name)
+        return self._success_ack("restart_with_game")
+
+    def _handle_go_to_launcher_control(self) -> Dict[str, Any]:
+        self.publisher.log("🎮 Returning to launcher...", level="warning")
+        save_ack = self._handle_save_control()
+        if not save_ack["success"]:
+            return self._error_ack("go_to_launcher", save_ack["error"])
+
+        self.launcher_mode = True
+        emit("redirect_to_launcher", {"message": "Returning to game launcher..."})
+        if self.on_save_and_quit_callback:
+            self.on_save_and_quit_callback()
+        return self._success_ack("go_to_launcher")
+
     def _register_routes(self) -> None:
         """Register Flask routes."""
 
@@ -1364,67 +1465,7 @@ class WebDashboard:
         @self.app.route("/api/game-stats")
         def api_game_stats():
             """Get training statistics for all games (for comparison panel)."""
-            import os
-            from src.game import list_games, get_game_info
-
-            stats = {}
-            for game_id in list_games():
-                game_info = get_game_info(game_id)
-                game_model_dir = os.path.join(self.config.MODEL_DIR, game_id)
-
-                game_stats = {
-                    "name": (
-                        game_info.get("name", game_id.title())
-                        if game_info
-                        else game_id.title()
-                    ),
-                    "icon": game_info.get("icon", "🎮") if game_info else "🎮",
-                    "color": (
-                        game_info.get("color", (100, 100, 100))
-                        if game_info
-                        else (100, 100, 100)
-                    ),
-                    "best_score": 0,
-                    "total_episodes": 0,
-                    "total_training_time": 0,
-                    "model_count": 0,
-                    "best_model": None,
-                }
-
-                # Scan models for this game
-                if os.path.exists(game_model_dir):
-                    for f in os.listdir(game_model_dir):
-                        if f.endswith(".pth"):
-                            game_stats["model_count"] += 1
-                            path = os.path.join(game_model_dir, f)
-                            try:
-                                checkpoint = load_checkpoint(
-                                    path,
-                                    map_location="cpu",
-                                    trusted_dirs=[game_model_dir],
-                                    allow_unsafe_fallback=False,
-                                )
-                                if "metadata" in checkpoint:
-                                    meta = checkpoint["metadata"]
-                                    if (
-                                        meta.get("best_score", 0)
-                                        > game_stats["best_score"]
-                                    ):
-                                        game_stats["best_score"] = meta["best_score"]
-                                        game_stats["best_model"] = f
-                                    if (
-                                        meta.get("episode", 0)
-                                        > game_stats["total_episodes"]
-                                    ):
-                                        game_stats["total_episodes"] = meta["episode"]
-                                    game_stats["total_training_time"] += meta.get(
-                                        "total_training_time_seconds", 0
-                                    )
-                            except Exception as e:
-                                _logger.debug(f"Could not load stats from {f}: {e}")
-
-                stats[game_id] = game_stats
-
+            stats = build_game_stats(self.config)
             return jsonify({"stats": stats, "current_game": self.config.GAME_NAME})
 
         # ===== Phase 2: Neuron Inspection & Layer Analysis Endpoints =====
@@ -1481,12 +1522,9 @@ class WebDashboard:
                 if self.on_pause_callback:
                     self.on_pause_callback()
             elif action == "save":
-                if self.on_save_callback:
-                    self.on_save_callback()
+                return self._handle_save_control()
             elif action == "save_as":
-                filename = data.get("filename", "custom_save.pth")
-                if self.on_save_as_callback:
-                    self.on_save_as_callback(filename)
+                return self._handle_save_as_control(data)
             elif action == "speed":
                 speed = data.get("value", 1.0)
                 if self.on_speed_callback:
@@ -1496,33 +1534,9 @@ class WebDashboard:
                 if self.on_reset_callback:
                     self.on_reset_callback()
             elif action == "start_fresh":
-                if self.on_start_fresh_callback:
-                    self.on_start_fresh_callback()
-                # Notify frontend to clear charts and reset UI
-                emit("training_reset", {"message": "Training reset - starting fresh"})
+                return self._handle_start_fresh_control()
             elif action == "load_model":
-                model_ref = data.get("id") or data.get("path")
-                if not model_ref:
-                    return {
-                        "success": False,
-                        "action": action,
-                        "error": "Invalid model id",
-                    }
-                model_path = self._resolve_model_ref(model_ref)
-                if not model_path:
-                    return {
-                        "success": False,
-                        "action": action,
-                        "error": "Invalid model id",
-                    }
-                if not os.path.exists(model_path):
-                    return {
-                        "success": False,
-                        "action": action,
-                        "error": "Model not found",
-                    }
-                if self.on_load_model_callback:
-                    self.on_load_model_callback(model_path)
+                return self._handle_load_model_control(data)
             elif action == "config_change":
                 config_data = data.get("config", {})
                 if self.on_config_change_callback:
@@ -1552,39 +1566,9 @@ class WebDashboard:
                     )
                     self.on_game_selected_callback(game_name, mode)
             elif action == "restart_with_game":
-                # Training mode: restart with a different game
-                game_name = data.get("game")
-                if game_name and self.on_restart_with_game_callback:
-                    self.publisher.log(
-                        f"🔄 Switching to {game_name}...", level="warning"
-                    )
-                    # Save first
-                    if self.on_save_callback:
-                        self.on_save_callback()
-                    emit(
-                        "restarting",
-                        {
-                            "game": game_name,
-                            "message": f"Restarting with {game_name}...",
-                        },
-                    )
-                    # Trigger restart (will replace process)
-                    self.on_restart_with_game_callback(game_name)
+                return self._handle_restart_with_game_control(data)
             elif action == "go_to_launcher":
-                # Return to launcher mode for game/mode selection
-                self.publisher.log("🎮 Returning to launcher...", level="warning")
-                # Save current progress
-                if self.on_save_callback:
-                    self.on_save_callback()
-                # Switch back to launcher mode
-                self.launcher_mode = True
-                # Tell browser to redirect to launcher
-                emit(
-                    "redirect_to_launcher", {"message": "Returning to game launcher..."}
-                )
-                # Trigger shutdown callback if set
-                if self.on_save_and_quit_callback:
-                    self.on_save_and_quit_callback()
+                return self._handle_go_to_launcher_control()
             else:
                 handled = False
 
