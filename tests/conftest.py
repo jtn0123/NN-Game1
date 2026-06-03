@@ -19,6 +19,4 @@ def pytest_configure(config):
     config.addinivalue_line("filterwarnings", "ignore:MAX_EPISODES is 0:UserWarning")
 
     # Suppress pygame's pkg_resources deprecation warning (external dependency)
-    config.addinivalue_line(
-        "filterwarnings", "ignore:pkg_resources is deprecated:UserWarning"
-    )
+    config.addinivalue_line("filterwarnings", "ignore:pkg_resources is deprecated:UserWarning")

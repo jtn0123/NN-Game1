@@ -287,11 +287,11 @@
         <p class="subtitle">Select a mode and game</p>
 
         <div class="mode-selector">
-            <button class="mode-btn selected" id="mode-ai" onclick="selectMode('ai')">
+            <button class="mode-btn selected" id="mode-ai" data-mode="ai">
                 <span class="mode-icon">🤖</span>
                 <span>AI TRAINING</span>
             </button>
-            <button class="mode-btn" id="mode-human" onclick="selectMode('human')">
+            <button class="mode-btn" id="mode-human" data-mode="human">
                 <span class="mode-icon">🎮</span>
                 <span>PLAY YOURSELF</span>
             </button>
@@ -302,7 +302,7 @@
             <!-- Games loaded dynamically -->
         </div>
         
-        <button class="start-btn" id="start-btn" onclick="startGame()">
+        <button class="start-btn" id="start-btn">
             SELECT A GAME
         </button>
         
@@ -330,6 +330,11 @@
             document.getElementById('status-msg').textContent = 'Socket.IO failed to load';
             console.error('Socket.IO initialization error:', e);
         }
+
+        document.querySelectorAll('.mode-btn[data-mode]').forEach((button) => {
+            button.addEventListener('click', () => selectMode(button.dataset.mode));
+        });
+        document.getElementById('start-btn').addEventListener('click', startGame);
 
         function selectMode(mode) {
             selectedMode = mode;
@@ -367,8 +372,12 @@
                     card.setAttribute('role', 'button');
                     card.setAttribute('tabindex', '0');
                     card.setAttribute('aria-label', `Select ${game.name}`);
-                    card.onclick = () => selectGame(game.id, card);
-                    card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') selectGame(game.id, card); };
+                    card.addEventListener('click', () => selectGame(game.id, card));
+                    card.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            selectGame(game.id, card);
+                        }
+                    });
                     
                     // Determine difficulty class
                     let diffClass = 'medium';

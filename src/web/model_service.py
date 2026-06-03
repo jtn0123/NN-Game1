@@ -21,8 +21,7 @@ class ModelService:
 
     def __init__(self, model_dirs: Iterable[Tuple[str, str]]):
         self._model_dirs = [
-            ModelDirectory(path=model_dir, source=source)
-            for model_dir, source in model_dirs
+            ModelDirectory(path=model_dir, source=source) for model_dir, source in model_dirs
         ]
 
     @property
@@ -56,9 +55,9 @@ class ModelService:
                     "source": entry.source,
                     "size": os.path.getsize(path),
                     "modified": os.path.getmtime(path),
-                    "modified_str": datetime.fromtimestamp(
-                        os.path.getmtime(path)
-                    ).strftime("%Y-%m-%d %H:%M"),
+                    "modified_str": datetime.fromtimestamp(os.path.getmtime(path)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    ),
                     "has_metadata": False,
                     "metadata": None,
                 }
@@ -141,9 +140,9 @@ class ModelService:
     def _is_allowed_file(candidate: str, model_dir: str) -> bool:
         real_dir = os.path.realpath(model_dir)
         try:
-            return os.path.commonpath(
-                [real_dir, candidate]
-            ) == real_dir and candidate.endswith(".pth")
+            return os.path.commonpath([real_dir, candidate]) == real_dir and candidate.endswith(
+                ".pth"
+            )
         except ValueError:
             return False
 

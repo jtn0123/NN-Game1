@@ -22,7 +22,7 @@ import pygame
 from typing import Tuple, List, Optional
 from dataclasses import dataclass
 
-from .base_game import BaseGame
+from .base_game import BaseGame, step_vector_env_no_copy
 from config import Config
 
 
@@ -316,9 +316,7 @@ class Asteroids(BaseGame):
         self._explosion_particles: List[dict] = []
         self._thrust_particles: List[dict] = []
         self._starfield_surface: Optional[pygame.Surface] = None
-        self._starfield_data: List[Tuple[int, int, int, float]] = (
-            []
-        )  # (x, y, brightness, phase)
+        self._starfield_data: List[Tuple[int, int, int, float]] = []  # (x, y, brightness, phase)
 
         # Bug 105: Track game time for smooth animations (not affected by pause)
         self._game_time = 0.0
@@ -424,12 +422,8 @@ class Asteroids(BaseGame):
                     push_x, push_y = np.cos(angle), np.sin(angle)
 
                 # Move asteroid to safe distance
-                asteroid.x = center_x + push_x * (
-                    self.SAFE_SPAWN_RADIUS + asteroid.radius + 10
-                )
-                asteroid.y = center_y + push_y * (
-                    self.SAFE_SPAWN_RADIUS + asteroid.radius + 10
-                )
+                asteroid.x = center_x + push_x * (self.SAFE_SPAWN_RADIUS + asteroid.radius + 10)
+                asteroid.y = center_y + push_y * (self.SAFE_SPAWN_RADIUS + asteroid.radius + 10)
 
                 # Wrap to screen bounds
                 asteroid.x = asteroid.x % self.width
@@ -534,9 +528,7 @@ class Asteroids(BaseGame):
         for b_idx, bullet in enumerate(self.bullets):
             for a_idx, asteroid in enumerate(self.asteroids):
                 # Simple circle collision
-                dist = np.sqrt(
-                    (bullet.x - asteroid.x) ** 2 + (bullet.y - asteroid.y) ** 2
-                )
+                dist = np.sqrt((bullet.x - asteroid.x) ** 2 + (bullet.y - asteroid.y) ** 2)
                 if dist < asteroid.radius + bullet.radius:
                     bullets_to_remove.add(b_idx)
                     asteroids_to_remove.append(a_idx)
@@ -552,20 +544,14 @@ class Asteroids(BaseGame):
                     break
 
         # Remove hit bullets and asteroids
-        self.bullets = [
-            b for i, b in enumerate(self.bullets) if i not in bullets_to_remove
-        ]
-        self.asteroids = [
-            a for i, a in enumerate(self.asteroids) if i not in asteroids_to_remove
-        ]
+        self.bullets = [b for i, b in enumerate(self.bullets) if i not in bullets_to_remove]
+        self.asteroids = [a for i, a in enumerate(self.asteroids) if i not in asteroids_to_remove]
         self.asteroids.extend(new_asteroids)
 
         # Ship-asteroid collision
         if self.ship.alive and self.ship.invincible_timer <= 0:
             for asteroid in self.asteroids:
-                dist = np.sqrt(
-                    (self.ship.x - asteroid.x) ** 2 + (self.ship.y - asteroid.y) ** 2
-                )
+                dist = np.sqrt((self.ship.x - asteroid.x) ** 2 + (self.ship.y - asteroid.y) ** 2)
                 if dist < asteroid.radius + self.ship.size:
                     self.lives -= 1
                     reward -= 100
@@ -613,9 +599,7 @@ class Asteroids(BaseGame):
             p["dx"] *= 0.95
             p["dy"] *= 0.95
 
-        self._explosion_particles = [
-            p for p in self._explosion_particles if p["life"] > 0
-        ]
+        self._explosion_particles = [p for p in self._explosion_particles if p["life"] > 0]
 
         # Update thrust particles
         for p in self._thrust_particles:
@@ -635,12 +619,8 @@ class Asteroids(BaseGame):
         self._state_array[idx] = self.ship.x * self._inv_width
         self._state_array[idx + 1] = self.ship.y * self._inv_height
         self._state_array[idx + 2] = (self.ship.angle % (2 * np.pi)) * self._inv_2pi
-        self._state_array[idx + 3] = (
-            self.ship.velocity.x * self._inv_max_speed + 1
-        ) * 0.5
-        self._state_array[idx + 4] = (
-            self.ship.velocity.y * self._inv_max_speed + 1
-        ) * 0.5
+        self._state_array[idx + 3] = (self.ship.velocity.x * self._inv_max_speed + 1) * 0.5
+        self._state_array[idx + 4] = (self.ship.velocity.y * self._inv_max_speed + 1) * 0.5
         idx += 5
 
         # Sort asteroids by distance to ship
@@ -787,9 +767,7 @@ class Asteroids(BaseGame):
             screen.blit(self._starfield_surface, (0, 0))
 
             # Bug 105: Use game time for smooth twinkle (not affected by pause/frame drops)
-            for i in range(
-                0, min(20, len(self._starfield_data)), 2
-            ):  # Every other star, max 10
+            for i in range(0, min(20, len(self._starfield_data)), 2):  # Every other star, max 10
                 x, y, brightness, phase = self._starfield_data[i]
                 twinkle = int(brightness + np.sin(self._game_time + phase) * 40)
                 twinkle = max(60, min(220, twinkle))
@@ -803,9 +781,7 @@ class Asteroids(BaseGame):
             color = (alpha, alpha, alpha)
             end_x = p["x"] + p["dx"] * 3
             end_y = p["y"] + p["dy"] * 3
-            pygame.draw.line(
-                screen, color, (int(p["x"]), int(p["y"])), (int(end_x), int(end_y)), 1
-            )
+            pygame.draw.line(screen, color, (int(p["x"]), int(p["y"])), (int(end_x), int(end_y)), 1)
 
         # Draw thrust particles
         for p in self._thrust_particles:
@@ -848,10 +824,7 @@ class Asteroids(BaseGame):
             verts = self.ship.get_vertices()
 
             # Flashing when invincible
-            if (
-                self.ship.invincible_timer > 0
-                and (self.ship.invincible_timer // 5) % 2 == 0
-            ):
+            if self.ship.invincible_timer > 0 and (self.ship.invincible_timer // 5) % 2 == 0:
                 ship_color = (100, 100, 100)
             else:
                 ship_color = (255, 255, 255)
@@ -884,9 +857,7 @@ class Asteroids(BaseGame):
 
             # Level
             if self._small_font:
-                level_text = self._small_font.render(
-                    f"Level {self.level}", True, (150, 150, 150)
-                )
+                level_text = self._small_font.render(f"Level {self.level}", True, (150, 150, 150))
                 screen.blit(level_text, (self.width - 80, 20))
 
                 # Ammo indicator (bullets remaining)
@@ -898,16 +869,10 @@ class Asteroids(BaseGame):
                     bullet_x = self.width - 80 + i * 12
                     bullet_y = 72
                     if i < bullets_remaining:
-                        pygame.draw.circle(
-                            screen, (100, 200, 255), (bullet_x + 5, bullet_y), 4
-                        )
+                        pygame.draw.circle(screen, (100, 200, 255), (bullet_x + 5, bullet_y), 4)
                     else:
-                        pygame.draw.circle(
-                            screen, (50, 50, 50), (bullet_x + 5, bullet_y), 4
-                        )
-                        pygame.draw.circle(
-                            screen, (80, 80, 80), (bullet_x + 5, bullet_y), 4, 1
-                        )
+                        pygame.draw.circle(screen, (50, 50, 50), (bullet_x + 5, bullet_y), 4)
+                        pygame.draw.circle(screen, (80, 80, 80), (bullet_x + 5, bullet_y), 4, 1)
 
                 # Cooldown bar
                 if self.shoot_cooldown > 0:
@@ -917,9 +882,7 @@ class Asteroids(BaseGame):
                     bar_x = self.width - 80
                     bar_y = 90
                     # Background
-                    pygame.draw.rect(
-                        screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height)
-                    )
+                    pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height))
                     # Cooldown fill
                     fill_width = int(bar_width * cooldown_pct)
                     pygame.draw.rect(
@@ -933,9 +896,7 @@ class Asteroids(BaseGame):
                 True,
                 (80, 80, 80),
             )
-            text_rect = controls_text.get_rect(
-                centerx=self.width // 2, bottom=self.height - 10
-            )
+            text_rect = controls_text.get_rect(centerx=self.width // 2, bottom=self.height - 10)
             screen.blit(controls_text, text_rect)
 
         # Game over
@@ -949,9 +910,7 @@ class Asteroids(BaseGame):
                 final_text = self._small_font.render(
                     f"Final Score: {self.score}", True, (200, 200, 200)
                 )
-                final_rect = final_text.get_rect(
-                    center=(self.width // 2, self.height // 2 + 40)
-                )
+                final_rect = final_text.get_rect(center=(self.width // 2, self.height // 2 + 40))
                 screen.blit(final_text, final_rect)
 
     def close(self) -> None:
@@ -993,9 +952,7 @@ class VecAsteroids:
             self._states[i] = env.reset()
         return self._states.copy()
 
-    def step(
-        self, actions: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments with batched actions."""
         infos = []
 
@@ -1020,6 +977,12 @@ class VecAsteroids:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos
+
+    def step_no_copy(
+        self, actions: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step all environments and return reusable internal buffers."""
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def close(self) -> None:
         """Clean up all environments."""

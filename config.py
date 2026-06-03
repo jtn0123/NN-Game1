@@ -380,17 +380,13 @@ class Config:
 
     # Rewards for different events (tuned for stable learning)
     REWARD_BRICK_HIT: float = 2.0  # Breaking a brick - primary positive signal
-    REWARD_GAME_OVER: float = (
-        -5.0
-    )  # Losing a life - moderate negative to avoid risk aversion
+    REWARD_GAME_OVER: float = -5.0  # Losing a life - moderate negative to avoid risk aversion
     REWARD_WIN: float = 100.0  # Clearing all bricks - strong completion incentive
     REWARD_PADDLE_HIT: float = 0.2  # Ball hitting paddle - encourages survival
     REWARD_STEP: float = 0.0  # Per-step reward (can set negative for urgency)
 
     # Dense reward shaping for ball tracking
-    REWARD_TRACKING_GOOD: float = (
-        0.01  # Reward for moving toward predicted ball landing
-    )
+    REWARD_TRACKING_GOOD: float = 0.01  # Reward for moving toward predicted ball landing
     REWARD_TRACKING_BAD: float = -0.01  # Penalty for moving away from predicted landing
 
     # Reward clipping to prevent extreme gradients during training
@@ -470,12 +466,8 @@ class Config:
 
     # Auto-exploration boost: when plateau detected, reset epsilon to explore new strategies
     # This helps escape local optima by forcing the agent to try new behaviors
-    EVAL_PLATEAU_EPSILON_BOOST: float = (
-        0.15  # Reset epsilon to this value when plateau detected
-    )
-    EVAL_PLATEAU_BOOST_EPISODES: int = (
-        1000  # Keep boosted epsilon for this many episodes
-    )
+    EVAL_PLATEAU_EPSILON_BOOST: float = 0.15  # Reset epsilon to this value when plateau detected
+    EVAL_PLATEAU_BOOST_EPISODES: int = 1000  # Keep boosted epsilon for this many episodes
 
     # Render every N episodes during training (0 = never)
     RENDER_EVERY: int = 1
@@ -559,9 +551,7 @@ if __name__ == "__main__":
     print("Neural Network Game AI - Configuration Summary")
     print("=" * 60)
     print(f"\n📺 Game: {cfg.SCREEN_WIDTH}x{cfg.SCREEN_HEIGHT}")
-    print(
-        f"🧱 Bricks: {cfg.BRICK_ROWS}x{cfg.BRICK_COLS} = {cfg.BRICK_ROWS * cfg.BRICK_COLS}"
-    )
+    print(f"🧱 Bricks: {cfg.BRICK_ROWS}x{cfg.BRICK_COLS} = {cfg.BRICK_ROWS * cfg.BRICK_COLS}")
     print(f"\n🧠 Neural Network:")
     print(f"   Input size: {cfg.STATE_SIZE}")
     print(f"   Hidden layers: {cfg.HIDDEN_LAYERS}")

@@ -86,9 +86,7 @@ TIPS
         help="Show game selection menu on launch (interactive game picker)",
     )
 
-    parser.add_argument(
-        "--model", type=str, default=None, help="Path to model file to load"
-    )
+    parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
 
     parser.add_argument(
         "--episodes",
@@ -160,9 +158,7 @@ TIPS
         help="Force CPU (faster than MPS for small models on M4)",
     )
 
-    parser.add_argument(
-        "--seed", type=int, default=None, help="Random seed for reproducibility"
-    )
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
 
     return parser
 

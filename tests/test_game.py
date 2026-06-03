@@ -106,9 +106,7 @@ class TestBreakoutActions:
         """Action 2 (RIGHT) should move paddle right."""
         initial_x = game.paddle.x
         game.step(2)  # RIGHT
-        assert (
-            game.paddle.x > initial_x or game.paddle.x >= game.width - game.paddle.width
-        )
+        assert game.paddle.x > initial_x or game.paddle.x >= game.width - game.paddle.width
 
     def test_action_stay_no_movement(self, game):
         """Action 1 (STAY) should not move paddle."""
@@ -243,9 +241,7 @@ class TestBallBrickCollisionPhysics:
 
         # If brick was hit from top, dy should flip
         if not brick.alive:
-            assert (
-                game.ball.dy != initial_dy
-            ), "Ball dy should change on top/bottom collision"
+            assert game.ball.dy != initial_dy, "Ball dy should change on top/bottom collision"
 
     def test_brick_destroyed_on_collision(self, game, config):
         """Brick should be destroyed when ball collides with it."""
@@ -286,9 +282,7 @@ class TestPaddleBounceAngle:
         # Angle should be -90° ± some tolerance
         assert game.ball.dy < 0, "Ball should be moving up after paddle hit"
         # Center hit should result in small dx
-        assert (
-            abs(game.ball.dx) < abs(game.ball.dy) * 0.5
-        ), "Center hit should be mostly vertical"
+        assert abs(game.ball.dx) < abs(game.ball.dy) * 0.5, "Center hit should be mostly vertical"
 
     def test_edge_hit_bounces_at_angle(self, game, config):
         """Ball hitting paddle edge should bounce at sharper angle."""

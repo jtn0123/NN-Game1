@@ -334,9 +334,7 @@ class TestTrainSavesCheckpoints:
 
             # Check that best model was saved
             best_model_path = os.path.join(tmpdir, f"{config.GAME_NAME}_best.pth")
-            assert os.path.exists(
-                best_model_path
-            ), "Best model should be saved during training"
+            assert os.path.exists(best_model_path), "Best model should be saved during training"
 
     def test_train_saves_final_model(self, game, agent, config):
         """Training should save final model at end."""
@@ -353,9 +351,7 @@ class TestTrainSavesCheckpoints:
 
             # Check that final model was saved
             final_model_path = os.path.join(tmpdir, f"{config.GAME_NAME}_final.pth")
-            assert os.path.exists(
-                final_model_path
-            ), "Final model should be saved at training end"
+            assert os.path.exists(final_model_path), "Final model should be saved at training end"
 
 
 class TestEvaluateResetsEpsilon:

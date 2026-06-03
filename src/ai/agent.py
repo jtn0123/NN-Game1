@@ -182,9 +182,7 @@ class Agent:
     target_net: Union[DQN, DuelingDQN]
     memory: Union[ReplayBuffer, PrioritizedReplayBuffer]
 
-    def __init__(
-        self, state_size: int, action_size: int, config: Optional[Config] = None
-    ):
+    def __init__(self, state_size: int, action_size: int, config: Optional[Config] = None):
         """
         Initialize the DQN agent.
 
@@ -209,9 +207,7 @@ class Agent:
         self._compiled = False
         if self.config.USE_TORCH_COMPILE and hasattr(torch, "compile"):
             try:
-                compile_mode = getattr(
-                    self.config, "TORCH_COMPILE_MODE", "reduce-overhead"
-                )
+                compile_mode = getattr(self.config, "TORCH_COMPILE_MODE", "reduce-overhead")
                 # torch.compile() returns a wrapper that preserves the interface but changes the type
                 self.policy_net = torch.compile(self.policy_net, mode=compile_mode)  # type: ignore[assignment]
                 self.target_net = torch.compile(self.target_net, mode=compile_mode)  # type: ignore[assignment]
@@ -249,9 +245,7 @@ class Agent:
                 self.scheduler = StepLR(  # type: ignore[assignment]
                     self.optimizer, step_size=step_size, gamma=gamma
                 )
-                print(
-                    f"✓ Step LR scheduler enabled (step_size={step_size}, gamma={gamma})"
-                )
+                print(f"✓ Step LR scheduler enabled (step_size={step_size}, gamma={gamma})")
 
         # Track if using NoisyNets for exploration (disables epsilon-greedy)
         self._use_noisy_nets = getattr(self.config, "USE_NOISY_NETWORKS", False)
@@ -286,9 +280,7 @@ class Agent:
             print("✓ Prioritized Experience Replay enabled")
         else:
             # Basic uniform replay buffer
-            self.memory = ReplayBuffer(
-                capacity=self.config.MEMORY_SIZE, state_size=state_size
-            )
+            self.memory = ReplayBuffer(capacity=self.config.MEMORY_SIZE, state_size=state_size)
 
         # Exploration
         self.epsilon = self.config.EPSILON_START
@@ -320,35 +312,25 @@ class Agent:
 
         # Training metrics (bounded to prevent memory growth during long training)
         self.losses: deque[float] = deque(maxlen=10000)
-        self._losses_lock = (
-            threading.Lock()
-        )  # Thread safety for concurrent reads/writes
+        self._losses_lock = threading.Lock()  # Thread safety for concurrent reads/writes
 
         # Track whether last action was exploration (for accurate metrics)
         self._last_action_explored: bool = False
 
         # Pre-allocated tensors for action selection (avoids tensor creation per step)
-        self._state_tensor = torch.empty(
-            (1, state_size), dtype=torch.float32, device=self.device
-        )
+        self._state_tensor = torch.empty((1, state_size), dtype=torch.float32, device=self.device)
 
         # Pre-allocated batch tensors for learning (avoids allocation per learning step)
         batch_size = self.config.BATCH_SIZE
         self._batch_states = torch.empty(
             (batch_size, state_size), dtype=torch.float32, device=self.device
         )
-        self._batch_actions = torch.empty(
-            batch_size, dtype=torch.int64, device=self.device
-        )
-        self._batch_rewards = torch.empty(
-            batch_size, dtype=torch.float32, device=self.device
-        )
+        self._batch_actions = torch.empty(batch_size, dtype=torch.int64, device=self.device)
+        self._batch_rewards = torch.empty(batch_size, dtype=torch.float32, device=self.device)
         self._batch_next_states = torch.empty(
             (batch_size, state_size), dtype=torch.float32, device=self.device
         )
-        self._batch_dones = torch.empty(
-            batch_size, dtype=torch.float32, device=self.device
-        )
+        self._batch_dones = torch.empty(batch_size, dtype=torch.float32, device=self.device)
         self._cached_batch_size = batch_size
 
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
@@ -459,9 +441,7 @@ class Agent:
 
             if num_explored > 0:
                 # Random actions for exploring states
-                actions[explore_mask] = np.random.randint(
-                    0, self.action_size, size=num_explored
-                )
+                actions[explore_mask] = np.random.randint(0, self.action_size, size=num_explored)
 
             if num_exploited > 0:
                 # Exploitation: best Q-value actions for non-exploring states
@@ -509,16 +489,8 @@ class Agent:
         else:
             for i in range(len(states)):
                 # Use .item() for numpy scalar conversion (more reliable than int/float)
-                action = (
-                    actions[i].item()
-                    if hasattr(actions[i], "item")
-                    else int(actions[i])
-                )
-                reward = (
-                    rewards[i].item()
-                    if hasattr(rewards[i], "item")
-                    else float(rewards[i])
-                )
+                action = actions[i].item() if hasattr(actions[i], "item") else int(actions[i])
+                reward = rewards[i].item() if hasattr(rewards[i], "item") else float(rewards[i])
                 done = dones[i].item() if hasattr(dones[i], "item") else bool(dones[i])
                 self.memory.push(states[i], action, reward, next_states[i], done)
 
@@ -668,18 +640,12 @@ class Agent:
             self._batch_states = torch.empty(
                 (batch_size, self.state_size), dtype=torch.float32, device=self.device
             )
-            self._batch_actions = torch.empty(
-                batch_size, dtype=torch.int64, device=self.device
-            )
-            self._batch_rewards = torch.empty(
-                batch_size, dtype=torch.float32, device=self.device
-            )
+            self._batch_actions = torch.empty(batch_size, dtype=torch.int64, device=self.device)
+            self._batch_rewards = torch.empty(batch_size, dtype=torch.float32, device=self.device)
             self._batch_next_states = torch.empty(
                 (batch_size, self.state_size), dtype=torch.float32, device=self.device
             )
-            self._batch_dones = torch.empty(
-                batch_size, dtype=torch.float32, device=self.device
-            )
+            self._batch_dones = torch.empty(batch_size, dtype=torch.float32, device=self.device)
             self._cached_batch_size = batch_size
 
         # Copy to pre-allocated tensors (faster than creating new tensors)
@@ -820,9 +786,7 @@ class Agent:
             )
 
         for target_param, policy_param in zip(target_params, policy_params):
-            target_param.data.copy_(
-                tau * policy_param.data + (1.0 - tau) * target_param.data
-            )
+            target_param.data.copy_(tau * policy_param.data + (1.0 - tau) * target_param.data)
 
     def decay_epsilon(self, episode: Optional[int] = None) -> None:
         """Decay exploration rate.
@@ -847,9 +811,7 @@ class Agent:
         if episode is not None and episode < warmup:
             return
 
-        self.epsilon = max(
-            self.config.EPSILON_END, self.epsilon * self.config.EPSILON_DECAY
-        )
+        self.epsilon = max(self.config.EPSILON_END, self.epsilon * self.config.EPSILON_DECAY)
 
     def step_scheduler(self) -> None:
         """Step the learning rate scheduler after each episode."""
@@ -929,12 +891,8 @@ class Agent:
 
         if self._compiled:
             # Strip _orig_mod. prefix for portability
-            policy_state = {
-                k.replace("_orig_mod.", ""): v for k, v in policy_state.items()
-            }
-            target_state = {
-                k.replace("_orig_mod.", ""): v for k, v in target_state.items()
-            }
+            policy_state = {k.replace("_orig_mod.", ""): v for k, v in policy_state.items()}
+            target_state = {k.replace("_orig_mod.", ""): v for k, v in target_state.items()}
 
         checkpoint = {
             "policy_net_state_dict": policy_state,
@@ -988,9 +946,7 @@ class Agent:
                 }.get(save_reason, "💾")
 
                 print(f"\n{reason_emoji} Model Saved: {os.path.basename(filepath)}")
-                print(
-                    f"   Episode: {episode:,} | Steps: {self.steps:,} | ε: {self.epsilon:.4f}"
-                )
+                print(f"   Episode: {episode:,} | Steps: {self.steps:,} | ε: {self.epsilon:.4f}")
                 print(
                     f"   Best Score: {best_score} | Avg(100): {avg_score_last_100:.1f} | Win Rate: {win_rate*100:.1f}% | Max Lv: {max_level}"
                 )
@@ -1036,9 +992,7 @@ class Agent:
         if saved_has_prefix and not target_expects_prefix:
             # Remove _orig_mod. prefix
             for k, v in state_dict.items():
-                new_key = (
-                    k.replace("_orig_mod.", "") if k.startswith("_orig_mod.") else k
-                )
+                new_key = k.replace("_orig_mod.", "") if k.startswith("_orig_mod.") else k
                 adapted[new_key] = v
         elif not saved_has_prefix and target_expects_prefix:
             # Add _orig_mod. prefix
@@ -1098,9 +1052,7 @@ class Agent:
                     print(
                         f"⚠️  Model incompatible: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})"
                     )
-                print(
-                    f"❌ Cannot load model - architecture mismatch. Starting fresh training."
-                )
+                print(f"❌ Cannot load model - architecture mismatch. Starting fresh training.")
             return None, None
 
         # Adapt state dicts for torch.compile() compatibility
@@ -1135,9 +1087,7 @@ class Agent:
         training_history = None
         if "training_history" in checkpoint:
             try:
-                training_history = TrainingHistory.from_dict(
-                    checkpoint["training_history"]
-                )
+                training_history = TrainingHistory.from_dict(checkpoint["training_history"])
             except Exception:
                 pass  # Old format without training history
 
@@ -1145,9 +1095,7 @@ class Agent:
         replay_buffer_loaded = False
         if "replay_buffer" in checkpoint:
             try:
-                replay_buffer_loaded = self.memory.load_from_dict(
-                    checkpoint["replay_buffer"]
-                )
+                replay_buffer_loaded = self.memory.load_from_dict(checkpoint["replay_buffer"])
             except Exception as e:
                 if not quiet:
                     print(f"⚠️ Could not restore replay buffer: {e}")
@@ -1172,9 +1120,7 @@ class Agent:
                         time_str = f"{time_ago.seconds // 3600}h ago"
                     else:
                         time_str = f"{time_ago.seconds // 60}m ago"
-                    print(
-                        f"   Saved: {save_time.strftime('%b %d, %Y %I:%M %p')} ({time_str})"
-                    )
+                    print(f"   Saved: {save_time.strftime('%b %d, %Y %I:%M %p')} ({time_str})")
                 except Exception:
                     print(f"   Saved: {metadata.timestamp}")
 
@@ -1204,9 +1150,7 @@ class Agent:
 
             # Report training history status
             if training_history and len(training_history.scores) > 0:
-                print(
-                    f"   Training History: {len(training_history.scores)} episodes restored"
-                )
+                print(f"   Training History: {len(training_history.scores)} episodes restored")
             else:
                 print(f"   Training History: Not available (older save format)")
 
@@ -1321,9 +1265,7 @@ if __name__ == "__main__":
     print("Testing DQN Agent...")
 
     config = Config()
-    agent = Agent(
-        state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-    )
+    agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
     print(f"\n📊 Agent Configuration:")
     print(f"   State size: {agent.state_size}")

@@ -34,9 +34,7 @@ except ImportError:
 
 
 # Skip all tests if Flask is not available
-pytestmark = pytest.mark.skipif(
-    not WEB_AVAILABLE, reason="Flask/SocketIO not installed"
-)
+pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
 
 
 class TestMakeJsonSafe:
@@ -134,17 +132,13 @@ class TestLogMessage:
 
     def test_creation(self):
         """LogMessage should store message and level."""
-        msg = LogMessage(
-            timestamp=datetime.now().isoformat(), message="Test message", level="info"
-        )
+        msg = LogMessage(timestamp=datetime.now().isoformat(), message="Test message", level="info")
         assert msg.message == "Test message"
         assert msg.level == "info"
 
     def test_to_dict(self):
         """LogMessage should convert to dictionary correctly."""
-        msg = LogMessage(
-            timestamp="2024-01-01T00:00:00", message="Test", level="warning"
-        )
+        msg = LogMessage(timestamp="2024-01-01T00:00:00", message="Test", level="warning")
         data = msg.to_dict()
         assert data["message"] == "Test"
         assert data["level"] == "warning"
@@ -188,9 +182,7 @@ class TestMetricsPublisher:
         publisher = MetricsPublisher(history_length=100)
 
         for i in range(5):
-            publisher.update(
-                episode=i, score=i * 10, epsilon=1.0 - i * 0.1, loss=1.0 / (i + 1)
-            )
+            publisher.update(episode=i, score=i * 10, epsilon=1.0 - i * 0.1, loss=1.0 / (i + 1))
 
         assert len(publisher.scores) == 5
         assert len(publisher.losses) == 5
@@ -224,9 +216,7 @@ class TestMetricsPublisher:
 
         publisher.log("Test message", level="info")
 
-        assert re.match(
-            r"^\d{2}:\d{2}:\d{2}\.\d{3}$", publisher.console_logs[0].timestamp
-        )
+        assert re.match(r"^\d{2}:\d{2}:\d{2}\.\d{3}$", publisher.console_logs[0].timestamp)
 
     def test_log_level_parsing(self):
         """MetricsPublisher.log should handle different log levels."""
@@ -313,12 +303,8 @@ class TestMetricsPublisher:
         """All layer analysis should return layers in index order."""
         publisher = MetricsPublisher(history_length=100)
 
-        publisher.update_layer_analysis(
-            2, "layer_2", 1, np.array([0.2], dtype=np.float32)
-        )
-        publisher.update_layer_analysis(
-            1, "layer_1", 1, np.array([0.1], dtype=np.float32)
-        )
+        publisher.update_layer_analysis(2, "layer_2", 1, np.array([0.2], dtype=np.float32))
+        publisher.update_layer_analysis(1, "layer_1", 1, np.array([0.1], dtype=np.float32))
 
         layers = publisher.get_all_layer_analysis()
         assert [layer["layer_idx"] for layer in layers] == [1, 2]

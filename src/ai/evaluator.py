@@ -228,9 +228,7 @@ class Evaluator:
         )
         print(f"   Range:  {results.min_score} - {results.max_score}")
         print(f"   Level:  avg {results.mean_level:.1f}, max {results.max_level}")
-        print(
-            f"   Wins:   {results.wins}/{results.num_games} ({results.win_rate*100:.1f}%)"
-        )
+        print(f"   Wins:   {results.wins}/{results.num_games} ({results.win_rate*100:.1f}%)")
         print(
             f"   Best eval ever: {self.best_eval_score:.0f} "
             f"(no improvement for {self.evals_since_improvement} evals)"
@@ -302,8 +300,6 @@ def compare_checkpoints(
         evaluator = Evaluator(game, agent, config)
         eval_results = evaluator.evaluate(num_episodes)
 
-        results.append(
-            {"checkpoint": os.path.basename(path), "results": eval_results.to_dict()}
-        )
+        results.append({"checkpoint": os.path.basename(path), "results": eval_results.to_dict()})
 
     return results

@@ -39,11 +39,7 @@ def resolve_model_path(
             trusted_dirs=trusted_dirs,
             allow_unsafe_fallback=True,
         )
-        if (
-            info
-            and info.get("state_size") == state_size
-            and info.get("action_size") == action_size
-        ):
+        if info and info.get("state_size") == state_size and info.get("action_size") == action_size:
             return explicit_path
 
         print(f"⚠️  Specified model incompatible: {os.path.basename(explicit_path)}")
@@ -127,9 +123,7 @@ def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:
     for weight in raw_weights:
         if weight is None:
             continue
-        sampled = weight[
-            : min(max_neurons, weight.shape[0]), : min(max_neurons, weight.shape[1])
-        ]
+        sampled = weight[: min(max_neurons, weight.shape[0]), : min(max_neurons, weight.shape[1])]
         sampled_weights.append(sampled.tolist())
         analysis_weights.append(weight.tolist())
 

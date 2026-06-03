@@ -115,17 +115,13 @@ class TrainingHUD:
         bg_rect = text_surface.get_rect(topleft=(10, 10))
         bg_rect.inflate_ip(16, 8)
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(
-            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
-        )
+        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Text
         surface.blit(text_surface, (18, 14))
 
-    def _render_score_display(
-        self, surface: pygame.Surface, score: int, best_score: int
-    ) -> None:
+    def _render_score_display(self, surface: pygame.Surface, score: int, best_score: int) -> None:
         """Render score display below episode counter."""
         text = f"Score: {score:,}  |  Best: {best_score:,}"
 
@@ -143,9 +139,7 @@ class TrainingHUD:
         bg_rect = text_surface.get_rect(topleft=(10, 42))
         bg_rect.inflate_ip(16, 6)
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(
-            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
-        )
+        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Text
@@ -165,9 +159,7 @@ class TrainingHUD:
         # Background
         bg_rect = pygame.Rect(10, 68, 170, 24)
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(
-            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
-        )
+        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Label
@@ -216,9 +208,7 @@ class TrainingHUD:
 
         # Background
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(
-            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5
-        )
+        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=5)
         surface.blit(bg_surface, bg_rect.topleft)
 
         # Text
@@ -241,16 +231,12 @@ class TrainingHUD:
         screen_width = surface.get_width()
         screen_height = surface.get_height()
 
-        bg_rect = text_surface.get_rect(
-            centerx=screen_width // 2, bottom=screen_height - 35
-        )
+        bg_rect = text_surface.get_rect(centerx=screen_width // 2, bottom=screen_height - 35)
         bg_rect.inflate_ip(20, 10)
 
         # Background with accent border
         bg_surface = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(
-            bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=6
-        )
+        pygame.draw.rect(bg_surface, self.bg_color, bg_surface.get_rect(), border_radius=6)
         surface.blit(bg_surface, bg_rect.topleft)
         pygame.draw.rect(surface, self.accent_color, bg_rect, 2, border_radius=6)
 

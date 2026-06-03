@@ -72,13 +72,9 @@ class Particle:
         if self.size > 2:
             glow_size = int(self.size * 1.5)
             glow_color = (r // 2, g // 2, b // 2)
-            pygame.draw.circle(
-                screen, glow_color, (int(self.x), int(self.y)), glow_size
-            )
+            pygame.draw.circle(screen, glow_color, (int(self.x), int(self.y)), glow_size)
 
-        pygame.draw.circle(
-            screen, (r, g, b), (int(self.x), int(self.y)), max(1, int(self.size))
-        )
+        pygame.draw.circle(screen, (r, g, b), (int(self.x), int(self.y)), max(1, int(self.size)))
 
 
 class ParticleSystem:
@@ -342,9 +338,7 @@ class TrailRenderer:
         if len(self.positions) > self.max_length:
             self.positions.pop(0)
 
-    def draw(
-        self, screen: pygame.Surface, color: Tuple[int, int, int], radius: int
-    ) -> None:
+    def draw(self, screen: pygame.Surface, color: Tuple[int, int, int], radius: int) -> None:
         """
         Draw the trail with fading effect.
 
@@ -424,19 +418,11 @@ def create_radial_gradient(
 
     for r in range(radius, 0, -1):
         progress = 1 - (r / radius)
-        color_r = int(
-            center_color[0] + (edge_color[0] - center_color[0]) * (1 - progress)
-        )
-        color_g = int(
-            center_color[1] + (edge_color[1] - center_color[1]) * (1 - progress)
-        )
-        color_b = int(
-            center_color[2] + (edge_color[2] - center_color[2]) * (1 - progress)
-        )
+        color_r = int(center_color[0] + (edge_color[0] - center_color[0]) * (1 - progress))
+        color_g = int(center_color[1] + (edge_color[1] - center_color[1]) * (1 - progress))
+        color_b = int(center_color[2] + (edge_color[2] - center_color[2]) * (1 - progress))
         alpha = int(255 * progress * progress)  # Quadratic falloff
 
-        pygame.draw.circle(
-            surface, (color_r, color_g, color_b, alpha), (radius, radius), r
-        )
+        pygame.draw.circle(surface, (color_r, color_g, color_b, alpha), (radius, radius), r)
 
     return surface

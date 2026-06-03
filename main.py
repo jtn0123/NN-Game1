@@ -313,8 +313,8 @@ class GameApp:
             self.web_dashboard.on_load_model_callback = self._load_model
             self.web_dashboard.on_config_change_callback = self._apply_config
             self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
-            self.web_dashboard.on_restart_with_game_callback = (
-                lambda game: restart_with_game(game, args)
+            self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(
+                game, args
             )
             self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
 
@@ -323,12 +323,7 @@ class GameApp:
 
             # Log startup info
             self._log_startup_info()
-        elif (
-            hasattr(args, "web")
-            and args.web
-            and WEB_AVAILABLE
-            and WebDashboard is not None
-        ):
+        elif hasattr(args, "web") and args.web and WEB_AVAILABLE and WebDashboard is not None:
             # Create new dashboard
             self.web_dashboard = WebDashboard(
                 config, port=args.port, host=getattr(args, "host", "127.0.0.1")
@@ -344,17 +339,15 @@ class GameApp:
             self.web_dashboard.on_load_model_callback = self._load_model
             self.web_dashboard.on_config_change_callback = self._apply_config
             self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
-            self.web_dashboard.on_restart_with_game_callback = (
-                lambda game: restart_with_game(game, args)
+            self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(
+                game, args
             )
             self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
             self.web_dashboard.start()
 
             # Show URL prominently
             print("\n" + "=" * 60)
-            print(
-                f"🌐 WEB DASHBOARD: http://{getattr(args, 'host', '127.0.0.1')}:{args.port}"
-            )
+            print(f"🌐 WEB DASHBOARD: http://{getattr(args, 'host', '127.0.0.1')}:{args.port}")
             print("=" * 60 + "\n")
 
             # Send system info to dashboard
@@ -432,9 +425,7 @@ class GameApp:
                                 ),
                             )
                         )
-                    self.recent_scores = deque(
-                        training_history.scores[-1000:], maxlen=1000
-                    )
+                    self.recent_scores = deque(training_history.scores[-1000:], maxlen=1000)
 
                     # Restore dashboard with historical data
                     for i, score in enumerate(training_history.scores):
@@ -449,19 +440,11 @@ class GameApp:
                             else 0.0
                         )
                         bricks = (
-                            training_history.bricks[i]
-                            if i < len(training_history.bricks)
-                            else 0
+                            training_history.bricks[i] if i < len(training_history.bricks) else 0
                         )
-                        won = (
-                            training_history.wins[i]
-                            if i < len(training_history.wins)
-                            else False
-                        )
+                        won = training_history.wins[i] if i < len(training_history.wins) else False
                         loss = (
-                            training_history.losses[i]
-                            if i < len(training_history.losses)
-                            else 0.0
+                            training_history.losses[i] if i < len(training_history.losses) else 0.0
                         )
 
                         self.dashboard.update(
@@ -527,15 +510,9 @@ class GameApp:
                 "decay": self.config.EPSILON_DECAY,
             },
         )
-        target_str = (
-            "Unlimited"
-            if self.config.MAX_EPISODES == 0
-            else str(self.config.MAX_EPISODES)
-        )
+        target_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
         self.web_dashboard.log(f"Target episodes: {target_str}", "info")
-        self.web_dashboard.log(
-            "Ready to train! Use controls to manage training.", "info"
-        )
+        self.web_dashboard.log("Ready to train! Use controls to manage training.", "info")
 
     def _toggle_pause(self) -> None:
         """Toggle pause state (for web dashboard control)."""
@@ -647,9 +624,7 @@ class GameApp:
         """Save the model and exit the application gracefully."""
         request_save_and_stop(
             game_name=self.config.GAME_NAME,
-            save_model=lambda filename, reason: self._save_model(
-                filename, save_reason=reason
-            ),
+            save_model=lambda filename, reason: self._save_model(filename, save_reason=reason),
             set_running=self._set_running,
             dashboard=self.web_dashboard,
         )
@@ -684,9 +659,7 @@ class GameApp:
                                 else 0.0
                             ),
                             steps=(
-                                training_history.steps[i]
-                                if i < len(training_history.steps)
-                                else 0
+                                training_history.steps[i] if i < len(training_history.steps) else 0
                             ),
                             epsilon=(
                                 training_history.epsilons[i]
@@ -710,30 +683,14 @@ class GameApp:
                 # Restore dashboard with historical data
                 for i, score in enumerate(training_history.scores):
                     eps = (
-                        training_history.epsilons[i]
-                        if i < len(training_history.epsilons)
-                        else 0.5
+                        training_history.epsilons[i] if i < len(training_history.epsilons) else 0.5
                     )
                     reward = (
-                        training_history.rewards[i]
-                        if i < len(training_history.rewards)
-                        else 0.0
+                        training_history.rewards[i] if i < len(training_history.rewards) else 0.0
                     )
-                    bricks = (
-                        training_history.bricks[i]
-                        if i < len(training_history.bricks)
-                        else 0
-                    )
-                    won = (
-                        training_history.wins[i]
-                        if i < len(training_history.wins)
-                        else False
-                    )
-                    loss = (
-                        training_history.losses[i]
-                        if i < len(training_history.losses)
-                        else 0.0
-                    )
+                    bricks = training_history.bricks[i] if i < len(training_history.bricks) else 0
+                    won = training_history.wins[i] if i < len(training_history.wins) else False
+                    loss = training_history.losses[i] if i < len(training_history.losses) else 0.0
 
                     self.dashboard.update(
                         episode=i,
@@ -861,9 +818,7 @@ class GameApp:
         if training_history.wins:
             recent_wins = training_history.wins[-100:]
             publisher.state.win_rate = (
-                sum(1 for w in recent_wins if w) / len(recent_wins)
-                if recent_wins
-                else 0.0
+                sum(1 for w in recent_wins if w) / len(recent_wins) if recent_wins else 0.0
             )
 
         # Emit an update to connected clients
@@ -880,9 +835,7 @@ class GameApp:
                 if not math.isfinite(lr) or lr <= 0:
                     raise ValueError("Learning rate must be finite and positive")
                 if lr > 10.0:
-                    raise ValueError(
-                        f"Learning rate {lr} is unreasonably large (max 10.0)"
-                    )
+                    raise ValueError(f"Learning rate {lr} is unreasonably large (max 10.0)")
                 if lr < 1e-10:
                     raise ValueError(f"Learning rate {lr} is too small (min 1e-10)")
                 old_lr = self.config.LEARNING_RATE
@@ -892,9 +845,7 @@ class GameApp:
                     param_group["lr"] = lr
                 changes.append(f"LR: {old_lr} → {lr}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid learning_rate value: {config_data['learning_rate']} - {e}"
-                )
+                print(f"⚠️  Invalid learning_rate value: {config_data['learning_rate']} - {e}")
 
         if "epsilon" in config_data:
             try:
@@ -903,9 +854,7 @@ class GameApp:
                     raise ValueError("Epsilon must be finite (not NaN or Inf)")
                 old_eps = self.agent.epsilon
                 # Clamp epsilon to valid range with feedback
-                clamped_eps = max(
-                    self.config.EPSILON_END, min(self.config.EPSILON_START, eps)
-                )
+                clamped_eps = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
                 if clamped_eps != eps:
                     print(
                         f"⚠️  Epsilon {eps:.4f} clamped to valid range [{self.config.EPSILON_END}, {self.config.EPSILON_START}]"
@@ -923,9 +872,7 @@ class GameApp:
                 self.config.EPSILON_DECAY = decay
                 changes.append(f"Decay: {decay}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']} - {e}"
-                )
+                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']} - {e}")
 
         if "gamma" in config_data:
             try:
@@ -949,9 +896,7 @@ class GameApp:
                 self.config.BATCH_SIZE = batch_size
                 changes.append(f"Batch: {batch_size}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid batch_size value: {config_data['batch_size']} - {e}"
-                )
+                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']} - {e}")
 
         if "learn_every" in config_data:
             try:
@@ -961,9 +906,7 @@ class GameApp:
                 self.config.LEARN_EVERY = learn_every
                 changes.append(f"LearnEvery: {learn_every}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid learn_every value: {config_data['learn_every']} - {e}"
-                )
+                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']} - {e}")
 
         if "gradient_steps" in config_data:
             try:
@@ -973,9 +916,7 @@ class GameApp:
                 self.config.GRADIENT_STEPS = grad_steps
                 changes.append(f"GradSteps: {grad_steps}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']} - {e}"
-                )
+                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']} - {e}")
 
         if self.web_dashboard and changes:
             self.web_dashboard.log(
@@ -1026,9 +967,7 @@ class GameApp:
             self.web_dashboard.publisher.set_performance_mode(mode)
             self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
             self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
-            self.web_dashboard.publisher.state.gradient_steps = (
-                self.config.GRADIENT_STEPS
-            )
+            self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
             self.web_dashboard.log(
                 f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE}, grad_steps={self.config.GRADIENT_STEPS})",
                 "action",
@@ -1110,9 +1049,7 @@ class GameApp:
 
         current_time = time.time()
         self._notifications = [
-            n
-            for n in self._notifications
-            if current_time - n["start_time"] < n["duration"]
+            n for n in self._notifications if current_time - n["start_time"] < n["duration"]
         ]
 
     def _render_notifications(self, surface: pygame.Surface) -> None:
@@ -1177,25 +1114,20 @@ class GameApp:
         # Only log if speed changed significantly (avoid spam when dragging slider)
         # Log when: forced, or speed is a preset value, or changed by >10%
         speed_changed_significantly = (
-            abs(new_speed - self._last_logged_speed) / max(1, self._last_logged_speed)
-            > 0.1
+            abs(new_speed - self._last_logged_speed) / max(1, self._last_logged_speed) > 0.1
         )
         is_preset = int(new_speed) in self.SPEED_PRESETS
 
         if force_log or (speed_changed_significantly and is_preset):
             if self.web_dashboard:
-                self.web_dashboard.log(
-                    f"⏩ Speed set to {int(self.game_speed)}x", "action"
-                )
+                self.web_dashboard.log(f"⏩ Speed set to {int(self.game_speed)}x", "action")
             print(f"⏩ Speed: {int(self.game_speed)}x")
             self._last_logged_speed = new_speed
 
     def _speed_up(self) -> None:
         """Increase speed to next preset."""
         for preset in self.SPEED_PRESETS:
-            if (
-                preset > self.game_speed + 0.01
-            ):  # Epsilon comparison for float precision
+            if preset > self.game_speed + 0.01:  # Epsilon comparison for float precision
                 self._set_speed(preset, force_log=True)
                 return
         # Already at max
@@ -1204,9 +1136,7 @@ class GameApp:
     def _speed_down(self) -> None:
         """Decrease speed to previous preset."""
         for preset in reversed(self.SPEED_PRESETS):
-            if (
-                preset < self.game_speed - 0.01
-            ):  # Epsilon comparison for float precision
+            if preset < self.game_speed - 0.01:  # Epsilon comparison for float precision
                 self._set_speed(preset, force_log=True)
                 return
         # Already at min
@@ -1325,8 +1255,7 @@ class GameApp:
                         info["score"],
                         0,
                         0,
-                        bricks_broken=total_bricks
-                        - info.get("bricks_remaining", total_bricks),
+                        bricks_broken=total_bricks - info.get("bricks_remaining", total_bricks),
                     )
 
                 self.selected_action = action
@@ -1346,11 +1275,7 @@ class GameApp:
         print("\n" + "=" * 60)
         print("🧠 Starting AI Training with Live Visualization")
         print("=" * 60)
-        eps_str = (
-            "Unlimited"
-            if self.config.MAX_EPISODES == 0
-            else str(self.config.MAX_EPISODES)
-        )
+        eps_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
         print(f"   Episodes:       {eps_str}")
         print(f"   Learning Rate:  {self.config.LEARNING_RATE}")
         print(f"   Device:         {self.config.DEVICE}")
@@ -1472,8 +1397,7 @@ class GameApp:
                             info["score"],
                             self.agent.epsilon,
                             self.agent.get_average_loss(100),
-                            bricks_broken=total_bricks
-                            - info.get("bricks_remaining", total_bricks),
+                            bricks_broken=total_bricks - info.get("bricks_remaining", total_bricks),
                             won=info.get("won", False),
                             reward=episode_reward,
                         )
@@ -1502,15 +1426,11 @@ class GameApp:
                                 episode_length=episode_steps,
                             )
                             # Update performance settings in dashboard state
-                            self.web_dashboard.publisher.state.learn_every = (
-                                self.config.LEARN_EVERY
-                            )
+                            self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
                             self.web_dashboard.publisher.state.gradient_steps = (
                                 self.config.GRADIENT_STEPS
                             )
-                            self.web_dashboard.publisher.state.batch_size = (
-                                self.config.BATCH_SIZE
-                            )
+                            self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
 
                             # Log episode completion
                             self._log_episode_complete(
@@ -1556,10 +1476,7 @@ class GameApp:
                         )
 
                         # Save checkpoint (no replay buffer for periodic - saves disk space)
-                        if (
-                            self.episode % self.config.SAVE_EVERY == 0
-                            and self.episode > 0
-                        ):
+                        if self.episode % self.config.SAVE_EVERY == 0 and self.episode > 0:
                             self._save_model(
                                 f"{self.config.GAME_NAME}_ep{self.episode}.pth",
                                 save_reason="periodic",
@@ -1614,17 +1531,13 @@ class GameApp:
                 if steps_this_frame > 0:
                     frame_training_time = time.time() - training_start
                     measured_step_time = frame_training_time / steps_this_frame
-                    step_time_samples.append(
-                        measured_step_time
-                    )  # deque auto-trims to maxlen=100
+                    step_time_samples.append(measured_step_time)  # deque auto-trims to maxlen=100
                     avg_step_time = sum(step_time_samples) / len(step_time_samples)
 
                     # Log performance occasionally
                     if self.steps % 500 == 0 and self.web_dashboard:
                         frame_time = time.time() - frame_start
-                        steps_per_sec = (
-                            steps_this_frame / frame_time if frame_time > 0 else 0
-                        )
+                        steps_per_sec = steps_this_frame / frame_time if frame_time > 0 else 0
                         self.web_dashboard.log(
                             f"⚡ {int(self.game_speed)}x: {steps_this_frame} steps/render, {steps_per_sec:.0f} steps/sec",
                             "debug",
@@ -1632,9 +1545,7 @@ class GameApp:
 
             # Render the current state
             if not self.args.headless and not self.paused:
-                render_action = (
-                    self.selected_action if self.selected_action is not None else 1
-                )
+                render_action = self.selected_action if self.selected_action is not None else 1
                 self._render_frame(state, render_action, info if info else {})
 
                 # Cap frame rate to prevent GPU spikes
@@ -1730,11 +1641,7 @@ class GameApp:
         print("\n" + "=" * 60)
         print("🚀 Starting Headless Training (No Visualization)")
         print("=" * 60)
-        eps_str = (
-            "Unlimited"
-            if self.config.MAX_EPISODES == 0
-            else str(self.config.MAX_EPISODES)
-        )
+        eps_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
         print(f"   Episodes:       {eps_str}")
         print(f"   Device:         {self.config.DEVICE}")
         print(f"   Batch Size:     {self.config.BATCH_SIZE}")
@@ -1790,9 +1697,7 @@ class GameApp:
             ):
                 elapsed_total = current_time - start_time
                 steps_per_sec = (
-                    steps_since_report / elapsed_since_report
-                    if elapsed_since_report > 0
-                    else 0
+                    steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
                 avg_score = np.mean(scores[-100:]) if scores else 0
                 avg_loss = self.agent.get_average_loss(100)
@@ -1845,9 +1750,7 @@ class GameApp:
                 # Handle window resize
                 new_width = max(event.w, self.min_window_width)
                 new_height = max(event.h, self.min_window_height)
-                self.screen = pygame.display.set_mode(
-                    (new_width, new_height), pygame.RESIZABLE
-                )
+                self.screen = pygame.display.set_mode((new_width, new_height), pygame.RESIZABLE)
                 self._update_layout(new_width, new_height)
 
             # Handle pause menu interactions when paused
@@ -1866,13 +1769,9 @@ class GameApp:
                         )
                 elif action == "menu":
                     # Save current progress before returning to menu
-                    self._save_model(
-                        f"{self.config.GAME_NAME}_final.pth", save_reason="menu_exit"
-                    )
+                    self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="menu_exit")
                     if self.web_dashboard:
-                        self.web_dashboard.log(
-                            "🏠 Returning to game selector...", "warning"
-                        )
+                        self.web_dashboard.log("🏠 Returning to game selector...", "warning")
                         self.web_dashboard.launcher_mode = True
                         self.web_dashboard.socketio.emit(
                             "redirect_to_launcher",
@@ -1911,15 +1810,11 @@ class GameApp:
 
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                     self._speed_up()
-                    self._show_notification(
-                        f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0
-                    )
+                    self._show_notification(f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0)
 
                 elif event.key == pygame.K_MINUS:
                     self._speed_down()
-                    self._show_notification(
-                        f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0
-                    )
+                    self._show_notification(f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0)
 
                 elif event.key == pygame.K_f:
                     # Toggle fullscreen
@@ -1935,9 +1830,7 @@ class GameApp:
                         )
                         # Update layout to new screen size
                         display_info = pygame.display.Info()
-                        self._update_layout(
-                            display_info.current_w, display_info.current_h
-                        )
+                        self._update_layout(display_info.current_w, display_info.current_h)
                         # Bug 95: Show notification for fullscreen toggle
                         self._show_notification("Fullscreen", (100, 200, 255), 1.0)
 
@@ -1990,9 +1883,7 @@ class GameApp:
                 "training_time": time.time() - self.training_start_time,
                 "memory_size": len(self.agent.memory) if hasattr(self, "agent") else 0,
                 "memory_capacity": (
-                    self.config.MEMORY_SIZE
-                    if hasattr(self.config, "MEMORY_SIZE")
-                    else 0
+                    self.config.MEMORY_SIZE if hasattr(self.config, "MEMORY_SIZE") else 0
                 ),
             }
             self.pause_menu.render(self.game_surface, pause_context)
@@ -2019,9 +1910,7 @@ class GameApp:
 
             # Draw background
             legend_bg = pygame.Surface((legend_width, legend_height), pygame.SRCALPHA)
-            pygame.draw.rect(
-                legend_bg, (0, 0, 0, 200), legend_bg.get_rect(), border_radius=8
-            )
+            pygame.draw.rect(legend_bg, (0, 0, 0, 200), legend_bg.get_rect(), border_radius=8)
             self.game_surface.blit(legend_bg, (legend_x, legend_y))
             pygame.draw.rect(
                 self.game_surface,
@@ -2039,9 +1928,7 @@ class GameApp:
             y = legend_y + padding + 30
             for key, desc in controls:
                 key_surface = self._help_font.render(key, True, (100, 200, 255))
-                desc_surface = self._help_font.render(
-                    f" - {desc}", True, (180, 180, 180)
-                )
+                desc_surface = self._help_font.render(f" - {desc}", True, (180, 180, 180))
                 self.game_surface.blit(key_surface, (legend_x + padding, y))
                 self.game_surface.blit(
                     desc_surface, (legend_x + padding + key_surface.get_width(), y)
@@ -2049,15 +1936,11 @@ class GameApp:
                 y += line_height
         else:
             # Show hint to display help
-            hint_text = self._speed_font.render(
-                "Press H for controls", True, (80, 80, 80)
-            )
+            hint_text = self._speed_font.render("Press H for controls", True, (80, 80, 80))
             self.game_surface.blit(hint_text, (10, self.config.SCREEN_HEIGHT - 25))
 
         # Capture screenshot for web dashboard (before scaling, every 10 frames)
-        self.frame_count = (
-            self.frame_count + 1
-        ) % 10000  # Keep bounded to avoid overflow
+        self.frame_count = (self.frame_count + 1) % 10000  # Keep bounded to avoid overflow
         if self.web_dashboard and self.frame_count % 10 == 0:
             self.web_dashboard.capture_screenshot(self.game_surface)
 
@@ -2071,9 +1954,7 @@ class GameApp:
         # Scale the game surface (optimize: skip scaling at 1:1 ratio)
         if abs(self.scale_factor - 1.0) < 0.001:  # Effectively 1.0
             # No scaling needed - blit directly
-            self.screen.blit(
-                self.game_surface, (self.game_offset_x, self.game_offset_y)
-            )
+            self.screen.blit(self.game_surface, (self.game_offset_x, self.game_offset_y))
         else:
             # Calculate scaled size
             scaled_width = int(self.config.SCREEN_WIDTH * self.scale_factor)
@@ -2114,9 +1995,7 @@ class GameApp:
             # Don't crash training on visualization errors - silently ignore
             pass
 
-    def _save_model(
-        self, filename: str, save_reason: str = "manual", quiet: bool = False
-    ) -> bool:
+    def _save_model(self, filename: str, save_reason: str = "manual", quiet: bool = False) -> bool:
         """Save the current model with rich metadata.
 
         Returns:
@@ -2127,14 +2006,8 @@ class GameApp:
         filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
 
         # Calculate metrics for metadata
-        avg_score = (
-            np.mean(list(self.recent_scores)[-100:]) if self.recent_scores else 0.0
-        )
-        win_rate = (
-            self.dashboard.get_win_rate()
-            if hasattr(self.dashboard, "get_win_rate")
-            else 0.0
-        )
+        avg_score = np.mean(list(self.recent_scores)[-100:]) if self.recent_scores else 0.0
+        win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, "get_win_rate") else 0.0
 
         # Build training history for dashboard restoration from episode_history
         training_history = TrainingHistory(
@@ -2319,9 +2192,7 @@ class HeadlessTrainer:
                 self.game = self.vec_env.envs[0]  # Reference for state/action size
                 print(f"🎮 Vectorized: {self.num_envs} parallel environments")
             else:
-                print(
-                    f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}"
-                )
+                print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
                 print(f"   Falling back to single environment")
                 # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
                 self.game = GameClass(config, headless=True)  # type: ignore[call-arg]
@@ -2391,12 +2262,7 @@ class HeadlessTrainer:
                 )
                 # Sync history to dashboard NOW that dashboard is ready
                 self._sync_history_to_dashboard_after_load(initial_model_path)
-        elif (
-            hasattr(args, "web")
-            and args.web
-            and WEB_AVAILABLE
-            and WebDashboard is not None
-        ):
+        elif hasattr(args, "web") and args.web and WEB_AVAILABLE and WebDashboard is not None:
             self.web_dashboard = WebDashboard(
                 config, port=args.port, host=getattr(args, "host", "127.0.0.1")
             )
@@ -2405,9 +2271,7 @@ class HeadlessTrainer:
 
             # Show URL prominently
             print("\n" + "=" * 60)
-            print(
-                f"🌐 WEB DASHBOARD: http://{getattr(args, 'host', '127.0.0.1')}:{args.port}"
-            )
+            print(f"🌐 WEB DASHBOARD: http://{getattr(args, 'host', '127.0.0.1')}:{args.port}")
             print("=" * 60 + "\n")
 
             self._send_system_info()
@@ -2453,9 +2317,7 @@ class HeadlessTrainer:
             )
 
             if "training_history" in checkpoint:
-                training_history = TrainingHistory.from_dict(
-                    checkpoint["training_history"]
-                )
+                training_history = TrainingHistory.from_dict(checkpoint["training_history"])
                 metadata = None
                 if "metadata" in checkpoint:
                     from src.ai.agent import SaveMetadata
@@ -2464,9 +2326,7 @@ class HeadlessTrainer:
 
                 if len(training_history.scores) > 0:
                     self._sync_web_dashboard_history(training_history, metadata)
-                    print(
-                        f"📊 Dashboard charts restored ({len(training_history.scores)} episodes)"
-                    )
+                    print(f"📊 Dashboard charts restored ({len(training_history.scores)} episodes)")
         except Exception as e:
             print(f"⚠️ Could not restore dashboard history: {e}")
 
@@ -2497,8 +2357,8 @@ class HeadlessTrainer:
         self.web_dashboard.on_load_model_callback = self._load_model
         self.web_dashboard.on_config_change_callback = self._apply_config
         self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
-        self.web_dashboard.on_restart_with_game_callback = (
-            lambda game: restart_with_game(game, self.args)
+        self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(
+            game, self.args
         )
         self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
         # Speed control doesn't apply to headless (no frame timing)
@@ -2545,11 +2405,7 @@ class HeadlessTrainer:
             "info",
         )
         self.web_dashboard.log(f"Batch size: {self.config.BATCH_SIZE}", "info")
-        target_str = (
-            "Unlimited"
-            if self.config.MAX_EPISODES == 0
-            else str(self.config.MAX_EPISODES)
-        )
+        target_str = "Unlimited" if self.config.MAX_EPISODES == 0 else str(self.config.MAX_EPISODES)
         self.web_dashboard.log(f"Target episodes: {target_str}", "info")
 
     def _toggle_pause(self) -> None:
@@ -2669,25 +2525,15 @@ class HeadlessTrainer:
             # Restore local score/win history from training history (no limit - keep full history)
             if training_history and len(training_history.scores) > 0:
                 self.scores = training_history.scores.copy()
-                self.wins = (
-                    training_history.wins.copy() if training_history.wins else []
-                )
+                self.wins = training_history.wins.copy() if training_history.wins else []
                 self.q_values = (
-                    training_history.q_values.copy()
-                    if training_history.q_values
-                    else []
+                    training_history.q_values.copy() if training_history.q_values else []
                 )
-                self.losses = (
-                    training_history.losses.copy() if training_history.losses else []
-                )
+                self.losses = training_history.losses.copy() if training_history.losses else []
                 self.epsilons = (
-                    training_history.epsilons.copy()
-                    if training_history.epsilons
-                    else []
+                    training_history.epsilons.copy() if training_history.epsilons else []
                 )
-                self.rewards = (
-                    training_history.rewards.copy() if training_history.rewards else []
-                )
+                self.rewards = training_history.rewards.copy() if training_history.rewards else []
 
                 # Restore dashboard counters
                 self.exploration_actions = training_history.exploration_actions
@@ -2800,9 +2646,7 @@ class HeadlessTrainer:
         if training_history.wins:
             recent_wins = training_history.wins[-100:]
             publisher.state.win_rate = (
-                sum(1 for w in recent_wins if w) / len(recent_wins)
-                if recent_wins
-                else 0.0
+                sum(1 for w in recent_wins if w) / len(recent_wins) if recent_wins else 0.0
             )
 
         # Emit an update to connected clients
@@ -2858,9 +2702,7 @@ class HeadlessTrainer:
                     raise ValueError("Epsilon must be finite (not NaN or Inf)")
                 old_eps = self.agent.epsilon
                 # Clamp epsilon to valid range with feedback
-                clamped_eps = max(
-                    self.config.EPSILON_END, min(self.config.EPSILON_START, eps)
-                )
+                clamped_eps = max(self.config.EPSILON_END, min(self.config.EPSILON_START, eps))
                 if clamped_eps != eps:
                     print(
                         f"⚠️  Epsilon {eps:.4f} clamped to valid range [{self.config.EPSILON_END}, {self.config.EPSILON_START}]"
@@ -2878,9 +2720,7 @@ class HeadlessTrainer:
                 self.config.EPSILON_DECAY = decay
                 changes.append(f"Decay: {decay}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']} - {e}"
-                )
+                print(f"⚠️  Invalid epsilon_decay value: {config_data['epsilon_decay']} - {e}")
 
         if "gamma" in config_data:
             try:
@@ -2904,9 +2744,7 @@ class HeadlessTrainer:
                 self.config.BATCH_SIZE = batch_size
                 changes.append(f"Batch: {batch_size}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid batch_size value: {config_data['batch_size']} - {e}"
-                )
+                print(f"⚠️  Invalid batch_size value: {config_data['batch_size']} - {e}")
 
         if "learn_every" in config_data:
             try:
@@ -2916,9 +2754,7 @@ class HeadlessTrainer:
                 self.config.LEARN_EVERY = learn_every
                 changes.append(f"LearnEvery: {learn_every}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid learn_every value: {config_data['learn_every']} - {e}"
-                )
+                print(f"⚠️  Invalid learn_every value: {config_data['learn_every']} - {e}")
 
         if "gradient_steps" in config_data:
             try:
@@ -2928,9 +2764,7 @@ class HeadlessTrainer:
                 self.config.GRADIENT_STEPS = grad_steps
                 changes.append(f"GradSteps: {grad_steps}")
             except (ValueError, TypeError) as e:
-                print(
-                    f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']} - {e}"
-                )
+                print(f"⚠️  Invalid gradient_steps value: {config_data['gradient_steps']} - {e}")
 
         if self.web_dashboard and changes:
             self.web_dashboard.log(
@@ -2965,9 +2799,7 @@ class HeadlessTrainer:
             self.web_dashboard.publisher.set_performance_mode(mode)
             self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
             self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
-            self.web_dashboard.publisher.state.gradient_steps = (
-                self.config.GRADIENT_STEPS
-            )
+            self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
             self.web_dashboard.log(
                 f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE}, grad_steps={self.config.GRADIENT_STEPS})",
                 "action",
@@ -2978,9 +2810,7 @@ class HeadlessTrainer:
         """Save the model and exit the application gracefully."""
         request_save_and_stop(
             game_name=self.config.GAME_NAME,
-            save_model=lambda filename, reason: self._save_model(
-                filename, save_reason=reason
-            ),
+            save_model=lambda filename, reason: self._save_model(filename, save_reason=reason),
             set_running=self._set_running,
             dashboard=self.web_dashboard,
         )
@@ -3005,9 +2835,7 @@ class HeadlessTrainer:
         if self.web_dashboard:
             print("🌐 Web dashboard enabled")
         print("=" * 70)
-        eps_str = (
-            "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
-        )
+        eps_str = "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
         print(f"   Episodes:        {start_episode} → {eps_str}")
         print(f"   Device:          {config.DEVICE}")
         print(f"   Batch size:      {config.BATCH_SIZE}")
@@ -3022,15 +2850,11 @@ class HeadlessTrainer:
         self.training_start_time = time.time()
         last_report_time = self.training_start_time
         steps_since_report = 0
-        last_logged_episode = (
-            start_episode - 1
-        )  # Track last logged episode to prevent duplicates
+        last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         episode = start_episode
-        while self.running and (
-            config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES
-        ):
+        while self.running and (config.MAX_EPISODES == 0 or episode < config.MAX_EPISODES):
             self.current_episode = episode
 
             # Handle pause (only if web dashboard is active)
@@ -3102,16 +2926,12 @@ class HeadlessTrainer:
 
             # Calculate bricks broken
             initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
-            bricks_broken = initial_bricks - info.get(
-                "bricks_remaining", initial_bricks
-            )
+            bricks_broken = initial_bricks - info.get("bricks_remaining", initial_bricks)
 
             # Update web dashboard metrics (throttled to every 5 episodes for performance)
             # Always emit on: first 10 episodes, new best score, or every 5th episode
             is_new_best = info["score"] > getattr(self, "best_score", 0)
-            should_emit = self.web_dashboard and (
-                episode <= 10 or is_new_best or episode % 5 == 0
-            )
+            should_emit = self.web_dashboard and (episode <= 10 or is_new_best or episode % 5 == 0)
             if should_emit:
                 avg_loss = self.agent.get_average_loss(100)
 
@@ -3137,9 +2957,7 @@ class HeadlessTrainer:
                 )
                 # Update performance settings in dashboard state
                 self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                self.web_dashboard.publisher.state.gradient_steps = (
-                    config.GRADIENT_STEPS
-                )
+                self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                 self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
 
                 # Emit NN visualization data (throttled by server to ~10 FPS)
@@ -3166,14 +2984,10 @@ class HeadlessTrainer:
             if is_new_episode and (should_log_by_episode or should_log_by_time):
                 elapsed_total = current_time - self.training_start_time
                 steps_per_sec = (
-                    steps_since_report / elapsed_since_report
-                    if elapsed_since_report > 0
-                    else 0
+                    steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
                 eps_per_hour = (
-                    (episode - start_episode) / elapsed_total * 3600
-                    if elapsed_total > 0
-                    else 0
+                    (episode - start_episode) / elapsed_total * 3600 if elapsed_total > 0 else 0
                 )
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
 
@@ -3203,9 +3017,7 @@ class HeadlessTrainer:
                     f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True
                 )
                 if self.web_dashboard:
-                    self.web_dashboard.log(
-                        f"🏆 New best score: {self.best_score}", "success"
-                    )
+                    self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
 
             if episode % config.SAVE_EVERY == 0 and episode > 0:
                 self._save_model(
@@ -3248,9 +3060,7 @@ class HeadlessTrainer:
         and performing batched action selection for improved throughput.
         """
         # This method is only called when num_envs > 1, so vec_env is always set
-        assert (
-            self.vec_env is not None
-        ), "train_vectorized requires vec_env to be initialized"
+        assert self.vec_env is not None, "train_vectorized requires vec_env to be initialized"
 
         config = self.config
         num_envs = self.num_envs
@@ -3264,9 +3074,7 @@ class HeadlessTrainer:
             print("🌐 Web dashboard enabled")
         print("=" * 70)
         print(f"   Environments:    {num_envs} parallel games")
-        eps_str = (
-            "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
-        )
+        eps_str = "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
         print(f"   Episodes:        {start_episode} → {eps_str}")
         print(f"   Device:          {config.DEVICE}")
         print(f"   Batch size:      {config.BATCH_SIZE}")
@@ -3297,9 +3105,7 @@ class HeadlessTrainer:
         # Track last completed episode info for reporting
         last_score = 0
         last_info: dict = {}
-        last_logged_episode = (
-            start_episode - 1
-        )  # Track last logged episode to prevent duplicates
+        last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
         while self.running and (
@@ -3369,10 +3175,7 @@ class HeadlessTrainer:
                             )
 
                     # Track target updates (for persistence, independent of dashboard)
-                    if (
-                        self.agent.steps
-                        > self.last_target_update_step + config.TARGET_UPDATE
-                    ):
+                    if self.agent.steps > self.last_target_update_step + config.TARGET_UPDATE:
                         self.target_updates += 1
                         self.last_target_update_step = self.agent.steps
 
@@ -3380,9 +3183,7 @@ class HeadlessTrainer:
                     # Always emit on: first 10 episodes, new best score, or every 5th episode
                     is_new_best = score > self.best_score
                     should_emit_metrics = self.web_dashboard and (
-                        self.current_episode <= 10
-                        or is_new_best
-                        or self.current_episode % 5 == 0
+                        self.current_episode <= 10 or is_new_best or self.current_episode % 5 == 0
                     )
                     if should_emit_metrics:
                         initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
@@ -3407,15 +3208,9 @@ class HeadlessTrainer:
                             episode_length=int(env_episode_steps[i]),
                         )
                         # Update performance settings in dashboard state
-                        self.web_dashboard.publisher.state.learn_every = (
-                            config.LEARN_EVERY
-                        )
-                        self.web_dashboard.publisher.state.gradient_steps = (
-                            config.GRADIENT_STEPS
-                        )
-                        self.web_dashboard.publisher.state.batch_size = (
-                            config.BATCH_SIZE
-                        )
+                        self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                        self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                        self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
 
                         # Emit NN visualization data (throttled by server to ~10 FPS)
                         # Convert numpy int64 to Python int for JSON serialization
@@ -3434,10 +3229,7 @@ class HeadlessTrainer:
                     self.current_episode += 1
 
                     # Save checkpoints (no replay buffer for periodic saves - saves disk space)
-                    if (
-                        self.current_episode % config.SAVE_EVERY == 0
-                        and self.current_episode > 0
-                    ):
+                    if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
                         self._save_model(
                             f"{self.config.GAME_NAME}_ep{self.current_episode}.pth",
                             save_reason="periodic",
@@ -3460,14 +3252,10 @@ class HeadlessTrainer:
                         self.evaluator.log_results(eval_results)
 
                         # Auto-exploration boost: when plateau detected, increase epsilon
-                        if (
-                            self.evaluator.is_plateau()
-                            and not self._exploration_boost_active
-                        ):
+                        if self.evaluator.is_plateau() and not self._exploration_boost_active:
                             self._exploration_boost_active = True
                             self._exploration_boost_end_episode = (
-                                self.current_episode
-                                + config.EVAL_PLATEAU_BOOST_EPISODES
+                                self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES
                             )
                             old_epsilon = self.agent.epsilon
                             self.agent.epsilon = config.EVAL_PLATEAU_EPSILON_BOOST
@@ -3485,19 +3273,13 @@ class HeadlessTrainer:
                         # Log to web dashboard if available
                         if self.web_dashboard:
                             plateau_str = (
-                                " ⚠️ PLATEAU DETECTED"
-                                if self.evaluator.is_plateau()
-                                else ""
+                                " ⚠️ PLATEAU DETECTED" if self.evaluator.is_plateau() else ""
                             )
                             self.web_dashboard.log(
                                 f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
                                 f"max level {eval_results.max_level}, "
                                 f"{eval_results.win_rate*100:.0f}% wins{plateau_str}",
-                                (
-                                    "info"
-                                    if not self.evaluator.is_plateau()
-                                    else "warning"
-                                ),
+                                ("info" if not self.evaluator.is_plateau() else "warning"),
                             )
 
             # Decay epsilon once per step if any episodes completed
@@ -3543,9 +3325,7 @@ class HeadlessTrainer:
                 steps_since_report = 0
                 episodes_completed = 0  # Reset episodes count for accurate ep/hr
 
-            should_log_by_episode = (
-                self.current_episode - last_logged_episode
-            ) >= config.LOG_EVERY
+            should_log_by_episode = (self.current_episode - last_logged_episode) >= config.LOG_EVERY
             should_log_by_time = elapsed_since_report >= config.REPORT_INTERVAL_SECONDS
 
             # Only log if we have new episodes AND (LOG_EVERY condition OR time interval)
@@ -3554,15 +3334,9 @@ class HeadlessTrainer:
             ):
                 elapsed_total = current_time - self.training_start_time
                 steps_per_sec = (
-                    steps_since_report / elapsed_since_report
-                    if elapsed_since_report > 0
-                    else 0
+                    steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
-                eps_per_hour = (
-                    episodes_completed / elapsed_total * 3600
-                    if elapsed_total > 0
-                    else 0
-                )
+                eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
@@ -3682,9 +3456,7 @@ class HeadlessTrainer:
                 best_score=self.best_score,
             )
             if not quiet:
-                self.web_dashboard.log(
-                    f"💾 Saved: {filename} ({save_reason})", "success"
-                )
+                self.web_dashboard.log(f"💾 Saved: {filename} ({save_reason})", "success")
 
         return result is not None
 
@@ -3808,16 +3580,12 @@ def list_models(model_dir: str = "models") -> None:
     print("\n" + "=" * 80)
     print(f"📁 Saved Models in '{model_dir}/' ({len(models)} files)")
     print("=" * 80)
-    print(
-        f"{'Filename':<35} {'Episode':>8} {'Steps':>12} {'Best':>6} {'Epsilon':>8} {'Size':>8}"
-    )
+    print(f"{'Filename':<35} {'Episode':>8} {'Steps':>12} {'Best':>6} {'Epsilon':>8} {'Size':>8}")
     print("-" * 80)
 
     for model in models:
         filename = (
-            model["filename"][:33] + ".."
-            if len(model["filename"]) > 35
-            else model["filename"]
+            model["filename"][:33] + ".." if len(model["filename"]) > 35 else model["filename"]
         )
 
         # Get metadata if available
@@ -3841,9 +3609,7 @@ def list_models(model_dir: str = "models") -> None:
         best_str = str(best)
         eps_str = f"{epsilon:.3f}" if isinstance(epsilon, float) else str(epsilon)
 
-        print(
-            f"{filename:<35} {ep_str:>8} {steps_str:>12} {best_str:>6} {eps_str:>8} {size_mb:>8}"
-        )
+        print(f"{filename:<35} {ep_str:>8} {steps_str:>12} {best_str:>6} {eps_str:>8} {size_mb:>8}")
 
     print("=" * 80)
     print(f"\nUse --inspect <path> to see detailed info about a specific model.\n")
@@ -3988,9 +3754,7 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
         args.human = True
 
     dashboard.launcher_mode = False
-    dashboard.socketio.emit(
-        "game_ready", {"game": selected_game, "mode": selected_mode}
-    )
+    dashboard.socketio.emit("game_ready", {"game": selected_game, "mode": selected_mode})
 
     # Game loop - supports returning to menu
     while True:
@@ -4030,9 +3794,7 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
                         f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted"
                     )
                     if app.web_dashboard:
-                        app.web_dashboard.log(
-                            "⛔ Training interrupted by user", "warning"
-                        )
+                        app.web_dashboard.log("⛔ Training interrupted by user", "warning")
             break  # Exit on keyboard interrupt
 
         if not return_to_menu:
@@ -4073,9 +3835,7 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
         args.human = selected_mode == "human"
 
         dashboard.launcher_mode = False
-        dashboard.socketio.emit(
-            "game_ready", {"game": selected_game, "mode": selected_mode}
-        )
+        dashboard.socketio.emit("game_ready", {"game": selected_game, "mode": selected_mode})
 
     # Clean up resources
     if dashboard:
@@ -4104,9 +3864,7 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     print("\n" + "=" * 60)
     print("🎮 NEURAL NETWORK AI - GAME LAUNCHER")
     print("=" * 60)
-    print(
-        f"\n🌐 Open http://{getattr(args, 'host', '127.0.0.1')}:{args.port} to select a game\n"
-    )
+    print(f"\n🌐 Open http://{getattr(args, 'host', '127.0.0.1')}:{args.port} to select a game\n")
 
     # Track selected game
     selected_game = None
@@ -4177,9 +3935,7 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
             trainer.train()
         except KeyboardInterrupt:
             print("\n\n⛔ Training interrupted by user")
-            trainer._save_model(
-                f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted"
-            )
+            trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
         finally:
             # Clean up web dashboard
             if dashboard:
@@ -4288,15 +4044,11 @@ def main():
         return
 
     # Show game selection menu if requested OR if no game specified (visual mode only)
-    show_menu = (hasattr(args, "menu") and args.menu) or (
-        args.game is None and not args.headless
-    )
+    show_menu = (hasattr(args, "menu") and args.menu) or (args.game is None and not args.headless)
 
     if show_menu:
         pygame.init()
-        menu_screen = pygame.display.set_mode(
-            (config.SCREEN_WIDTH, config.SCREEN_HEIGHT)
-        )
+        menu_screen = pygame.display.set_mode((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
         pygame.display.set_caption("🧠 Neural Network AI - Game Selection")
         menu_clock = pygame.time.Clock()
 
@@ -4358,9 +4110,7 @@ def main():
             trainer.train()
         except KeyboardInterrupt:
             print("\n\n⛔ Training interrupted by user")
-            trainer._save_model(
-                f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted"
-            )
+            trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
         finally:
             # Clean up web dashboard if running
             if trainer.web_dashboard:
@@ -4424,9 +4174,7 @@ def main():
         except KeyboardInterrupt:
             print("\n\n⛔ Training interrupted by user")
             if app:
-                app._save_model(
-                    f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted"
-                )
+                app._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
                 if app.web_dashboard:
                     app.web_dashboard.log("⛔ Training interrupted by user", "warning")
             break

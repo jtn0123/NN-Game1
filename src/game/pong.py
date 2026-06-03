@@ -21,7 +21,7 @@ import numpy as np
 import pygame
 from typing import Tuple, List, Optional
 
-from .base_game import BaseGame
+from .base_game import BaseGame, step_vector_env_no_copy
 from config import Config
 
 
@@ -156,9 +156,7 @@ class Pong(BaseGame):
         self.height = self.config.SCREEN_HEIGHT
 
         # AI difficulty
-        ai_settings = self.AI_SKILL_LEVELS.get(
-            ai_difficulty, self.AI_SKILL_LEVELS["medium"]
-        )
+        ai_settings = self.AI_SKILL_LEVELS.get(ai_difficulty, self.AI_SKILL_LEVELS["medium"])
         self.ai_error = ai_settings["error"]
         self.ai_reaction = ai_settings["reaction"]
         self.ai_speed_mult = ai_settings["speed_mult"]
@@ -247,9 +245,7 @@ class Pong(BaseGame):
         )
 
         # Create ball at center
-        self.ball = PongBall(
-            self.width / 2, self.height / 2, self.BALL_RADIUS, self.BALL_SPEED
-        )
+        self.ball = PongBall(self.width / 2, self.height / 2, self.BALL_RADIUS, self.BALL_SPEED)
         # Alternate starting direction
         direction = 1 if np.random.random() > 0.5 else -1
         self.ball.reset(self.width / 2, self.height / 2, direction=direction)
@@ -371,9 +367,7 @@ class Pong(BaseGame):
             return self.ball.y
 
         # Simple prediction
-        time_to_target = (
-            self.ai_paddle.x + self.ai_paddle.width - self.ball.x
-        ) / self.ball.dx
+        time_to_target = (self.ai_paddle.x + self.ai_paddle.width - self.ball.x) / self.ball.dx
         if time_to_target >= 0:
             return self.ball.y
 
@@ -526,9 +520,7 @@ class Pong(BaseGame):
         predicted_y = self._cached_predicted_y * self._inv_height
 
         # Signed distance to predicted landing (preserves direction info)
-        distance_to_pred = (
-            self._cached_predicted_y - paddle_center_y
-        ) * self._inv_height
+        distance_to_pred = (self._cached_predicted_y - paddle_center_y) * self._inv_height
         # Map from [-0.5, 0.5] to [0, 1] while preserving sign info
         distance_to_pred = distance_to_pred + 0.5
         distance_to_pred = max(0.0, min(1.0, distance_to_pred))
@@ -642,14 +634,10 @@ class Pong(BaseGame):
 
             # Player label and score (right)
             player_label = self._label_font.render("YOU", True, (150, 200, 150))
-            screen.blit(
-                player_label, (3 * self.width // 4 - player_label.get_width() // 2, 15)
-            )
+            screen.blit(player_label, (3 * self.width // 4 - player_label.get_width() // 2, 15))
 
             player_text = self._font.render(str(self.player_score), True, score_color)
-            screen.blit(
-                player_text, (3 * self.width // 4 - player_text.get_width() // 2, 35)
-            )
+            screen.blit(player_text, (3 * self.width // 4 - player_text.get_width() // 2, 35))
 
             # Rally counter
             if self.rally_count > 0 and self._small_font:
@@ -669,9 +657,7 @@ class Pong(BaseGame):
         if self._small_font:
             if self.player_score == self.WIN_SCORE - 1:
                 mp_text = self._small_font.render("MATCH POINT!", True, (100, 255, 100))
-                screen.blit(
-                    mp_text, (self.width - mp_text.get_width() - 10, self.height - 30)
-                )
+                screen.blit(mp_text, (self.width - mp_text.get_width() - 10, self.height - 30))
             elif self.ai_score == self.WIN_SCORE - 1:
                 mp_text = self._small_font.render("MATCH POINT!", True, (255, 100, 100))
                 screen.blit(mp_text, (10, self.height - 30))
@@ -749,9 +735,7 @@ class VecPong:
             self._states[i] = env.reset()
         return self._states.copy()
 
-    def step(
-        self, actions: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments with batched actions."""
         infos = []
 
@@ -776,6 +760,12 @@ class VecPong:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos
+
+    def step_no_copy(
+        self, actions: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step all environments and return reusable internal buffers."""
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def close(self) -> None:
         """Clean up all environments."""

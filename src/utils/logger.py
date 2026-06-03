@@ -114,9 +114,7 @@ def setup_logging(
         log_path = _log_dir / log_filename
         _file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
         _file_handler.setLevel(logging.DEBUG)  # Capture everything in file
-        file_fmt = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-        )
+        file_fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
         _file_handler.setFormatter(file_fmt)
         root_logger.addHandler(_file_handler)
 

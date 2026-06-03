@@ -36,9 +36,7 @@ class TestDataFlowPulse:
 
     def test_initialization(self):
         """DataFlowPulse should initialize with correct properties."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.1
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.1)
         assert pulse.start == (0, 0)
         assert pulse.end == (100, 100)
         assert pulse.color == (255, 0, 0)
@@ -48,18 +46,14 @@ class TestDataFlowPulse:
 
     def test_update_increments_progress(self):
         """Update should increment progress by speed."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.1
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.1)
         pulse.update()
         assert pulse.progress == pytest.approx(0.1)
         assert pulse.alive is True
 
     def test_pulse_dies_at_end(self):
         """Pulse should die when progress reaches 1.0."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.5
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.5)
         pulse.update()  # 0.5
         assert pulse.alive is True
         pulse.update()  # 1.0
@@ -67,9 +61,7 @@ class TestDataFlowPulse:
 
     def test_position_interpolation(self):
         """Position should interpolate between start and end."""
-        pulse = DataFlowPulse(
-            start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.5
-        )
+        pulse = DataFlowPulse(start_pos=(0, 0), end_pos=(100, 100), color=(255, 0, 0), speed=0.5)
         # At start
         assert pulse.position == (0, 0)
 

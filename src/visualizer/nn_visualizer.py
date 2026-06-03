@@ -101,9 +101,7 @@ class NeuralNetVisualizer:
         # Visualization parameters
         self.neuron_radius = self.config.VIS_NEURON_RADIUS
         self.max_neurons = self.config.VIS_MAX_NEURONS_DISPLAY
-        self.fast_mode = (
-            self.config.VIS_FAST_MODE
-        )  # Skip glow/highlight for performance
+        self.fast_mode = self.config.VIS_FAST_MODE  # Skip glow/highlight for performance
 
         # Enhanced color palette
         self.bg_color = (12, 12, 24)
@@ -218,9 +216,7 @@ class NeuralNetVisualizer:
         self._draw_pulses(screen)
 
         # Draw neurons with smooth activation coloring
-        self._draw_neurons(
-            screen, layer_positions, layer_info, smoothed_activations, state
-        )
+        self._draw_neurons(screen, layer_positions, layer_info, smoothed_activations, state)
 
         # Draw layer labels
         self._draw_layer_labels(screen, layer_positions, layer_info)
@@ -234,9 +230,7 @@ class NeuralNetVisualizer:
         # Update animation phase
         self.pulse_phase = (self.pulse_phase + 0.08) % (2 * math.pi)
 
-    def _smooth_activations(
-        self, activations: Dict[str, np.ndarray]
-    ) -> Dict[str, np.ndarray]:
+    def _smooth_activations(self, activations: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Interpolate activations for smoother animation."""
         smoothed = {}
 
@@ -271,15 +265,9 @@ class NeuralNetVisualizer:
         self._cached_gradient = pygame.Surface((self.width, self.height))
         for i in range(self.height):
             progress = i / self.height
-            r = int(
-                self.bg_color[0] + (self.panel_color[0] - self.bg_color[0]) * progress
-            )
-            g = int(
-                self.bg_color[1] + (self.panel_color[1] - self.bg_color[1]) * progress
-            )
-            b = int(
-                self.bg_color[2] + (self.panel_color[2] - self.bg_color[2]) * progress
-            )
+            r = int(self.bg_color[0] + (self.panel_color[0] - self.bg_color[0]) * progress)
+            g = int(self.bg_color[1] + (self.panel_color[1] - self.bg_color[1]) * progress)
+            b = int(self.bg_color[2] + (self.panel_color[2] - self.bg_color[2]) * progress)
             pygame.draw.line(self._cached_gradient, (r, g, b), (0, i), (self.width, i))
 
     def _draw_background(self, screen: pygame.Surface) -> None:
@@ -318,9 +306,7 @@ class NeuralNetVisualizer:
         screen.blit(sub_text, (self.x + 10, row2_y))
 
         # Training step counter (right side of second row)
-        step_text = self.font_small.render(
-            f"Step: {agent.steps:,}", True, (120, 120, 140)
-        )
+        step_text = self.font_small.render(f"Step: {agent.steps:,}", True, (120, 120, 140))
         step_rect = step_text.get_rect(right=self.x + self.width - 10, top=row2_y)
         screen.blit(step_text, step_rect)
 
@@ -404,9 +390,7 @@ class NeuralNetVisualizer:
                         )
                     )
                     to_sample = list(
-                        np.random.choice(
-                            to_indices, size=min(10, len(to_indices)), replace=False
-                        )
+                        np.random.choice(to_indices, size=min(10, len(to_indices)), replace=False)
                     )
                     np.random.set_state(rng_state)  # Restore random state
                 else:
@@ -468,10 +452,7 @@ class NeuralNetVisualizer:
 
         # Spawn new pulses periodically
         self.pulse_spawn_timer += 1
-        if (
-            self.pulse_spawn_timer >= self.pulse_spawn_interval
-            and len(layer_positions) > 1
-        ):
+        if self.pulse_spawn_timer >= self.pulse_spawn_interval and len(layer_positions) > 1:
             self.pulse_spawn_timer = 0
 
             # Spawn pulses from active neurons
@@ -497,9 +478,7 @@ class NeuralNetVisualizer:
 
                         # Color based on activation
                         intensity = min(1.0, act_level * 2)
-                        color = self._interpolate_color(
-                            (60, 80, 120), (100, 255, 180), intensity
-                        )
+                        color = self._interpolate_color((60, 80, 120), (100, 255, 180), intensity)
 
                         pulse = DataFlowPulse(from_pos, to_pos, color, speed=0.08)
                         self.pulses.append(pulse)
@@ -568,9 +547,7 @@ class NeuralNetVisualizer:
 
                 if self.fast_mode:
                     # Fast mode: simple filled circle, no effects
-                    self._draw_aa_circle(
-                        screen, color, (int(pos[0]), int(pos[1])), radius
-                    )
+                    self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
                 else:
                     # Full quality mode with all effects
                     # Pulse effect for highly active neurons
@@ -592,9 +569,7 @@ class NeuralNetVisualizer:
                         )
 
                     # Draw neuron body with anti-aliasing
-                    self._draw_aa_circle(
-                        screen, color, (int(pos[0]), int(pos[1])), radius
-                    )
+                    self._draw_aa_circle(screen, color, (int(pos[0]), int(pos[1])), radius)
 
                     # Draw highlight (3D effect) with anti-aliasing
                     highlight_pos = (
@@ -607,9 +582,7 @@ class NeuralNetVisualizer:
                         min(255, color[1] + 50),
                         min(255, color[2] + 50),
                     )
-                    self._draw_aa_circle(
-                        screen, highlight_color, highlight_pos, highlight_radius
-                    )
+                    self._draw_aa_circle(screen, highlight_color, highlight_pos, highlight_radius)
 
                     # Draw anti-aliased border
                     self._draw_aa_circle(
@@ -626,9 +599,7 @@ class NeuralNetVisualizer:
                 text = self.font_small.render(
                     f"+{info['neurons'] - layer_pos['neurons']}", True, (100, 100, 120)
                 )
-                text_rect = text.get_rect(
-                    centerx=int(layer_pos["x"]), centery=int(ellipsis_y)
-                )
+                text_rect = text.get_rect(centerx=int(layer_pos["x"]), centery=int(ellipsis_y))
                 screen.blit(text, text_rect)
 
     def _draw_layer_labels(
@@ -664,9 +635,7 @@ class NeuralNetVisualizer:
             count_text = self.font_small.render(
                 f"({layer_pos['actual_neurons']})", True, (150, 150, 170)
             )
-            count_rect = count_text.get_rect(
-                centerx=int(layer_pos["x"]), top=label_y + 14
-            )
+            count_rect = count_text.get_rect(centerx=int(layer_pos["x"]), top=label_y + 14)
             screen.blit(count_text, count_rect)
 
     def _draw_q_values(
@@ -721,9 +690,7 @@ class NeuralNetVisualizer:
             bar_height = int(self._prev_bar_heights[i])
 
             # Determine if this is the selected/best action
-            is_selected = (i == selected_action) or (
-                selected_action is None and i == best_action
-            )
+            is_selected = (i == selected_action) or (selected_action is None and i == best_action)
 
             if is_selected:
                 # Animated selected action
@@ -820,12 +787,8 @@ class NeuralNetVisualizer:
             # Add slight offset lines for thickness effect
             if thickness >= 2:
                 for offset in range(1, thickness):
-                    pygame.draw.aaline(
-                        screen, color, (x1, y1 + offset), (x2, y2 + offset)
-                    )
-                    pygame.draw.aaline(
-                        screen, color, (x1, y1 - offset), (x2, y2 - offset)
-                    )
+                    pygame.draw.aaline(screen, color, (x1, y1 + offset), (x2, y2 + offset))
+                    pygame.draw.aaline(screen, color, (x1, y1 - offset), (x2, y2 - offset))
 
 
 # Testing

@@ -1422,6 +1422,10 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function escapeHtmlAttribute(text) {
+    return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ============================================================
 // CONTROL FUNCTIONS
 // ============================================================
@@ -1796,8 +1800,9 @@ function showLoadModal() {
                 
                 // Escape model name and id to prevent XSS
                 const safeName = escapeHtml(model.name);
+                const safeNameForAttr = escapeHtmlAttribute(model.name);
                 const modelId = DashboardCore.modelId(model);
-                const safeIdForJs = modelId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                const safeIdForAttr = escapeHtmlAttribute(modelId);
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
                 
                 // Reason badge (reason is from our own metadata, but escape anyway)
@@ -1806,7 +1811,7 @@ function showLoadModal() {
                 
                 return `
                     <div class="model-item">
-                        <div class="model-item-content" onclick="loadModel('${safeIdForJs}')">
+                        <div class="model-item-content" data-action="load-model" data-model-id="${safeIdForAttr}">
                             <div class="model-header">
                                 <div class="model-name">
                                     📁 ${safeName}
@@ -1834,7 +1839,7 @@ function showLoadModal() {
                             </div>
                             <div class="model-date">${safeModifiedStr}</div>
                         </div>
-                        <button class="model-delete-btn" onclick="event.stopPropagation(); deleteModel('${safeIdForJs}', '${safeName}')" title="Delete this model">
+                        <button class="model-delete-btn" data-action="delete-model" data-model-id="${safeIdForAttr}" data-model-name="${safeNameForAttr}" title="Delete this model">
                             🗑️
                         </button>
                     </div>
@@ -1898,6 +1903,36 @@ function deleteModel(modelId, name) {
 
 // Close modal on outside click (click on backdrop, not content)
 document.addEventListener('click', (e) => {
+    const actionTarget = e.target.closest('[data-action]');
+    if (actionTarget) {
+        const action = actionTarget.dataset.action;
+        if (action === 'load-model') {
+            loadModel(actionTarget.dataset.modelId);
+            return;
+        }
+        if (action === 'delete-model') {
+            e.stopPropagation();
+            deleteModel(actionTarget.dataset.modelId, actionTarget.dataset.modelName);
+            return;
+        }
+        if (action === 'copy-restart-command') {
+            copyRestartCommand(e);
+            return;
+        }
+        if (action === 'close-restart-banner') {
+            closeRestartBanner();
+            return;
+        }
+        if (action === 'close-neuron-inspection') {
+            closeNeuronInspection();
+            return;
+        }
+        if (action === 'close-layer-analysis') {
+            closeLayerAnalysis();
+            return;
+        }
+    }
+
     // Check if click was directly on an element with 'modal' class
     if (e.target.classList && e.target.classList.contains('modal')) {
         hideLoadModal();
@@ -2626,7 +2661,7 @@ function showRestartBanner(game, command) {
             <code id="restart-command" style="color: #64b5f6; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; word-break: break-all;">${escapeHtml(command)}</code>
         </div>
         <div style="display: flex; gap: 12px; justify-content: center;">
-            <button onclick="copyRestartCommand(event)" style="
+            <button data-action="copy-restart-command" style="
                 background: #4caf50;
                 border: none;
                 color: white;
@@ -2635,7 +2670,7 @@ function showRestartBanner(game, command) {
                 cursor: pointer;
                 font-weight: 500;
             ">📋 Copy Command</button>
-            <button onclick="closeRestartBanner()" style="
+            <button data-action="close-restart-banner" style="
                 background: #2a2e3d;
                 border: 1px solid #3a3e4d;
                 color: #e4e6f0;
@@ -2658,7 +2693,7 @@ function showRestartBanner(game, command) {
         background: rgba(0,0,0,0.7);
         z-index: 9999;
     `;
-    overlay.onclick = closeRestartBanner;
+    overlay.addEventListener('click', closeRestartBanner);
     
     document.body.appendChild(overlay);
     document.body.appendChild(banner);
@@ -2933,7 +2968,7 @@ class NeuralNetworkVisualizer {
         const html = `
             <div class="neuron-header">
                 <h3>${neuronData.layer_name} - Neuron #${neuronData.neuron_idx}</h3>
-                <button class="close-btn" onclick="closeNeuronInspection()">×</button>
+                <button class="close-btn" data-action="close-neuron-inspection">×</button>
             </div>
 
             <div class="neuron-content">
@@ -3113,7 +3148,7 @@ class NeuralNetworkVisualizer {
         const html = `
             <div class="layer-header">
                 <h3>${layerData.layer_name || `Layer ${layerData.layer_idx}`}</h3>
-                <button class="close-btn" onclick="closeLayerAnalysis()">×</button>
+                <button class="close-btn" data-action="close-layer-analysis">×</button>
             </div>
 
             <div class="layer-content">

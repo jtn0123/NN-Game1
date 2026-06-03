@@ -1,31 +1,8 @@
-# Neural Network Game AI - Dependencies
-# Install with: pip install -r requirements.txt
+# Compatibility shim for the historical setup command:
+#     pip install -r requirements.txt
+#
+# Project dependencies now live in pyproject.toml. This installs the app with
+# web, test, and dev extras so old setup instructions still produce a complete
+# local development environment.
 
-# Core Deep Learning
-torch>=2.0.0              # PyTorch - Neural network framework
-numpy>=1.24.0             # Numerical computing
-
-# Game Engine
-pygame>=2.5.0             # Game development and visualization
-
-# Visualization & Metrics
-matplotlib>=3.7.0         # Plotting training curves
-Pillow>=10.0.0            # Image processing for screenshots
-
-# Web Dashboard
-flask>=3.0.0              # Web framework
-flask-socketio>=5.3.0     # WebSocket support for real-time updates
-eventlet>=0.35.0          # Async server for SocketIO
-
-# Utilities
-tqdm>=4.65.0              # Progress bars
-dataclasses-json>=0.6.0   # Easy config serialization
-
-# Testing (optional)
-pytest>=7.0.0             # Unit testing framework
-pytest-cov>=4.0.0         # Code coverage
-
-# Development (optional)
-black>=23.0.0             # Code formatting
-mypy>=1.0.0               # Type checking
-
+-e .[web,test,dev]

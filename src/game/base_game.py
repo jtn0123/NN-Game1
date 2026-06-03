@@ -13,7 +13,8 @@ To add a new game:
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import List, Protocol, Sequence, Tuple
+
 import numpy as np
 
 
@@ -108,3 +109,55 @@ class BaseGame(ABC):
     def seed(self, seed: int) -> None:
         """Set random seed for reproducibility. Override if game has randomness."""
         pass
+
+
+class BaseVecGame(Protocol):
+    """Protocol for vectorized game environments used by headless training."""
+
+    envs: List[BaseGame]
+
+    def reset(self) -> np.ndarray:
+        """Reset every environment and return batched states."""
+        ...
+
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step every environment with one action per environment."""
+        ...
+
+    def step_no_copy(
+        self, actions: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step every environment and return reusable internal buffers when supported."""
+        ...
+
+    def close(self) -> None:
+        """Clean up every environment."""
+        ...
+
+    def seed(self, seeds: List[int]) -> None:
+        """Seed every environment."""
+        ...
+
+
+def step_vector_env_no_copy(
+    envs: Sequence[BaseGame],
+    states: np.ndarray,
+    rewards: np.ndarray,
+    dones: np.ndarray,
+    actions: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    """Step vectorized envs and return reusable internal buffers."""
+    infos = []
+
+    for i, (env, action) in enumerate(zip(envs, actions)):
+        next_state, reward, done, info = env.step(int(action))
+
+        states[i] = next_state
+        rewards[i] = reward
+        dones[i] = done
+        infos.append(info)
+
+        if done:
+            env.reset()
+
+    return states, rewards, dones, infos

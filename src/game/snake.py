@@ -22,7 +22,7 @@ import pygame
 from typing import Tuple, List, Optional, Deque
 from collections import deque
 
-from .base_game import BaseGame
+from .base_game import BaseGame, step_vector_env_no_copy
 from .particles import ParticleSystem
 from config import Config
 
@@ -112,9 +112,7 @@ class Snake(BaseGame):
 
         # Pre-allocated arrays - use 405 features (grid + 5 metadata)
         self._grid = np.zeros((self.GRID_SIZE, self.GRID_SIZE), dtype=np.float32)
-        self._state_array = np.zeros(
-            self.GRID_SIZE * self.GRID_SIZE + 5, dtype=np.float32
-        )
+        self._state_array = np.zeros(self.GRID_SIZE * self.GRID_SIZE + 5, dtype=np.float32)
 
         # Normalization constants
         self._inv_grid_size = 1.0 / self.GRID_SIZE
@@ -301,16 +299,8 @@ class Snake(BaseGame):
 
             # Death particles
             if not self.headless:
-                px = (
-                    self.grid_offset_x
-                    + new_head[1] * self.CELL_SIZE
-                    + self.CELL_SIZE // 2
-                )
-                py = (
-                    self.grid_offset_y
-                    + new_head[0] * self.CELL_SIZE
-                    + self.CELL_SIZE // 2
-                )
+                px = self.grid_offset_x + new_head[1] * self.CELL_SIZE + self.CELL_SIZE // 2
+                py = self.grid_offset_y + new_head[0] * self.CELL_SIZE + self.CELL_SIZE // 2
                 self.particles.emit_brick_break(px, py, (255, 50, 50), count=30)
 
             return self.get_state(), reward, True, self._get_info()
@@ -326,16 +316,8 @@ class Snake(BaseGame):
 
             # Food eaten particles
             if not self.headless:
-                px = (
-                    self.grid_offset_x
-                    + new_head[1] * self.CELL_SIZE
-                    + self.CELL_SIZE // 2
-                )
-                py = (
-                    self.grid_offset_y
-                    + new_head[0] * self.CELL_SIZE
-                    + self.CELL_SIZE // 2
-                )
+                px = self.grid_offset_x + new_head[1] * self.CELL_SIZE + self.CELL_SIZE // 2
+                py = self.grid_offset_y + new_head[0] * self.CELL_SIZE + self.CELL_SIZE // 2
                 self.particles.emit_brick_break(px, py, (50, 255, 100), count=20)
 
             self._spawn_food()
@@ -350,9 +332,7 @@ class Snake(BaseGame):
             self.steps_since_food += 1
 
             # Distance-based reward shaping
-            new_dist = abs(new_head[0] - self.food_pos[0]) + abs(
-                new_head[1] - self.food_pos[1]
-            )
+            new_dist = abs(new_head[0] - self.food_pos[0]) + abs(new_head[1] - self.food_pos[1])
             if new_dist < old_dist:
                 reward += 0.1  # Moving closer to food
 
@@ -405,9 +385,7 @@ class Snake(BaseGame):
             self._state_array[base_idx + 2] = 0.0
 
         # Steps since food (hunger pressure)
-        self._state_array[base_idx + 3] = min(
-            1.0, self.steps_since_food * self._inv_max_steps
-        )
+        self._state_array[base_idx + 3] = min(1.0, self.steps_since_food * self._inv_max_steps)
 
         # Snake length (normalized)
         self._state_array[base_idx + 4] = len(self.snake) * self._inv_max_length
@@ -436,16 +414,8 @@ class Snake(BaseGame):
 
         # Draw food with glow/pulse
         if self.food_pos != (-1, -1):
-            fx = (
-                self.grid_offset_x
-                + self.food_pos[1] * self.CELL_SIZE
-                + self.CELL_SIZE // 2
-            )
-            fy = (
-                self.grid_offset_y
-                + self.food_pos[0] * self.CELL_SIZE
-                + self.CELL_SIZE // 2
-            )
+            fx = self.grid_offset_x + self.food_pos[1] * self.CELL_SIZE + self.CELL_SIZE // 2
+            fy = self.grid_offset_y + self.food_pos[0] * self.CELL_SIZE + self.CELL_SIZE // 2
 
             # Pulsing glow (pre-computed phase)
             pulse = abs(np.sin(self._food_pulse_phase)) * 0.5 + 0.5
@@ -481,18 +451,14 @@ class Snake(BaseGame):
                 y = self.grid_offset_y + row * self.CELL_SIZE
 
                 # Body segment
-                segment_rect = pygame.Rect(
-                    x + 2, y + 2, self.CELL_SIZE - 4, self.CELL_SIZE - 4
-                )
+                segment_rect = pygame.Rect(x + 2, y + 2, self.CELL_SIZE - 4, self.CELL_SIZE - 4)
                 pygame.draw.rect(screen, color, segment_rect, border_radius=4)
 
                 # Head has extra glow and eyes
                 if i == 0:
                     # Glow around head
                     glow_rect = pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE)
-                    pygame.draw.rect(
-                        screen, (80, 200, 80), glow_rect, 2, border_radius=5
-                    )
+                    pygame.draw.rect(screen, (80, 200, 80), glow_rect, 2, border_radius=5)
 
                     # Eyes based on direction
                     dy, dx = self.DIRECTION_VECTORS[self.direction]
@@ -551,9 +517,7 @@ class Snake(BaseGame):
         # Draw HUD
         if self._font:
             # Score
-            score_text = self._font.render(
-                f"Score: {self.score}", True, (200, 255, 200)
-            )
+            score_text = self._font.render(f"Score: {self.score}", True, (200, 255, 200))
             screen.blit(score_text, (10, 10))
 
             # Length
@@ -578,13 +542,9 @@ class Snake(BaseGame):
                 bar_height = 8
                 bar_x = self.screen_width - bar_width - 10
                 bar_y = 15
-                pygame.draw.rect(
-                    screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height)
-                )
+                pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_width, bar_height))
                 fill_width = int(bar_width * (1 - hunger_pct))
-                pygame.draw.rect(
-                    screen, hunger_color, (bar_x, bar_y, fill_width, bar_height)
-                )
+                pygame.draw.rect(screen, hunger_color, (bar_x, bar_y, fill_width, bar_height))
 
                 hunger_label = self._small_font.render("Energy", True, (150, 150, 150))
                 screen.blit(hunger_label, (bar_x, bar_y + 12))
@@ -599,9 +559,7 @@ class Snake(BaseGame):
                 color = (255, 100, 100)
 
             text = self._font.render(msg, True, color)
-            text_rect = text.get_rect(
-                center=(self.screen_width // 2, self.screen_height // 2)
-            )
+            text_rect = text.get_rect(center=(self.screen_width // 2, self.screen_height // 2))
 
             # Background box (solid, no alpha)
             box_rect = text_rect.inflate(40, 20)
@@ -677,9 +635,7 @@ class VecSnake:
             self._states[i] = env.reset()
         return self._states.copy()
 
-    def step(
-        self, actions: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments with batched actions."""
         infos = []
 
@@ -704,6 +660,12 @@ class VecSnake:
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos
+
+    def step_no_copy(
+        self, actions: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+        """Step all environments and return reusable internal buffers."""
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def close(self) -> None:
         """Clean up all environments."""

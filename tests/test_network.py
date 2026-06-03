@@ -29,9 +29,7 @@ def config():
 @pytest.fixture
 def network(config):
     """Create network instance."""
-    return DQN(
-        state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-    )
+    return DQN(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
 
 class TestNetworkInitialization:
@@ -39,9 +37,7 @@ class TestNetworkInitialization:
 
     def test_network_creates_successfully(self, config):
         """Network should initialize without errors."""
-        net = DQN(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        net = DQN(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
         assert net is not None
 
     def test_correct_input_size(self, network, config):
@@ -305,9 +301,7 @@ class TestDuelingDQN:
         assert net.value_output.weight.grad is not None
         assert net.advantage_output.weight.grad is not None
 
-    def test_dueling_dqn_get_weights_includes_output_streams(
-        self, dueling_network, config
-    ):
+    def test_dueling_dqn_get_weights_includes_output_streams(self, dueling_network, config):
         """Dueling visualization weights should include stream output layers."""
         weights = dueling_network.get_weights()
         expected_count = len(dueling_network.feature_layers) + 4
@@ -316,9 +310,7 @@ class TestDuelingDQN:
         assert weights[-2].shape == (1, config.HIDDEN_LAYERS[-1])
         assert weights[-1].shape == (config.ACTION_SIZE, config.HIDDEN_LAYERS[-1])
 
-    def test_dueling_dqn_captures_stream_output_activations(
-        self, dueling_network, config
-    ):
+    def test_dueling_dqn_captures_stream_output_activations(self, dueling_network, config):
         """Dueling output stream activations should be available for inspection."""
         dueling_network.capture_activations = True
         _ = dueling_network(torch.randn(1, config.STATE_SIZE))
@@ -389,12 +381,9 @@ class TestNoisyLinear:
 
         # Compute expected weight using the noisy formula
         expected_weight = (
-            noisy_layer.weight_mu
-            + noisy_layer.weight_sigma * noisy_layer.weight_epsilon
+            noisy_layer.weight_mu + noisy_layer.weight_sigma * noisy_layer.weight_epsilon
         )
-        expected_bias = (
-            noisy_layer.bias_mu + noisy_layer.bias_sigma * noisy_layer.bias_epsilon
-        )
+        expected_bias = noisy_layer.bias_mu + noisy_layer.bias_sigma * noisy_layer.bias_epsilon
 
         # Verify the formula by computing output manually vs using forward pass
         x = torch.randn(1, 64)

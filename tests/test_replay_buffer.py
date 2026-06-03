@@ -213,9 +213,7 @@ class TestReplayBufferSampleNoCopy:
         assert states.shape == (batch_size, state_size)
         assert actions.shape == (batch_size,)
 
-    def test_sample_no_copy_shares_memory_with_buffer(
-        self, buffer, sample_experience, state_size
-    ):
+    def test_sample_no_copy_shares_memory_with_buffer(self, buffer, sample_experience, state_size):
         """sample_no_copy arrays should share memory with buffer storage."""
         for i in range(50):
             state = np.ones(state_size, dtype=np.float32) * i
@@ -301,9 +299,7 @@ class TestPrioritizedReplayBuffer:
         assert per_buffer.priorities[0] == per_buffer.max_priority
         assert len(per_buffer) == 1
 
-    def test_per_sample_returns_indices_and_weights(
-        self, per_buffer, sample_experience
-    ):
+    def test_per_sample_returns_indices_and_weights(self, per_buffer, sample_experience):
         """PER sample should return indices and weights."""
         for _ in range(50):
             state, action, reward, next_state, done = sample_experience()
@@ -388,9 +384,7 @@ class TestNStepReplayBuffer:
     @pytest.fixture
     def n_step_buffer(self, state_size):
         """Create an N-step replay buffer with n=3."""
-        return NStepReplayBuffer(
-            capacity=100, state_size=state_size, n_steps=3, gamma=0.99
-        )
+        return NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.99)
 
     def test_n_step_creates_successfully(self):
         """N-step buffer should initialize without errors."""
@@ -464,9 +458,7 @@ class TestNStepReplayBuffer:
 
     def test_n_step_no_early_termination(self, state_size):
         """When no early termination, buffer should use N-th state correctly."""
-        buffer = NStepReplayBuffer(
-            capacity=100, state_size=state_size, n_steps=3, gamma=0.9
-        )
+        buffer = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.9)
 
         # Push 4 experiences without early termination until the end
         states = []
@@ -487,9 +479,7 @@ class TestNStepReplayBuffer:
 
     def test_n_step_multiple_episodes(self, state_size):
         """Buffer should handle multiple episodes correctly."""
-        buffer = NStepReplayBuffer(
-            capacity=100, state_size=state_size, n_steps=3, gamma=0.99
-        )
+        buffer = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.99)
 
         # Episode 1: 2 steps then done
         for i in range(2):
@@ -561,9 +551,7 @@ class TestReplayBufferEdgeCases:
 class TestPrioritizedReplayBufferEdgeCases:
     """Test PER edge cases and validation."""
 
-    def test_per_sample_with_batch_larger_than_buffer(
-        self, state_size, sample_experience
-    ):
+    def test_per_sample_with_batch_larger_than_buffer(self, state_size, sample_experience):
         """PER should use replacement when batch > buffer size."""
         buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
         # Add only 5 experiences
@@ -801,9 +789,7 @@ class TestPushBatchCircularWrapping:
         buffer = ReplayBuffer(capacity=10, state_size=state_size)
 
         # Push batch of 15 experiences (larger than capacity)
-        batch_states = (
-            np.arange(15).reshape(15, 1).repeat(state_size, axis=1).astype(np.float32)
-        )
+        batch_states = np.arange(15).reshape(15, 1).repeat(state_size, axis=1).astype(np.float32)
         batch_actions = np.arange(15) % 3
         batch_rewards = np.arange(15, dtype=np.float32)
         batch_next_states = batch_states.copy()

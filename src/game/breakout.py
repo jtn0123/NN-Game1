@@ -29,9 +29,7 @@ from config import Config
 class Brick:
     """Represents a single brick in the game."""
 
-    def __init__(
-        self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]
-    ):
+    def __init__(self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]):
         self.rect = pygame.Rect(x, y, width, height)
         self.color = color
         self.alive = True
@@ -162,9 +160,7 @@ class Breakout(BaseGame):
         # Pre-computed normalization constants for get_state() (avoids division per call)
         self._inv_width = 1.0 / self.width
         self._inv_height = 1.0 / self.height
-        self._max_speed = max(
-            self.config.BALL_SPEED * 1.5, 1.0
-        )  # Guard against BALL_SPEED=0
+        self._max_speed = max(self.config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
         self._inv_max_speed = 1.0 / self._max_speed
         # Guard against paddle width >= screen width
         paddle_range = max(1.0, self.width - config.PADDLE_WIDTH)
@@ -180,9 +176,7 @@ class Breakout(BaseGame):
         if not headless:
             self.particles = ParticleSystem(max_particles=500)
             self.ball_trail = TrailRenderer(length=12)
-            self.background_surface: Optional[pygame.Surface] = (
-                None  # Cached gradient background
-            )
+            self.background_surface: Optional[pygame.Surface] = None  # Cached gradient background
             self._create_background()
             # Cache fonts to avoid recreating them every frame
             pygame.font.init()  # Ensure fonts are initialized
@@ -267,21 +261,15 @@ class Breakout(BaseGame):
         # Bake grid pattern into background (avoids redrawing each frame)
         grid_color = (30, 30, 50)
         for x in range(0, self.width, 40):
-            pygame.draw.line(
-                self.background_surface, grid_color, (x, 0), (x, self.height), 1
-            )
+            pygame.draw.line(self.background_surface, grid_color, (x, 0), (x, self.height), 1)
         for y in range(0, self.height, 40):
-            pygame.draw.line(
-                self.background_surface, grid_color, (0, y), (self.width, y), 1
-            )
+            pygame.draw.line(self.background_surface, grid_color, (0, y), (self.width, y), 1)
 
     def _reset_ball(self) -> None:
         """Reset ball position and velocity."""
         ball_x = self.width // 2
         ball_y = self.height - 100
-        self.ball = Ball(
-            ball_x, ball_y, self.config.BALL_RADIUS, self.config.BALL_SPEED
-        )
+        self.ball = Ball(ball_x, ball_y, self.config.BALL_RADIUS, self.config.BALL_SPEED)
 
     def _create_bricks(self) -> None:
         """Create the grid of bricks."""
@@ -297,9 +285,7 @@ class Breakout(BaseGame):
                 y = self.config.BRICK_OFFSET_TOP + row * (
                     self.config.BRICK_HEIGHT + self.config.BRICK_PADDING
                 )
-                brick = Brick(
-                    x, y, self.config.BRICK_WIDTH, self.config.BRICK_HEIGHT, color
-                )
+                brick = Brick(x, y, self.config.BRICK_WIDTH, self.config.BRICK_HEIGHT, color)
                 self.bricks.append(brick)
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, dict]:
@@ -440,9 +426,7 @@ class Breakout(BaseGame):
                 # Clamp to prevent extreme bounce angles when ball is far from paddle center
                 ball_paddle_offset = max(-1.0, min(1.0, ball_paddle_offset))
             else:
-                ball_paddle_offset = (
-                    0.0  # Default to center bounce if paddle width is zero
-                )
+                ball_paddle_offset = 0.0  # Default to center bounce if paddle width is zero
 
             # New angle: -150° to -30° (upward arc)
             angle = -np.pi / 2 + ball_paddle_offset * np.pi / 3
@@ -486,9 +470,7 @@ class Breakout(BaseGame):
                 overlap_top = ball_rect.bottom - brick_rect.top
                 overlap_bottom = brick_rect.bottom - ball_rect.top
 
-                min_overlap = min(
-                    overlap_left, overlap_right, overlap_top, overlap_bottom
-                )
+                min_overlap = min(overlap_left, overlap_right, overlap_top, overlap_bottom)
 
                 if min_overlap == overlap_left or min_overlap == overlap_right:
                     self.ball.dx = -self.ball.dx
@@ -542,9 +524,7 @@ class Breakout(BaseGame):
 
                 # Check for horizontal wall bounces during descent
                 bounce_iterations = 0
-                while (
-                    predicted_x < 0 or predicted_x > self.width
-                ) and bounce_iterations < 10:
+                while (predicted_x < 0 or predicted_x > self.width) and bounce_iterations < 10:
                     if predicted_x < 0:
                         predicted_x = -predicted_x
                     elif predicted_x > self.width:
@@ -607,9 +587,7 @@ class Breakout(BaseGame):
 
         # Normalize velocities (approximate range: -speed to +speed)
         # Clamp to [0, 1] range in case actual velocity exceeds _max_speed
-        ball_dx = (
-            self.ball.dx * self._inv_max_speed + 1
-        ) * 0.5  # Map [-1, 1] to [0, 1]
+        ball_dx = (self.ball.dx * self._inv_max_speed + 1) * 0.5  # Map [-1, 1] to [0, 1]
         ball_dy = (self.ball.dy * self._inv_max_speed + 1) * 0.5
         ball_dx = max(0.0, min(1.0, ball_dx))
         ball_dy = max(0.0, min(1.0, ball_dy))
@@ -633,9 +611,7 @@ class Breakout(BaseGame):
         # Distance from paddle center to predicted landing
         # Normalized: 0.5 means paddle is at landing spot, 0 or 1 means far away
         distance_to_target = (predicted_x - paddle_center) * self._inv_width + 0.5
-        distance_to_target = max(
-            0.0, min(1.0, distance_to_target)
-        )  # Faster than np.clip
+        distance_to_target = max(0.0, min(1.0, distance_to_target))  # Faster than np.clip
 
         # Use pre-allocated state array (avoids allocation per step)
         self._state_array[0] = ball_x
@@ -724,9 +700,7 @@ class Breakout(BaseGame):
         )
         pygame.draw.rect(screen, paddle_color, paddle_rect, border_radius=5)
         # Paddle highlight
-        highlight = pygame.Rect(
-            paddle_rect.x + 5, paddle_rect.y + 2, paddle_rect.width - 10, 3
-        )
+        highlight = pygame.Rect(paddle_rect.x + 5, paddle_rect.y + 2, paddle_rect.width - 10, 3)
         lighter = tuple(min(255, c + 60) for c in paddle_color)
         pygame.draw.rect(screen, lighter, highlight, border_radius=2)
 
@@ -751,9 +725,7 @@ class Breakout(BaseGame):
 
         # Ball highlight
         highlight_pos = (ball_x - self.ball.radius // 3, ball_y - self.ball.radius // 3)
-        pygame.draw.circle(
-            screen, (255, 255, 255), highlight_pos, self.ball.radius // 3
-        )
+        pygame.draw.circle(screen, (255, 255, 255), highlight_pos, self.ball.radius // 3)
 
         # Draw HUD (score and lives)
         self._draw_hud(screen)
@@ -761,15 +733,11 @@ class Breakout(BaseGame):
     def _draw_hud(self, screen: pygame.Surface) -> None:
         """Draw heads-up display (score, lives)."""
         # Score (top left)
-        score_text = self._hud_font.render(
-            f"Score: {self.score}", True, self.config.COLOR_TEXT
-        )
+        score_text = self._hud_font.render(f"Score: {self.score}", True, self.config.COLOR_TEXT)
         screen.blit(score_text, (10, 10))
 
         # Lives (top right)
-        lives_text = self._hud_font.render(
-            f"Lives: {self.lives}", True, self.config.COLOR_TEXT
-        )
+        lives_text = self._hud_font.render(f"Lives: {self.lives}", True, self.config.COLOR_TEXT)
         screen.blit(lives_text, (self.width - 100, 10))
 
         # Game over or win message
@@ -838,9 +806,7 @@ class VecBreakout:
         self._states = np.empty((num_envs, self.state_size), dtype=np.float32)
         self._rewards = np.empty(num_envs, dtype=np.float32)
         self._dones = np.empty(num_envs, dtype=np.bool_)
-        self._pending_resets = np.zeros(
-            num_envs, dtype=np.bool_
-        )  # Track envs needing reset
+        self._pending_resets = np.zeros(num_envs, dtype=np.bool_)  # Track envs needing reset
 
     def reset(self) -> np.ndarray:
         """
@@ -865,9 +831,7 @@ class VecBreakout:
         """
         return self.envs[env_idx].reset()
 
-    def step(
-        self, actions: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """
         Step all environments with batched actions.
 

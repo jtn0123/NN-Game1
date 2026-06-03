@@ -181,9 +181,7 @@ class ReplayBuffer:
             RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
         if not self._initialized:
-            raise RuntimeError(
-                "Cannot sample from uninitialized buffer. Call push() first."
-            )
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
         if self._size == 0:
             raise RuntimeError("Cannot sample from empty buffer.")
 
@@ -218,9 +216,7 @@ class ReplayBuffer:
             RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
         if not self._initialized:
-            raise RuntimeError(
-                "Cannot sample from uninitialized buffer. Call push() first."
-            )
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
         if self._size == 0:
             raise RuntimeError("Cannot sample from empty buffer.")
 
@@ -323,9 +319,7 @@ class ReplayBuffer:
             self.states[:load_size] = data["states"][offset : offset + load_size]
             self.actions[:load_size] = data["actions"][offset : offset + load_size]
             self.rewards[:load_size] = data["rewards"][offset : offset + load_size]
-            self.next_states[:load_size] = data["next_states"][
-                offset : offset + load_size
-            ]
+            self.next_states[:load_size] = data["next_states"][offset : offset + load_size]
             self.dones[:load_size] = data["dones"][offset : offset + load_size]
 
         self._size = load_size
@@ -469,9 +463,7 @@ class PrioritizedReplayBuffer:
         # Sample indices based on priorities
         # Use replace=True if batch size exceeds buffer size (early training)
         use_replacement = batch_size > self._size
-        indices = np.random.choice(
-            self._size, size=batch_size, p=probs, replace=use_replacement
-        )
+        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=use_replacement)
 
         # Calculate importance sampling weights
         weights = (self._size * probs[indices]) ** (-self.beta)
@@ -526,9 +518,7 @@ class PrioritizedReplayBuffer:
 
         # Bug 2 fix: Use replace=True if batch size exceeds buffer size (early training)
         use_replacement = batch_size > self._size
-        indices = np.random.choice(
-            self._size, size=batch_size, p=probs, replace=use_replacement
-        )
+        indices = np.random.choice(self._size, size=batch_size, p=probs, replace=use_replacement)
 
         weights = (self._size * probs[indices]) ** (-self.beta)
         max_weight = weights.max()
@@ -638,9 +628,7 @@ class PrioritizedReplayBuffer:
             self.states[:load_size] = data["states"][offset : offset + load_size]
             self.actions[:load_size] = data["actions"][offset : offset + load_size]
             self.rewards[:load_size] = data["rewards"][offset : offset + load_size]
-            self.next_states[:load_size] = data["next_states"][
-                offset : offset + load_size
-            ]
+            self.next_states[:load_size] = data["next_states"][offset : offset + load_size]
             self.dones[:load_size] = data["dones"][offset : offset + load_size]
 
         # Restore priorities
@@ -649,9 +637,7 @@ class PrioritizedReplayBuffer:
                 self.priorities[:load_size] = data["priorities"][:load_size]
             else:
                 offset = saved_size - self.capacity
-                self.priorities[:load_size] = data["priorities"][
-                    offset : offset + load_size
-                ]
+                self.priorities[:load_size] = data["priorities"][offset : offset + load_size]
             self.max_priority = data.get("max_priority", 1.0)
 
         self._size = load_size
@@ -682,9 +668,7 @@ class NStepReplayBuffer(ReplayBuffer):
         Hessel et al., 2017 - "Rainbow: Combining Improvements in Deep RL"
     """
 
-    def __init__(
-        self, capacity: int, state_size: int = 0, n_steps: int = 3, gamma: float = 0.99
-    ):
+    def __init__(self, capacity: int, state_size: int = 0, n_steps: int = 3, gamma: float = 0.99):
         """
         Initialize N-step replay buffer.
 
@@ -709,9 +693,7 @@ class NStepReplayBuffer(ReplayBuffer):
         then computes N-step returns and stores them.
         """
         # Store in temporary buffer
-        self._n_step_buffer.append(
-            (state.copy(), action, reward, next_state.copy(), done)
-        )
+        self._n_step_buffer.append((state.copy(), action, reward, next_state.copy(), done))
 
         # Flush when we have N steps or episode ended
         if done or len(self._n_step_buffer) >= self.n_steps:
@@ -740,9 +722,7 @@ class NStepReplayBuffer(ReplayBuffer):
                     break  # Stop at terminal state
 
             # Use the actual final index to get the correct next state and done flag
-            _, _, _, n_step_next_state, n_step_done = self._n_step_buffer[
-                actual_final_idx
-            ]
+            _, _, _, n_step_next_state, n_step_done = self._n_step_buffer[actual_final_idx]
 
             # Store the N-step experience in the base buffer
             super().push(state, action, n_step_reward, n_step_next_state, n_step_done)
@@ -815,9 +795,7 @@ if __name__ == "__main__":
 
         per_buffer.push(state, action, reward, next_state, done)
 
-    states, actions, rewards, next_states, dones, indices, weights = per_buffer.sample(
-        32
-    )
+    states, actions, rewards, next_states, dones, indices, weights = per_buffer.sample(32)
     print(f"PER sample shapes: states={states.shape}, weights={weights.shape}")
     print(f"Indices range: {indices.min()} - {indices.max()}")
     print(f"Weights range: {weights.min():.4f} - {weights.max():.4f}")

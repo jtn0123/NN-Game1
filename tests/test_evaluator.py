@@ -7,17 +7,17 @@ These tests verify:
     - Statistics computation
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
 import tempfile
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.evaluator import Evaluator, EvalResults
 from src.ai.agent import Agent
+from src.ai.evaluator import EvalResults, Evaluator
 from src.game.breakout import Breakout
 
 
@@ -132,9 +132,7 @@ class TestPlateauDetection:
     def test_is_plateau_after_improvements(self, game, agent, config):
         """Should not be plateau if improvements are happening."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            evaluator = Evaluator(
-                game, agent, config, log_dir=tmpdir, plateau_threshold=3
-            )
+            evaluator = Evaluator(game, agent, config, log_dir=tmpdir, plateau_threshold=3)
 
             # Simulate improving evaluations by manually updating history
             evaluator.best_eval_score = 10.0
@@ -145,9 +143,7 @@ class TestPlateauDetection:
     def test_is_plateau_after_no_improvement(self, game, agent, config):
         """Should detect plateau after N evals without improvement."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            evaluator = Evaluator(
-                game, agent, config, log_dir=tmpdir, plateau_threshold=3
-            )
+            evaluator = Evaluator(game, agent, config, log_dir=tmpdir, plateau_threshold=3)
 
             # Manually set state to simulate no improvement
             evaluator.best_eval_score = 100.0
@@ -158,9 +154,7 @@ class TestPlateauDetection:
     def test_plateau_threshold_respected(self, game, agent, config):
         """Plateau should trigger at exactly threshold."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            evaluator = Evaluator(
-                game, agent, config, log_dir=tmpdir, plateau_threshold=5
-            )
+            evaluator = Evaluator(game, agent, config, log_dir=tmpdir, plateau_threshold=5)
 
             evaluator.best_eval_score = 100.0
 

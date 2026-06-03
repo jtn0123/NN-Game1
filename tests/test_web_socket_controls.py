@@ -14,9 +14,7 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not WEB_AVAILABLE, reason="Flask/SocketIO not installed"
-)
+pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
 
 
 class TestWebDashboardSocketControls:
@@ -117,9 +115,7 @@ class TestWebDashboardSocketControls:
         }
         client.disconnect()
 
-    def test_socket_control_rejects_unknown_or_invalid_model_actions(
-        self, web_dashboard
-    ):
+    def test_socket_control_rejects_unknown_or_invalid_model_actions(self, web_dashboard):
         """Bad control actions should fail through the same ack path as success."""
         client = web_dashboard.socketio.test_client(
             web_dashboard.app,

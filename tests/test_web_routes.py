@@ -14,9 +14,7 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not WEB_AVAILABLE, reason="Flask/SocketIO not installed"
-)
+pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
 
 
 class TestWebDashboardRoutes:
@@ -119,13 +117,8 @@ class TestWebDashboardRoutes:
         html = response.data.decode("utf-8")
 
         assert response.status_code == 200
-        assert (
-            response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
-        )
-        assert (
-            f'<meta name="dashboard-token" content="{web_dashboard.access_token}">'
-            in html
-        )
+        assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
+        assert f'<meta name="dashboard-token" content="{web_dashboard.access_token}">' in html
         assert "Training Dashboard" in html
         assert html.index("dashboard_core.js") < html.index("app.js")
         assert core_response.status_code == 200
@@ -145,9 +138,7 @@ class TestWebDashboardRoutes:
         html = response.data.decode("utf-8")
 
         assert response.status_code == 200
-        assert (
-            f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
-        )
+        assert f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
         assert "auth: { token: DASHBOARD_TOKEN }" in html
 
     def test_api_models_uses_opaque_ids(self, tmp_path):

@@ -84,9 +84,7 @@ def draw_space_invaders_icon(
     )
 
 
-def draw_pong_icon(
-    surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]
-) -> None:
+def draw_pong_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]) -> None:
     """Draw a Pong-style icon with paddles and ball."""
     cx, cy = rect.centerx, rect.centery
 
@@ -127,9 +125,7 @@ def draw_snake_icon(
     for i, (sx, sy) in enumerate(segments):
         progress = i / len(segments)
         segment_color = tuple(int(c * (0.5 + progress * 0.5)) for c in color)
-        pygame.draw.rect(
-            surface, segment_color, (sx - 4, sy - 4, 8, 8), border_radius=2
-        )
+        pygame.draw.rect(surface, segment_color, (sx - 4, sy - 4, 8, 8), border_radius=2)
 
     # Snake head (last segment) with eyes
     head_x, head_y = segments[-1]
@@ -269,8 +265,7 @@ class GameCard:
         # Border with animated color
         border_intensity = 0.3 + self.hover_progress * 0.7
         border_color = tuple(
-            int(c * border_intensity + 50 * (1 - border_intensity))
-            for c in self.base_color
+            int(c * border_intensity + 50 * (1 - border_intensity)) for c in self.base_color
         )
         border_width = 2 if self.hover_progress > 0.5 else 1
         pygame.draw.rect(screen, border_color, rect, border_width, border_radius=14)
@@ -278,9 +273,7 @@ class GameCard:
         # Selection indicator - top accent line
         if self.hover_progress > 0.1:
             accent_width = int(w * 0.6 * self.hover_progress)
-            accent_rect = pygame.Rect(
-                rect.centerx - accent_width // 2, rect.top, accent_width, 3
-            )
+            accent_rect = pygame.Rect(rect.centerx - accent_width // 2, rect.top, accent_width, 3)
             pygame.draw.rect(screen, self.base_color, accent_rect, border_radius=2)
 
         # Draw custom icon (smaller for compact layout)
@@ -422,9 +415,7 @@ class ActionButton:
             # Text
             text_font = pygame.font.Font(None, 22)
             text_surface = text_font.render(self.text, True, (200, 205, 220))
-            text_rect = text_surface.get_rect(
-                left=key_bg.right + 8, centery=rect.centery
-            )
+            text_rect = text_surface.get_rect(left=key_bg.right + 8, centery=rect.centery)
             screen.blit(text_surface, text_rect)
         else:
             text_font = pygame.font.Font(None, 22)
@@ -574,9 +565,7 @@ class GameMenu:
                     return None
                 elif event.type == pygame.VIDEORESIZE:
                     # Handle window resize
-                    screen = pygame.display.set_mode(
-                        (event.w, event.h), pygame.RESIZABLE
-                    )
+                    screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                     self.handle_resize(event.w, event.h)
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
@@ -654,10 +643,7 @@ class GameMenu:
         for y in range(self.screen_height):
             t = y / self.screen_height
             color = tuple(
-                int(
-                    self.bg_color_top[i]
-                    + t * (self.bg_color_bottom[i] - self.bg_color_top[i])
-                )
+                int(self.bg_color_top[i] + t * (self.bg_color_bottom[i] - self.bg_color_top[i]))
                 for i in range(3)
             )
             pygame.draw.line(screen, color, (0, y), (self.screen_width, y))
@@ -670,12 +656,8 @@ class GameMenu:
             start = (offset, 0)
             end = (offset - self.screen_height, self.screen_height)
 
-            line_surface = pygame.Surface(
-                (self.screen_width, self.screen_height), pygame.SRCALPHA
-            )
-            pygame.draw.line(
-                line_surface, (255, 255, 255, line["alpha"]), start, end, 1
-            )
+            line_surface = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+            pygame.draw.line(line_surface, (255, 255, 255, line["alpha"]), start, end, 1)
             screen.blit(line_surface, (0, 0))
 
         # Particles (stars)
@@ -690,9 +672,7 @@ class GameMenu:
 
         # Glow layers
         for i in range(3):
-            glow_surface = title_font.render(
-                title_text, True, (0, 150, 255, 30 - i * 10)
-            )
+            glow_surface = title_font.render(title_text, True, (0, 150, 255, 30 - i * 10))
             glow_rect = glow_surface.get_rect(
                 centerx=self.screen_width // 2 + (i - 1), top=55 + (i - 1)
             )

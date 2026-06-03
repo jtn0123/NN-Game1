@@ -50,9 +50,7 @@ class MetricCard:
         if len(self.history) < 2:
             return "→"
         recent_avg = np.mean(list(self.history)[-5:])
-        older_avg = (
-            np.mean(list(self.history)[:5]) if len(self.history) >= 5 else recent_avg
-        )
+        older_avg = np.mean(list(self.history)[:5]) if len(self.history) >= 5 else recent_avg
         if recent_avg > older_avg * 1.05:
             return "↑"
         elif recent_avg < older_avg * 0.95:
@@ -275,18 +273,9 @@ class Dashboard:
         self._cached_gradient = pygame.Surface((self.width, self.height))
         for i in range(self.height):
             progress = i / self.height
-            r = int(
-                self.bg_color[0]
-                + (self.panel_color[0] - self.bg_color[0]) * progress * 0.5
-            )
-            g = int(
-                self.bg_color[1]
-                + (self.panel_color[1] - self.bg_color[1]) * progress * 0.5
-            )
-            b = int(
-                self.bg_color[2]
-                + (self.panel_color[2] - self.bg_color[2]) * progress * 0.5
-            )
+            r = int(self.bg_color[0] + (self.panel_color[0] - self.bg_color[0]) * progress * 0.5)
+            g = int(self.bg_color[1] + (self.panel_color[1] - self.bg_color[1]) * progress * 0.5)
+            b = int(self.bg_color[2] + (self.panel_color[2] - self.bg_color[2]) * progress * 0.5)
             pygame.draw.line(self._cached_gradient, (r, g, b), (0, i), (self.width, i))
 
     def _draw_background(self, screen: pygame.Surface) -> None:
@@ -315,9 +304,7 @@ class Dashboard:
         episode_text = self.font_tiny.render(
             f"Episodes: {self.current_episode}", True, (120, 120, 140)
         )
-        episode_rect = episode_text.get_rect(
-            right=self.x + self.width - 15, top=self.y + 12
-        )
+        episode_rect = episode_text.get_rect(right=self.x + self.width - 15, top=self.y + 12)
         screen.blit(episode_text, episode_rect)
 
     def _draw_chart(self, screen: pygame.Surface, rect: pygame.Rect) -> None:
@@ -330,16 +317,12 @@ class Dashboard:
         num_h_lines = 4
         for i in range(1, num_h_lines + 1):
             y = rect.top + (i * rect.height // (num_h_lines + 1))
-            pygame.draw.line(
-                screen, self.grid_color, (rect.left + 5, y), (rect.right - 5, y), 1
-            )
+            pygame.draw.line(screen, self.grid_color, (rect.left + 5, y), (rect.right - 5, y), 1)
 
         num_v_lines = 6
         for i in range(1, num_v_lines + 1):
             x = rect.left + (i * rect.width // (num_v_lines + 1))
-            pygame.draw.line(
-                screen, (30, 35, 45), (x, rect.top + 5), (x, rect.bottom - 20), 1
-            )
+            pygame.draw.line(screen, (30, 35, 45), (x, rect.top + 5), (x, rect.bottom - 20), 1)
 
         if len(self.scores) < 2:
             text = self.font_medium.render("Collecting data...", True, (80, 80, 100))
@@ -354,20 +337,14 @@ class Dashboard:
         self._draw_performance_zones(screen, rect, max_score)
 
         # Draw filled area under score line
-        self._draw_filled_area(
-            screen, rect, list(self.scores), max_score, self.score_color
-        )
+        self._draw_filled_area(screen, rect, list(self.scores), max_score, self.score_color)
 
         # Draw score line
-        self._draw_line_graph(
-            screen, rect, list(self.scores), max_score, self.score_color, 2
-        )
+        self._draw_line_graph(screen, rect, list(self.scores), max_score, self.score_color, 2)
 
         # Draw smoothed average line (thicker, different style)
         if len(self.avg_scores) >= 2:
-            self._draw_line_graph(
-                screen, rect, list(self.avg_scores), max_score, self.avg_color, 3
-            )
+            self._draw_line_graph(screen, rect, list(self.avg_scores), max_score, self.avg_color, 3)
 
         # Draw epsilon (scaled to fit)
         if len(self.epsilons) >= 2:
@@ -394,9 +371,7 @@ class Dashboard:
         """Draw subtle performance zone backgrounds."""
         # Good zone (top 25%)
         good_height = rect.height // 4
-        good_rect = pygame.Rect(
-            rect.left + 2, rect.top + 2, rect.width - 4, good_height
-        )
+        good_rect = pygame.Rect(rect.left + 2, rect.top + 2, rect.width - 4, good_height)
         s = pygame.Surface((good_rect.width, good_rect.height), pygame.SRCALPHA)
         s.fill((46, 204, 113, 15))
         screen.blit(s, good_rect.topleft)
@@ -483,9 +458,7 @@ class Dashboard:
                         y1 = int(start[1] + uy * pos)
                         x2 = int(start[0] + ux * dash_end)
                         y2 = int(start[1] + uy * dash_end)
-                        pygame.draw.line(
-                            screen, color, (x1, y1), (x2, y2), thickness + 1
-                        )
+                        pygame.draw.line(screen, color, (x1, y1), (x2, y2), thickness + 1)
                         pos = dash_end + gap_length
                     else:
                         pos += gap_length
@@ -509,9 +482,7 @@ class Dashboard:
         # Bug 100: Use SRCALPHA surface for proper opacity handling
         total_width = len(legend_items) * 75 + 10
         legend_bg = pygame.Rect(legend_x - 5, legend_y - 8, total_width, 18)
-        legend_surface = pygame.Surface(
-            (legend_bg.width, legend_bg.height), pygame.SRCALPHA
-        )
+        legend_surface = pygame.Surface((legend_bg.width, legend_bg.height), pygame.SRCALPHA)
         pygame.draw.rect(
             legend_surface,
             (15, 18, 28, 230),
@@ -536,18 +507,14 @@ class Dashboard:
                     )
             else:
                 # Solid line
-                pygame.draw.line(
-                    screen, color, (legend_x, line_y), (legend_x + 18, line_y), 3
-                )
+                pygame.draw.line(screen, color, (legend_x, line_y), (legend_x + 18, line_y), 3)
 
             # Label text with better contrast
             text = self.font_tiny.render(label, True, color)
             screen.blit(text, (legend_x + 22, legend_y - 6))
             legend_x += 75
 
-    def _draw_y_axis(
-        self, screen: pygame.Surface, rect: pygame.Rect, max_val: float
-    ) -> None:
+    def _draw_y_axis(self, screen: pygame.Surface, rect: pygame.Rect, max_val: float) -> None:
         """Draw Y-axis labels."""
         for i in range(5):
             val = int(max_val * (1 - i / 4))
@@ -556,9 +523,7 @@ class Dashboard:
             text = self.font_tiny.render(str(val), True, (130, 135, 150))
             screen.blit(text, (rect.left + 3, y - 5))
 
-    def _draw_metric_cards(
-        self, screen: pygame.Surface, x: int, y: int, panel_width: int
-    ) -> None:
+    def _draw_metric_cards(self, screen: pygame.Surface, x: int, y: int, panel_width: int) -> None:
         """Draw metric cards on the right side with integrated epsilon gauge."""
         card_height = 22
         card_spacing = 24
@@ -623,9 +588,7 @@ class Dashboard:
         gauge_y = y + len(metrics) * card_spacing + 5
         self._draw_epsilon_gauge(screen, x, gauge_y, card_width)
 
-    def _draw_epsilon_gauge(
-        self, screen: pygame.Surface, x: int, y: int, gauge_width: int
-    ) -> None:
+    def _draw_epsilon_gauge(self, screen: pygame.Surface, x: int, y: int, gauge_width: int) -> None:
         """Draw a mini epsilon gauge with better visibility."""
         # Gauge dimensions - fit within the cards panel
         gauge_height = 12
@@ -658,9 +621,7 @@ class Dashboard:
                 min(255, self.epsilon_color[2] + 40),
             )
             if highlight_rect.width > 0:
-                pygame.draw.rect(
-                    screen, highlight_color, highlight_rect, border_radius=2
-                )
+                pygame.draw.rect(screen, highlight_color, highlight_rect, border_radius=2)
 
         # Border with glow effect when epsilon is high
         border_color = (70, 85, 110)

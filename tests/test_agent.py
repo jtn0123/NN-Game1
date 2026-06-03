@@ -39,9 +39,7 @@ def config():
 @pytest.fixture
 def agent(config):
     """Create agent instance."""
-    return Agent(
-        state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-    )
+    return Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
 
 class TestAgentInitialization:
@@ -49,9 +47,7 @@ class TestAgentInitialization:
 
     def test_agent_creates_successfully(self, config):
         """Agent should initialize without errors."""
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
         assert agent is not None
 
     def test_networks_initialized(self, agent):
@@ -93,9 +89,7 @@ class TestActionSelection:
     def test_select_actions_batch_handles_empty_batch(self, agent, config):
         """Empty batches should return an empty action array."""
         states = np.empty((0, config.STATE_SIZE), dtype=np.float32)
-        actions, explored, exploited = agent.select_actions_batch(
-            states, training=False
-        )
+        actions, explored, exploited = agent.select_actions_batch(states, training=False)
         assert actions.shape == (0,)
         assert explored == 0
         assert exploited == 0
@@ -121,9 +115,7 @@ class TestActionSelection:
         config.USE_NOISY_NETWORKS = False
         config.EPSILON_START = 1.0
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
 
@@ -136,9 +128,7 @@ class TestActionSelection:
         config.USE_NOISY_NETWORKS = True
         config.USE_DUELING = True  # NoisyNets require DuelingDQN
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         state = np.random.randn(config.STATE_SIZE).astype(np.float32)
 
@@ -227,9 +217,7 @@ class TestLearning:
         config.USE_NOISY_NETWORKS = False
         config.EPSILON_START = 1.0
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
@@ -244,9 +232,7 @@ class TestLearning:
         config.EPSILON_DECAY = 1.0
         config.EPSILON_START = 1.0
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
@@ -261,9 +247,7 @@ class TestLearning:
         config.EPSILON_END = 0.1
         config.EPSILON_START = 1.0
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Decay many times
         for _ in range(100):
@@ -279,9 +263,7 @@ class TestLearning:
         config.EPSILON_DECAY = 0.9995
         config.EPSILON_END = 0.01
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_epsilon = agent.epsilon
         agent.decay_epsilon()
@@ -354,9 +336,7 @@ class TestTargetNetwork:
         agent.update_target_network()
 
         # Check they're equal
-        for p_param, t_param in zip(
-            agent.policy_net.parameters(), agent.target_net.parameters()
-        ):
+        for p_param, t_param in zip(agent.policy_net.parameters(), agent.target_net.parameters()):
             assert torch.allclose(p_param, t_param)
 
     def test_soft_update_target_network(self, config):
@@ -365,14 +345,10 @@ class TestTargetNetwork:
         config.USE_SOFT_UPDATE = True
         config.TARGET_TAU = 0.1  # Use larger tau for easier testing
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Store original target weights
-        original_target_weights = [
-            param.clone() for param in agent.target_net.parameters()
-        ]
+        original_target_weights = [param.clone() for param in agent.target_net.parameters()]
 
         # Modify policy network significantly
         with torch.no_grad():
@@ -391,9 +367,7 @@ class TestTargetNetwork:
             )
         ):
             # Target should have moved toward policy
-            assert not torch.allclose(
-                t_param, orig_param
-            ), f"Target param {i} didn't change"
+            assert not torch.allclose(t_param, orig_param), f"Target param {i} didn't change"
             # But shouldn't be equal to policy (soft update)
             assert not torch.allclose(
                 t_param, p_param
@@ -408,9 +382,7 @@ class TestVectorizedTraining:
         batch_size = 8
         states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
 
-        actions, num_explored, num_exploited = agent.select_actions_batch(
-            states, training=True
-        )
+        actions, num_explored, num_exploited = agent.select_actions_batch(states, training=True)
 
         assert actions.shape == (batch_size,)
         assert actions.dtype == np.int64
@@ -432,9 +404,7 @@ class TestVectorizedTraining:
         batch_size = 100
         states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
 
-        actions, num_explored, num_exploited = agent.select_actions_batch(
-            states, training=True
-        )
+        actions, num_explored, num_exploited = agent.select_actions_batch(states, training=True)
 
         # Counters should sum to batch size
         assert num_explored + num_exploited == batch_size
@@ -447,9 +417,7 @@ class TestVectorizedTraining:
         batch_size = 16
         states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
 
-        actions, num_explored, num_exploited = agent.select_actions_batch(
-            states, training=False
-        )
+        actions, num_explored, num_exploited = agent.select_actions_batch(states, training=False)
 
         assert num_explored == 0
         assert num_exploited == batch_size
@@ -513,9 +481,7 @@ class TestQValueComputation:
 
     def test_q_values_done_masking(self, config):
         """Q-values for terminal states should be masked (no future reward)."""
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Create tensors directly
         batch_size = 4
@@ -526,9 +492,7 @@ class TestQValueComputation:
         # Half done, half not
         dones = torch.tensor([1.0, 1.0, 0.0, 0.0]).to(agent.device)
 
-        current_q, target_q = agent._compute_q_values(
-            states, actions, rewards, next_states, dones
-        )
+        current_q, target_q = agent._compute_q_values(states, actions, rewards, next_states, dones)
 
         # For done states (indices 0,1), target should be just the reward (no future Q)
         # For non-done states (indices 2,3), target should include discounted future Q
@@ -558,9 +522,7 @@ class TestSaveLoadEdgeCases:
         """Model saved on one device should load on another."""
         # Create and save agent on CPU
         config.FORCE_CPU = True
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
         agent.epsilon = 0.42
         agent.steps = 5000
 
@@ -639,9 +601,7 @@ class TestPrioritizedReplayIntegration:
         config.LEARN_EVERY = 1
         config.GRADIENT_STEPS = 1
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Fill buffer with experiences
         for _ in range(100):
@@ -674,9 +634,7 @@ class TestHardUpdateTargetNetwork:
         config.LEARN_EVERY = 1
         config.GRADIENT_STEPS = 1
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         # Fill buffer
         for _ in range(100):
@@ -806,9 +764,7 @@ class TestTorchCompileExceptionHandling:
         """Agent should work when torch.compile is disabled."""
         config.USE_TORCH_COMPILE = False
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         assert agent._compiled is False
         # Agent should still work
@@ -826,9 +782,7 @@ class TestLRSchedulerConfiguration:
         config.LR_SCHEDULER_TYPE = "cosine"
         config.LR_MIN = 1e-6
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         assert agent.scheduler is not None
         # Scheduler should be CosineAnnealingLR
@@ -841,9 +795,7 @@ class TestLRSchedulerConfiguration:
         config.LR_SCHEDULER_STEP = 500
         config.LR_SCHEDULER_GAMMA = 0.5
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         assert agent.scheduler is not None
         assert "StepLR" in type(agent.scheduler).__name__
@@ -856,9 +808,7 @@ class TestLRSchedulerConfiguration:
         config.LR_SCHEDULER_GAMMA = 0.5
         config.LEARNING_RATE = 0.001
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_lr = agent.optimizer.param_groups[0]["lr"]
         agent.optimizer.zero_grad()
@@ -882,9 +832,7 @@ class TestLRSchedulerConfiguration:
         config.LR_SCHEDULER_GAMMA = 0.5
         config.LEARNING_RATE = 0.001
 
-        agent = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         initial_lr = agent.optimizer.param_groups[0]["lr"]
         with warnings.catch_warnings(record=True) as captured_warnings:
@@ -901,9 +849,7 @@ class TestArchitectureMismatchOnLoad:
     def test_state_size_mismatch_returns_none(self, config):
         """Loading model with wrong state size should fail gracefully."""
         # Create and save agent with one state size
-        agent1 = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent1 = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test_model.pth")
@@ -923,9 +869,7 @@ class TestArchitectureMismatchOnLoad:
 
     def test_action_size_mismatch_returns_none(self, config):
         """Loading model with wrong action size should fail gracefully."""
-        agent1 = Agent(
-            state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-        )
+        agent1 = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "test_model.pth")

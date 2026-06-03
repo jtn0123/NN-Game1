@@ -15,13 +15,14 @@ Game Registry:
     Use get_game_info(name) to get metadata about a game
 """
 
-from typing import Dict, List, Type, Optional, Any
-from .breakout import Breakout
+from typing import Any, Dict, List, Optional, Type, cast
+
+from .breakout import Breakout, VecBreakout
 from .space_invaders import SpaceInvaders, VecSpaceInvaders
 from .pong import Pong, VecPong
 from .snake import Snake, VecSnake
 from .asteroids import Asteroids, VecAsteroids
-from .base_game import BaseGame
+from .base_game import BaseGame, BaseVecGame
 from .particles import ParticleSystem, TrailRenderer
 from .menu import GameMenu
 
@@ -37,6 +38,7 @@ from .menu import GameMenu
 GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     "breakout": {
         "class": Breakout,
+        "vec_class": VecBreakout,
         "name": "Breakout",
         "description": "Classic brick-breaking arcade game",
         "actions": ["LEFT", "STAY", "RIGHT"],
@@ -46,6 +48,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "space_invaders": {
         "class": SpaceInvaders,
+        "vec_class": VecSpaceInvaders,
         "name": "Space Invaders",
         "description": "Defend Earth from alien invasion",
         "actions": ["LEFT", "STAY", "RIGHT", "SHOOT"],
@@ -55,6 +58,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "pong": {
         "class": Pong,
+        "vec_class": VecPong,
         "name": "Pong",
         "description": "Classic paddle vs AI opponent",
         "actions": ["UP", "STAY", "DOWN"],
@@ -64,6 +68,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "snake": {
         "class": Snake,
+        "vec_class": VecSnake,
         "name": "Snake",
         "description": "Grow the snake by eating food",
         "actions": ["UP", "DOWN", "LEFT", "RIGHT"],
@@ -73,6 +78,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "asteroids": {
         "class": Asteroids,
+        "vec_class": VecAsteroids,
         "name": "Asteroids",
         "description": "Destroy asteroids with your spaceship",
         "actions": ["ROTATE_LEFT", "ROTATE_RIGHT", "THRUST", "SHOOT", "NOTHING"],
@@ -99,7 +105,23 @@ def get_game(name: str) -> Optional[Type[BaseGame]]:
     """
     entry = GAME_REGISTRY.get(name.lower())
     if entry:
-        return entry["class"]
+        return cast(Type[BaseGame], entry["class"])
+    return None
+
+
+def get_vec_game(name: str) -> Optional[Type[BaseVecGame]]:
+    """
+    Get a vectorized game environment class by name.
+
+    Args:
+        name: Game identifier (e.g., 'breakout', 'space_invaders')
+
+    Returns:
+        The vectorized environment class, or None if not supported
+    """
+    entry = GAME_REGISTRY.get(name.lower())
+    if entry and entry.get("vec_class"):
+        return cast(Type[BaseVecGame], entry["vec_class"])
     return None
 
 
@@ -137,7 +159,7 @@ def get_game_info(name: str) -> Optional[Dict[str, Any]]:
     """
     entry = GAME_REGISTRY.get(name.lower())
     if entry:
-        return {k: v for k, v in entry.items() if k != "class"}
+        return {k: v for k, v in entry.items() if k not in {"class", "vec_class"}}
     return None
 
 
@@ -159,6 +181,7 @@ def get_all_game_info() -> Dict[str, Dict[str, Any]]:
 __all__ = [
     # Classes
     "Breakout",
+    "VecBreakout",
     "SpaceInvaders",
     "VecSpaceInvaders",
     "Pong",
@@ -168,12 +191,14 @@ __all__ = [
     "Asteroids",
     "VecAsteroids",
     "BaseGame",
+    "BaseVecGame",
     "ParticleSystem",
     "TrailRenderer",
     "GameMenu",
     # Registry functions
     "GAME_REGISTRY",
     "get_game",
+    "get_vec_game",
     "list_games",
     "get_game_info",
     "get_all_game_info",

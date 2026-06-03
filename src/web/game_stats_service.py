@@ -24,15 +24,9 @@ def build_game_stats(
         game_model_dir = os.path.join(config.MODEL_DIR, game_id)
 
         game_stats: Dict[str, Any] = {
-            "name": (
-                game_info.get("name", game_id.title()) if game_info else game_id.title()
-            ),
+            "name": (game_info.get("name", game_id.title()) if game_info else game_id.title()),
             "icon": game_info.get("icon", "🎮") if game_info else "🎮",
-            "color": (
-                game_info.get("color", (100, 100, 100))
-                if game_info
-                else (100, 100, 100)
-            ),
+            "color": (game_info.get("color", (100, 100, 100)) if game_info else (100, 100, 100)),
             "best_score": 0,
             "total_episodes": 0,
             "total_training_time": 0,
@@ -67,9 +61,7 @@ def build_game_stats(
                     game_stats["best_model"] = filename
                 if metadata.get("episode", 0) > game_stats["total_episodes"]:
                     game_stats["total_episodes"] = metadata["episode"]
-                game_stats["total_training_time"] += metadata.get(
-                    "total_training_time_seconds", 0
-                )
+                game_stats["total_training_time"] += metadata.get("total_training_time_seconds", 0)
 
         stats[game_id] = game_stats
 

@@ -157,9 +157,7 @@ class ScorePopup:
         # Glow effect
         glow_color = tuple(c // 2 for c in color)
         glow_surf = font.render(text, True, glow_color)
-        screen.blit(
-            glow_surf, (self.x - glow_surf.get_width() // 2 + 1, int(self.y) + 1)
-        )
+        screen.blit(glow_surf, (self.x - glow_surf.get_width() // 2 + 1, int(self.y) + 1))
 
         # Main text
         text_surf = font.render(text, True, color)
@@ -219,9 +217,7 @@ class WaveAnnouncement:
         # Main text
         text_color = tuple(int(c * alpha) for c in color)
         text_surf = font.render(text, True, text_color)
-        text_rect = text_surf.get_rect(
-            center=(self.screen_width // 2, self.screen_height // 2)
-        )
+        text_rect = text_surf.get_rect(center=(self.screen_width // 2, self.screen_height // 2))
         screen.blit(text_surf, text_rect)
 
 
@@ -297,9 +293,7 @@ class Bullet:
         for i, (tx, ty) in enumerate(self.trail):
             alpha = (i + 1) / len(self.trail) * 0.5
             trail_color = tuple(int(c * alpha) for c in self.color)
-            trail_rect = pygame.Rect(
-                int(tx - 1), int(ty - self.height // 4), 2, self.height // 2
-            )
+            trail_rect = pygame.Rect(int(tx - 1), int(ty - self.height // 4), 2, self.height // 2)
             pygame.draw.rect(screen, trail_color, trail_rect)
 
         # Glow effect
@@ -470,9 +464,7 @@ class Ship:
         ]
         # Cockpit glow
         glow_surf = pygame.Surface((20, 20), pygame.SRCALPHA)
-        pygame.draw.polygon(
-            glow_surf, (100, 255, 200, 80), [(10, 0), (4, 12), (16, 12)]
-        )
+        pygame.draw.polygon(glow_surf, (100, 255, 200, 80), [(10, 0), (4, 12), (16, 12)])
         screen.blit(glow_surf, (rect.centerx - 10, rect.top + 2))
 
         # Cockpit glass
@@ -565,9 +557,7 @@ class UFO:
                 light_color = (255, 255, 100)
             else:
                 light_color = (100, 100, 40)
-            pygame.draw.circle(
-                screen, light_color, (rect.centerx + offset, rect.centery + 2), 2
-            )
+            pygame.draw.circle(screen, light_color, (rect.centerx + offset, rect.centery + 2), 2)
 
 
 class ShieldBlock:
@@ -620,9 +610,7 @@ class ShieldBlock:
 class Shield:
     """A protective bunker made of destructible blocks - classic Space Invaders defense."""
 
-    def __init__(
-        self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]
-    ):
+    def __init__(self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]):
         self.x = x
         self.y = y
         self.width = width
@@ -915,9 +903,7 @@ class SpaceInvaders(BaseGame):
 
         for i in range(shield_count):
             x = int(spacing + i * (shield_width + spacing))
-            shield = Shield(
-                x, shield_y, shield_width, shield_height, self.config.SI_COLOR_SHIELD
-            )
+            shield = Shield(x, shield_y, shield_width, shield_height, self.config.SI_COLOR_SHIELD)
             self.shields.append(shield)
 
     def _next_level(self) -> None:
@@ -944,9 +930,7 @@ class SpaceInvaders(BaseGame):
         # - Aliens start lower (closer to player)
         # - Base speed increases
         # - Aliens shoot more frequently (handled in config multiplier)
-        self.alien_base_speed = self.config.SI_ALIEN_SPEED_X * (
-            1 + 0.15 * (self.level - 1)
-        )
+        self.alien_base_speed = self.config.SI_ALIEN_SPEED_X * (1 + 0.15 * (self.level - 1))
         self.alien_speed = self.alien_base_speed
 
         # Move aliens closer to player on higher levels (original game behavior)
@@ -956,9 +940,7 @@ class SpaceInvaders(BaseGame):
 
         # Show wave announcement
         if not self.headless:
-            self.wave_announcement = WaveAnnouncement(
-                self.level, self.width, self.height
-            )
+            self.wave_announcement = WaveAnnouncement(self.level, self.width, self.height)
 
         # Visual feedback for new level
         self.flash_alpha = 100
@@ -1031,10 +1013,7 @@ class SpaceInvaders(BaseGame):
         elif action == 2:
             self.ship.move(1, self.width)
         elif action == 3:
-            if (
-                self._shoot_cooldown == 0
-                and len(self.player_bullets) < self._max_player_bullets
-            ):
+            if self._shoot_cooldown == 0 and len(self.player_bullets) < self._max_player_bullets:
                 self._fire_player_bullet()
                 self._shoot_cooldown = self._shoot_cooldown_max
                 # Reward for shooting - encourages aggression
@@ -1059,10 +1038,7 @@ class SpaceInvaders(BaseGame):
             # Check win condition: complete SI_WIN_LEVELS levels to win.
             # This block runs after clearing the current level, before incrementing it.
             # (0 means endless mode, no wins possible)
-            if (
-                self.config.SI_WIN_LEVELS > 0
-                and self.level >= self.config.SI_WIN_LEVELS
-            ):
+            if self.config.SI_WIN_LEVELS > 0 and self.level >= self.config.SI_WIN_LEVELS:
                 # We've completed enough levels - win!
                 self.won = True
                 self.game_over = True
@@ -1075,9 +1051,7 @@ class SpaceInvaders(BaseGame):
         for alien in self.aliens:
             if alien.alive and alien.y + alien.height >= self.ground_y:
                 self.game_over = True
-                reward += (
-                    self.config.SI_REWARD_PLAYER_DEATH * 2
-                )  # Extra penalty for invasion
+                reward += self.config.SI_REWARD_PLAYER_DEATH * 2  # Extra penalty for invasion
                 break
 
         return self.get_state(), reward, self.game_over, self._get_info()
@@ -1151,9 +1125,7 @@ class SpaceInvaders(BaseGame):
 
         # Update alien pulse phase (speeds up as fewer aliens remain)
         # Guard against division by zero when no aliens spawned
-        alien_ratio = (
-            self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
-        )
+        alien_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
         pulse_speed = 0.5 + (1 - alien_ratio) * 3
         self.alien_pulse_phase += pulse_speed * (1.0 / 60.0)
 
@@ -1173,14 +1145,8 @@ class SpaceInvaders(BaseGame):
         for alien in bottom_aliens:
             # Increase shoot chance slightly as aliens are destroyed
             # Guard against division by zero when no aliens spawned
-            alien_ratio = (
-                self._aliens_remaining / self._num_aliens
-                if self._num_aliens > 0
-                else 1.0
-            )
-            shoot_chance = self.config.SI_ALIEN_SHOOT_CHANCE * (
-                1 + 0.5 * (1 - alien_ratio)
-            )
+            alien_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
+            shoot_chance = self.config.SI_ALIEN_SHOOT_CHANCE * (1 + 0.5 * (1 - alien_ratio))
             if random.random() < shoot_chance:
                 actual_x = alien.x + self.alien_x_offset + alien.width // 2
                 bullet = Bullet(
@@ -1196,9 +1162,7 @@ class SpaceInvaders(BaseGame):
         if self.ufo is None and random.random() < self.config.SI_UFO_CHANCE:
             direction = random.choice([-1, 1])
             x = -50 if direction > 0 else self.width + 50
-            self.ufo = UFO(
-                x, 50, direction * self.config.SI_UFO_SPEED, self.config.SI_COLOR_UFO
-            )
+            self.ufo = UFO(x, 50, direction * self.config.SI_UFO_SPEED, self.config.SI_COLOR_UFO)
 
         return reward
 
@@ -1340,9 +1304,7 @@ class SpaceInvaders(BaseGame):
             for shield in self.shields:
                 if shield.check_collision(bullet.rect):
                     bullet.alive = False
-                    self._spawn_explosion(
-                        int(bullet.x), int(bullet.y), (255, 100, 50), count=5
-                    )
+                    self._spawn_explosion(int(bullet.x), int(bullet.y), (255, 100, 50), count=5)
                     break
 
         # Alien bullets vs player (skip if invincible)
@@ -1461,9 +1423,7 @@ class SpaceInvaders(BaseGame):
 
         # Lives remaining (risk awareness)
         # Bug 78 fix: Guard against division by zero if config.LIVES = 0
-        self._state_array[idx] = (
-            self.lives / self.config.LIVES if self.config.LIVES > 0 else 0.0
-        )
+        self._state_array[idx] = self.lives / self.config.LIVES if self.config.LIVES > 0 else 0.0
         idx += 1
 
         # Level (difficulty awareness)
@@ -1526,13 +1486,9 @@ class SpaceInvaders(BaseGame):
         # Draw aliens with shake offset and pulse effect
         # Pulse intensity increases as fewer aliens remain (like the audio in original)
         # Bug 63 fix: Guard against division by zero if _num_aliens = 0
-        aliens_ratio = (
-            self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
-        )
+        aliens_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
         pulse_intensity = 0.15 * (1 - aliens_ratio)
-        pulse_offset = (
-            math.sin(self.alien_pulse_phase * math.pi * 2) * pulse_intensity * 3
-        )
+        pulse_offset = math.sin(self.alien_pulse_phase * math.pi * 2) * pulse_intensity * 3
 
         for alien in self.aliens:
             if alien.alive:
@@ -1638,9 +1594,7 @@ class SpaceInvaders(BaseGame):
         glow_surface = pygame.Surface((self.width, 10), pygame.SRCALPHA)
         for i in range(5):
             alpha = 40 - i * 8
-            pygame.draw.rect(
-                glow_surface, (*ground_color, alpha), (0, i, self.width, 1)
-            )
+            pygame.draw.rect(glow_surface, (*ground_color, alpha), (0, i, self.width, 1))
         screen.blit(glow_surface, (0, self.ground_y - 5))
 
         # City/base silhouette at the bottom
@@ -1746,16 +1700,12 @@ class SpaceInvaders(BaseGame):
 
             # Shadow
             shadow = big_font.render(msg, True, (0, 0, 0))
-            shadow_rect = shadow.get_rect(
-                center=(self.width // 2 + 3, self.height // 2 + 3)
-            )
+            shadow_rect = shadow.get_rect(center=(self.width // 2 + 3, self.height // 2 + 3))
             screen.blit(shadow, shadow_rect)
 
             # Main text with glow
             glow = big_font.render(msg, True, tuple(c // 2 for c in color))
-            glow_rect = glow.get_rect(
-                center=(self.width // 2 + 1, self.height // 2 + 1)
-            )
+            glow_rect = glow.get_rect(center=(self.width // 2 + 1, self.height // 2 + 1))
             screen.blit(glow, glow_rect)
 
             text = big_font.render(msg, True, color)
@@ -1851,9 +1801,7 @@ class VecSpaceInvaders:
         """
         return self.envs[env_idx].reset()
 
-    def step(
-        self, actions: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
+    def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """
         Step all environments with batched actions.
 

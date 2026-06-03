@@ -11,8 +11,8 @@ Classes:
     Trainer      - Training loop orchestration
 """
 
-from .network import DQN
 from .agent import Agent
+from .network import DQN
 from .replay_buffer import ReplayBuffer
 from .trainer import Trainer
 

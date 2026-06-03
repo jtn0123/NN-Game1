@@ -66,9 +66,7 @@ class TestNeuronInspectionData:
         assert result["layer_name"] == "hidden_1"
         assert result["current_activation"] == 0.5
         assert len(result["activation_history"]) == 5
-        assert result["incoming_weight_stats"]["mean"] == pytest.approx(
-            0.016666, abs=0.001
-        )
+        assert result["incoming_weight_stats"]["mean"] == pytest.approx(0.016666, abs=0.001)
         assert result["q_value_contributions"]["stay"] == 0.3
 
 

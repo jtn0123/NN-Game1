@@ -279,9 +279,7 @@ class NeuronInspectionData:
             "layer_idx": self.layer_idx,
             "neuron_idx": self.neuron_idx,
             "layer_name": self.layer_name,
-            "activation_history": self.activation_history[
-                -100:
-            ],  # Last 100 for visualization
+            "activation_history": self.activation_history[-100:],  # Last 100 for visualization
             "current_activation": self.current_activation,
             "incoming_weights": self.incoming_weights[:50],  # Sample top 50
             "incoming_weight_stats": self.incoming_weight_stats,
@@ -341,9 +339,7 @@ class LayerAnalysisData:
             "dead_neuron_count": self.dead_neuron_count,
             # Bug 71 fix: Explicit check for neuron_count > 0 instead of masking with max(1, ...)
             "dead_neuron_percent": (
-                (self.dead_neuron_count / self.neuron_count * 100)
-                if self.neuron_count > 0
-                else 0.0
+                (self.dead_neuron_count / self.neuron_count * 100) if self.neuron_count > 0 else 0.0
             ),
             "saturated_neuron_count": self.saturated_neuron_count,
             "saturated_percent": (
@@ -386,9 +382,7 @@ class MetricsPublisher:
         self.rewards: Deque[float] = deque(maxlen=history_length)
         self.q_values: Deque[float] = deque(maxlen=history_length)
         self.episode_lengths: Deque[int] = deque(maxlen=history_length)
-        self.wins: Deque[bool] = deque(
-            maxlen=history_length
-        )  # Track actual wins per episode
+        self.wins: Deque[bool] = deque(maxlen=history_length)  # Track actual wins per episode
 
         # Phase 1: Per-action Q-value history (last 1000 steps)
         self.q_values_left: Deque[float] = deque(maxlen=1000)
@@ -439,9 +433,7 @@ class MetricsPublisher:
         self._neuron_inspection_data: Dict[Tuple[int, int], NeuronInspectionData] = (
             {}
         )  # (layer, neuron) -> data
-        self._layer_analysis_data: Dict[int, LayerAnalysisData] = (
-            {}
-        )  # layer_idx -> data
+        self._layer_analysis_data: Dict[int, LayerAnalysisData] = {}  # layer_idx -> data
         self._on_neuron_select_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._on_layer_analysis_callbacks: List[Callable[[Dict[str, Any]], None]] = []
 
@@ -567,9 +559,7 @@ class MetricsPublisher:
 
             # Remove samples older than window, but keep at least 2 for rate calculation
             cutoff_time = current_time - self._steps_window_seconds
-            while (
-                len(self._step_samples) > 2 and self._step_samples[0][0] < cutoff_time
-            ):
+            while len(self._step_samples) > 2 and self._step_samples[0][0] < cutoff_time:
                 self._step_samples.popleft()
 
             # Calculate rate from remaining samples
@@ -606,9 +596,7 @@ class MetricsPublisher:
         for callback in callbacks:
             callback(self.get_snapshot())
 
-    def log(
-        self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def log(self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None) -> None:
         """Add a log message to the console."""
         log_entry = LogMessage(
             timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
@@ -651,9 +639,7 @@ class MetricsPublisher:
                     # Use PNG format directly without filename extension
                     pygame.image.save(temp_surface, buffer)
                     buffer.seek(0)
-                    self._screenshot_data = base64.b64encode(buffer.read()).decode(
-                        "utf-8"
-                    )
+                    self._screenshot_data = base64.b64encode(buffer.read()).decode("utf-8")
                 except Exception as fallback_error:
                     _logger.warning(f"Screenshot fallback error: {fallback_error}")
                     self._screenshot_data = None
@@ -735,9 +721,7 @@ class MetricsPublisher:
         self.state.training_start_time = time.time()
         self.state.headless = headless
 
-    def record_save(
-        self, filename: str, reason: str, episode: int, best_score: int
-    ) -> None:
+    def record_save(self, filename: str, reason: str, episode: int, best_score: int) -> None:
         """Record a model save event."""
         self.save_status.last_save_time = time.time()
         self.save_status.last_save_filename = filename
@@ -835,9 +819,7 @@ class MetricsPublisher:
         for callback in callbacks:
             callback(nn_dict)
 
-    def should_update_nn_visualization(
-        self, current_time: Optional[float] = None
-    ) -> bool:
+    def should_update_nn_visualization(self, current_time: Optional[float] = None) -> bool:
         """Return whether a neural-network visualization update should run."""
         check_time = time.time() if current_time is None else current_time
         return check_time - self._last_nn_update_time >= self._nn_update_interval
@@ -1044,9 +1026,7 @@ class MetricsPublisher:
         """
         return [
             data.to_dict()
-            for data in sorted(
-                self._layer_analysis_data.values(), key=lambda x: x.layer_idx
-            )
+            for data in sorted(self._layer_analysis_data.values(), key=lambda x: x.layer_idx)
         ]
 
     def on_neuron_select(self, callback: Callable[[Dict[str, Any]], None]) -> None:
@@ -1150,13 +1130,9 @@ class WebDashboard:
         self.port = port
         self.host = host
         self.launcher_mode = launcher_mode
-        self.access_token = os.environ.get(
-            "NN_GAME_DASHBOARD_TOKEN"
-        ) or secrets.token_urlsafe(24)
+        self.access_token = os.environ.get("NN_GAME_DASHBOARD_TOKEN") or secrets.token_urlsafe(24)
         self.model_service = ModelService(self._model_search_dirs())
-        self.on_game_selected_callback: Optional[Callable[[str, str], None]] = (
-            None  # (game, mode)
-        )
+        self.on_game_selected_callback: Optional[Callable[[str, str], None]] = None  # (game, mode)
         self.on_restart_with_game_callback: Optional[Callable[[str], None]] = None
 
         # Metrics publisher
@@ -1169,9 +1145,7 @@ class WebDashboard:
         template_dir = os.path.join(base_dir, "templates")
         static_dir = os.path.join(base_dir, "static")
 
-        self.app = Flask(
-            __name__, template_folder=template_dir, static_folder=static_dir
-        )
+        self.app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
         # Generate secure random secret key (not hardcoded for security)
         self.app.config["SECRET_KEY"] = base64.b64encode(os.urandom(24)).decode("utf-8")
 
@@ -1201,9 +1175,7 @@ class WebDashboard:
         self.on_reset_callback: Optional[Callable[[], None]] = None
         self.on_start_fresh_callback: Optional[Callable[[], None]] = None
         self.on_load_model_callback: Optional[Callable[[str], None]] = None
-        self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = (
-            None
-        )
+        self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
         self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
         self.on_save_and_quit_callback: Optional[Callable[[], None]] = None
 
@@ -1265,9 +1237,7 @@ class WebDashboard:
         return self._success_ack(action)
 
     def _handle_save_control(self) -> Dict[str, Any]:
-        return self._callback_ack(
-            "save", self.on_save_callback, failure_message="Save failed"
-        )
+        return self._callback_ack("save", self.on_save_callback, failure_message="Save failed")
 
     def _handle_save_as_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
         filename = data.get("filename", "custom_save.pth")
@@ -1344,7 +1314,11 @@ class WebDashboard:
                 )
             else:
                 response = make_response(
-                    render_template("dashboard.html", access_token=self.access_token)
+                    render_template(
+                        "dashboard.html",
+                        access_token=self.access_token,
+                        control_token=self.access_token,
+                    )
                 )
             # Prevent browser caching to ensure fresh content
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -1702,9 +1676,7 @@ class WebDashboard:
         """Convenience method to update and emit metrics."""
         self.publisher.update(**kwargs)
 
-    def log(
-        self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def log(self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None) -> None:
         """
         Add a log message to the console.
 
@@ -1752,11 +1724,7 @@ class WebDashboard:
 
         self._sync_phase2_inspection(
             layer_info=layer_info,
-            activations=(
-                analysis_activations
-                if analysis_activations is not None
-                else activations
-            ),
+            activations=(analysis_activations if analysis_activations is not None else activations),
             q_values=q_values,
             weights=analysis_weights if analysis_weights is not None else weights,
             input_state=input_state,
@@ -1785,9 +1753,7 @@ class WebDashboard:
         """Populate neuron and layer inspection data from live NN snapshots."""
         weight_arrays = [np.asarray(weight) for weight in weights]
         linear_keys = self._sorted_linear_activation_keys(activations)
-        hidden_weight_count = sum(
-            1 for info in layer_info if info.get("type") == "hidden"
-        )
+        hidden_weight_count = sum(1 for info in layer_info if info.get("type") == "hidden")
         hidden_weight_idx = 0
         value_weight_idx = hidden_weight_count
         advantage_weight_idx = hidden_weight_count + 1
@@ -1825,9 +1791,7 @@ class WebDashboard:
             elif layer_type == "advantage_stream":
                 layer_acts = np.asarray(activations.get("advantage_hidden", []))
             elif hidden_weight_idx < len(linear_keys):
-                layer_acts = np.asarray(
-                    activations.get(linear_keys[hidden_weight_idx], [])
-                )
+                layer_acts = np.asarray(activations.get(linear_keys[hidden_weight_idx], []))
             elif layer_type == "output":
                 layer_acts = np.asarray(q_values)
             else:
@@ -1854,9 +1818,7 @@ class WebDashboard:
                         if candidate is not None
                     ]
                     next_weights = (
-                        np.concatenate(branch_weights, axis=0)
-                        if branch_weights
-                        else None
+                        np.concatenate(branch_weights, axis=0) if branch_weights else None
                     )
             elif layer_type == "value_stream":
                 incoming_weights = weight_at(value_weight_idx)

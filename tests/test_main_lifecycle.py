@@ -28,9 +28,7 @@ def test_game_app_save_and_quit_requests_loop_shutdown(monkeypatch):
     app._save_and_quit()
 
     assert app.running is False
-    assert any(
-        "Shutting down" in message for message, _level, _data in app.web_dashboard.logs
-    )
+    assert any("Shutting down" in message for message, _level, _data in app.web_dashboard.logs)
 
 
 def test_headless_save_and_quit_requests_loop_shutdown(monkeypatch):
@@ -45,16 +43,11 @@ def test_headless_save_and_quit_requests_loop_shutdown(monkeypatch):
     trainer._save_and_quit()
 
     assert trainer.running is False
-    assert any(
-        "Shutting down" in message
-        for message, _level, _data in trainer.web_dashboard.logs
-    )
+    assert any("Shutting down" in message for message, _level, _data in trainer.web_dashboard.logs)
 
 
 @pytest.mark.parametrize("runtime_cls", [main.GameApp, main.HeadlessTrainer])
-def test_runtime_nn_visualization_uses_shared_snapshot_builder(
-    runtime_cls, monkeypatch
-):
+def test_runtime_nn_visualization_uses_shared_snapshot_builder(runtime_cls, monkeypatch):
     """Both app modes should emit the same shared NN snapshot contract."""
     emitted = []
 

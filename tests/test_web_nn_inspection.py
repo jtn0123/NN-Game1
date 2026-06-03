@@ -14,9 +14,7 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not WEB_AVAILABLE, reason="Flask/SocketIO not installed"
-)
+pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
 
 
 class TestWebDashboardNNInspection:

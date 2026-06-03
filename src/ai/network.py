@@ -377,9 +377,7 @@ class DuelingDQN(nn.Module):
         if use_noisy:
             noisy_std = getattr(self.config, "NOISY_STD_INIT", 0.5)
             self.value_output = NoisyLinear(stream_hidden_size, 1, noisy_std)
-            self.advantage_output = NoisyLinear(
-                stream_hidden_size, self.action_size, noisy_std
-            )
+            self.advantage_output = NoisyLinear(stream_hidden_size, self.action_size, noisy_std)
         else:
             self.value_output = nn.Linear(stream_hidden_size, 1)  # type: ignore[assignment]
             self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)  # type: ignore[assignment]
@@ -512,9 +510,7 @@ class DuelingDQN(nn.Module):
         )
 
         # Output layer
-        info.append(
-            {"name": "Output (Q)", "neurons": self.action_size, "type": "output"}
-        )
+        info.append({"name": "Output (Q)", "neurons": self.action_size, "type": "output"})
 
         return info
 
@@ -531,9 +527,7 @@ class DuelingDQN(nn.Module):
                 return layer.visualization_weight()
             if isinstance(layer, nn.Linear):
                 return layer.weight.detach().cpu().numpy()
-            raise TypeError(
-                f"Unsupported layer type for visualization: {type(layer)!r}"
-            )
+            raise TypeError(f"Unsupported layer type for visualization: {type(layer)!r}")
 
         weights = []
         for layer in self.feature_layers:
@@ -564,9 +558,7 @@ if __name__ == "__main__":
     config = Config()
 
     # Create network
-    net = DQN(
-        state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
-    )
+    net = DQN(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
     print("=" * 60)
     print("DQN Network Architecture")

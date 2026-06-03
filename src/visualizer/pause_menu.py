@@ -46,9 +46,7 @@ class PauseButton:
             border_color = (80, 80, 90)
 
         # Background
-        bg_surface = pygame.Surface(
-            (self.rect.width, self.rect.height), pygame.SRCALPHA
-        )
+        bg_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         pygame.draw.rect(bg_surface, bg_color, bg_surface.get_rect(), border_radius=8)
         surface.blit(bg_surface, self.rect.topleft)
 
@@ -224,14 +222,10 @@ class PauseMenu:
 
         # Bug 94: Animate fade-in instead of instant full opacity
         if self._fade_alpha < self._target_alpha:
-            self._fade_alpha = min(
-                self._fade_alpha + self._fade_speed, self._target_alpha
-            )
+            self._fade_alpha = min(self._fade_alpha + self._fade_speed, self._target_alpha)
 
         # Semi-transparent overlay with animated fade
-        overlay = pygame.Surface(
-            (self.screen_width, self.screen_height), pygame.SRCALPHA
-        )
+        overlay = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, self._fade_alpha))
         surface.blit(overlay, (0, 0))
 
@@ -330,9 +324,7 @@ class PauseMenu:
             )
 
             # Confirmation text
-            confirm_text = self._button_font.render(
-                "Quit training?", True, (255, 255, 255)
-            )
+            confirm_text = self._button_font.render("Quit training?", True, (255, 255, 255))
             confirm_rect = confirm_text.get_rect(center=(center_x, box_y + 35))
             surface.blit(confirm_text, confirm_rect)
 

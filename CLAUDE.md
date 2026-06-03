@@ -70,8 +70,9 @@ The game state has 55+ features:
 python -m venv venv
 source venv/bin/activate
 
-# Install dependencies
+# Install dependencies and dev tools
 pip install -r requirements.txt
+# or: make setup
 
 # Verify installation
 python config.py
@@ -103,13 +104,13 @@ python main.py --device cpu
 
 ```bash
 # Run all tests
-pytest
+make test
 
 # Run specific test file
 pytest tests/test_agent.py -v
 
 # Run with coverage
-pytest --cov=src tests/
+make coverage
 
 # Run single test
 pytest tests/test_agent.py::TestAgent::test_select_action -v
@@ -119,13 +120,16 @@ pytest tests/test_agent.py::TestAgent::test_select_action -v
 
 ```bash
 # Type checking
-mypy --config-file=mypy.ini src/
+make typecheck
+
+# Lint
+make lint
 
 # Code formatting
-black src/ tests/ *.py
+make format
 
 # Format check only (don't modify)
-black --check src/ tests/ *.py
+make format-check
 ```
 
 ### Configuration

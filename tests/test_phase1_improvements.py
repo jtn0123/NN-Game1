@@ -9,10 +9,9 @@ Tests verify:
 """
 
 import pytest
-import time
+
 from src.web.server import (
     MetricsPublisher,
-    TrainingState,
     NNVisualizationData,
 )
 
