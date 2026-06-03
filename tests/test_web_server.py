@@ -503,6 +503,38 @@ class TestWebDashboardIntegration:
         assert authorized.status_code == 200
         assert not os.path.exists(model_path)
 
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "breakout:../outside.pth",
+            "breakout:%2e%2e/outside.pth",
+            "breakout:subdir/demo.pth",
+            "legacy:missing.pth",
+        ],
+    )
+    def test_delete_model_rejects_encoded_and_malformed_ids(self, tmp_path, model_id):
+        """HTTP delete route should reject traversal-shaped ids with a valid token."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        os.makedirs(config.GAME_MODEL_DIR)
+        outside = tmp_path / "outside.pth"
+        outside.write_bytes(b"keep me")
+
+        dashboard = WebDashboard(port=5106, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.delete(
+                f"/api/models/{model_id}",
+                headers={"X-Dashboard-Token": dashboard.access_token},
+            )
+
+        assert response.status_code in {403, 404}
+        assert outside.exists()
+
     def test_socket_requires_dashboard_token(self, web_dashboard):
         """Socket.IO clients need the dashboard token to connect."""
         unauthorized = web_dashboard.socketio.test_client(web_dashboard.app)

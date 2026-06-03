@@ -32,6 +32,30 @@ def test_model_service_resolves_ids_and_rejects_traversal(tmp_path):
     assert service.resolve("legacy:best.pth") is None
 
 
+@pytest.mark.parametrize(
+    "model_ref",
+    [
+        "",
+        "breakout:",
+        "breakout:.",
+        "breakout:..",
+        "breakout:best.pth/extra",
+        "breakout:%2e%2e/best.pth",
+        "breakout:subdir/best.pth",
+        "breakout:\\best.pth",
+        "unknown:best.pth",
+    ],
+)
+def test_model_service_rejects_malformed_model_ids(tmp_path, model_ref):
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    (model_dir / "best.pth").write_bytes(b"checkpoint")
+
+    service = ModelService([(str(model_dir), "breakout")])
+
+    assert service.resolve(model_ref) is None
+
+
 def test_model_service_resolves_legacy_absolute_paths_only_inside_allowed_dirs(
     tmp_path,
 ):

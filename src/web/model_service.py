@@ -95,7 +95,12 @@ class ModelService:
             return None
 
         source, filename = model_ref.split(":", 1)
-        if not filename or os.path.basename(filename) != filename:
+        if (
+            not filename
+            or os.path.basename(filename) != filename
+            or "/" in filename
+            or "\\" in filename
+        ):
             return None
 
         for entry in self._model_dirs:

@@ -1,7 +1,9 @@
 import os
 from types import SimpleNamespace
+import time
 
 import numpy as np
+import pytest
 
 from src.app.training_runtime import build_nn_snapshot, resolve_model_path
 from src.ai.agent import Agent
@@ -61,3 +63,66 @@ def test_build_nn_snapshot_creates_sampled_and_full_payloads():
     assert snapshot.analysis_weights
     assert len(snapshot.analysis_weights[0][0]) == config.STATE_SIZE
     assert len(snapshot.weights[0]) <= 15
+
+
+@pytest.mark.parametrize(
+    ("use_dueling", "use_noisy"),
+    [(False, False), (True, False), (True, True)],
+)
+def test_build_nn_snapshot_contract_for_network_variants(use_dueling, use_noisy):
+    """Dashboard NN snapshots should stay structurally valid across network variants."""
+    config = Config()
+    config.HIDDEN_LAYERS = [24, 12]
+    config.USE_DUELING = use_dueling
+    config.USE_NOISY_NETWORKS = use_noisy
+    config.USE_N_STEP_RETURNS = False
+    config.USE_PRIORITIZED_REPLAY = False
+    agent = Agent(
+        state_size=config.STATE_SIZE,
+        action_size=config.ACTION_SIZE,
+        config=config,
+    )
+    game = SimpleNamespace(get_action_labels=lambda: ["LEFT", "STAY", "RIGHT"])
+    state = np.linspace(0, 1, config.STATE_SIZE, dtype=np.float32)
+
+    snapshot = build_nn_snapshot(agent, game, state)
+
+    assert snapshot.layer_info[0]["type"] == "input"
+    assert snapshot.layer_info[-1]["type"] == "output"
+    assert len(snapshot.q_values) == config.ACTION_SIZE
+    assert len(snapshot.action_labels) == config.ACTION_SIZE
+    assert len(snapshot.input_state) == config.STATE_SIZE
+    assert np.isfinite(snapshot.q_values).all()
+    assert snapshot.activations
+    assert snapshot.analysis_activations
+    assert snapshot.weights
+    assert snapshot.analysis_weights
+    assert all(len(layer) <= 15 for layer in snapshot.weights)
+    if use_dueling:
+        layer_types = {layer["type"] for layer in snapshot.layer_info}
+        assert "value_stream" in layer_types
+        assert "advantage_stream" in layer_types
+
+
+def test_build_nn_snapshot_smoke_performance_budget():
+    """A small NN snapshot should stay comfortably below an interactive budget."""
+    config = Config()
+    config.HIDDEN_LAYERS = [32, 16]
+    config.USE_DUELING = False
+    config.USE_NOISY_NETWORKS = False
+    config.USE_N_STEP_RETURNS = False
+    config.USE_PRIORITIZED_REPLAY = False
+    agent = Agent(
+        state_size=config.STATE_SIZE,
+        action_size=config.ACTION_SIZE,
+        config=config,
+    )
+    game = SimpleNamespace(get_action_labels=lambda: ["LEFT", "STAY", "RIGHT"])
+    state = np.zeros(config.STATE_SIZE, dtype=np.float32)
+
+    start = time.perf_counter()
+    for _ in range(5):
+        build_nn_snapshot(agent, game, state)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 1.0

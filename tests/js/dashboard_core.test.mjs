@@ -16,6 +16,16 @@ test('withDashboardToken preserves headers and adds token', () => {
   assert.equal(options.headers['X-Dashboard-Token'], 'secret-token');
 });
 
+test('withDashboardToken does not mutate original options', () => {
+  const original = { method: 'GET', headers: { Accept: 'application/json' } };
+  const options = DashboardCore.withDashboardToken(original, 'new-token');
+
+  assert.notEqual(options, original);
+  assert.notEqual(options.headers, original.headers);
+  assert.deepEqual(original.headers, { Accept: 'application/json' });
+  assert.equal(options.headers['X-Dashboard-Token'], 'new-token');
+});
+
 test('readToken reads dashboard token from meta tag', () => {
   const documentRef = {
     querySelector(selector) {
@@ -32,6 +42,11 @@ test('authorizedControlPayload preserves existing payload fields', () => {
     DashboardCore.authorizedControlPayload({ action: 'save_as', filename: 'x.pth' }, 'token'),
     { action: 'save_as', filename: 'x.pth', token: 'token' },
   );
+});
+
+test('authorizedControlPayload ignores non-object payloads', () => {
+  assert.equal(DashboardCore.authorizedControlPayload(null, 'token'), null);
+  assert.equal(DashboardCore.authorizedControlPayload('bad', 'token'), 'bad');
 });
 
 test('createAuthorizedSocket injects token into mutating events only', () => {
