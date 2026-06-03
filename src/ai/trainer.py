@@ -36,6 +36,15 @@ class EpisodeStats:
     won: bool
 
 
+def calculate_progress_count(info: Dict, config: Config) -> int:
+    """Return a game progress count for dashboard/training metrics."""
+    if "bricks" in info:
+        return max(0, int(info.get("bricks") or 0))
+
+    initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
+    return max(0, initial_bricks - int(info.get("bricks_remaining", initial_bricks)))
+
+
 class TrainingMetrics:
     """
     Tracks and stores training metrics over time.
@@ -171,9 +180,13 @@ class Trainer:
         """
         start_time = time.time()
 
+        if self.config.MAX_STEPS_PER_EPISODE <= 0:
+            raise ValueError("MAX_STEPS_PER_EPISODE must be positive")
+
         state = self.game.reset()
         total_reward = 0.0
         steps = 0
+        info: Dict = {"score": 0, "won": False}
 
         while steps < self.config.MAX_STEPS_PER_EPISODE:
             # Select and execute action
@@ -206,9 +219,7 @@ class Trainer:
 
         duration = time.time() - start_time
 
-        # Calculate bricks broken
-        initial_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS
-        bricks_broken = initial_bricks - info.get("bricks_remaining", initial_bricks)
+        bricks_broken = calculate_progress_count(info, self.config)
 
         return EpisodeStats(
             episode=self.current_episode,
@@ -328,25 +339,34 @@ class Trainer:
         Returns:
             Evaluation statistics
         """
+        if num_episodes <= 0:
+            raise ValueError("num_episodes must be positive")
+        if self.config.MAX_STEPS_PER_EPISODE <= 0:
+            raise ValueError("MAX_STEPS_PER_EPISODE must be positive")
+
         scores = []
         wins = 0
 
         original_epsilon = self.agent.epsilon
         self.agent.epsilon = 0  # No exploration during evaluation
 
-        for ep in range(num_episodes):
-            state = self.game.reset()
-            done = False
+        try:
+            for _ in range(num_episodes):
+                state = self.game.reset()
+                done = False
+                steps = 0
+                info: Dict = {"score": 0, "won": False}
 
-            while not done:
-                action = self.agent.select_action(state, training=False)
-                state, _, done, info = self.game.step(action)
+                while not done and steps < self.config.MAX_STEPS_PER_EPISODE:
+                    action = self.agent.select_action(state, training=False)
+                    state, _, done, info = self.game.step(action)
+                    steps += 1
 
-            scores.append(info.get("score", 0))
-            if info.get("won", False):
-                wins += 1
-
-        self.agent.epsilon = original_epsilon
+                scores.append(info.get("score", 0))
+                if info.get("won", False):
+                    wins += 1
+        finally:
+            self.agent.epsilon = original_epsilon
 
         return {
             "mean_score": np.mean(scores),

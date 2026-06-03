@@ -20,6 +20,40 @@ from src.ai.agent import Agent
 from src.game.breakout import Breakout
 
 
+class OneStepGame:
+    state_size = 2
+    action_size = 1
+
+    def __init__(self, info=None, done=True):
+        self.info = info or {"score": 0, "won": False}
+        self.done = done
+
+    def reset(self):
+        return np.zeros(2, dtype=np.float32)
+
+    def step(self, action):
+        return np.zeros(2, dtype=np.float32), 0.0, self.done, dict(self.info)
+
+
+class MinimalAgent:
+    epsilon = 1.0
+
+    def select_action(self, state, training=True):
+        return 0
+
+    def remember(self, *args):
+        pass
+
+    def learn(self):
+        return 0.0
+
+    def decay_epsilon(self, episode=0):
+        pass
+
+    def get_average_loss(self, n):
+        return 0.0
+
+
 @pytest.fixture
 def config():
     """Create a test configuration."""
@@ -313,6 +347,27 @@ class TestRunEpisode:
         stats = trainer.run_episode(render=False)
         assert stats.duration > 0
 
+    def test_run_episode_rejects_zero_max_steps(self, config):
+        """Zero-step episodes should fail with a clear validation error."""
+        config.MAX_STEPS_PER_EPISODE = 0
+        trainer = Trainer(OneStepGame(), MinimalAgent(), config)
+
+        with pytest.raises(ValueError, match="MAX_STEPS_PER_EPISODE"):
+            trainer.run_episode(render=False)
+
+    def test_run_episode_uses_direct_bricks_metric_for_non_breakout_games(self, config):
+        """Games that report direct progress should not be forced through Breakout math."""
+        config.MAX_STEPS_PER_EPISODE = 1
+        trainer = Trainer(
+            OneStepGame({"score": 0, "won": False, "bricks": 7}),
+            MinimalAgent(),
+            config,
+        )
+
+        stats = trainer.run_episode(render=False)
+
+        assert stats.bricks_broken == 7
+
 
 class TestTrainSavesCheckpoints:
     """Test that train() saves checkpoints correctly."""
@@ -394,6 +449,27 @@ class TestEvaluateResetsEpsilon:
         # Max should be >= mean >= min
         assert results["max_score"] >= results["mean_score"]
         assert results["mean_score"] >= results["min_score"]
+
+    def test_evaluate_rejects_zero_episodes(self, trainer):
+        """Zero-episode evaluation should fail clearly."""
+        with pytest.raises(ValueError, match="num_episodes"):
+            trainer.evaluate(num_episodes=0, render=False)
+
+    def test_evaluate_uses_max_step_cap_and_restores_epsilon(self, config):
+        """Evaluation should not hang forever when a game never finishes."""
+        config.MAX_STEPS_PER_EPISODE = 3
+        agent = MinimalAgent()
+        agent.epsilon = 0.75
+        trainer = Trainer(
+            OneStepGame({"score": 5, "won": False}, done=False),
+            agent,
+            config,
+        )
+
+        results = trainer.evaluate(num_episodes=1, render=False)
+
+        assert results["mean_score"] == 5.0
+        assert agent.epsilon == 0.75
 
 
 if __name__ == "__main__":

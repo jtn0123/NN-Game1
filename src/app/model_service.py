@@ -45,8 +45,13 @@ class ModelService:
         log: Callable[[str], None] = print,
     ) -> Optional[str]:
         """Resolve the explicit compatible checkpoint or newest game-specific save."""
+        trusted_dirs = [self.config.MODEL_DIR, self.config.GAME_MODEL_DIR]
         if explicit_path and os.path.exists(explicit_path):
-            info = Agent.inspect_model(explicit_path)
+            info = Agent.inspect_model(
+                explicit_path,
+                trusted_dirs=trusted_dirs,
+                allow_unsafe_fallback=True,
+            )
             if (
                 info
                 and info.get("state_size") == state_size
@@ -75,9 +80,23 @@ class ModelService:
             return None
 
         model_files.sort(key=lambda x: x[1], reverse=True)
-        most_recent = model_files[0][0]
-        log(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
-        return most_recent
+        for model_path, _ in model_files:
+            info = Agent.inspect_model(
+                model_path,
+                trusted_dirs=trusted_dirs,
+                allow_unsafe_fallback=True,
+            )
+            if (
+                info
+                and info.get("state_size") == state_size
+                and info.get("action_size") == action_size
+            ):
+                log(f"📂 Auto-loading most recent compatible save: {os.path.basename(model_path)}")
+                return model_path
+            log(f"⚠️  Skipping incompatible save: {os.path.basename(model_path)}")
+
+        log("⚠️  No compatible saved model found for this game")
+        return None
 
     def build_visual_history(
         self,
@@ -163,5 +182,5 @@ class ModelService:
                 sidecar_path = Agent.metadata_sidecar_path(filepath)
                 if os.path.exists(sidecar_path):
                     os.remove(sidecar_path)
-            except OSError:
-                pass
+            except OSError as exc:
+                print(f"⚠️ Could not delete old checkpoint {filepath}: {exc}")

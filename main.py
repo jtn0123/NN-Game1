@@ -91,7 +91,7 @@ from src.app.training_runtime import (
     request_save_and_stop,
     resolve_model_path,
 )
-from src.ai.trainer import Trainer
+from src.ai.trainer import Trainer, calculate_progress_count
 from src.ai.evaluator import Evaluator  # Deterministic performance tracking
 from src.utils.checkpoint_loader import load_checkpoint
 from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
@@ -826,6 +826,9 @@ class GameApp:
 
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
+        if not isinstance(config_data, dict):
+            print("⚠️  Ignoring invalid config payload")
+            return
         changes = []
 
         if "learning_rate" in config_data:
@@ -1104,6 +1107,14 @@ class GameApp:
 
     def _set_speed(self, speed: float, force_log: bool = False) -> None:
         """Set game speed (for web dashboard control)."""
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            print(f"⚠️  Invalid speed value: {speed}")
+            return
+        if not math.isfinite(speed):
+            print(f"⚠️  Invalid speed value: {speed}")
+            return
         new_speed = max(1.0, min(1000.0, speed))
         old_speed = self.game_speed
         self.game_speed = new_speed
@@ -1667,8 +1678,9 @@ class GameApp:
             state = self.game.reset()
             episode_reward = 0.0
             episode_steps = 0
+            info = {"score": 0, "won": False}
 
-            while not done:
+            while not done and episode_steps < self.config.MAX_STEPS_PER_EPISODE:
                 action = self.agent.select_action(state, training=True)
                 next_state, reward, done, info = self.game.step(action)
 
@@ -1991,9 +2003,15 @@ class GameApp:
                 selected_action=selected_action,
                 step=self.agent.steps,
             )
-        except Exception:
-            # Don't crash training on visualization errors - silently ignore
-            pass
+        except Exception as exc:
+            # Don't crash training on visualization errors, but surface the first failure.
+            if not getattr(self, "_nn_visualization_error_reported", False):
+                self._nn_visualization_error_reported = True
+                message = f"⚠️ Neural network visualization update failed: {type(exc).__name__}"
+                if self.web_dashboard:
+                    self.web_dashboard.log(message, "warning")
+                else:
+                    print(message)
 
     def _save_model(self, filename: str, save_reason: str = "manual", quiet: bool = False) -> bool:
         """Save the current model with rich metadata.
@@ -2090,8 +2108,12 @@ class GameApp:
         for filepath in to_delete:
             try:
                 os.remove(filepath)
-            except Exception:
-                pass
+            except OSError as exc:
+                message = f"⚠️ Could not delete old checkpoint {filepath}: {exc}"
+                if self.web_dashboard:
+                    self.web_dashboard.log(message, "warning")
+                else:
+                    print(message)
 
 
 class HeadlessTrainer:
@@ -2680,20 +2702,38 @@ class HeadlessTrainer:
                 selected_action=selected_action,
                 step=self.agent.steps,
             )
-        except Exception:
-            # Don't crash training on visualization errors - silently ignore
-            pass
+        except Exception as exc:
+            if not getattr(self, "_nn_visualization_error_reported", False):
+                self._nn_visualization_error_reported = True
+                message = f"⚠️ Neural network visualization update failed: {type(exc).__name__}"
+                if self.web_dashboard:
+                    self.web_dashboard.log(message, "warning")
+                else:
+                    print(message)
 
     def _apply_config(self, config_data: dict) -> None:
         """Apply configuration changes from web dashboard."""
+        if not isinstance(config_data, dict):
+            print("⚠️  Ignoring invalid config payload")
+            return
         changes = []
 
         if "learning_rate" in config_data:
-            old_lr = self.config.LEARNING_RATE
-            self.config.LEARNING_RATE = config_data["learning_rate"]
-            for param_group in self.agent.optimizer.param_groups:
-                param_group["lr"] = config_data["learning_rate"]
-            changes.append(f"LR: {old_lr} → {config_data['learning_rate']}")
+            try:
+                lr = float(config_data["learning_rate"])
+                if not math.isfinite(lr) or lr <= 0:
+                    raise ValueError("Learning rate must be finite and positive")
+                if lr > 10.0:
+                    raise ValueError(f"Learning rate {lr} is unreasonably large (max 10.0)")
+                if lr < 1e-10:
+                    raise ValueError(f"Learning rate {lr} is too small (min 1e-10)")
+                old_lr = self.config.LEARNING_RATE
+                self.config.LEARNING_RATE = lr
+                for param_group in self.agent.optimizer.param_groups:
+                    param_group["lr"] = lr
+                changes.append(f"LR: {old_lr} → {lr}")
+            except (ValueError, TypeError) as e:
+                print(f"⚠️  Invalid learning_rate value: {config_data['learning_rate']} - {e}")
 
         if "epsilon" in config_data:
             try:
@@ -2867,8 +2907,9 @@ class HeadlessTrainer:
             episode_reward = 0.0
             episode_steps = 0
             done = False
+            info = {"score": 0, "won": False}
 
-            while not done:
+            while not done and episode_steps < config.MAX_STEPS_PER_EPISODE:
                 # Handle pause during episode
                 while self.paused:
                     time.sleep(0.1)
@@ -2924,9 +2965,7 @@ class HeadlessTrainer:
             won = info.get("won", False)
             self.wins.append(won)
 
-            # Calculate bricks broken
-            initial_bricks = config.BRICK_ROWS * config.BRICK_COLS
-            bricks_broken = initial_bricks - info.get("bricks_remaining", initial_bricks)
+            bricks_broken = calculate_progress_count(info, config)
 
             # Update web dashboard metrics (throttled to every 5 episodes for performance)
             # Always emit on: first 10 episodes, new best score, or every 5th episode

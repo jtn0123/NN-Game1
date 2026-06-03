@@ -547,6 +547,51 @@ class TestReplayBufferEdgeCases:
         with pytest.raises(ValueError, match="State shape mismatch"):
             buffer.push(wrong_state, 0, 1.0, wrong_state, False)
 
+    @pytest.mark.parametrize("method_name", ["sample", "sample_no_copy"])
+    def test_sample_rejects_non_positive_batch_size(self, method_name):
+        """Sampling zero items should fail before returning empty training batches."""
+        buffer = ReplayBuffer(capacity=100, state_size=10)
+        state = np.zeros(10, dtype=np.float32)
+        buffer.push(state, 0, 1.0, state, False)
+
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            getattr(buffer, method_name)(0)
+
+    def test_is_ready_rejects_non_positive_batch_size(self):
+        """Readiness checks should use the same positive batch-size contract."""
+        buffer = ReplayBuffer(capacity=100, state_size=10)
+
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            buffer.is_ready(0)
+
+    def test_push_batch_rejects_mismatched_lengths(self, state_size):
+        """Vectorized inserts should fail clearly when arrays disagree."""
+        buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        states = np.zeros((2, state_size), dtype=np.float32)
+
+        with pytest.raises(ValueError, match="actions length mismatch"):
+            buffer.push_batch(
+                states,
+                np.zeros(1, dtype=np.int64),
+                np.zeros(2, dtype=np.float32),
+                states.copy(),
+                np.zeros(2, dtype=bool),
+            )
+
+    def test_push_batch_rejects_empty_batches(self, state_size):
+        """Empty vectorized inserts should not silently no-op."""
+        buffer = ReplayBuffer(capacity=100, state_size=state_size)
+        states = np.zeros((0, state_size), dtype=np.float32)
+
+        with pytest.raises(ValueError, match="at least one experience"):
+            buffer.push_batch(
+                states,
+                np.zeros(0, dtype=np.int64),
+                np.zeros(0, dtype=np.float32),
+                states.copy(),
+                np.zeros(0, dtype=bool),
+            )
+
 
 class TestPrioritizedReplayBufferEdgeCases:
     """Test PER edge cases and validation."""
@@ -607,6 +652,39 @@ class TestPrioritizedReplayBufferEdgeCases:
         with pytest.raises(ValueError, match="Capacity must be positive"):
             PrioritizedReplayBuffer(capacity=-10)
 
+    def test_per_rejects_non_positive_beta_frames(self):
+        """PER beta annealing must not allow divide-by-zero schedules."""
+        with pytest.raises(ValueError, match="beta_frames must be positive"):
+            PrioritizedReplayBuffer(capacity=100, beta_frames=0)
+
+    @pytest.mark.parametrize("method_name", ["sample", "sample_no_copy"])
+    def test_per_sample_rejects_non_positive_batch_size(self, state_size, method_name):
+        """PER sampling should fail clearly for zero-sized batches."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        state = np.zeros(state_size, dtype=np.float32)
+        buffer.push(state, 0, 1.0, state, False)
+
+        with pytest.raises(ValueError, match="batch_size must be positive"):
+            getattr(buffer, method_name)(0)
+
+    def test_per_update_priorities_rejects_negative_indices(self, state_size):
+        """Priority updates should not allow negative indexing into the buffer."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        state = np.zeros(state_size, dtype=np.float32)
+        buffer.push(state, 0, 1.0, state, False)
+
+        with pytest.raises(ValueError, match="outside the populated buffer range"):
+            buffer.update_priorities(np.array([-1]), np.array([1.0]))
+
+    def test_per_update_priorities_rejects_length_mismatch(self, state_size):
+        """Priority index and TD-error arrays must line up."""
+        buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
+        state = np.zeros(state_size, dtype=np.float32)
+        buffer.push(state, 0, 1.0, state, False)
+
+        with pytest.raises(ValueError, match="length mismatch"):
+            buffer.update_priorities(np.array([0]), np.array([1.0, 2.0]))
+
     def test_per_state_shape_mismatch_raises(self, state_size):
         """Pushing state with wrong shape to PER buffer should raise ValueError."""
         buffer = PrioritizedReplayBuffer(capacity=100, state_size=state_size)
@@ -618,6 +696,16 @@ class TestPrioritizedReplayBufferEdgeCases:
         wrong_state = np.ones(state_size + 5, dtype=np.float32)
         with pytest.raises(ValueError, match="State shape mismatch"):
             buffer.push(wrong_state, 0, 1.0, wrong_state, False)
+
+    def test_n_step_rejects_non_positive_n_steps(self, state_size):
+        """N-step return buffers need a positive lookahead window."""
+        with pytest.raises(ValueError, match="n_steps must be positive"):
+            NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=0)
+
+    def test_n_step_rejects_invalid_gamma(self, state_size):
+        """N-step discount factors should be finite and in the RL gamma range."""
+        with pytest.raises(ValueError, match="gamma must be finite"):
+            NStepReplayBuffer(capacity=100, state_size=state_size, gamma=float("nan"))
 
 
 class TestReplayBufferPersistence:

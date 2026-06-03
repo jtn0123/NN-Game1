@@ -81,6 +81,11 @@ class ReplayBuffer:
         self.dones = np.empty(self.capacity, dtype=np.float32)
         self._initialized = True
 
+    @staticmethod
+    def _validate_batch_size(batch_size: int) -> None:
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
+
     def push(
         self,
         state: np.ndarray,
@@ -144,11 +149,38 @@ class ReplayBuffer:
             next_states: Batch of next states (batch_size, state_size)
             dones: Batch of done flags (batch_size,)
         """
+        states = np.asarray(states)
+        actions = np.asarray(actions)
+        rewards = np.asarray(rewards)
+        next_states = np.asarray(next_states)
+        dones = np.asarray(dones)
         batch_size = len(states)
+        if batch_size <= 0:
+            raise ValueError("push_batch requires at least one experience")
+        if states.ndim != 2:
+            raise ValueError("states must be a 2D array")
+        if next_states.shape != states.shape:
+            raise ValueError(
+                f"next_states shape mismatch: expected {states.shape}, got {next_states.shape}"
+            )
+        for name, values in [
+            ("actions", actions),
+            ("rewards", rewards),
+            ("dones", dones),
+        ]:
+            actual_length = values.shape[0] if values.ndim >= 1 else 0
+            if values.ndim != 1 or actual_length != batch_size:
+                raise ValueError(
+                    f"{name} length mismatch: expected {batch_size}, got {actual_length}"
+                )
 
         # Lazy initialization on first push
         if not self._initialized:
             self._init_arrays(states.shape[1])
+        elif states.shape[1] != self._state_size:
+            raise ValueError(
+                f"State shape mismatch: expected ({self._state_size},), got ({states.shape[1]},)"
+            )
 
         # Calculate indices where batch will be stored
         indices = np.arange(self._position, self._position + batch_size) % self.capacity
@@ -180,6 +212,7 @@ class ReplayBuffer:
         Raises:
             RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
+        self._validate_batch_size(batch_size)
         if not self._initialized:
             raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
         if self._size == 0:
@@ -215,6 +248,7 @@ class ReplayBuffer:
         Raises:
             RuntimeError: If buffer has not been initialized (no push() calls yet)
         """
+        self._validate_batch_size(batch_size)
         if not self._initialized:
             raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
         if self._size == 0:
@@ -238,6 +272,7 @@ class ReplayBuffer:
 
     def is_ready(self, batch_size: int) -> bool:
         """Check if buffer has enough experiences for sampling."""
+        self._validate_batch_size(batch_size)
         return self._size >= batch_size
 
     def clear(self) -> None:
@@ -363,6 +398,8 @@ class PrioritizedReplayBuffer:
         """
         if capacity <= 0:
             raise ValueError(f"Capacity must be positive, got {capacity}")
+        if beta_frames <= 0:
+            raise ValueError(f"beta_frames must be positive, got {beta_frames}")
         self.capacity = capacity
         self._state_size = state_size
         self._size = 0
@@ -392,6 +429,11 @@ class PrioritizedReplayBuffer:
         self.next_states = np.empty((self.capacity, state_size), dtype=np.float32)
         self.dones = np.empty(self.capacity, dtype=np.float32)
         self._initialized = True
+
+    @staticmethod
+    def _validate_batch_size(batch_size: int) -> None:
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {batch_size}")
 
     def push(
         self,
@@ -437,6 +479,7 @@ class PrioritizedReplayBuffer:
         Returns:
             Tuple: (states, actions, rewards, next_states, dones, indices, weights)
         """
+        self._validate_batch_size(batch_size)
         if not self._initialized:
             raise RuntimeError(
                 f"Cannot sample from uninitialized {self.__class__.__name__}. Call push() first."
@@ -495,6 +538,7 @@ class PrioritizedReplayBuffer:
         """Sample without copying (faster, returns views)."""
         # Bug 8 fix: Check for empty buffer
         # Bug 82 fix: Use class name in error messages for clarity
+        self._validate_batch_size(batch_size)
         if not self._initialized:
             raise RuntimeError(
                 f"Cannot sample from uninitialized {self.__class__.__name__}. Call push() first."
@@ -545,6 +589,21 @@ class PrioritizedReplayBuffer:
             indices: Indices of sampled experiences
             td_errors: Absolute TD errors from training
         """
+        indices = np.asarray(indices)
+        td_errors = np.asarray(td_errors)
+        if indices.ndim != 1 or td_errors.ndim != 1:
+            raise ValueError("indices and td_errors must be 1D arrays")
+        if len(indices) == 0:
+            raise ValueError("indices must not be empty")
+        if len(indices) != len(td_errors):
+            raise ValueError(
+                f"indices and td_errors length mismatch: {len(indices)} != {len(td_errors)}"
+            )
+        if np.any(indices < 0) or np.any(indices >= self._size):
+            raise ValueError("priority indices are outside the populated buffer range")
+        if not np.isfinite(td_errors).all():
+            raise ValueError("td_errors must be finite")
+
         priorities = (
             np.abs(td_errors) + 1e-6
         )  # Small epsilon ensures non-zero priorities when td_error=0
@@ -557,6 +616,7 @@ class PrioritizedReplayBuffer:
 
     def is_ready(self, batch_size: int) -> bool:
         """Check if buffer has enough experiences for sampling."""
+        self._validate_batch_size(batch_size)
         return self._size >= batch_size
 
     def clear(self) -> None:
@@ -678,6 +738,10 @@ class NStepReplayBuffer(ReplayBuffer):
             n_steps: Number of steps to look ahead (typically 3-5)
             gamma: Discount factor for computing N-step returns
         """
+        if n_steps <= 0:
+            raise ValueError(f"n_steps must be positive, got {n_steps}")
+        if not np.isfinite(gamma) or gamma <= 0 or gamma > 1:
+            raise ValueError(f"gamma must be finite and in (0, 1], got {gamma}")
         super().__init__(capacity, state_size)
         self.n_steps = n_steps
         self.gamma = gamma

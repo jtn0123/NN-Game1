@@ -66,9 +66,20 @@ def resolve_model_path(
         return None
 
     model_files.sort(key=lambda item: item[1], reverse=True)
-    most_recent = model_files[0][0]
-    print(f"📂 Auto-loading most recent save: {os.path.basename(most_recent)}")
-    return most_recent
+    for model_path, _ in model_files:
+        info = inspect_model(
+            model_path,
+            trusted_dirs=trusted_dirs,
+            allow_unsafe_fallback=True,
+        )
+        if info and info.get("state_size") == state_size and info.get("action_size") == action_size:
+            print(f"📂 Auto-loading most recent compatible save: {os.path.basename(model_path)}")
+            return model_path
+
+        print(f"⚠️  Skipping incompatible save: {os.path.basename(model_path)}")
+
+    print("⚠️  No compatible saved model found for this game")
+    return None
 
 
 def request_save_and_stop(

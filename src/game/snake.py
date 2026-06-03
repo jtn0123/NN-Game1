@@ -22,7 +22,7 @@ import pygame
 from typing import Tuple, List, Optional, Deque
 from collections import deque
 
-from .base_game import BaseGame, step_vector_env_no_copy
+from .base_game import BaseGame, step_vector_env_no_copy, validate_action, validate_action_batch
 from .particles import ParticleSystem
 from config import Config
 
@@ -256,6 +256,7 @@ class Snake(BaseGame):
         if self.game_over:
             return self.get_state(), 0.0, True, self._get_info()
 
+        action = validate_action(action, self.action_size, "Snake")
         reward = -0.01  # Small step penalty to encourage efficiency
 
         # Buffer direction change (prevents 180-degree turns in same frame)
@@ -637,6 +638,7 @@ class VecSnake:
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments with batched actions."""
+        actions = validate_action_batch(actions, self.num_envs, self.action_size, "VecSnake")
         infos = []
 
         for i, (env, action) in enumerate(zip(self.envs, actions)):

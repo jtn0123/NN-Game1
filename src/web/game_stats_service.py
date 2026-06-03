@@ -39,7 +39,6 @@ def build_game_stats(
                 if not filename.endswith(".pth"):
                     continue
 
-                game_stats["model_count"] += 1
                 path = os.path.join(game_model_dir, filename)
                 try:
                     checkpoint = checkpoint_loader(
@@ -52,6 +51,7 @@ def build_game_stats(
                     _logger.debug(f"Could not load stats from {filename}: {exc}")
                     continue
 
+                game_stats["model_count"] += 1
                 metadata = checkpoint.get("metadata")
                 if not metadata:
                     continue

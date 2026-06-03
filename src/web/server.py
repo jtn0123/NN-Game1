@@ -25,6 +25,7 @@ import os
 import threading
 import time
 import json
+import math
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Deque, Callable, Tuple
 from dataclasses import dataclass, asdict, field
@@ -33,6 +34,7 @@ from enum import Enum
 import base64
 import io
 import secrets
+import socket
 from urllib.parse import urlencode
 
 import numpy as np
@@ -1192,8 +1194,20 @@ class WebDashboard:
 
     def dashboard_url(self) -> str:
         """Return the tokenized URL needed to open the dashboard page."""
+        display_host = self.host
+        if display_host in {"0.0.0.0", "::"}:
+            display_host = "127.0.0.1"
         query = urlencode({"token": self.access_token})
-        return f"http://{self.host}:{self.port}/?{query}"
+        return f"http://{display_host}:{self.port}/?{query}"
+
+    def dashboard_network_url(self) -> str:
+        """Return a best-effort LAN URL for dashboards bound to all interfaces."""
+        try:
+            display_host = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            display_host = "127.0.0.1"
+        query = urlencode({"token": self.access_token})
+        return f"http://{display_host}:{self.port}/?{query}"
 
     def _model_search_dirs(self) -> List[Tuple[str, str]]:
         """Return allowed model directories as (directory, source) pairs."""
@@ -1231,8 +1245,9 @@ class WebDashboard:
             return self._success_ack(action)
         try:
             result = callback(*args)
-        except Exception as exc:
-            return self._error_ack(action, str(exc))
+        except Exception:
+            _logger.exception("Dashboard control callback failed for %s", action)
+            return self._error_ack(action, failure_message)
 
         if isinstance(result, dict):
             success = bool(result.get("success", False))
@@ -1248,6 +1263,8 @@ class WebDashboard:
 
     def _handle_save_as_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
         filename = data.get("filename", "custom_save.pth")
+        if not isinstance(filename, str) or not filename.strip():
+            return self._error_ack("save_as", "Invalid filename")
         return self._callback_ack(
             "save_as",
             self.on_save_as_callback,
@@ -1286,6 +1303,8 @@ class WebDashboard:
         game_name = data.get("game")
         if not game_name or not self.on_restart_with_game_callback:
             return self._error_ack("restart_with_game", "Invalid game")
+        if not self._is_known_game(game_name):
+            return self._error_ack("restart_with_game", "Invalid game")
 
         self.publisher.log(f"🔄 Switching to {game_name}...", level="warning")
         save_ack = self._handle_save_control()
@@ -1297,6 +1316,28 @@ class WebDashboard:
         )
         self.on_restart_with_game_callback(game_name)
         return self._success_ack("restart_with_game")
+
+    @staticmethod
+    def _is_known_game(game_name: Any) -> bool:
+        if not isinstance(game_name, str):
+            return False
+        from src.game import list_games
+
+        return game_name in list_games()
+
+    @staticmethod
+    def _valid_performance_modes() -> set[str]:
+        return {"normal", "fast", "turbo", "ultra"}
+
+    @staticmethod
+    def _parse_speed(value: Any) -> Optional[float]:
+        try:
+            speed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(speed) or speed <= 0:
+            return None
+        return speed
 
     def _handle_go_to_launcher_control(self) -> Dict[str, Any]:
         self.publisher.log("🎮 Returning to launcher...", level="warning")
@@ -1312,6 +1353,17 @@ class WebDashboard:
 
     def _register_routes(self) -> None:
         """Register Flask routes."""
+
+        @self.app.before_request
+        def require_dashboard_token_for_api():
+            if request.path.startswith("/api/") and not self._is_authorized_request():
+                return jsonify({"error": "Unauthorized"}), 401
+
+        @self.app.after_request
+        def apply_security_headers(response):
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            return response
 
         @self.app.route("/")
         def index():
@@ -1515,7 +1567,9 @@ class WebDashboard:
             elif action == "save_as":
                 return self._handle_save_as_control(data)
             elif action == "speed":
-                speed = data.get("value", 1.0)
+                speed = self._parse_speed(data.get("value", 1.0))
+                if speed is None:
+                    return self._error_ack("speed", "Invalid speed")
                 if self.on_speed_callback:
                     self.on_speed_callback(speed)
                 self.publisher.set_speed(speed)
@@ -1528,11 +1582,15 @@ class WebDashboard:
                 return self._handle_load_model_control(data)
             elif action == "config_change":
                 config_data = data.get("config", {})
+                if not isinstance(config_data, dict):
+                    return self._error_ack("config_change", "Invalid config")
                 if self.on_config_change_callback:
                     self.on_config_change_callback(config_data)
                 self.publisher.update_config(config_data)
             elif action == "performance_mode":
                 mode = data.get("mode", "normal")
+                if mode not in self._valid_performance_modes():
+                    return self._error_ack("performance_mode", "Invalid performance mode")
                 if self.on_performance_mode_callback:
                     self.on_performance_mode_callback(mode)
                 self.publisher.set_performance_mode(mode)
@@ -1543,7 +1601,9 @@ class WebDashboard:
                 # Launcher mode: user selected a game to start
                 game_name = data.get("game")
                 mode = data.get("mode", "ai")  # 'ai' or 'human'
-                if game_name and self.on_game_selected_callback:
+                if not self._is_known_game(game_name) or mode not in {"ai", "human"}:
+                    return self._error_ack("select_game", "Invalid game")
+                if self.on_game_selected_callback:
                     mode_text = "Playing" if mode == "human" else "Training"
                     emit(
                         "game_starting",
@@ -1554,6 +1614,8 @@ class WebDashboard:
                         },
                     )
                     self.on_game_selected_callback(game_name, mode)
+                else:
+                    return self._error_ack("select_game", "Invalid game")
             elif action == "restart_with_game":
                 return self._handle_restart_with_game_control(data)
             elif action == "go_to_launcher":

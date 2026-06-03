@@ -218,3 +218,81 @@ class TestWebDashboardSocketControls:
         }
         assert called == []
         client.disconnect()
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            (
+                {"action": "speed", "value": "fast"},
+                {"success": False, "action": "speed", "error": "Invalid speed"},
+            ),
+            (
+                {"action": "config_change", "config": ["bad"]},
+                {"success": False, "action": "config_change", "error": "Invalid config"},
+            ),
+            (
+                {"action": "performance_mode", "mode": "warp"},
+                {
+                    "success": False,
+                    "action": "performance_mode",
+                    "error": "Invalid performance mode",
+                },
+            ),
+            (
+                {"action": "select_game", "game": "not_a_game"},
+                {"success": False, "action": "select_game", "error": "Invalid game"},
+            ),
+            (
+                {"action": "save_as", "filename": {"bad": "name"}},
+                {"success": False, "action": "save_as", "error": "Invalid filename"},
+            ),
+        ],
+    )
+    def test_socket_control_rejects_malformed_control_payloads(
+        self, web_dashboard, payload, expected
+    ):
+        """Malformed control payloads should fail without invoking app callbacks."""
+        called = []
+        web_dashboard.on_game_selected_callback = lambda game, mode: called.append((game, mode))
+        web_dashboard.on_save_as_callback = lambda filename: called.append(filename)
+        web_dashboard.on_speed_callback = lambda speed: called.append(speed)
+        web_dashboard.on_config_change_callback = lambda config: called.append(config)
+        web_dashboard.on_performance_mode_callback = lambda mode: called.append(mode)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+        payload = {**payload, "token": web_dashboard.access_token}
+
+        ack = client.emit("control", payload, callback=True)
+
+        assert ack == expected
+        assert called == []
+        client.disconnect()
+
+    def test_socket_control_rejects_invalid_restart_game_before_callback(self, web_dashboard):
+        """Invalid restart targets should not reach the restart callback."""
+        called = []
+        web_dashboard.on_restart_with_game_callback = lambda game: called.append(game)
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        ack = client.emit(
+            "control",
+            {
+                "action": "restart_with_game",
+                "game": "not_a_game",
+                "token": web_dashboard.access_token,
+            },
+            callback=True,
+        )
+
+        assert ack == {
+            "success": False,
+            "action": "restart_with_game",
+            "error": "Invalid game",
+        }
+        assert called == []
+        client.disconnect()

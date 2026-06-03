@@ -1787,6 +1787,7 @@ function showLoadModal() {
                 const size = (model.size / (1024 * 1024)).toFixed(2) + ' MB';
                 const meta = model.metadata || {};
                 const hasMeta = model.has_metadata;
+                const isLoadable = model.is_loadable !== false;
                 
                 // Get values from metadata or fallback
                 const episode = hasMeta ? (meta.episode || '?') : '?';
@@ -1804,18 +1805,26 @@ function showLoadModal() {
                 const modelId = DashboardCore.modelId(model);
                 const safeIdForAttr = escapeHtmlAttribute(modelId);
                 const safeModifiedStr = escapeHtml(model.modified_str || '');
+                const safeLoadError = escapeHtml(model.load_error || 'Unreadable checkpoint');
+                const loadAttrs = isLoadable
+                    ? `data-action="load-model" data-model-id="${safeIdForAttr}"`
+                    : '';
+                const loadWarning = isLoadable
+                    ? ''
+                    : `<span class="reason-badge error" title="${safeLoadError}">unreadable</span>`;
                 
                 // Reason badge (reason is from our own metadata, but escape anyway)
                 const safeReason = escapeHtml(reason);
                 const reasonBadge = reason ? `<span class="reason-badge ${safeReason}">${safeReason}</span>` : '';
                 
                 return `
-                    <div class="model-item">
-                        <div class="model-item-content" data-action="load-model" data-model-id="${safeIdForAttr}">
+                    <div class="model-item${isLoadable ? '' : ' model-item-invalid'}">
+                        <div class="model-item-content" ${loadAttrs}>
                             <div class="model-header">
                                 <div class="model-name">
                                     📁 ${safeName}
                                     ${reasonBadge}
+                                    ${loadWarning}
                                 </div>
                                 <span class="model-size">${size}</span>
                             </div>
@@ -2771,7 +2780,7 @@ function showRestartingOverlay(game) {
  * Check if server is back up and reload
  */
 function checkServerAndReload() {
-    fetch('/api/status')
+    fetchWithTimeout('/api/status')
         .then(response => {
             if (response.ok) {
                 location.reload();
@@ -2948,7 +2957,7 @@ class NeuralNetworkVisualizer {
     selectNeuron(layerIdx, neuronIdx) {
         // Phase 2: Load and display neuron inspection panel
         // Fetch neuron details from backend
-        fetch(`/api/neuron/${layerIdx}/${neuronIdx}`)
+        fetchWithTimeout(`/api/neuron/${layerIdx}/${neuronIdx}`)
             .then(response => response.json())
             .then(data => {
                 this.displayNeuronInspection(data);
@@ -3113,7 +3122,7 @@ class NeuralNetworkVisualizer {
     selectLayer(layerIdx) {
         // Phase 2: Load and display layer analysis panel
         // Fetch layer analysis from backend
-        fetch(`/api/layer/${layerIdx}`)
+        fetchWithTimeout(`/api/layer/${layerIdx}`)
             .then(response => response.json())
             .then(data => {
                 this.displayLayerAnalysis(data);

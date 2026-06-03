@@ -117,6 +117,11 @@ class Evaluator:
         Returns:
             EvalResults with all metrics
         """
+        if num_episodes <= 0:
+            raise ValueError("num_episodes must be positive")
+        if max_steps <= 0:
+            raise ValueError("max_steps must be positive")
+
         # Save current epsilon and set to 0 for deterministic play
         original_epsilon = self.agent.epsilon
         self.agent.epsilon = 0.0
@@ -126,28 +131,30 @@ class Evaluator:
         steps_list = []
         wins = 0
 
-        for _ in range(num_episodes):
-            state = self.game.reset()
-            done = False
-            steps = 0
+        try:
+            for _ in range(num_episodes):
+                state = self.game.reset()
+                done = False
+                steps = 0
+                info = {"score": 0, "level": 1, "won": False}
 
-            while not done and steps < max_steps:
-                action = self.agent.select_action(state, training=False)
-                state, _, done, info = self.game.step(action)
-                steps += 1
+                while not done and steps < max_steps:
+                    action = self.agent.select_action(state, training=False)
+                    state, _, done, info = self.game.step(action)
+                    steps += 1
 
-            score = info.get("score", 0)
-            level = info.get("level", 1)
-            won = info.get("won", False)
+                score = info.get("score", 0)
+                level = info.get("level", 1)
+                won = info.get("won", False)
 
-            scores.append(score)
-            levels.append(level)
-            steps_list.append(steps)
-            if won:
-                wins += 1
-
-        # Restore epsilon
-        self.agent.epsilon = original_epsilon
+                scores.append(score)
+                levels.append(level)
+                steps_list.append(steps)
+                if won:
+                    wins += 1
+        finally:
+            # Restore epsilon even if the game or agent raises.
+            self.agent.epsilon = original_epsilon
 
         # Calculate statistics
         scores_arr = np.array(scores)
@@ -156,7 +163,8 @@ class Evaluator:
 
         # Level distribution
         level_dist = {}
-        for lvl in range(1, 11):
+        max_level_seen = max(10, int(np.max(levels_arr)))
+        for lvl in range(1, max_level_seen + 1):
             level_dist[lvl] = int((levels_arr == lvl).sum())
 
         results = EvalResults(

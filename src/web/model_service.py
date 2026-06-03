@@ -58,6 +58,7 @@ class ModelService:
                     "modified_str": datetime.fromtimestamp(os.path.getmtime(path)).strftime(
                         "%Y-%m-%d %H:%M"
                     ),
+                    "is_loadable": True,
                     "has_metadata": False,
                     "metadata": None,
                 }
@@ -74,8 +75,9 @@ class ModelService:
                     if "metadata" in checkpoint:
                         model_info["has_metadata"] = True
                         model_info["metadata"] = checkpoint["metadata"]
-                except Exception:
-                    pass
+                except Exception as exc:
+                    model_info["is_loadable"] = False
+                    model_info["load_error"] = type(exc).__name__
 
                 models.append(model_info)
 

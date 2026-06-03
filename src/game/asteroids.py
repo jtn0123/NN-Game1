@@ -22,7 +22,7 @@ import pygame
 from typing import Tuple, List, Optional
 from dataclasses import dataclass
 
-from .base_game import BaseGame, step_vector_env_no_copy
+from .base_game import BaseGame, step_vector_env_no_copy, validate_action, validate_action_batch
 from config import Config
 
 
@@ -434,6 +434,7 @@ class Asteroids(BaseGame):
         if self.game_over:
             return self.get_state(), 0.0, True, self._get_info()
 
+        action = validate_action(action, self.action_size, "Asteroids")
         assert self.ship is not None
 
         reward = 0.01  # Small survival reward
@@ -954,6 +955,7 @@ class VecAsteroids:
 
     def step(self, actions: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
         """Step all environments with batched actions."""
+        actions = validate_action_batch(actions, self.num_envs, self.action_size, "VecAsteroids")
         infos = []
 
         for i, (env, action) in enumerate(zip(self.envs, actions)):

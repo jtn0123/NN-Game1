@@ -48,6 +48,15 @@ class TestWebDashboardRoutes:
         assert web_dashboard.config.GAME_NAME == "breakout"
         assert web_dashboard.publisher is not None
 
+    def test_dashboard_url_uses_openable_localhost_for_wildcard_bind(self):
+        """A wildcard bind address should not be printed as the browser URL."""
+        from src.web.server import WebDashboard
+        from config import Config
+
+        dashboard = WebDashboard(port=5108, host="0.0.0.0", config=Config())
+
+        assert dashboard.dashboard_url().startswith("http://127.0.0.1:5108/?token=")
+
     def test_emit_metrics(self, web_dashboard):
         """WebDashboard.emit_metrics should update publisher."""
         web_dashboard.emit_metrics(episode=10, score=100, epsilon=0.5, loss=0.01)
@@ -84,7 +93,10 @@ class TestWebDashboardRoutes:
 
         web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get("/api/status")
+            response = client.get(
+                "/api/status",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
             assert response.status_code == 200
 
             data = json.loads(response.data)
@@ -99,12 +111,36 @@ class TestWebDashboardRoutes:
         """GET /api/models should return available models."""
         web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get("/api/models")
+            response = client.get(
+                "/api/models",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
             assert response.status_code == 200
 
             data = json.loads(response.data)
-            assert "models" in data
-            assert "current_game" in data
+        assert "models" in data
+        assert "current_game" in data
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/status",
+            "/api/config",
+            "/api/games",
+            "/api/models",
+            "/api/save-status",
+            "/api/game-stats",
+            "/api/layers",
+        ],
+    )
+    def test_read_api_routes_require_dashboard_token(self, web_dashboard, path):
+        """Read APIs should not expose dashboard data to anonymous callers."""
+        web_dashboard.app.config["TESTING"] = True
+        with web_dashboard.app.test_client() as client:
+            response = client.get(path)
+
+        assert response.status_code == 401
+        assert json.loads(response.data) == {"error": "Unauthorized"}
 
     def test_dashboard_page_requires_token_before_serving_frontend(self, web_dashboard):
         """Dashboard HTML should not bootstrap anonymous clients with the token."""
@@ -129,7 +165,9 @@ class TestWebDashboardRoutes:
 
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
+        assert response.headers["Referrer-Policy"] == "no-referrer"
         assert f'<meta name="dashboard-token" content="{web_dashboard.access_token}">' in html
+        assert '<meta name="referrer" content="no-referrer">' in html
         assert "Training Dashboard" in html
         assert html.index("dashboard_core.js") < html.index("app.js")
         assert core_response.status_code == 200
@@ -153,7 +191,9 @@ class TestWebDashboardRoutes:
         assert unauthorized.status_code == 401
         assert dashboard.access_token not in unauthorized_html
         assert response.status_code == 200
+        assert response.headers["Referrer-Policy"] == "no-referrer"
         assert f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
+        assert '<meta name="referrer" content="no-referrer">' in html
         assert "auth: { token: DASHBOARD_TOKEN }" in html
 
     def test_api_models_uses_opaque_ids(self, tmp_path):
@@ -171,7 +211,10 @@ class TestWebDashboardRoutes:
         dashboard = WebDashboard(port=5101, config=config)
         dashboard.app.config["TESTING"] = True
         with dashboard.app.test_client() as client:
-            response = client.get("/api/models")
+            response = client.get(
+                "/api/models",
+                headers={"X-Dashboard-Token": dashboard.access_token},
+            )
 
         data = json.loads(response.data)
         assert response.status_code == 200
@@ -265,13 +308,26 @@ class TestWebDashboardRoutes:
         """GET /api/config should return configuration."""
         web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get("/api/config")
+            response = client.get(
+                "/api/config",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
             assert response.status_code == 200
 
             data = json.loads(response.data)
             # Config returns training hyperparameters
             assert "batch_size" in data or "learning_rate" in data
             assert "device" in data
+
+    def test_control_callback_errors_use_generic_ack(self, web_dashboard, tmp_path):
+        """Socket control acks should not leak callback exception details."""
+        web_dashboard.on_save_as_callback = lambda _filename: (_ for _ in ()).throw(
+            RuntimeError(f"secret path: {tmp_path}")
+        )
+
+        ack = web_dashboard._handle_save_as_control({"filename": "demo.pth"})
+
+        assert ack == {"success": False, "action": "save_as", "error": "Save failed"}
 
     def test_logging_during_training(self, web_dashboard):
         """Logging should work during training simulation."""

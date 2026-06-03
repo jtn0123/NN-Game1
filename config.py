@@ -517,19 +517,49 @@ class Config:
 
     def __post_init__(self):
         """Validation and derived calculations."""
-        assert self.LEARNING_RATE > 0, "Learning rate must be positive"
-        assert 0 < self.GAMMA <= 1, "Gamma must be in (0, 1]"
-        assert self.BATCH_SIZE > 0, "Batch size must be positive"
-        assert (
-            self.BATCH_SIZE <= self.MEMORY_SIZE
-        ), f"Batch size ({self.BATCH_SIZE}) cannot exceed memory size ({self.MEMORY_SIZE})"
-        assert self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end"
-        assert self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1"
-        assert self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1"
-        assert self.SCREEN_WIDTH > 0, "Screen width must be positive"
-        assert self.SCREEN_HEIGHT > 0, "Screen height must be positive"
-        assert self.BALL_SPEED > 0, "Ball speed must be positive"
-        assert len(self.HIDDEN_LAYERS) > 0, "Must have at least one hidden layer"
+        self._require(self.LEARNING_RATE > 0, "Learning rate must be positive")
+        self._require(0 < self.GAMMA <= 1, "Gamma must be in (0, 1]")
+        self._require(self.MEMORY_SIZE > 0, "Memory size must be positive")
+        self._require(self.BATCH_SIZE > 0, "Batch size must be positive")
+        self._require(
+            self.BATCH_SIZE <= self.MEMORY_SIZE,
+            f"Batch size ({self.BATCH_SIZE}) cannot exceed memory size ({self.MEMORY_SIZE})",
+        )
+        self._require(self.TARGET_UPDATE > 0, "TARGET_UPDATE must be positive")
+        self._require(self.GRAD_CLIP > 0, "GRAD_CLIP must be positive")
+        self._require(self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end")
+        self._require(self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1")
+        self._require(self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1")
+        self._require(self.MAX_EPISODES >= 0, "MAX_EPISODES must be non-negative")
+        self._require(self.MAX_STEPS_PER_EPISODE > 0, "MAX_STEPS_PER_EPISODE must be positive")
+        self._require(self.SAVE_EVERY > 0, "SAVE_EVERY must be positive")
+        self._require(self.RENDER_EVERY >= 0, "RENDER_EVERY must be non-negative")
+        self._require(self.LOG_EVERY > 0, "LOG_EVERY must be positive")
+        self._require(self.PLOT_HISTORY_LENGTH > 0, "PLOT_HISTORY_LENGTH must be positive")
+        self._require(self.EVAL_EVERY >= 0, "EVAL_EVERY must be non-negative")
+        self._require(self.EVAL_EPISODES > 0, "EVAL_EPISODES must be positive")
+        self._require(self.EVAL_MAX_STEPS > 0, "EVAL_MAX_STEPS must be positive")
+        self._require(self.EVAL_PLATEAU_THRESHOLD > 0, "EVAL_PLATEAU_THRESHOLD must be positive")
+        self._require(
+            0 <= self.EVAL_PLATEAU_EPSILON_BOOST <= 1,
+            "EVAL_PLATEAU_EPSILON_BOOST must be between 0 and 1",
+        )
+        self._require(
+            self.EVAL_PLATEAU_BOOST_EPISODES > 0,
+            "EVAL_PLATEAU_BOOST_EPISODES must be positive",
+        )
+        self._require(self.PER_ALPHA >= 0, "PER_ALPHA must be non-negative")
+        self._require(0 < self.PER_BETA_START <= 1, "PER_BETA_START must be in (0, 1]")
+        self._require(self.PER_BETA_FRAMES > 0, "PER_BETA_FRAMES must be positive")
+        self._require(self.N_STEP_SIZE > 0, "N_STEP_SIZE must be positive")
+        self._require(self.SCREEN_WIDTH > 0, "Screen width must be positive")
+        self._require(self.SCREEN_HEIGHT > 0, "Screen height must be positive")
+        self._require(self.BALL_SPEED > 0, "Ball speed must be positive")
+        self._require(len(self.HIDDEN_LAYERS) > 0, "Must have at least one hidden layer")
+        self._require(
+            all(isinstance(size, int) and size > 0 for size in self.HIDDEN_LAYERS),
+            "Hidden layer sizes must be positive integers",
+        )
         # Warn about unlimited training
         if self.MAX_EPISODES == 0:
             import warnings
@@ -538,6 +568,11 @@ class Config:
                 "MAX_EPISODES is 0 - training will run indefinitely until manually stopped",
                 UserWarning,
             )
+
+    @staticmethod
+    def _require(condition: bool, message: str) -> None:
+        if not condition:
+            raise ValueError(message)
 
 
 # Global config instance for easy importing
