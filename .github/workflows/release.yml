@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'jtn0123/NN-Game1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: true
