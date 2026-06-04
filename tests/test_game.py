@@ -40,6 +40,13 @@ class TestBreakoutInitialization:
         game = Breakout(config)
         assert game is not None
 
+    def test_game_uses_default_config_when_omitted(self):
+        """Breakout should honor its optional config argument."""
+        game = Breakout(headless=True)
+
+        assert game.config is not None
+        assert game.get_state().shape == (game.state_size,)
+
     def test_initial_state_shape(self, game, config):
         """State should have correct shape."""
         state = game.get_state()

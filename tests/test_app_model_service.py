@@ -33,3 +33,24 @@ def test_app_model_service_skips_newer_incompatible_checkpoint(tmp_path, monkeyp
     )
 
     assert resolved == str(older)
+
+
+def test_cleanup_old_periodic_saves_removes_checkpoints_and_sidecars(tmp_path):
+    """Periodic checkpoint cleanup should not depend on Agent internals."""
+    config = Config()
+    config.GAME_NAME = "breakout"
+    config.MODEL_DIR = str(tmp_path / "models")
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+
+    for episode in range(6):
+        checkpoint = model_dir / f"breakout_ep{episode}.pth"
+        checkpoint.write_bytes(b"x" * 1200)
+        sidecar = model_dir / f"breakout_ep{episode}.pth.json"
+        sidecar.write_text("{}", encoding="utf-8")
+
+    ModelService(config).cleanup_old_periodic_saves(keep_last=5)
+
+    assert not (model_dir / "breakout_ep0.pth").exists()
+    assert not (model_dir / "breakout_ep0.pth.json").exists()
+    assert (model_dir / "breakout_ep1.pth").exists()

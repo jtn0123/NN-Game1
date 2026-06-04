@@ -1,5 +1,6 @@
 """Tests for application lifecycle helpers in main.py."""
 
+from collections import deque
 from types import SimpleNamespace
 
 import numpy as np
@@ -70,6 +71,13 @@ def test_game_app_set_speed_rejects_non_numeric_values():
     app._set_speed("fast")
 
     assert app.game_speed == 5.0
+
+
+def test_game_app_new_best_dashboard_log_handles_deque_scores():
+    """New-best dashboard logging should average deque history without slicing it."""
+    scores = deque([10, 20, 30], maxlen=1000)
+
+    assert main.GameApp._average_recent_scores(scores) == 20.0
 
 
 @pytest.mark.parametrize("runtime_cls", [main.GameApp, main.HeadlessTrainer])
