@@ -164,6 +164,11 @@ class ModelService:
         """Return recent max level, defaulting to 1 when no level history exists."""
         return max(levels[-100:]) if levels else 1
 
+    @staticmethod
+    def metadata_sidecar_path(checkpoint_path: str) -> str:
+        """Return the JSON metadata sidecar path for a checkpoint file."""
+        return f"{checkpoint_path}.json"
+
     def cleanup_old_periodic_saves(self, keep_last: int = 5) -> None:
         """Delete old periodic checkpoints and their metadata sidecars."""
         pattern = os.path.join(self.config.GAME_MODEL_DIR, f"{self.config.GAME_NAME}_ep*.pth")
@@ -179,7 +184,7 @@ class ModelService:
         for filepath in periodic_saves[:-keep_last]:
             try:
                 os.remove(filepath)
-                sidecar_path = Agent.metadata_sidecar_path(filepath)
+                sidecar_path = self.metadata_sidecar_path(filepath)
                 if os.path.exists(sidecar_path):
                     os.remove(sidecar_path)
             except OSError as exc:

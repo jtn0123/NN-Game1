@@ -67,7 +67,12 @@ def pr_title_lint_types(workflow_text: str) -> list[str]:
 
 def validate_pr_title_lint(workflow_text: str) -> None:
     require_equal("PR title lint types", pr_title_lint_types(workflow_text), EXPECTED_ALLOWED_TAGS)
-    for required in ("subjectPattern:", "requireScope: false"):
+    for required in (
+        "Allow Dependabot-generated bump titles",
+        "action-semantic-pull-request@v6.1.1",
+        "subjectPattern:",
+        "requireScope: false",
+    ):
         if required not in workflow_text:
             raise ValueError(f"PR title lint missing {required}")
 
@@ -87,10 +92,23 @@ def validate_release_workflow(workflow_text: str) -> None:
             raise ValueError(f"release workflow missing {snippet!r}")
 
 
+def validate_ci_workflow(workflow_text: str) -> None:
+    required_snippets = [
+        "python .github/scripts/check_release_config.py",
+        "actions/checkout@v6",
+        "actions/setup-python@v6",
+        "actions/setup-node@v6",
+    ]
+    for snippet in required_snippets:
+        if snippet not in workflow_text:
+            raise ValueError(f"CI workflow missing {snippet!r}")
+
+
 def main() -> int:
     validate_semantic_release_config(semantic_release_config())
     validate_pr_title_lint((ROOT / ".github/workflows/pr-title-lint.yml").read_text())
     validate_release_workflow((ROOT / ".github/workflows/release.yml").read_text())
+    validate_ci_workflow((ROOT / ".github/workflows/ci.yml").read_text())
     version = (ROOT / "VERSION").read_text().strip()
     if not version:
         raise ValueError("VERSION must not be empty")

@@ -20,8 +20,21 @@ jobs:
     name: Validate PR title
     runs-on: ubuntu-latest
     steps:
+      - name: Allow Dependabot-generated bump titles
+        if: github.actor == 'dependabot[bot]'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ "${PR_TITLE}" =~ ^Bump[[:space:]].+[[:space:]]from[[:space:]].+[[:space:]]to[[:space:]].+$ ]]; then
+            echo "Dependabot bump title accepted: ${PR_TITLE}"
+          else
+            echo "Unexpected Dependabot title: ${PR_TITLE}" >&2
+            exit 1
+          fi
+
       - name: Check title matches Conventional Commits
-        uses: amannn/action-semantic-pull-request@v5.5.3
+        if: github.actor != 'dependabot[bot]'
+        uses: amannn/action-semantic-pull-request@v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

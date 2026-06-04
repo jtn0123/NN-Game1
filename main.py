@@ -69,7 +69,7 @@ import time
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Callable, Any, Type, Union, List
+from typing import Optional, Callable, Any, Type, Union, List, Iterable
 from enum import Enum, auto
 
 # Add project root to path
@@ -144,6 +144,12 @@ class GameApp:
         - Visualizations (neural network + dashboard)
         - User input handling
     """
+
+    @staticmethod
+    def _average_recent_scores(scores: Iterable[int], limit: int = 100) -> float:
+        """Average the most recent scores from any iterable score history."""
+        recent_scores = list(scores)[-limit:]
+        return float(np.mean(recent_scores)) if recent_scores else 0.0
 
     def __init__(
         self,
@@ -1511,11 +1517,7 @@ class GameApp:
                                 f"New Best: {info['score']}!", (255, 215, 0), 2.0
                             )
                             if self.web_dashboard:
-                                avg_score = (
-                                    np.mean(self.recent_scores[-100:])
-                                    if self.recent_scores
-                                    else 0.0
-                                )
+                                avg_score = self._average_recent_scores(self.recent_scores)
                                 self.web_dashboard.log(
                                     f"🏆 New best score: {info['score']}! Model saved.",
                                     "success",
@@ -2024,7 +2026,7 @@ class GameApp:
         filepath = os.path.join(self.config.GAME_MODEL_DIR, filename)
 
         # Calculate metrics for metadata
-        avg_score = np.mean(list(self.recent_scores)[-100:]) if self.recent_scores else 0.0
+        avg_score = self._average_recent_scores(self.recent_scores)
         win_rate = self.dashboard.get_win_rate() if hasattr(self.dashboard, "get_win_rate") else 0.0
 
         # Build training history for dashboard restoration from episode_history

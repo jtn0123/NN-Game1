@@ -163,7 +163,7 @@ class Breakout(BaseGame):
         self._max_speed = max(self.config.BALL_SPEED * 1.5, 1.0)  # Guard against BALL_SPEED=0
         self._inv_max_speed = 1.0 / self._max_speed
         # Guard against paddle width >= screen width
-        paddle_range = max(1.0, self.width - config.PADDLE_WIDTH)
+        paddle_range = max(1.0, self.width - self.config.PADDLE_WIDTH)
         self._inv_paddle_range = 1.0 / paddle_range
 
         # For reward shaping (tracking ball)
