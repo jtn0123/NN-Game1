@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.0.2 (2026-06-07)
+
+### Bug Fixes
+
+- Polish runtime edges and CI actions
+  ([`1f5e245`](https://github.com/jtn0123/NN-Game1/commit/1f5e245a301c3e9721139174906502ac4d2072b6))
+
+
 ## v0.0.1 (2026-06-04)
 
 ### Bug Fixes
