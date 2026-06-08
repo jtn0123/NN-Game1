@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.0.3 (2026-06-08)
+
+### Bug Fixes
+
+- Polish runtime edges and CI actions
+  ([`63c50ec`](https://github.com/jtn0123/NN-Game1/commit/63c50ec89365d4e04f08e30310050c0b7f205ff3))
+
+### Testing
+
+- Enforce strict mypy and coverage gate
+  ([`9ba130d`](https://github.com/jtn0123/NN-Game1/commit/9ba130dbba22653e1858dce4142ff8b1b1aa0b94))
+
+
 ## v0.0.2 (2026-06-07)
 
 ### Bug Fixes
