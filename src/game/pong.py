@@ -172,7 +172,7 @@ class Pong(BaseGame):
         self.ai_score = 0
         self.game_over = False
         self.rally_count = 0  # Track hits in current rally
-        self.last_hit_by = None  # 'player' or 'ai'
+        self.last_hit_by: Optional[str] = None  # 'player' or 'ai'
 
         # Pre-allocated state array
         self._state_array = np.zeros(10, dtype=np.float32)
@@ -197,9 +197,9 @@ class Pong(BaseGame):
         # Visual effects
         if not headless:
             pygame.font.init()
-            self._font = pygame.font.Font(None, 72)
-            self._small_font = pygame.font.Font(None, 28)
-            self._label_font = pygame.font.Font(None, 24)
+            self._font: Optional[pygame.font.Font] = pygame.font.Font(None, 72)
+            self._small_font: Optional[pygame.font.Font] = pygame.font.Font(None, 28)
+            self._label_font: Optional[pygame.font.Font] = pygame.font.Font(None, 24)
         else:
             self._font = None
             self._small_font = None
@@ -757,8 +757,8 @@ class VecPong:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done in enumerate(self._dones):
-            if done:
+        for i, done_flag in enumerate(self._dones):
+            if bool(done_flag):
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

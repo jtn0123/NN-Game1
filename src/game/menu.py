@@ -306,8 +306,8 @@ class GameCard:
 
         # Wrap description to fit card width
         words = desc.split()
-        lines = []
-        current_line = []
+        lines: List[str] = []
+        current_line: List[str] = []
         max_width = rect.width - 20
 
         for word in words:
@@ -653,11 +653,17 @@ class GameMenu:
             offset = (self.time * 50 * line["speed"] + line["offset"]) % (
                 self.screen_width + self.screen_height
             )
-            start = (offset, 0)
-            end = (offset - self.screen_height, self.screen_height)
+            start = (int(offset), 0)
+            end = (int(offset - self.screen_height), self.screen_height)
 
             line_surface = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
-            pygame.draw.line(line_surface, (255, 255, 255, line["alpha"]), start, end, 1)
+            pygame.draw.line(
+                line_surface,
+                (255, 255, 255, int(line["alpha"])),
+                start,
+                end,
+                1,
+            )
             screen.blit(line_surface, (0, 0))
 
         # Particles (stars)

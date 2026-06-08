@@ -1,3 +1,311 @@
+# NN-Game1 Codebase Grade Report
+
+**Project:** NN-Game1
+**Audited:** 2026-06-07
+**Scope:** Whole repository, current worktree on `codex/polish-runtime-ci-actions`
+**Stack:** Python 3.10-3.12, PyTorch DQN/Dueling DQN, Pygame games, Flask/SocketIO dashboard, pytest, Node dashboard tests
+
+## Current Summary
+
+| ID | Category | Grade | Current state |
+|----|----------|-------|---------------|
+| A | Architecture & Design | B- | Core modules exist, but `main.py`, the web server, and dashboard script still concentrate too much behavior. |
+| B | Backend Quality | B | Runtime services and safety checks are solid; route/socket registration and payload contracts need smaller seams. |
+| C | Frontend Quality | C+ | Dashboard is useful and feature-rich, but `app.js` is a large mutable script with limited browser-level coverage. |
+| D | Testing & Reliability | B | `make check` now enforces strict broad mypy and a 70% coverage floor, with manual UI shells excluded from coverage measurement. |
+| E | Security | B | Checkpoint/model loading and local dashboard auth are stronger; token and browser-sink hygiene can still improve. |
+| F | Dependencies & Tech Currency | B | CI and Dependabot are in place; pending `tqdm` bump should be folded into the next PR. |
+| G | Performance & Scalability | B | Vectorized training and sampling are good; hot-path regression tests would reduce future risk. |
+| H | Documentation & Onboarding | B- | README is useful, but install/version guidance has drifted and old audit artifacts remain tracked. |
+| I | Developer Experience & Tooling | B | CI, release checks, and package builds are strong; local gates should catch more repo-wide issues. |
+| **Overall** | | **B-** | Strong operational baseline, held back mostly by concentrated complexity and uneven validation depth. |
+
+## Current Validation Snapshot
+
+- `make verify` passed locally: Black, strict broad mypy, dashboard JS helper tests, Python coverage, release config, and repo hygiene.
+- Dashboard JS helper tests: 11 passed.
+- Python tests: 634 passed.
+- Python coverage is 70.58% against a 70% floor. Coverage config omits manual UI/runtime shells: `main.py`, `src/game/menu.py`, and `src/visualizer/pause_menu.py`.
+- `python .github/scripts/check_release_config.py` passed.
+- Local package build was skipped by `make verify` because the `build` module is not installed in this environment; the strict `make build` target remains available.
+- Broad mypy is clean: `python -m mypy --config-file mypy.ini --follow-imports=silent src main.py config.py` reports no issues.
+- The pending `tqdm` constraint bump has been folded into this branch: `constraints.txt` now pins `tqdm==4.68.1`.
+
+## Current Top 5 Highest-Leverage Fixes
+
+1. **A1 - Split `main.py` around app lifecycle, training orchestration, and rendering.** This reduces blast radius for neural-net/runtime changes.
+2. **C1 - Modularize `src/web/static/app.js`.** The dashboard is important enough that a 3,945-line global script is now a reliability issue.
+3. **D2 - Add targeted tests for omitted manual UI/runtime shells.** The coverage gate is now 70%, but excluded interactive shells still need direct behavioral tests where practical.
+4. **E1 - Reduce dashboard token exposure in URLs.** CSP/referrer protection helps, but the bootstrap token is still in the URL.
+5. **G1/G2 - Keep adding lightweight performance and payload regression tests.** This protects training speed and dashboard responsiveness without brittle benchmark thresholds.
+
+## Current Addressable Items
+
+### A - Architecture & Design - B-
+
+#### A1 - Split the main application shell
+- **Evidence:** `main.py` is 4,227 lines. Large functions include `train_vectorized` at 331 lines, `run_training` at 298, `train` at 232, and `GameApp.__init__` at 219.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** One file is doing too many jobs, so training, rendering, and startup changes can interfere with each other.
+- **Fix:** Move lifecycle, training orchestration, CLI/app setup, and rendering helpers into smaller modules with focused tests.
+
+#### A2 - Formalize game/runtime protocol boundaries
+- **Evidence:** Broad mypy reports that `BaseGame` lacks `get_human_action` where the app expects it, plus optional surface/font issues in live game code.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** The app assumes every game speaks the same interface, but the code does not fully prove that yet.
+- **Fix:** Tighten protocols for game actions, render state, and optional display dependencies.
+
+#### A3 - Extract web dashboard registration into smaller units
+- **Evidence:** `src/web/server.py` is 2,060 lines; `_register_routes` is 177 lines and `_register_socket_events` is 140.
+- **Impact:** B
+- **Difficulty:** C
+- **Layman terms:** The dashboard server works, but too many routes and live events are wired in one place.
+- **Fix:** Split route groups, socket handlers, and metrics publishing into testable modules.
+
+#### A4 - Isolate neural-net inspection payload models
+- **Evidence:** Layer/neuron inspection crosses `main.py`, `src/web/server.py`, and frontend rendering.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The neural-net visualization depends on several pieces agreeing on the same data shape.
+- **Fix:** Define typed DTOs for inspection payloads and test serialization from model output to browser payload.
+
+### B - Backend Quality - B
+
+#### B1 - Reduce web server handler density
+- **Evidence:** `MetricsPublisher.update`, `_sync_phase2_inspection`, and route/socket registration remain long, stateful methods.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** Some server functions are still large enough for edge cases to hide.
+- **Fix:** Pull metrics, inspection sync, and socket command handling into focused helpers.
+
+#### B2 - Make dashboard command responses a typed contract
+- **Evidence:** Socket command tests cover key acknowledgements, but responses are still assembled as ad hoc dictionaries.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The browser and server should share a clear promise about every command response.
+- **Fix:** Add a response factory/dataclass and use it from every control command path.
+
+#### B3 - Clean optional display/resource handling in games
+- **Evidence:** Broad mypy reports optional `Surface`/`Font` issues in `snake.py`, `pong.py`, `asteroids.py`, and visualizer modules.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** Some drawing code can still receive "nothing" where it expects a real drawing object.
+- **Fix:** Narrow optional values at initialization boundaries and use explicit fallback render paths.
+
+#### B4 - Add contract tests for model/web payload compatibility
+- **Evidence:** Backend services are tested, but dashboard-facing payload shapes rely on integration assumptions.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** A backend change could send the browser data it does not understand.
+- **Fix:** Snapshot representative payloads for model metrics, layer inspection, neuron inspection, and control state.
+
+### C - Frontend Quality - C+
+
+#### C1 - Modularize `src/web/static/app.js`
+- **Evidence:** `app.js` is 3,945 lines with global mutable state and many direct DOM updates.
+- **Impact:** A
+- **Difficulty:** C
+- **Layman terms:** The dashboard frontend is one large script, so fixes are harder to isolate.
+- **Fix:** Split socket state, model list, controls, inspection panels, and chart rendering into modules with tests.
+
+#### C2 - Add real browser tests for dashboard flows
+- **Evidence:** Node tests cover `dashboard_core.js`, but not real `app.js` DOM and Socket.IO flows.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** Helper logic is tested, but not enough of the screen users actually click.
+- **Fix:** Add Playwright or equivalent tests for launch, auth failure, model list render, control ack display, and neural inspection panels.
+
+#### C3 - Replace broad `innerHTML` sinks with structured render helpers
+- **Evidence:** Some values are escaped, but inspection panels still build HTML templates from payload data.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The page should build UI safely instead of pasting HTML strings around.
+- **Fix:** Centralize escaping/rendering and prefer DOM node creation for dynamic inspection content.
+
+#### C4 - Add frontend error and empty-state tests
+- **Evidence:** Current JS tests focus on successful helper behavior.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The dashboard should be tested when data is missing, stale, or malformed.
+- **Fix:** Cover disconnected sockets, missing model metadata, empty inspection arrays, and failed control responses.
+
+### D - Testing & Reliability - B-
+
+#### D1 - Turn broad mypy drift into a ratcheted gate
+- **Evidence:** Complete. Strict broad mypy now passes across `src`, `main.py`, and `config.py`.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** The current type check watches the safest parts, but not the whole app.
+- **Fix:** Complete. `make typecheck` is now the broad strict gate, and `make typecheck-audit` aliases it.
+
+#### D2 - Add path-specific coverage expectations for risky modules
+- **Evidence:** Coverage gate is now 70%, with `main.py`, `src/game/menu.py`, and `src/visualizer/pause_menu.py` omitted as manual UI/runtime shells.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** The overall test number is okay, but some of the most important code still has little protection.
+- **Fix:** Continue adding focused tests for app startup decisions, headless training setup, pause/menu behavior, and web mode startup so those omitted shells can eventually re-enter the measured gate.
+
+#### D3 - Expand neural-net runtime tests around live payload behavior
+- **Evidence:** Neural-net core tests exist, but visualization and inspection payload paths still rely on multiple integration seams.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** The neural-net logic is tested, but the dashboard display path needs more proof.
+- **Fix:** Test a small model/stub publishing metrics and verify layer/neuron payloads consumed by the dashboard.
+
+#### D4 - Add regression tests for optional display/headless modes
+- **Evidence:** Broad mypy found optional Pygame surfaces and fonts in several game/visualizer files.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The app should behave predictably with or without a real screen.
+- **Fix:** Cover headless construction, render fallback paths, and human-control action dispatch.
+
+### E - Security - B
+
+#### E1 - Reduce dashboard token exposure in URLs
+- **Evidence:** `dashboard_url()` currently returns a URL with `?token=...` for local auth bootstrap.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The password-like token works, but putting it in the address bar is easier to leak.
+- **Fix:** Consider one-time local bootstrap tokens, localhost-only opener flow, or short-lived exchange tokens.
+
+#### E2 - Add a stricter dashboard Content Security Policy
+- **Evidence:** Token checks and no-referrer policy exist, but CSP is not yet a strong defense layer for dynamic rendering.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The browser should get clearer rules about what scripts and content are allowed.
+- **Fix:** Add CSP headers that match current assets, then tighten as inline rendering is reduced.
+
+#### E3 - Continue hardening dynamic dashboard rendering
+- **Evidence:** `app.js` uses dynamic HTML rendering in multiple panels.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** Data shown in the browser should be treated as data, not trusted HTML.
+- **Fix:** Centralize escaping, prefer DOM APIs, and test hostile strings in model names and inspection labels.
+
+#### E4 - Document trusted checkpoint fallback explicitly
+- **Evidence:** `checkpoint_loader.py` safely prefers `weights_only=True` and restricts fallback loading, but users still need the trust-boundary explained.
+- **Impact:** C
+- **Difficulty:** A
+- **Layman terms:** Loading old model files can be risky unless they come from a trusted place.
+- **Fix:** Add README notes for trusted checkpoint directories and unsafe legacy checkpoint behavior.
+
+### F - Dependencies & Tech Currency - B
+
+#### F1 - Fold pending `tqdm` bump into the next PR
+- **Evidence:** Applied in this branch: `constraints.txt` changed from `tqdm==4.67.3` to `tqdm==4.68.1`.
+- **Impact:** C
+- **Difficulty:** A
+- **Layman terms:** A small dependency update was waiting and appeared safe.
+- **Fix:** Complete. Let Dependabot auto-close or close the standalone PR after this branch lands.
+
+#### F2 - Keep constraints and declared dependency ranges synchronized
+- **Evidence:** `pyproject.toml` allows `tqdm>=4.67.3`; constraints pin the exact tested version.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The app has both "allowed versions" and "tested exact versions"; they should move together intentionally.
+- **Fix:** Add a small check or documented workflow for refreshing constraints after Dependabot bumps.
+
+#### F3 - Add periodic stale dependency visibility
+- **Evidence:** Dependabot is configured, but local reports do not summarize dependency freshness.
+- **Impact:** C
+- **Difficulty:** B
+- **Layman terms:** It should be easy to see whether the app is quietly falling behind.
+- **Fix:** Add optional dependency freshness output to docs or CI summary without blocking normal PRs.
+
+### G - Performance & Scalability - B
+
+#### G1 - Add benchmark protection for neural-net training loops
+- **Evidence:** Vectorized training exists, but `train_vectorized` and `run_training` are large and performance-sensitive.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** Training speed matters, so the repo should catch slowdowns automatically.
+- **Fix:** Add lightweight benchmarks for a small deterministic training scenario with loose thresholds.
+
+#### G2 - Add dashboard payload-size regression tests
+- **Evidence:** Metrics and inspection publishing can include model/layer/neuron data over Socket.IO.
+- **Impact:** B
+- **Difficulty:** B
+- **Layman terms:** The live dashboard should not become sluggish because messages got too large.
+- **Fix:** Test representative payload sizes and downsampling behavior for history, layer, and neuron data.
+
+#### G3 - Split collision/render hot paths in large games
+- **Evidence:** `space_invaders.py` has `_handle_collisions` at 156 lines and `render` at 136.
+- **Impact:** B
+- **Difficulty:** C
+- **Layman terms:** Some games still have dense frame-by-frame logic that is harder to optimize safely.
+- **Fix:** Extract collision phases and render layers into smaller tested helpers.
+
+### H - Documentation & Onboarding - B-
+
+#### H1 - Fix README Python and install drift
+- **Evidence:** README says Python 3.9+ while `pyproject.toml` requires `>=3.10,<3.13`; README also has unconstrained and constrained install guidance.
+- **Impact:** B
+- **Difficulty:** A
+- **Layman terms:** New contributors can follow setup instructions that do not match the actual package.
+- **Fix:** Update README to Python 3.10-3.12 and make constrained install the default local recommendation.
+
+#### H2 - Archive or remove stale audit artifacts from tracked source
+- **Evidence:** Tracked files include old `.Codex` reports plus `30_BUGS_LIST.md`, `BUGS_AND_IMPROVEMENTS.md`, and `POTENTIAL_BUGS.md`.
+- **Impact:** B
+- **Difficulty:** A
+- **Layman terms:** Old reports make it hard to tell what is still true.
+- **Fix:** Keep the current grade report, move stale reports to `docs/archive`, or remove them if no longer useful.
+
+#### H3 - Add a short architecture map
+- **Evidence:** The repo has several major runtime surfaces: games, AI/training, web dashboard, model service, and release tooling.
+- **Impact:** B
+- **Difficulty:** A
+- **Layman terms:** A newcomer needs a quick map of where each kind of change belongs.
+- **Fix:** Add `docs/architecture.md` with module ownership and key validation commands.
+
+### I - Developer Experience & Tooling - B
+
+#### I1 - Add a stronger local `make verify` target
+- **Evidence:** `make check` is green and useful, but CI also runs release config checks, package build, and dependency audit.
+- **Impact:** B
+- **Difficulty:** A
+- **Layman terms:** Developers should be able to run one local command that closely matches the PR gate.
+- **Fix:** Add a local aggregate target for check, release config, build, and dependency audit where environment allows.
+
+#### I2 - Ratchet type checking separately from the normal fast path
+- **Evidence:** The Makefile typecheck target intentionally checks only selected modules.
+- **Impact:** A
+- **Difficulty:** B
+- **Layman terms:** Keep the quick check fast, but create a visible path toward checking everything.
+- **Fix:** Add `make typecheck-audit` with the current error count documented, then reduce it in cleanup PRs.
+
+#### I3 - Remove tracked scratch/helper files that are not product workflow
+- **Evidence:** `config.py.backup` and `fix_claude.sh` are tracked alongside source.
+- **Impact:** C
+- **Difficulty:** A
+- **Layman terms:** Backup and one-off helper files can confuse future maintainers.
+- **Fix:** Delete them or move them into documented tooling if still useful.
+
+#### I4 - Add repository hygiene checks for generated/stale files
+- **Evidence:** Old report files and backup scripts have accumulated in source control.
+- **Impact:** C
+- **Difficulty:** B
+- **Layman terms:** The repo should warn before temporary files become permanent.
+- **Fix:** Add a lightweight tracked-file denylist or pre-commit/check script for `.backup`, scratch scripts, and obsolete audit filenames.
+
+## Suggested Next PR Scope
+
+1. Continue A1: split `main.py` around lifecycle and training orchestration.
+2. Continue C1/C2: break more dashboard behavior out of `app.js` and add browser-level coverage.
+3. Continue D2: add path-specific runtime/UI coverage for the currently omitted manual shells.
+4. Continue E1: reduce dashboard token exposure beyond the current CSP/referrer protection.
+5. Continue G1: add lightweight training-loop regression tests around vectorized training.
+
+Larger refactors like A1, C1, and D3 should be separate PRs unless the next PR is intentionally a larger cleanup branch.
+
+---
+
+# Archived June 2 Grade Report
+
+The section below is preserved as the older audit trail. The current grade and open items are the June 7 report above.
+
 # Codebase Grade Report
 
 **Project:** NN-Game1

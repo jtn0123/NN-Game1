@@ -177,6 +177,8 @@ class TestWebDashboardRoutes:
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
         assert response.headers["Referrer-Policy"] == "no-referrer"
+        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
         assert f'<meta name="dashboard-token" content="{web_dashboard.access_token}">' in html
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "Training Dashboard" in html
@@ -203,6 +205,8 @@ class TestWebDashboardRoutes:
         assert dashboard.access_token not in unauthorized_html
         assert response.status_code == 200
         assert response.headers["Referrer-Policy"] == "no-referrer"
+        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
         assert f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "auth: { token: DASHBOARD_TOKEN }" in html

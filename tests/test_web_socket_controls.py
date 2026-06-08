@@ -115,6 +115,19 @@ class TestWebDashboardSocketControls:
         }
         client.disconnect()
 
+    def test_control_ack_helpers_have_stable_shapes(self, web_dashboard):
+        """Control responses should keep a predictable browser contract."""
+        assert web_dashboard._success_ack("pause") == {"success": True, "action": "pause"}
+        assert web_dashboard._error_ack("save", "Save failed") == {
+            "success": False,
+            "action": "save",
+            "error": "Save failed",
+        }
+        assert web_dashboard._unauthorized_ack() == {
+            "success": False,
+            "error": "Unauthorized",
+        }
+
     def test_socket_control_rejects_unknown_or_invalid_model_actions(self, web_dashboard):
         """Bad control actions should fail through the same ack path as success."""
         client = web_dashboard.socketio.test_client(

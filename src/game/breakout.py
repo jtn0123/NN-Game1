@@ -868,8 +868,8 @@ class VecBreakout:
         dones_to_return = self._dones.copy()
 
         # NOW update state array for next iteration (after returning terminal states)
-        for i, done in enumerate(self._dones):
-            if done:
+        for i, done_flag in enumerate(self._dones):
+            if bool(done_flag):
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

@@ -130,10 +130,10 @@ class Snake(BaseGame):
         if not headless:
             self.particles = ParticleSystem(max_particles=300)
             pygame.font.init()
-            self._font = pygame.font.Font(None, 48)
-            self._small_font = pygame.font.Font(None, 24)
+            self._font: Optional[pygame.font.Font] = pygame.font.Font(None, 48)
+            self._small_font: Optional[pygame.font.Font] = pygame.font.Font(None, 24)
             # Pre-render gradient background
-            self._background = self._create_background()
+            self._background: Optional[pygame.Surface] = self._create_background()
         else:
             self.particles = None  # type: ignore
             self._font = None
@@ -657,8 +657,8 @@ class VecSnake:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done in enumerate(self._dones):
-            if done:
+        for i, done_flag in enumerate(self._dones):
+            if bool(done_flag):
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

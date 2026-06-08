@@ -170,3 +170,25 @@ class TestWebDashboardNNInspection:
         web_dashboard.emit_nn_visualization(step=2, **payload)
 
         assert len(calls) == 1
+
+    def test_nn_update_callbacks_omit_heavy_weight_payloads(self, web_dashboard):
+        """Live callbacks should avoid sending full weight matrices every tick."""
+        updates = []
+        web_dashboard.publisher.on_nn_update(lambda payload: updates.append(payload))
+
+        web_dashboard.publisher.update_nn_visualization(
+            layer_info=[
+                {"name": "Input", "neurons": 2, "type": "input"},
+                {"name": "Output", "neurons": 2, "type": "output"},
+            ],
+            activations={"layer_0": [0.1, 0.2]},
+            q_values=[0.3, 0.4],
+            selected_action=1,
+            weights=[[[float(i) for i in range(50)] for _ in range(50)]],
+            step=1,
+            action_labels=["LEFT", "RIGHT"],
+        )
+
+        assert len(updates) == 1
+        assert updates[0]["weights"] == []
+        assert len(json.dumps(updates[0])) < 2_000

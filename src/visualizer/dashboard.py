@@ -283,7 +283,10 @@ class Dashboard:
         rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
         # Blit cached gradient surface
-        screen.blit(self._cached_gradient, (self.x, self.y))
+        if self._cached_gradient is None:
+            self._create_gradient_surface()
+        if self._cached_gradient is not None:
+            screen.blit(self._cached_gradient, (self.x, self.y))
 
         # Border
         pygame.draw.rect(screen, (45, 50, 70), rect, 2, border_radius=5)
@@ -579,7 +582,11 @@ class Dashboard:
                 # Bug 111: Add subtle pulse animation to trend indicators
                 if indicator in ("↑", "↓"):
                     pulse = 0.7 + 0.3 * math.sin(self.pulse_phase * 2)
-                    trend_color = tuple(int(c * pulse) for c in trend_color)
+                    trend_color = (
+                        int(trend_color[0] * pulse),
+                        int(trend_color[1] * pulse),
+                        int(trend_color[2] * pulse),
+                    )
                 trend_text = self.font_small.render(indicator, True, trend_color)
                 trend_rect = trend_text.get_rect(right=x + card_width - 5, top=cy + 3)
                 screen.blit(trend_text, trend_rect)

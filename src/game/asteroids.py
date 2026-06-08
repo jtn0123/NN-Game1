@@ -323,8 +323,8 @@ class Asteroids(BaseGame):
 
         if not headless:
             pygame.font.init()
-            self._font = pygame.font.Font(None, 48)
-            self._small_font = pygame.font.Font(None, 24)
+            self._font: Optional[pygame.font.Font] = pygame.font.Font(None, 48)
+            self._small_font: Optional[pygame.font.Font] = pygame.font.Font(None, 24)
             self._generate_starfield()
         else:
             self._font = None
@@ -625,10 +625,11 @@ class Asteroids(BaseGame):
         idx += 5
 
         # Sort asteroids by distance to ship
-        if self.asteroids:
+        ship = self.ship
+        if self.asteroids and ship is not None:
             sorted_asteroids = sorted(
                 self.asteroids,
-                key=lambda a: (a.x - self.ship.x) ** 2 + (a.y - self.ship.y) ** 2,
+                key=lambda a: (a.x - ship.x) ** 2 + (a.y - ship.y) ** 2,
             )
         else:
             sorted_asteroids = []
@@ -974,8 +975,8 @@ class VecAsteroids:
         dones_to_return = self._dones.copy()
 
         # Update state array for done episodes
-        for i, done in enumerate(self._dones):
-            if done:
+        for i, done_flag in enumerate(self._dones):
+            if bool(done_flag):
                 self._states[i] = self.envs[i].get_state()
 
         return states_to_return, rewards_to_return, dones_to_return, infos

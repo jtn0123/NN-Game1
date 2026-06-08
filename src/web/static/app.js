@@ -1417,13 +1417,11 @@ function copyLogsSimple() {
  * Escape HTML entities
  */
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return DashboardCore.escapeHtml(text);
 }
 
 function escapeHtmlAttribute(text) {
-    return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return DashboardCore.escapeHtmlAttribute(text);
 }
 
 // ============================================================
@@ -1777,83 +1775,7 @@ function showLoadModal() {
         .then(response => response.json())
         .then(data => {
             const list = document.getElementById('model-list');
-            
-            if (data.models.length === 0) {
-                list.innerHTML = '<div class="no-models">No saved models found</div>';
-                return;
-            }
-
-            list.innerHTML = data.models.map(model => {
-                const size = (model.size / (1024 * 1024)).toFixed(2) + ' MB';
-                const meta = model.metadata || {};
-                const hasMeta = model.has_metadata;
-                const isLoadable = model.is_loadable !== false;
-                
-                // Get values from metadata or fallback
-                const episode = hasMeta ? (meta.episode || '?') : '?';
-                const bestScore = hasMeta ? (meta.best_score || '?') : '?';
-                const avgScore = hasMeta ? (meta.avg_score_last_100?.toFixed(1) || '?') : '?';
-                const epsilon = model.epsilon ? model.epsilon.toFixed(3) : '?';
-                const reason = hasMeta ? (meta.save_reason || '') : '';
-                
-                // Format episode and best score
-                const episodeStr = typeof episode === 'number' ? episode.toLocaleString() : episode;
-                
-                // Escape model name and id to prevent XSS
-                const safeName = escapeHtml(model.name);
-                const safeNameForAttr = escapeHtmlAttribute(model.name);
-                const modelId = DashboardCore.modelId(model);
-                const safeIdForAttr = escapeHtmlAttribute(modelId);
-                const safeModifiedStr = escapeHtml(model.modified_str || '');
-                const safeLoadError = escapeHtmlAttribute(model.load_error || 'Unreadable checkpoint');
-                const loadAttrs = isLoadable
-                    ? `data-action="load-model" data-model-id="${safeIdForAttr}"`
-                    : '';
-                const loadWarning = isLoadable
-                    ? ''
-                    : `<span class="reason-badge error" title="${safeLoadError}">unreadable</span>`;
-                
-                // Reason badge (reason is from our own metadata, but escape anyway)
-                const safeReason = escapeHtml(reason);
-                const reasonBadge = reason ? `<span class="reason-badge ${safeReason}">${safeReason}</span>` : '';
-                
-                return `
-                    <div class="model-item${isLoadable ? '' : ' model-item-invalid'}">
-                        <div class="model-item-content" ${loadAttrs}>
-                            <div class="model-header">
-                                <div class="model-name">
-                                    📁 ${safeName}
-                                    ${reasonBadge}
-                                    ${loadWarning}
-                                </div>
-                                <span class="model-size">${size}</span>
-                            </div>
-                            <div class="model-stats">
-                                <div class="model-stat">
-                                    <span class="model-stat-label">Episode</span>
-                                    <span class="model-stat-value">${episodeStr}</span>
-                                </div>
-                                <div class="model-stat">
-                                    <span class="model-stat-label">Best</span>
-                                    <span class="model-stat-value">${bestScore}</span>
-                                </div>
-                                <div class="model-stat">
-                                    <span class="model-stat-label">Avg(100)</span>
-                                    <span class="model-stat-value">${avgScore}</span>
-                                </div>
-                                <div class="model-stat">
-                                    <span class="model-stat-label">Epsilon</span>
-                                    <span class="model-stat-value">${epsilon}</span>
-                                </div>
-                            </div>
-                            <div class="model-date">${safeModifiedStr}</div>
-                        </div>
-                        <button class="model-delete-btn" data-action="delete-model" data-model-id="${safeIdForAttr}" data-model-name="${safeNameForAttr}" title="Delete this model">
-                            🗑️
-                        </button>
-                    </div>
-                `;
-            }).join('');
+            list.innerHTML = DashboardCore.modelListHtml(data.models);
         })
         .catch(err => {
             document.getElementById('model-list').innerHTML = 

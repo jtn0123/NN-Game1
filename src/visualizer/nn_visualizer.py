@@ -276,7 +276,10 @@ class NeuralNetVisualizer:
         panel_rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
         # Blit cached gradient surface
-        screen.blit(self._cached_gradient, (self.x, self.y))
+        if self._cached_gradient is None:
+            self._create_gradient_surface()
+        if self._cached_gradient is not None:
+            screen.blit(self._cached_gradient, (self.x, self.y))
 
         # Animated border glow
         glow_intensity = int(20 + 10 * math.sin(self.pulse_phase))
