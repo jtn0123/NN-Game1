@@ -1201,15 +1201,17 @@ class GameApp:
             # Get keyboard input as dict for games that use get_human_action
             pressed = pygame.key.get_pressed()
             keys_dict = {key: pressed[key] for key in range(len(pressed))}
+            get_human_action = getattr(self.game, "get_human_action", None)
+            step_human = getattr(self.game, "step_human", None)
 
             # Handle game-specific controls
-            if game_name == "asteroids" and hasattr(self.game, "step_human"):
+            if game_name == "asteroids" and callable(step_human) and callable(get_human_action):
                 # Asteroids supports simultaneous actions via step_human
-                state, reward, done, info = self.game.step_human(keys_dict)
-                action = self.game.get_human_action(keys_dict)  # For display purposes
-            elif hasattr(self.game, "get_human_action"):
+                state, reward, done, info = step_human(keys_dict)
+                action = get_human_action(keys_dict)  # For display purposes
+            elif callable(get_human_action):
                 # Use game's built-in human action helper
-                action = self.game.get_human_action(keys_dict)
+                action = get_human_action(keys_dict)
                 state, reward, done, info = self.game.step(action)
             else:
                 # Fallback: generic control mapping
@@ -1422,11 +1424,11 @@ class GameApp:
                         # Update web dashboard if enabled (throttled to every 5 episodes for performance)
                         # Always emit on: first 10 episodes, new best score, or every 5th episode
                         is_new_best = info["score"] > self.best_score_ever
-                        should_emit = self.web_dashboard and (
+                        dashboard = self.web_dashboard
+                        if dashboard is not None and (
                             self.episode <= 10 or is_new_best or self.episode % 5 == 0
-                        )
-                        if should_emit:
-                            self.web_dashboard.emit_metrics(
+                        ):
+                            dashboard.emit_metrics(
                                 episode=self.episode,
                                 score=info["score"],
                                 epsilon=self.agent.epsilon,
@@ -1443,11 +1445,9 @@ class GameApp:
                                 episode_length=episode_steps,
                             )
                             # Update performance settings in dashboard state
-                            self.web_dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
-                            self.web_dashboard.publisher.state.gradient_steps = (
-                                self.config.GRADIENT_STEPS
-                            )
-                            self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
+                            dashboard.publisher.state.learn_every = self.config.LEARN_EVERY
+                            dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
+                            dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
 
                             # Log episode completion
                             self._log_episode_complete(
@@ -2964,7 +2964,7 @@ class HeadlessTrainer:
             self.scores.append(info["score"])
 
             # Track wins (all bricks cleared)
-            won = info.get("won", False)
+            won = bool(info.get("won", False))
             self.wins.append(won)
 
             bricks_broken = calculate_progress_count(info, config)
@@ -2972,15 +2972,15 @@ class HeadlessTrainer:
             # Update web dashboard metrics (throttled to every 5 episodes for performance)
             # Always emit on: first 10 episodes, new best score, or every 5th episode
             is_new_best = info["score"] > getattr(self, "best_score", 0)
-            should_emit = self.web_dashboard and (episode <= 10 or is_new_best or episode % 5 == 0)
-            if should_emit:
+            dashboard = self.web_dashboard
+            if dashboard is not None and (episode <= 10 or is_new_best or episode % 5 == 0):
                 avg_loss = self.agent.get_average_loss(100)
 
                 # Calculate average Q-value for current state (was missing from headless)
                 q_values = self.agent.get_q_values(state)
                 avg_q_value = float(np.mean(q_values))
 
-                self.web_dashboard.emit_metrics(
+                dashboard.emit_metrics(
                     episode=episode,
                     score=info["score"],
                     epsilon=self.agent.epsilon,
@@ -2997,9 +2997,9 @@ class HeadlessTrainer:
                     episode_length=episode_steps,
                 )
                 # Update performance settings in dashboard state
-                self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                dashboard.publisher.state.batch_size = config.BATCH_SIZE
 
                 # Emit NN visualization data (throttled by server to ~10 FPS)
                 self._emit_nn_visualization(state, action)
@@ -3223,13 +3223,13 @@ class HeadlessTrainer:
                     # Update web dashboard metrics (throttled to every 5 episodes for performance)
                     # Always emit on: first 10 episodes, new best score, or every 5th episode
                     is_new_best = score > self.best_score
-                    should_emit_metrics = self.web_dashboard and (
+                    dashboard = self.web_dashboard
+                    if dashboard is not None and (
                         self.current_episode <= 10 or is_new_best or self.current_episode % 5 == 0
-                    )
-                    if should_emit_metrics:
+                    ):
                         bricks_broken = calculate_progress_count(infos[i], config)
 
-                        self.web_dashboard.emit_metrics(
+                        dashboard.emit_metrics(
                             episode=self.current_episode,
                             score=score,
                             epsilon=self.agent.epsilon,
@@ -3246,9 +3246,9 @@ class HeadlessTrainer:
                             episode_length=int(env_episode_steps[i]),
                         )
                         # Update performance settings in dashboard state
-                        self.web_dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                        self.web_dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                        self.web_dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                        dashboard.publisher.state.learn_every = config.LEARN_EVERY
+                        dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+                        dashboard.publisher.state.batch_size = config.BATCH_SIZE
 
                         # Emit NN visualization data (throttled by server to ~10 FPS)
                         # Convert numpy int64 to Python int for JSON serialization
@@ -3907,7 +3907,7 @@ def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
     selected_game = None
     selection_event = threading.Event()
 
-    def on_game_selected(game_name: str) -> None:
+    def on_game_selected(game_name: str, mode: str) -> None:
         """Called when user selects a game from web UI."""
         nonlocal selected_game
         selected_game = game_name

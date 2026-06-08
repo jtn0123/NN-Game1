@@ -1,4 +1,4 @@
-.PHONY: test coverage typecheck dashboard-test format format-check audit build check
+.PHONY: test coverage typecheck typecheck-audit dashboard-test format format-check audit build build-if-available release-config hygiene check verify
 
 PYTHON ?= python
 
@@ -6,10 +6,13 @@ test:
 	$(PYTHON) -m pytest -q
 
 coverage:
-	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=40 -q
+	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=70 -q
 
 typecheck:
-	$(PYTHON) -m mypy --config-file mypy.ini --follow-imports=silent src/ai/agent.py src/ai/network.py src/utils src/app/training_runtime.py src/web/model_service.py src/web/game_stats_service.py
+	$(PYTHON) -m mypy --config-file mypy.ini --follow-imports=silent src main.py config.py
+
+typecheck-audit:
+	$(MAKE) typecheck
 
 dashboard-test:
 	node --test tests/js/*.test.mjs
@@ -26,4 +29,19 @@ audit:
 build:
 	$(PYTHON) -m build
 
+build-if-available:
+	@if $(PYTHON) -c "import build" >/dev/null 2>&1; then \
+		$(PYTHON) -m build; \
+	else \
+		echo "python-build package not installed; skipping package build in local verify"; \
+	fi
+
+release-config:
+	$(PYTHON) .github/scripts/check_release_config.py
+
+hygiene:
+	$(PYTHON) .github/scripts/check_repo_hygiene.py
+
 check: format-check typecheck dashboard-test coverage
+
+verify: check typecheck-audit release-config hygiene build-if-available

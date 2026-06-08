@@ -128,9 +128,10 @@ class TrainingHUD:
         # Bug 90: Smooth color transition instead of instant flip
         target_color = self.good_color if score >= best_score * 0.8 else self.text_color
         for i in range(3):
-            self._current_score_color[i] += (
-                target_color[i] - self._current_score_color[i]
-            ) * self._color_lerp_speed
+            current = self._current_score_color[i]
+            self._current_score_color[i] = int(
+                current + (target_color[i] - current) * self._color_lerp_speed
+            )
         color = tuple(int(c) for c in self._current_score_color)
 
         text_surface = self._font_small.render(text, True, color)

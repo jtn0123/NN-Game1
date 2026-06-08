@@ -27,7 +27,7 @@ import time
 import json
 import math
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Deque, Callable, Tuple
+from typing import Optional, Dict, Any, List, Deque, Callable, Tuple, TypedDict
 from dataclasses import dataclass, asdict, field
 from collections import deque
 from enum import Enum
@@ -38,6 +38,24 @@ import socket
 from urllib.parse import urlencode
 
 import numpy as np
+
+
+class ControlAck(TypedDict, total=False):
+    success: bool
+    action: str
+    error: str
+
+
+DASHBOARD_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "connect-src 'self' ws: wss:; "
+    "img-src 'self' data:; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
 
 try:
     # Suppress werkzeug logging BEFORE importing Flask
@@ -883,25 +901,25 @@ class MetricsPublisher:
             data.activation_history = list(activation_history)[-500:]  # Keep last 500
 
         if incoming_weights is not None:
-            incoming_weights = np.asarray(incoming_weights)
-            if incoming_weights.size > 0:
-                data.incoming_weights = incoming_weights.tolist()
+            incoming_weight_array = np.asarray(incoming_weights)
+            if incoming_weight_array.size > 0:
+                data.incoming_weights = incoming_weight_array.tolist()
                 data.incoming_weight_stats = {
-                    "mean": float(np.mean(incoming_weights)),
-                    "std": float(np.std(incoming_weights)),
-                    "min": float(np.min(incoming_weights)),
-                    "max": float(np.max(incoming_weights)),
+                    "mean": float(np.mean(incoming_weight_array)),
+                    "std": float(np.std(incoming_weight_array)),
+                    "min": float(np.min(incoming_weight_array)),
+                    "max": float(np.max(incoming_weight_array)),
                 }
 
         if outgoing_weights is not None:
-            outgoing_weights = np.asarray(outgoing_weights)
-            if outgoing_weights.size > 0:
-                data.outgoing_weights = outgoing_weights.tolist()
+            outgoing_weight_array = np.asarray(outgoing_weights)
+            if outgoing_weight_array.size > 0:
+                data.outgoing_weights = outgoing_weight_array.tolist()
                 data.outgoing_weight_stats = {
-                    "mean": float(np.mean(outgoing_weights)),
-                    "std": float(np.std(outgoing_weights)),
-                    "min": float(np.min(outgoing_weights)),
-                    "max": float(np.max(outgoing_weights)),
+                    "mean": float(np.mean(outgoing_weight_array)),
+                    "std": float(np.std(outgoing_weight_array)),
+                    "min": float(np.min(outgoing_weight_array)),
+                    "max": float(np.max(outgoing_weight_array)),
                 }
 
         if q_contributions:
@@ -1233,12 +1251,16 @@ class WebDashboard:
         return self.model_service.resolve(model_ref)
 
     @staticmethod
-    def _success_ack(action: str) -> Dict[str, Any]:
+    def _success_ack(action: str) -> ControlAck:
         return {"success": True, "action": action}
 
     @staticmethod
-    def _error_ack(action: str, error: str) -> Dict[str, Any]:
+    def _error_ack(action: str, error: str) -> ControlAck:
         return {"success": False, "action": action, "error": error}
+
+    @staticmethod
+    def _unauthorized_ack() -> ControlAck:
+        return {"success": False, "error": "Unauthorized"}
 
     def _callback_ack(
         self,
@@ -1246,7 +1268,7 @@ class WebDashboard:
         callback: Optional[Callable[..., Any]],
         *args: Any,
         failure_message: str,
-    ) -> Dict[str, Any]:
+    ) -> ControlAck:
         """Run a control callback and translate its return value into an ack."""
         if callback is None:
             return self._success_ack(action)
@@ -1265,10 +1287,10 @@ class WebDashboard:
             return self._error_ack(action, failure_message)
         return self._success_ack(action)
 
-    def _handle_save_control(self) -> Dict[str, Any]:
+    def _handle_save_control(self) -> ControlAck:
         return self._callback_ack("save", self.on_save_callback, failure_message="Save failed")
 
-    def _handle_save_as_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_save_as_control(self, data: Dict[str, Any]) -> ControlAck:
         filename = data.get("filename", "custom_save.pth")
         if not isinstance(filename, str) or not filename.strip():
             return self._error_ack("save_as", "Invalid filename")
@@ -1279,7 +1301,7 @@ class WebDashboard:
             failure_message="Save failed",
         )
 
-    def _handle_start_fresh_control(self) -> Dict[str, Any]:
+    def _handle_start_fresh_control(self) -> ControlAck:
         ack = self._callback_ack(
             "start_fresh",
             self.on_start_fresh_callback,
@@ -1289,7 +1311,7 @@ class WebDashboard:
             emit("training_reset", {"message": "Training reset - starting fresh"})
         return ack
 
-    def _handle_load_model_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_load_model_control(self, data: Dict[str, Any]) -> ControlAck:
         model_ref = data.get("id") or data.get("path")
         if not model_ref:
             return self._error_ack("load_model", "Invalid model id")
@@ -1306,7 +1328,7 @@ class WebDashboard:
             failure_message="Load model failed",
         )
 
-    def _handle_restart_with_game_control(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_restart_with_game_control(self, data: Dict[str, Any]) -> ControlAck:
         game_name = data.get("game")
         if not game_name or not self.on_restart_with_game_callback:
             return self._error_ack("restart_with_game", "Invalid game")
@@ -1407,7 +1429,7 @@ class WebDashboard:
 
         return True, normalized, ""
 
-    def _handle_go_to_launcher_control(self) -> Dict[str, Any]:
+    def _handle_go_to_launcher_control(self) -> ControlAck:
         self.publisher.log("🎮 Returning to launcher...", level="warning")
         save_ack = self._handle_save_control()
         if not save_ack["success"]:
@@ -1431,6 +1453,10 @@ class WebDashboard:
         def apply_security_headers(response):
             response.headers.setdefault("Referrer-Policy", "no-referrer")
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                DASHBOARD_CONTENT_SECURITY_POLICY,
+            )
             return response
 
         @self.app.route("/")
@@ -1622,7 +1648,7 @@ class WebDashboard:
             data = data if isinstance(data, dict) else {}
             if not self._is_authorized_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
-                return {"success": False, "error": "Unauthorized"}
+                return self._unauthorized_ack()
 
             action = data.get("action")
             handled = True
@@ -1695,18 +1721,18 @@ class WebDashboard:
                 handled = False
 
             if not handled:
-                return {"success": False, "action": action, "error": "Unknown action"}
-            return {"success": True, "action": action}
+                return self._error_ack(str(action), "Unknown action")
+            return self._success_ack(str(action))
 
         @self.socketio.on("clear_logs")
         def handle_clear_logs(data=None):
             data = data or {}
             if not self._is_authorized_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
-                return {"success": False, "error": "Unauthorized"}
+                return self._unauthorized_ack()
             self.publisher.console_logs.clear()
             emit("console_logs", {"logs": []})
-            return {"success": True, "action": "clear_logs"}
+            return self._success_ack("clear_logs")
 
         # Auto-emit on metric updates
         # Bug 65 fix: Add null/running checks to prevent AttributeError during shutdown

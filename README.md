@@ -120,7 +120,7 @@ NN-Game1/
 
 ### Prerequisites
 
-- Python 3.9+ (tested with 3.11)
+- Python 3.10, 3.11, or 3.12
 - pip package manager
 
 ### Setup Steps
@@ -133,8 +133,8 @@ cd /Users/justin/Documents/Github/NN-Game1
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# 3. Install dependencies
-pip install -r requirements.txt
+# 3. Install dependencies with the tested constraint pins
+pip install -r requirements.txt -c constraints.txt
 
 # 4. Verify installation
 python -c "import torch; import pygame; print('Ready!')"
@@ -629,18 +629,21 @@ make test
 # Coverage with the current ratcheting threshold
 make coverage
 
-# Focused type check for the AI/utils core
+# Strict type check for the full Python app
 make typecheck
 
 # Formatting
 make format
 make format-check
 
-# Combined local gate used by CI
+# Fast local gate used by CI
 make check
+
+# Fuller local verification, including release config, hygiene, and build when available
+make verify
 ```
 
-Install with pinned constraints when you want reproducible local behavior:
+The project supports Python 3.10 through 3.12. Install with pinned constraints for reproducible local behavior:
 
 ```bash
 pip install -r requirements.txt -c constraints.txt

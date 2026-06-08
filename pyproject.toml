@@ -109,3 +109,10 @@ markers = [
     "pygame: requires pygame",
     "web: requires Flask/SocketIO dashboard dependencies",
 ]
+
+[tool.coverage.run]
+omit = [
+    "main.py",
+    "src/game/menu.py",
+    "src/visualizer/pause_menu.py",
+]

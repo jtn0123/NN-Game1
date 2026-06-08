@@ -88,3 +88,65 @@ test('model helpers prefer opaque ids and display filenames', () => {
   );
   assert.equal(DashboardCore.modelDisplayName('breakout:best.pth'), 'best.pth');
 });
+
+test('escape helpers encode html and attribute-sensitive characters', () => {
+  const hostile = `<img src=x onerror="alert('x')">&`;
+
+  assert.equal(
+    DashboardCore.escapeHtml(hostile),
+    '&lt;img src=x onerror=&quot;alert(&#39;x&#39;)&quot;&gt;&amp;',
+  );
+  assert.equal(DashboardCore.escapeHtmlAttribute(hostile), DashboardCore.escapeHtml(hostile));
+});
+
+test('modelListHtml renders empty and malformed model lists safely', () => {
+  assert.equal(
+    DashboardCore.modelListHtml([]),
+    '<div class="no-models">No saved models found</div>',
+  );
+  assert.equal(
+    DashboardCore.modelListHtml(null),
+    '<div class="no-models">No saved models found</div>',
+  );
+});
+
+test('modelListHtml escapes unsafe model fields and preserves opaque ids', () => {
+  const html = DashboardCore.modelListHtml([{
+    id: 'snake:<best>.pth',
+    name: `<script>alert('model')</script>`,
+    size: 1048576,
+    modified_str: 'Today <now>',
+    has_metadata: true,
+    metadata: {
+      episode: 1234,
+      best_score: 99,
+      avg_score_last_100: 12.345,
+      save_reason: 'best',
+    },
+    epsilon: 0.12345,
+  }]);
+
+  assert.match(html, /data-model-id="snake:&lt;best&gt;.pth"/);
+  assert.match(html, /&lt;script&gt;alert\(&#39;model&#39;\)&lt;\/script&gt;/);
+  assert.match(html, /Today &lt;now&gt;/);
+  assert.match(html, />1\.00 MB</);
+  assert.match(html, />1,234</);
+  assert.match(html, />12\.3</);
+  assert.match(html, />0\.123</);
+  assert.doesNotMatch(html, /<script>alert/);
+});
+
+test('modelListHtml marks unreadable checkpoints without load action', () => {
+  const html = DashboardCore.modelListHtml([{
+    id: 'bad:model.pth',
+    name: 'bad model',
+    size: -1,
+    is_loadable: false,
+    load_error: 'bad "checkpoint"',
+  }]);
+
+  assert.match(html, /model-item-invalid/);
+  assert.doesNotMatch(html, /data-action="load-model"/);
+  assert.match(html, /title="bad &quot;checkpoint&quot;"/);
+  assert.match(html, />\? MB</);
+});
