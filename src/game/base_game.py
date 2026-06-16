@@ -13,7 +13,7 @@ To add a new game:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Protocol, Sequence, Tuple
+from typing import Dict, List, Protocol, Sequence, Tuple
 
 import numpy as np
 
@@ -166,6 +166,28 @@ class BaseVecGame(Protocol):
     def seed(self, seeds: List[int]) -> None:
         """Seed every environment."""
         ...
+
+
+class HumanActionProvider(Protocol):
+    """Optional game capability for keyboard-to-action conversion."""
+
+    def get_human_action(self, keys: Dict[int, bool]) -> int:
+        """Return the game action represented by the current key state."""
+        ...
+
+
+class HumanStepProvider(Protocol):
+    """Optional game capability for simultaneous-key human stepping."""
+
+    def step_human(self, keys: Dict[int, bool]) -> Tuple[np.ndarray, float, bool, dict]:
+        """Step the game directly from keyboard state."""
+        ...
+
+
+class ControlDisplayProvider(Protocol):
+    """Optional game capability for rendering built-in control hints."""
+
+    show_controls: bool
 
 
 def step_vector_env_no_copy(

@@ -1,0 +1,292 @@
+/* Neural Network AI - Game Launcher */
+
+:root {
+    --bg-dark: #0a0a0f;
+    --bg-card: #12121a;
+    --accent-blue: #00d4ff;
+    --accent-green: #00ff88;
+    --accent-purple: #a855f7;
+    --text-primary: #e4e6f0;
+    --text-secondary: #7a7e8c;
+    --glow-blue: 0 0 20px rgba(0, 212, 255, 0.3);
+    --glow-green: 0 0 20px rgba(0, 255, 136, 0.3);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    font-family: 'Space Mono', monospace;
+}
+
+.bg-grid {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+    animation: grid-move 20s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes grid-move {
+    0% {
+        transform: translate(0, 0);
+    }
+
+    100% {
+        transform: translate(50px, 50px);
+    }
+}
+
+.container {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 40px;
+}
+
+h1 {
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+    background-clip: text;
+    color: transparent;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 700;
+    text-shadow: var(--glow-blue);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+    margin-bottom: 50px;
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+.games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 30px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.game-card {
+    position: relative;
+    overflow: hidden;
+    padding: 30px;
+    border: 2px solid rgba(0, 212, 255, 0.2);
+    border-radius: 16px;
+    background: var(--bg-card);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.game-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+}
+
+.game-card:hover {
+    border-color: var(--accent-blue);
+    box-shadow: var(--glow-blue);
+    transform: translateY(-5px);
+}
+
+.game-card:hover::before {
+    transform: scaleX(1);
+}
+
+.game-card.selected {
+    border-color: var(--accent-green);
+    box-shadow: var(--glow-green);
+}
+
+.game-icon {
+    display: block;
+    margin-bottom: 15px;
+    font-size: 4rem;
+}
+
+.game-name {
+    margin-bottom: 10px;
+    color: var(--text-primary);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+.game-desc {
+    margin-bottom: 15px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.game-stats {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.game-stats span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.stat-label {
+    color: var(--accent-blue);
+}
+
+.start-btn {
+    margin-top: 50px;
+    padding: 15px 50px;
+    border: 0;
+    border-radius: 30px;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-green));
+    color: var(--bg-dark);
+    cursor: pointer;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    opacity: 0.5;
+    pointer-events: none;
+    transition: all 0.3s ease;
+}
+
+.start-btn.active {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.start-btn.active:hover {
+    box-shadow: var(--glow-green);
+    transform: scale(1.05);
+}
+
+.start-btn.loading {
+    pointer-events: none;
+}
+
+.start-btn.loading::after {
+    content: '...';
+    animation: dots 1s steps(3, end) infinite;
+}
+
+@keyframes dots {
+    0% {
+        content: '.';
+    }
+
+    33% {
+        content: '..';
+    }
+
+    66% {
+        content: '...';
+    }
+}
+
+.status-msg {
+    min-height: 25px;
+    margin-top: 20px;
+    color: var(--accent-green);
+    font-size: 0.9rem;
+}
+
+.difficulty {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.difficulty.easy {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+}
+
+.difficulty.medium {
+    background: rgba(0, 212, 255, 0.2);
+    color: #00d4ff;
+}
+
+.difficulty.hard {
+    background: rgba(255, 152, 0, 0.2);
+    color: #ff9800;
+}
+
+.mode-selector {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin: 25px 0;
+}
+
+.mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 28px;
+    border: 2px solid var(--text-secondary);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.mode-btn:hover {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+.mode-btn.selected {
+    border-color: var(--accent-green);
+    background: rgba(0, 255, 136, 0.1);
+    box-shadow: var(--glow-green);
+    color: var(--accent-green);
+}
+
+.mode-btn .mode-icon {
+    font-size: 1.2rem;
+}
+
+.mode-description {
+    margin-top: 8px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-align: center;
+}

@@ -169,23 +169,26 @@ class ModelService:
         """Return the JSON metadata sidecar path for a checkpoint file."""
         return f"{checkpoint_path}.json"
 
-    def cleanup_old_periodic_saves(self, keep_last: int = 5) -> None:
-        """Delete old periodic checkpoints and their metadata sidecars."""
+    def cleanup_old_periodic_saves(self, keep_last: int = 5) -> list[str]:
+        """Delete old periodic checkpoints and metadata sidecars, returning removed paths."""
         pattern = os.path.join(self.config.GAME_MODEL_DIR, f"{self.config.GAME_NAME}_ep*.pth")
         periodic_saves = glob.glob(pattern)
         if len(periodic_saves) <= keep_last:
-            return
+            return []
 
         def get_episode_num(path: str) -> int:
             match = re.search(r"_ep(\d+)\.pth$", path)
             return int(match.group(1)) if match else 0
 
         periodic_saves.sort(key=get_episode_num)
+        deleted: list[str] = []
         for filepath in periodic_saves[:-keep_last]:
             try:
                 os.remove(filepath)
+                deleted.append(filepath)
                 sidecar_path = self.metadata_sidecar_path(filepath)
                 if os.path.exists(sidecar_path):
                     os.remove(sidecar_path)
             except OSError as exc:
                 print(f"⚠️ Could not delete old checkpoint {filepath}: {exc}")
+        return deleted

@@ -32,6 +32,50 @@
         return socket;
     }
 
+    function controlErrorMessage(response, fallback = 'Command failed') {
+        if (response && response.success) {
+            return '';
+        }
+        return response?.error || fallback;
+    }
+
+    function emitControl(socket, payload, options = {}) {
+        const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 5000;
+        const timeoutMessage = options.timeoutMessage || 'No response from server';
+
+        return new Promise((resolve) => {
+            if (!socket || typeof socket.emit !== 'function' || socket.connected === false) {
+                resolve({ success: false, error: 'Not connected to server' });
+                return;
+            }
+
+            let settled = false;
+            let timer = null;
+            const finish = (response) => {
+                if (settled) return;
+                settled = true;
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                if (!response || typeof response !== 'object') {
+                    resolve({ success: false, error: timeoutMessage });
+                    return;
+                }
+                resolve(response);
+            };
+
+            timer = setTimeout(() => {
+                finish({ success: false, error: timeoutMessage });
+            }, timeoutMs);
+
+            try {
+                socket.emit('control', payload, finish);
+            } catch (error) {
+                finish({ success: false, error: error?.message || 'Control request failed' });
+            }
+        });
+    }
+
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, (char) => ({
             '&': '&amp;',
@@ -143,6 +187,8 @@
         withDashboardToken,
         authorizedControlPayload,
         createAuthorizedSocket,
+        controlErrorMessage,
+        emitControl,
         escapeHtml,
         escapeHtmlAttribute,
         formatMegabytes,

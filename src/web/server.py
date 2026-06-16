@@ -27,7 +27,7 @@ import time
 import json
 import math
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Deque, Callable, Tuple, TypedDict
+from typing import Optional, Dict, Any, List, Deque, Callable, Tuple
 from dataclasses import dataclass, asdict, field
 from collections import deque
 from enum import Enum
@@ -39,19 +39,13 @@ from urllib.parse import urlencode
 
 import numpy as np
 
-
-class ControlAck(TypedDict, total=False):
-    success: bool
-    action: str
-    error: str
-
-
 DASHBOARD_CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
     "connect-src 'self' ws: wss:; "
     "img-src 'self' data:; "
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.socket.io; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com data:; "
     "object-src 'none'; "
     "base-uri 'self'; "
     "frame-ancestors 'none'"
@@ -74,7 +68,9 @@ except ImportError:
     print("Install with: pip install flask flask-socketio eventlet")
 
 from config import Config
+from src.app.performance_modes import PERFORMANCE_MODES, performance_mode_payload
 from src.utils.logger import get_logger
+from src.web.contracts import CONTROL_ACTIONS, ControlAck, GameInfoPayload
 from src.web.game_stats_service import build_game_stats
 from src.web.model_service import ModelService
 
@@ -1311,6 +1307,89 @@ class WebDashboard:
             emit("training_reset", {"message": "Training reset - starting fresh"})
         return ack
 
+    def _handle_speed_control(self, data: Dict[str, Any]) -> ControlAck:
+        speed = self._parse_speed(data.get("value", 1.0))
+        if speed is None:
+            return self._error_ack("speed", "Invalid speed")
+
+        ack = self._callback_ack(
+            "speed",
+            self.on_speed_callback,
+            speed,
+            failure_message="Speed change failed",
+        )
+        if ack["success"]:
+            self.publisher.set_speed(speed)
+        return ack
+
+    def _handle_config_change_control(self, data: Dict[str, Any]) -> ControlAck:
+        config_data = data.get("config", {})
+        if not isinstance(config_data, dict):
+            return self._error_ack("config_change", "Invalid config")
+
+        valid_config, normalized_config, error = self._normalize_config_change(config_data)
+        if not valid_config:
+            return self._error_ack("config_change", error)
+
+        ack = self._callback_ack(
+            "config_change",
+            self.on_config_change_callback,
+            normalized_config,
+            failure_message="Config change failed",
+        )
+        if ack["success"]:
+            self.publisher.update_config(normalized_config)
+        return ack
+
+    def _handle_performance_mode_control(self, data: Dict[str, Any]) -> ControlAck:
+        mode = data.get("mode", "normal")
+        if mode not in self._valid_performance_modes():
+            return self._error_ack("performance_mode", "Invalid performance mode")
+
+        ack = self._callback_ack(
+            "performance_mode",
+            self.on_performance_mode_callback,
+            mode,
+            failure_message="Performance mode failed",
+        )
+        if ack["success"]:
+            self.publisher.set_performance_mode(mode)
+        return ack
+
+    def _handle_save_and_quit_control(self) -> ControlAck:
+        return self._callback_ack(
+            "save_and_quit",
+            self.on_save_and_quit_callback,
+            failure_message="Save and quit failed",
+        )
+
+    def _handle_select_game_control(self, data: Dict[str, Any]) -> ControlAck:
+        game_name = data.get("game")
+        mode = data.get("mode", "ai")
+        if not self._is_known_game(game_name) or mode not in {"ai", "human"}:
+            return self._error_ack("select_game", "Invalid game")
+        if not self.on_game_selected_callback:
+            return self._error_ack("select_game", "Invalid game")
+
+        ack = self._callback_ack(
+            "select_game",
+            self.on_game_selected_callback,
+            game_name,
+            mode,
+            failure_message="Game selection failed",
+        )
+        if ack["success"]:
+            mode_text = "Playing" if mode == "human" else "Training"
+            emit(
+                "game_starting",
+                {
+                    "game": game_name,
+                    "mode": mode,
+                    "message": f"{mode_text} {game_name}...",
+                },
+            )
+        return ack
+
     def _handle_load_model_control(self, data: Dict[str, Any]) -> ControlAck:
         model_ref = data.get("id") or data.get("path")
         if not model_ref:
@@ -1339,11 +1418,18 @@ class WebDashboard:
         save_ack = self._handle_save_control()
         if not save_ack["success"]:
             return self._error_ack("restart_with_game", save_ack["error"])
+        ack = self._callback_ack(
+            "restart_with_game",
+            self.on_restart_with_game_callback,
+            game_name,
+            failure_message="Restart failed",
+        )
+        if not ack["success"]:
+            return ack
         emit(
             "restarting",
             {"game": game_name, "message": f"Restarting with {game_name}..."},
         )
-        self.on_restart_with_game_callback(game_name)
         return self._success_ack("restart_with_game")
 
     @staticmethod
@@ -1356,7 +1442,7 @@ class WebDashboard:
 
     @staticmethod
     def _valid_performance_modes() -> set[str]:
-        return {"normal", "fast", "turbo", "ultra"}
+        return set(PERFORMANCE_MODES.keys())
 
     @staticmethod
     def _parse_speed(value: Any) -> Optional[float]:
@@ -1435,10 +1521,16 @@ class WebDashboard:
         if not save_ack["success"]:
             return self._error_ack("go_to_launcher", save_ack["error"])
 
+        ack = self._callback_ack(
+            "go_to_launcher",
+            self.on_save_and_quit_callback,
+            failure_message="Launcher switch failed",
+        )
+        if not ack["success"]:
+            return ack
+
         self.launcher_mode = True
         emit("redirect_to_launcher", {"message": "Returning to game launcher..."})
-        if self.on_save_and_quit_callback:
-            self.on_save_and_quit_callback()
         return self._success_ack("go_to_launcher")
 
     def _register_routes(self) -> None:
@@ -1521,7 +1613,7 @@ class WebDashboard:
             """List all available games with their metadata."""
             from src.game import list_games, get_game_info
 
-            games = []
+            games: List[GameInfoPayload] = []
             for game_id in list_games():
                 info = get_game_info(game_id)
                 if info:
@@ -1531,6 +1623,7 @@ class WebDashboard:
                             "name": info.get("name", game_id.title()),
                             "description": info.get("description", ""),
                             "actions": info.get("actions", []),
+                            "controls": info.get("controls", []),
                             "difficulty": info.get("difficulty", "Unknown"),
                             "icon": info.get("icon", "🎮"),
                             "color": info.get("color", (100, 100, 100)),
@@ -1539,6 +1632,11 @@ class WebDashboard:
                     )
 
             return jsonify({"games": games, "current_game": self.config.GAME_NAME})
+
+        @self.app.route("/api/performance-modes")
+        def api_performance_modes():
+            """List dashboard performance-mode presets."""
+            return jsonify({"modes": performance_mode_payload()})
 
         @self.app.route("/api/screenshot")
         def api_screenshot():
@@ -1651,77 +1749,43 @@ class WebDashboard:
                 return self._unauthorized_ack()
 
             action = data.get("action")
-            handled = True
+            if action not in CONTROL_ACTIONS:
+                return self._error_ack(str(action), "Unknown action")
 
             if action == "pause":
-                if self.on_pause_callback:
-                    self.on_pause_callback()
+                return self._callback_ack(
+                    "pause",
+                    self.on_pause_callback,
+                    failure_message="Pause failed",
+                )
             elif action == "save":
                 return self._handle_save_control()
             elif action == "save_as":
                 return self._handle_save_as_control(data)
             elif action == "speed":
-                speed = self._parse_speed(data.get("value", 1.0))
-                if speed is None:
-                    return self._error_ack("speed", "Invalid speed")
-                if self.on_speed_callback:
-                    self.on_speed_callback(speed)
-                self.publisher.set_speed(speed)
+                return self._handle_speed_control(data)
             elif action == "reset":
-                if self.on_reset_callback:
-                    self.on_reset_callback()
+                return self._callback_ack(
+                    "reset",
+                    self.on_reset_callback,
+                    failure_message="Reset failed",
+                )
             elif action == "start_fresh":
                 return self._handle_start_fresh_control()
             elif action == "load_model":
                 return self._handle_load_model_control(data)
             elif action == "config_change":
-                config_data = data.get("config", {})
-                if not isinstance(config_data, dict):
-                    return self._error_ack("config_change", "Invalid config")
-                valid_config, normalized_config, error = self._normalize_config_change(config_data)
-                if not valid_config:
-                    return self._error_ack("config_change", error)
-                if self.on_config_change_callback:
-                    self.on_config_change_callback(normalized_config)
-                self.publisher.update_config(normalized_config)
+                return self._handle_config_change_control(data)
             elif action == "performance_mode":
-                mode = data.get("mode", "normal")
-                if mode not in self._valid_performance_modes():
-                    return self._error_ack("performance_mode", "Invalid performance mode")
-                if self.on_performance_mode_callback:
-                    self.on_performance_mode_callback(mode)
-                self.publisher.set_performance_mode(mode)
+                return self._handle_performance_mode_control(data)
             elif action == "save_and_quit":
-                if self.on_save_and_quit_callback:
-                    self.on_save_and_quit_callback()
+                return self._handle_save_and_quit_control()
             elif action == "select_game":
-                # Launcher mode: user selected a game to start
-                game_name = data.get("game")
-                mode = data.get("mode", "ai")  # 'ai' or 'human'
-                if not self._is_known_game(game_name) or mode not in {"ai", "human"}:
-                    return self._error_ack("select_game", "Invalid game")
-                if self.on_game_selected_callback:
-                    mode_text = "Playing" if mode == "human" else "Training"
-                    emit(
-                        "game_starting",
-                        {
-                            "game": game_name,
-                            "mode": mode,
-                            "message": f"{mode_text} {game_name}...",
-                        },
-                    )
-                    self.on_game_selected_callback(game_name, mode)
-                else:
-                    return self._error_ack("select_game", "Invalid game")
+                return self._handle_select_game_control(data)
             elif action == "restart_with_game":
                 return self._handle_restart_with_game_control(data)
             elif action == "go_to_launcher":
                 return self._handle_go_to_launcher_control()
-            else:
-                handled = False
-
-            if not handled:
-                return self._error_ack(str(action), "Unknown action")
             return self._success_ack(str(action))
 
         @self.socketio.on("clear_logs")

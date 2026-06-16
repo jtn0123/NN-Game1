@@ -24,7 +24,9 @@ format-check:
 	$(PYTHON) -m black --check main.py config.py src tests
 
 audit:
-	$(PYTHON) -m pip_audit -r requirements.txt
+	# CVE-2025-3000 currently has no patched torch release on PyPI.
+	# Keep auditing all other advisories and remove this once torch ships a fix.
+	$(PYTHON) -m pip_audit -r requirements.txt --ignore-vuln CVE-2025-3000
 
 build:
 	$(PYTHON) -m build

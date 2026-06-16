@@ -81,6 +81,60 @@ test('createAuthorizedSocket injects token into mutating events only', () => {
   });
 });
 
+test('emitControl resolves explicit server acknowledgements', async () => {
+  const emitted = [];
+  const socket = {
+    emit(event, payload, callback) {
+      emitted.push({ event, payload });
+      callback({ success: true, action: payload.action });
+    },
+  };
+
+  const response = await DashboardCore.emitControl(socket, { action: 'save' }, { timeoutMs: 50 });
+
+  assert.deepEqual(response, { success: true, action: 'save' });
+  assert.deepEqual(emitted, [{ event: 'control', payload: { action: 'save' } }]);
+});
+
+test('emitControl reports disconnected sockets without emitting', async () => {
+  let emitted = false;
+  const socket = {
+    connected: false,
+    emit() {
+      emitted = true;
+    },
+  };
+
+  const response = await DashboardCore.emitControl(socket, { action: 'save' }, { timeoutMs: 50 });
+
+  assert.deepEqual(response, { success: false, error: 'Not connected to server' });
+  assert.equal(emitted, false);
+});
+
+test('emitControl times out when the server never acknowledges', async () => {
+  const socket = {
+    emit() {
+      // Intentionally never calls the acknowledgement callback.
+    },
+  };
+
+  const response = await DashboardCore.emitControl(socket, { action: 'save' }, {
+    timeoutMs: 5,
+    timeoutMessage: 'Timed out',
+  });
+
+  assert.deepEqual(response, { success: false, error: 'Timed out' });
+});
+
+test('controlErrorMessage normalizes failed acknowledgement text', () => {
+  assert.equal(DashboardCore.controlErrorMessage({ success: true }), '');
+  assert.equal(
+    DashboardCore.controlErrorMessage({ success: false, error: 'Save failed' }),
+    'Save failed',
+  );
+  assert.equal(DashboardCore.controlErrorMessage(null, 'Fallback'), 'Fallback');
+});
+
 test('model helpers prefer opaque ids and display filenames', () => {
   assert.equal(
     DashboardCore.modelId({ id: 'breakout:best.pth', path: '/tmp/best.pth' }),

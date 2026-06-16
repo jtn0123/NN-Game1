@@ -11,7 +11,7 @@ pytest.importorskip("pygame")
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from config import Config
-from src.game import BaseGame, get_game, get_vec_game, list_games
+from src.game import BaseGame, get_game, get_game_info, get_vec_game, list_games
 
 pytestmark = [pytest.mark.pygame, pytest.mark.torch]
 
@@ -68,3 +68,14 @@ def test_registered_vector_games_satisfy_batch_contract(game_id):
         assert next_states.shape[0] == 2
     finally:
         vec_env.close()
+
+
+@pytest.mark.parametrize("game_id", list_games())
+def test_registered_games_define_human_control_help(game_id):
+    """Human mode should be able to show controls from registry metadata."""
+    info = get_game_info(game_id)
+
+    assert info is not None
+    assert isinstance(info["controls"], list)
+    assert info["controls"]
+    assert all(isinstance(control, str) and control for control in info["controls"])

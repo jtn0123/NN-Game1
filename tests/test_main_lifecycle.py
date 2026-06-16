@@ -61,6 +61,20 @@ def test_headless_apply_config_rejects_invalid_learning_rate():
     assert trainer.web_dashboard.logs == []
 
 
+@pytest.mark.parametrize("runtime_cls", [main.GameApp, main.HeadlessTrainer])
+def test_runtime_performance_mode_uses_shared_preset(runtime_cls):
+    """Visual and headless modes should apply the same shared preset values."""
+    runtime = runtime_cls.__new__(runtime_cls)
+    runtime.config = SimpleNamespace(LEARN_EVERY=1, BATCH_SIZE=64, GRADIENT_STEPS=1)
+    runtime.web_dashboard = None
+
+    runtime._set_performance_mode("ultra")
+
+    assert runtime.config.LEARN_EVERY == 32
+    assert runtime.config.BATCH_SIZE == 128
+    assert runtime.config.GRADIENT_STEPS == 2
+
+
 def test_game_app_set_speed_rejects_non_numeric_values():
     """Speed changes should ignore malformed values instead of raising."""
     app = main.GameApp.__new__(main.GameApp)
