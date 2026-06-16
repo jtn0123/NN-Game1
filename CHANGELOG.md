@@ -1,6 +1,17 @@
 # CHANGELOG
 
 
+## v0.0.4 (2026-06-16)
+
+### Bug Fixes
+
+- Harden dashboard stability
+  ([`2344274`](https://github.com/jtn0123/NN-Game1/commit/23442741e3959a15d81ea56322b9452cd1ce7c32))
+
+Harden dashboard startup and control flows, extract launcher assets, add regression coverage, and
+  align dependency audit handling.
+
+
 ## v0.0.3 (2026-06-08)
 
 ### Bug Fixes
