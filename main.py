@@ -69,7 +69,7 @@ import time
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Callable, Any, Type, Union, List, Iterable
+from typing import Optional, Callable, Any, Type, List, Iterable, cast
 from enum import Enum, auto
 
 # Add project root to path
@@ -77,20 +77,26 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
 from src.utils.logger import setup_logging, get_logger, LogLevel
-from src.game import get_game, list_games, get_game_info, BaseGame, GameMenu
-from src.game.breakout import Breakout, VecBreakout
-from src.game.space_invaders import VecSpaceInvaders
-from src.game.pong import VecPong
-from src.game.snake import VecSnake
-from src.game.asteroids import VecAsteroids
+from src.game import (
+    BaseGame,
+    BaseVecGame,
+    ControlDisplayProvider,
+    GameMenu,
+    HumanActionProvider,
+    HumanStepProvider,
+    get_game_info,
+    list_games,
+)
+from src.app.game_factory import create_single_game, create_training_environment
+from src.app.model_service import ModelService as AppModelService
 from src.ai.agent import Agent, TrainingHistory
 from src.app.cli import parse_args
 from src.app.training_runtime import (
     build_nn_snapshot,
     emit_nn_snapshot_to_dashboard,
     request_save_and_stop,
-    resolve_model_path,
 )
+from src.app.performance_modes import apply_performance_mode
 from src.ai.trainer import Trainer, calculate_progress_count
 from src.ai.evaluator import Evaluator  # Deterministic performance tracking
 from src.utils.checkpoint_loader import load_checkpoint
@@ -167,6 +173,7 @@ class GameApp:
         """
         self.config = config
         self.args = args
+        self.model_service = AppModelService(config)
 
         # Update config from args
         if args.lr:
@@ -225,13 +232,13 @@ class GameApp:
         self._update_scale()
 
         # Create game from registry
-        GameClass = get_game(config.GAME_NAME)
-        if GameClass is None:
+        try:
+            game_environment = create_single_game(config.GAME_NAME, config)
+        except ValueError:
             print(f"❌ Unknown game: {config.GAME_NAME}")
             print(f"   Available games: {', '.join(list_games())}")
             sys.exit(1)
-        # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
-        self.game: BaseGame = GameClass(config)  # type: ignore[call-arg]
+        self.game: BaseGame = game_environment.game
 
         # Create AI agent
         self.agent = Agent(
@@ -375,12 +382,10 @@ class GameApp:
         self, explicit_path: Optional[str], state_size: int, action_size: int
     ) -> Optional[str]:
         """Resolve which model to load on startup."""
-        return resolve_model_path(
-            explicit_path=explicit_path,
+        return self.model_service.resolve_model_path(
+            explicit_path,
             state_size=state_size,
             action_size=action_size,
-            config=self.config,
-            inspect_model=Agent.inspect_model,
         )
 
     def _restore_training_history(self, filepath: str) -> None:
@@ -949,26 +954,9 @@ class GameApp:
 
     def _set_performance_mode(self, mode: str) -> None:
         """Set performance mode from web dashboard."""
-        if mode == "normal":
-            self.config.LEARN_EVERY = 1
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 1
-        elif mode == "fast":
-            self.config.LEARN_EVERY = 4
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 1
-        elif mode == "turbo":
-            # Match CLI turbo preset - optimized for M4 CPU based on benchmarks
-            self.config.LEARN_EVERY = 8
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 2
-        elif mode == "ultra":
-            # Maximum throughput: less frequent learning, same batch size as turbo
-            # learn_every=32 means learning 4x less often than turbo
-            self.config.LEARN_EVERY = 32
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 2
-        else:
+        try:
+            preset = apply_performance_mode(self.config, mode)
+        except KeyError:
             print(f"⚠️  Unknown performance mode: {mode}")
             return
 
@@ -978,7 +966,7 @@ class GameApp:
             self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
             self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
             self.web_dashboard.log(
-                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE}, grad_steps={self.config.GRADIENT_STEPS})",
+                f"⚡ Performance mode: {mode.upper()} (learn_every={preset.learn_every}, batch={preset.batch_size}, grad_steps={preset.gradient_steps})",
                 "action",
             )
         print(f"⚡ Performance mode: {mode.upper()}")
@@ -1167,22 +1155,9 @@ class GameApp:
 
         # Show game-specific controls
         game_name = self.config.GAME_NAME
-        if game_name == "space_invaders":
-            print("   LEFT/RIGHT arrows: Move ship")
-            print("   SPACE: Shoot")
-        elif game_name == "breakout":
-            print("   LEFT/RIGHT arrows: Move paddle")
-        elif game_name == "pong":
-            print("   UP/DOWN arrows (or W/S): Move paddle")
-        elif game_name == "snake":
-            print("   Arrow keys (or WASD): Change direction")
-        elif game_name == "asteroids":
-            print("   LEFT/RIGHT arrows: Rotate ship")
-            print("   UP arrow: Thrust")
-            print("   SPACE: Shoot")
-            print("   (Multiple keys can be pressed simultaneously)")
-        else:
-            print("   Use arrow keys to control")
+        game_info = get_game_info(game_name) or {}
+        for control in game_info.get("controls", ["Use arrow keys to control"]):
+            print(f"   {control}")
 
         print("\n   R: Reset game")
         print("   Q/ESC: Quit")
@@ -1191,7 +1166,7 @@ class GameApp:
 
         # Enable controls display for games that support it
         if hasattr(self.game, "show_controls"):
-            self.game.show_controls = True
+            cast(ControlDisplayProvider, self.game).show_controls = True
 
         state = self.game.reset()
 
@@ -1201,17 +1176,23 @@ class GameApp:
             # Get keyboard input as dict for games that use get_human_action
             pressed = pygame.key.get_pressed()
             keys_dict = {key: pressed[key] for key in range(len(pressed))}
-            get_human_action = getattr(self.game, "get_human_action", None)
-            step_human = getattr(self.game, "step_human", None)
+            human_action_provider = (
+                cast(HumanActionProvider, self.game)
+                if hasattr(self.game, "get_human_action")
+                else None
+            )
+            human_step_provider = (
+                cast(HumanStepProvider, self.game) if hasattr(self.game, "step_human") else None
+            )
 
             # Handle game-specific controls
-            if game_name == "asteroids" and callable(step_human) and callable(get_human_action):
+            if game_name == "asteroids" and human_step_provider and human_action_provider:
                 # Asteroids supports simultaneous actions via step_human
-                state, reward, done, info = step_human(keys_dict)
-                action = get_human_action(keys_dict)  # For display purposes
-            elif callable(get_human_action):
+                state, reward, done, info = human_step_provider.step_human(keys_dict)
+                action = human_action_provider.get_human_action(keys_dict)  # For display purposes
+            elif human_action_provider:
                 # Use game's built-in human action helper
-                action = get_human_action(keys_dict)
+                action = human_action_provider.get_human_action(keys_dict)
                 state, reward, done, info = self.game.step(action)
             else:
                 # Fallback: generic control mapping
@@ -2088,34 +2069,12 @@ class GameApp:
         """
         Delete old periodic checkpoint saves, keeping only the most recent ones.
         """
-        import glob
-        import re
-
-        model_dir = self.config.GAME_MODEL_DIR
-        game_name = self.config.GAME_NAME
-
-        pattern = os.path.join(model_dir, f"{game_name}_ep*.pth")
-        periodic_saves = glob.glob(pattern)
-
-        if len(periodic_saves) <= keep_last:
-            return
-
-        def get_episode_num(path: str) -> int:
-            match = re.search(r"_ep(\d+)\.pth$", path)
-            return int(match.group(1)) if match else 0
-
-        periodic_saves.sort(key=get_episode_num)
-        to_delete = periodic_saves[:-keep_last]
-
-        for filepath in to_delete:
-            try:
-                os.remove(filepath)
-            except OSError as exc:
-                message = f"⚠️ Could not delete old checkpoint {filepath}: {exc}"
-                if self.web_dashboard:
-                    self.web_dashboard.log(message, "warning")
-                else:
-                    print(message)
+        for filepath in self.model_service.cleanup_old_periodic_saves(keep_last=keep_last):
+            if self.web_dashboard:
+                self.web_dashboard.log(
+                    f"🗑️ Cleaned up old checkpoint: {os.path.basename(filepath)}",
+                    "info",
+                )
 
 
 class HeadlessTrainer:
@@ -2152,6 +2111,7 @@ class HeadlessTrainer:
         self.args = args
         self._existing_dashboard = existing_dashboard
         self.running = True
+        self.model_service = AppModelService(config)
 
         # Apply CLI overrides to config
         if args.lr:
@@ -2180,51 +2140,28 @@ class HeadlessTrainer:
         # Vectorized environment support
         self.num_envs = getattr(args, "vec_envs", 1)
 
-        # Get game class from registry
-        GameClass = get_game(config.GAME_NAME)
-        if GameClass is None:
+        # Get game environment from registry
+        try:
+            game_environment = create_training_environment(
+                config.GAME_NAME,
+                config,
+                num_envs=self.num_envs,
+                headless=True,
+            )
+        except ValueError:
             print(f"❌ Unknown game: {config.GAME_NAME}")
             print(f"   Available games: {', '.join(list_games())}")
             sys.exit(1)
 
-        # Type annotations for game and vec_env
-        self.vec_env: Optional[
-            Union[VecBreakout, VecSpaceInvaders, VecPong, VecSnake, VecAsteroids]
-        ] = None
-        self.game: BaseGame
-
-        if self.num_envs > 1:
-            # Create vectorized environment for parallel game execution
-            if config.GAME_NAME == "breakout":
-                self.vec_env = VecBreakout(self.num_envs, config, headless=True)
-                self.game = self.vec_env.envs[0]  # Reference for state/action size
-                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
-            elif config.GAME_NAME == "space_invaders":
-                self.vec_env = VecSpaceInvaders(self.num_envs, config, headless=True)
-                self.game = self.vec_env.envs[0]  # Reference for state/action size
-                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
-            elif config.GAME_NAME == "pong":
-                self.vec_env = VecPong(self.num_envs, config, headless=True)
-                self.game = self.vec_env.envs[0]  # Reference for state/action size
-                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
-            elif config.GAME_NAME == "snake":
-                self.vec_env = VecSnake(self.num_envs, config, headless=True)
-                self.game = self.vec_env.envs[0]  # Reference for state/action size
-                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
-            elif config.GAME_NAME == "asteroids":
-                self.vec_env = VecAsteroids(self.num_envs, config, headless=True)
-                self.game = self.vec_env.envs[0]  # Reference for state/action size
-                print(f"🎮 Vectorized: {self.num_envs} parallel environments")
-            else:
-                print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
-                print(f"   Falling back to single environment")
-                # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
-                self.game = GameClass(config, headless=True)  # type: ignore[call-arg]
-                self.num_envs = 1
-        else:
-            # Single game mode (original behavior)
-            # Concrete game classes accept (config, headless) but BaseGame has no __init__ params
-            self.game = GameClass(config, headless=True)  # type: ignore[call-arg]
+        self.vec_env: Optional[BaseVecGame] = game_environment.vec_env
+        self.game: BaseGame = game_environment.game
+        GameClass = game_environment.game_class
+        if self.num_envs > 1 and self.vec_env is None:
+            print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
+            print(f"   Falling back to single environment")
+        self.num_envs = game_environment.num_envs
+        if self.vec_env is not None:
+            print(f"🎮 Vectorized: {self.num_envs} parallel environments")
 
         # Create AI agent
         self.agent = Agent(
@@ -2358,12 +2295,10 @@ class HeadlessTrainer:
         self, explicit_path: Optional[str], state_size: int, action_size: int
     ) -> Optional[str]:
         """Resolve which model to load on startup."""
-        return resolve_model_path(
-            explicit_path=explicit_path,
+        return self.model_service.resolve_model_path(
+            explicit_path,
             state_size=state_size,
             action_size=action_size,
-            config=self.config,
-            inspect_model=Agent.inspect_model,
         )
 
     def _setup_web_callbacks(self) -> None:
@@ -2815,25 +2750,9 @@ class HeadlessTrainer:
 
     def _set_performance_mode(self, mode: str) -> None:
         """Set performance mode preset."""
-        if mode == "normal":
-            self.config.LEARN_EVERY = 1
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 1
-        elif mode == "fast":
-            self.config.LEARN_EVERY = 4
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 1
-        elif mode == "turbo":
-            self.config.LEARN_EVERY = 8
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 2
-        elif mode == "ultra":
-            # Maximum throughput: less frequent learning, same batch size as turbo
-            # learn_every=32 means learning 4x less often than turbo
-            self.config.LEARN_EVERY = 32
-            self.config.BATCH_SIZE = 128
-            self.config.GRADIENT_STEPS = 2
-        else:
+        try:
+            preset = apply_performance_mode(self.config, mode)
+        except KeyError:
             print(f"⚠️  Unknown performance mode: {mode}")
             return
 
@@ -2843,7 +2762,7 @@ class HeadlessTrainer:
             self.web_dashboard.publisher.state.batch_size = self.config.BATCH_SIZE
             self.web_dashboard.publisher.state.gradient_steps = self.config.GRADIENT_STEPS
             self.web_dashboard.log(
-                f"⚡ Performance mode: {mode.upper()} (learn_every={self.config.LEARN_EVERY}, batch={self.config.BATCH_SIZE}, grad_steps={self.config.GRADIENT_STEPS})",
+                f"⚡ Performance mode: {mode.upper()} (learn_every={preset.learn_every}, batch={preset.batch_size}, grad_steps={preset.gradient_steps})",
                 "action",
             )
         print(f"⚡ Performance mode: {mode.upper()}")
@@ -3348,7 +3267,7 @@ class HeadlessTrainer:
                     self.agent.decay_epsilon(self.current_episode)
                 self.agent.step_scheduler()  # Step learning rate scheduler
 
-            # Update states for next iteration (already auto-reset in VecBreakout)
+            # Update states for next iteration (vector envs auto-reset completed games)
             states = next_states.copy()
 
             # Progress reporting (terminal) - only log when new episodes complete
@@ -3508,40 +3427,12 @@ class HeadlessTrainer:
         Args:
             keep_last: Number of recent periodic saves to keep
         """
-        import glob
-        import re
-
-        model_dir = self.config.GAME_MODEL_DIR
-        game_name = self.config.GAME_NAME
-
-        # Find all periodic saves (e.g., space_invaders_ep100.pth, space_invaders_ep200.pth)
-        pattern = os.path.join(model_dir, f"{game_name}_ep*.pth")
-        periodic_saves = glob.glob(pattern)
-
-        if len(periodic_saves) <= keep_last:
-            return  # Nothing to clean up
-
-        # Extract episode numbers and sort
-        def get_episode_num(path: str) -> int:
-            match = re.search(r"_ep(\d+)\.pth$", path)
-            return int(match.group(1)) if match else 0
-
-        # Sort by episode number (oldest first)
-        periodic_saves.sort(key=get_episode_num)
-
-        # Delete all but the last `keep_last` saves
-        to_delete = periodic_saves[:-keep_last]
-
-        for filepath in to_delete:
-            try:
-                os.remove(filepath)
-                if self.web_dashboard:
-                    self.web_dashboard.log(
-                        f"🗑️ Cleaned up old checkpoint: {os.path.basename(filepath)}",
-                        "info",
-                    )
-            except Exception as e:
-                print(f"⚠️ Could not delete {filepath}: {e}")
+        for filepath in self.model_service.cleanup_old_periodic_saves(keep_last=keep_last):
+            if self.web_dashboard:
+                self.web_dashboard.log(
+                    f"🗑️ Cleaned up old checkpoint: {os.path.basename(filepath)}",
+                    "info",
+                )
 
 
 def inspect_model(filepath: str) -> None:
@@ -3884,101 +3775,8 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
 
 
 def run_web_launcher(config: Config, args: argparse.Namespace) -> None:
-    """Run web-based game launcher mode.
-
-    This mode starts a web server without any training, allowing the user
-    to select a game from the browser. When a game is selected, training
-    starts in the SAME process (no restart needed).
-    """
-    import threading
-
-    try:
-        from src.web.server import WebDashboard
-    except ImportError:
-        print("❌ Web dashboard requires Flask. Install with:")
-        print("   pip install flask flask-socketio eventlet")
-        return
-
-    print("\n" + "=" * 60)
-    print("🎮 NEURAL NETWORK AI - GAME LAUNCHER")
-    print("=" * 60)
-
-    # Track selected game
-    selected_game = None
-    selection_event = threading.Event()
-
-    def on_game_selected(game_name: str, mode: str) -> None:
-        """Called when user selects a game from web UI."""
-        nonlocal selected_game
-        selected_game = game_name
-        selection_event.set()
-
-    # Create web dashboard in launcher mode
-    dashboard = WebDashboard(
-        config,
-        port=args.port,
-        host=getattr(args, "host", "127.0.0.1"),
-        launcher_mode=True,
-    )
-    dashboard.on_game_selected_callback = on_game_selected
-    print(f"\n🌐 Open {dashboard.dashboard_url()} to select a game\n")
-
-    # Start web server in background thread
-    server_thread = threading.Thread(
-        target=lambda: dashboard.socketio.run(
-            dashboard.app,
-            host=getattr(args, "host", "127.0.0.1"),
-            port=args.port,
-            debug=False,
-            use_reloader=False,
-            log_output=False,
-            allow_unsafe_werkzeug=True,
-        ),
-        daemon=True,
-    )
-    server_thread.start()
-
-    print("⏳ Waiting for game selection from web UI...")
-    print("   Press Ctrl+C to exit\n")
-
-    try:
-        # Wait for game selection or keyboard interrupt
-        while not selection_event.is_set():
-            selection_event.wait(timeout=0.5)
-    except KeyboardInterrupt:
-        print("\n\n👋 Launcher closed by user")
-        dashboard.stop()
-        return
-
-    if selected_game:
-        print(f"\n🎮 Starting {selected_game}...")
-
-        # Update config with selected game
-        config.GAME_NAME = selected_game
-        args.game = selected_game
-
-        # Switch dashboard out of launcher mode (same server, same port!)
-        dashboard.launcher_mode = False
-
-        # Notify browser to switch to dashboard view
-        dashboard.socketio.emit("game_ready", {"game": selected_game})
-
-        # Now run HeadlessTrainer with the same dashboard (no process restart!)
-        print(f"🚀 Training {selected_game} in-place (same server)\n")
-
-        # Create trainer and run - reuse the existing dashboard
-        trainer = HeadlessTrainer(config, args, existing_dashboard=dashboard)
-
-        try:
-            trainer.train()
-        except KeyboardInterrupt:
-            print("\n\n⛔ Training interrupted by user")
-            trainer._save_model(f"{config.GAME_NAME}_interrupted.pth", save_reason="interrupted")
-        finally:
-            # Clean up web dashboard
-            if dashboard:
-                dashboard.stop()
-            print("\n👋 Training complete")
+    """Compatibility wrapper for the canonical web-mode launcher flow."""
+    run_web_mode(config, args)
 
 
 def terminal_game_selector() -> Optional[str]:
@@ -4126,7 +3924,7 @@ def main():
     if args.headless:
         # If no game specified and web mode, run in launcher mode
         if args.game is None and args.web:
-            run_web_launcher(config, args)
+            run_web_mode(config, args)
             return
 
         # If no game specified, show terminal game selector

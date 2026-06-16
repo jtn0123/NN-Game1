@@ -59,7 +59,7 @@
                                 <span class="legend-item avg" data-tooltip="Smoothed average over last 20 episodes">● Average</span>
                                 <span class="legend-item best" data-tooltip="Best average so far - can only go UP! If this is flat, you're oscillating. If rising, you're improving.">● Best Avg</span>
                             </div>
-                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="score" title="Reset view to latest episodes">↻</button>
+                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="score" title="Reset view to latest episodes" aria-label="Reset score chart view">↻</button>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -78,7 +78,7 @@
                     <div class="chart-card half">
                         <div class="card-header">
                             <h2 data-tooltip="Measures prediction error (log scale). Spikes are normal during exploration. Generally should trend downward as the AI improves its value estimates. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="right">📉 Loss</h2>
-                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="loss" title="Reset view to latest episodes">↻</button>
+                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="loss" title="Reset view to latest episodes" aria-label="Reset loss chart view">↻</button>
                         </div>
                         <div class="chart-container small">
                             <canvas id="lossChart"></canvas>
@@ -94,7 +94,7 @@
                     <div class="chart-card half">
                         <div class="card-header">
                             <h2 data-tooltip="Average expected future reward. Rising Q-values mean the AI is learning to recognize valuable game states. Stable or slowly increasing = healthy learning. Click and drag to pan left/right through history. Ctrl+Scroll to zoom." data-tooltip-position="left">📈 Avg Q-Value</h2>
-                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="qvalue" title="Reset view to latest episodes">↻</button>
+                            <button class="chart-reset-btn" data-action="reset-chart" data-chart="qvalue" title="Reset view to latest episodes" aria-label="Reset Q-value chart view">↻</button>
                         </div>
                         <div class="chart-container small">
                             <canvas id="qvalueChart"></canvas>
@@ -109,13 +109,13 @@
 
                 <!-- Neural Network Visualization -->
                 <div class="nn-viz-card" id="nn-viz-card" data-tooltip="Real-time visualization of the neural network's internal state. Shows how neurons activate and how information flows through the network as it makes decisions." data-tooltip-position="right">
-                    <div class="card-header clickable" data-action="toggle-nn-panel">
+                    <div class="card-header clickable" data-action="toggle-nn-panel" role="button" tabindex="0" aria-expanded="true" aria-controls="nn-viz-content">
                         <div class="nn-viz-header-left">
                             <h3>🧠 Neural Network</h3>
                             <span class="nn-viz-status" id="nn-viz-status">● LIVE</span>
                         </div>
                         <div class="nn-viz-header-right">
-                            <button class="nn-viz-toggle" data-action="toggle-nn-visualization">⏸️</button>
+                            <button class="nn-viz-toggle" data-action="toggle-nn-visualization" aria-label="Pause neural network visualization">⏸️</button>
                             <span class="collapse-icon" id="nn-viz-icon">▲</span>
                         </div>
                     </div>
@@ -296,7 +296,7 @@
                 <div class="preview-card">
                     <div class="card-header">
                         <h3>🎮 Game Preview</h3>
-                        <button class="refresh-btn" data-action="refresh-screenshot">↻</button>
+                        <button class="refresh-btn" data-action="refresh-screenshot" aria-label="Refresh game preview">↻</button>
                     </div>
                     <div class="preview-container">
                         <img id="game-preview" src="" alt="Game Preview">
@@ -316,16 +316,16 @@
                     <div class="performance-modes" data-tooltip="Performance presets control how often the AI learns. Faster modes skip some learning steps for higher throughput.">
                         <label class="mode-label">⚡ Performance Mode</label>
                         <div class="mode-buttons">
-                            <button class="mode-btn active" id="mode-normal" data-action="set-performance-mode" data-mode="normal" data-tooltip="Learn every step. Best for watching learning in detail. ~200-300 steps/sec">
+                            <button class="mode-btn active" id="mode-normal" data-action="set-performance-mode" data-mode="normal" aria-pressed="true" data-tooltip="Learn every step. Best for watching learning in detail. ~200-300 steps/sec">
                                 Normal
                             </button>
-                            <button class="mode-btn" id="mode-fast" data-action="set-performance-mode" data-mode="fast" data-tooltip="Learn every 4 steps. ~4x faster training with minimal learning impact. ~800-1200 steps/sec">
+                            <button class="mode-btn" id="mode-fast" data-action="set-performance-mode" data-mode="fast" aria-pressed="false" data-tooltip="Learn every 4 steps. ~4x faster training with minimal learning impact. ~800-1200 steps/sec">
                                 Fast
                             </button>
-                            <button class="mode-btn turbo" id="mode-turbo" data-action="set-performance-mode" data-mode="turbo" data-tooltip="Learn every 8 steps + 2 gradient updates. Maximum training speed. ~5000 steps/sec on M4">
+                            <button class="mode-btn turbo" id="mode-turbo" data-action="set-performance-mode" data-mode="turbo" aria-pressed="false" data-tooltip="Learn every 8 steps + 2 gradient updates. Maximum training speed. ~5000 steps/sec on M4">
                                 🚀 Turbo
                             </button>
-                            <button class="mode-btn ultra" id="mode-ultra" data-action="set-performance-mode" data-mode="ultra" data-tooltip="Learn every 16 steps + 4 gradient updates + batch 256. Extreme throughput. ~8000+ steps/sec">
+                            <button class="mode-btn ultra" id="mode-ultra" data-action="set-performance-mode" data-mode="ultra" aria-pressed="false" data-tooltip="Learn every 32 steps + 2 gradient updates + batch 128. Extreme throughput. ~8000+ steps/sec">
                                 ⚡ Ultra
                             </button>
                         </div>
@@ -354,7 +354,7 @@
                     
                     <!-- Speed Control -->
                     <div class="speed-control" data-tooltip="Training speed multiplier. Higher = more training steps per frame. Auto-targets your display's refresh rate." data-tooltip-position="left">
-                        <label class="speed-label">
+                        <label class="speed-label" for="speed-slider">
                             <span>⏩ Speed</span>
                             <span id="speed-value">1x</span>
                         </label>
@@ -400,6 +400,7 @@
                     </div>
                     <div class="save-actions">
                         <div class="save-as-row">
+                            <label class="sr-only" for="save-as-name">Custom save name</label>
                             <input type="text" id="save-as-name" placeholder="custom_name" maxlength="30">
                             <button class="save-as-btn" data-action="save-model-as" title="Save with custom name">Save As</button>
                         </div>
@@ -409,7 +410,7 @@
 
                 <!-- Settings Panel -->
                 <div class="settings-card collapsed" id="settings-card">
-                    <div class="card-header clickable" data-action="toggle-settings">
+                    <div class="card-header clickable" data-action="toggle-settings" role="button" tabindex="0" aria-expanded="false" aria-controls="settings-content">
                         <h3>⚙️ Settings</h3>
                         <span class="collapse-icon" id="settings-icon">▼</span>
                     </div>
@@ -456,7 +457,7 @@
                             <div class="setting-row" data-tooltip="Learn every N steps. 1=every step (detailed), 4=every 4th step (~4x faster). Higher values increase throughput but may slow convergence.">
                                 <label for="setting-learn-every">Learn Every</label>
                                 <div class="range-input">
-                                    <input type="range" id="setting-learn-every" value="1" min="1" max="16" step="1" data-action="update-learn-every-label">
+                                    <input type="range" id="setting-learn-every" value="1" min="1" max="64" step="1" data-action="update-learn-every-label">
                                     <span id="learn-every-value">1 step</span>
                                 </div>
                             </div>
@@ -479,7 +480,7 @@
 
                 <!-- Game Comparison Panel -->
                 <div class="comparison-card collapsed" id="comparison-card">
-                    <div class="card-header clickable" data-action="toggle-comparison">
+                    <div class="card-header clickable" data-action="toggle-comparison" role="button" tabindex="0" aria-expanded="false" aria-controls="comparison-content">
                         <h3>📊 Game Comparison</h3>
                         <span class="collapse-icon" id="comparison-icon">▼</span>
                     </div>
@@ -487,7 +488,7 @@
                         <div class="comparison-grid" id="comparison-grid">
                             <div class="loading">Loading game stats...</div>
                         </div>
-                        <button class="refresh-btn" data-action="refresh-game-stats">↻ Refresh</button>
+                        <button class="refresh-btn" data-action="refresh-game-stats" aria-label="Refresh game comparison statistics">↻ Refresh</button>
                     </div>
                 </div>
             </div>
@@ -504,11 +505,11 @@
     </div>
 
     <!-- Load Model Modal -->
-    <div class="modal" id="load-modal">
+    <div class="modal" id="load-modal" role="dialog" aria-modal="true" aria-labelledby="load-modal-title">
         <div class="modal-content modal-wide">
             <div class="modal-header">
-                <h3>📂 Model Browser</h3>
-                <button class="close-btn" data-action="hide-load-modal">×</button>
+                <h3 id="load-modal-title">📂 Model Browser</h3>
+                <button class="close-btn" data-action="hide-load-modal" aria-label="Close model browser">×</button>
             </div>
             <div class="modal-body">
                 <div class="model-list" id="model-list">

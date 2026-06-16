@@ -22,7 +22,13 @@ from .space_invaders import SpaceInvaders, VecSpaceInvaders
 from .pong import Pong, VecPong
 from .snake import Snake, VecSnake
 from .asteroids import Asteroids, VecAsteroids
-from .base_game import BaseGame, BaseVecGame
+from .base_game import (
+    BaseGame,
+    BaseVecGame,
+    ControlDisplayProvider,
+    HumanActionProvider,
+    HumanStepProvider,
+)
 from .particles import ParticleSystem, TrailRenderer
 from .menu import GameMenu
 
@@ -42,6 +48,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "name": "Breakout",
         "description": "Classic brick-breaking arcade game",
         "actions": ["LEFT", "STAY", "RIGHT"],
+        "controls": ["LEFT/RIGHT arrows: Move paddle"],
         "difficulty": "Medium",
         "color": (52, 152, 219),  # Blue theme
         "icon": "🧱",
@@ -52,6 +59,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "name": "Space Invaders",
         "description": "Defend Earth from alien invasion",
         "actions": ["LEFT", "STAY", "RIGHT", "SHOOT"],
+        "controls": ["LEFT/RIGHT arrows: Move ship", "SPACE: Shoot"],
         "difficulty": "Medium-Hard",
         "color": (0, 255, 100),  # Green CRT theme
         "icon": "👾",
@@ -62,6 +70,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "name": "Pong",
         "description": "Classic paddle vs AI opponent",
         "actions": ["UP", "STAY", "DOWN"],
+        "controls": ["UP/DOWN arrows (or W/S): Move paddle"],
         "difficulty": "Easy",
         "color": (255, 255, 255),  # White retro theme
         "icon": "🏓",
@@ -72,6 +81,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "name": "Snake",
         "description": "Grow the snake by eating food",
         "actions": ["UP", "DOWN", "LEFT", "RIGHT"],
+        "controls": ["Arrow keys (or WASD): Change direction"],
         "difficulty": "Medium",
         "color": (100, 255, 100),  # Green modern theme
         "icon": "🐍",
@@ -82,6 +92,12 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "name": "Asteroids",
         "description": "Destroy asteroids with your spaceship",
         "actions": ["ROTATE_LEFT", "ROTATE_RIGHT", "THRUST", "SHOOT", "NOTHING"],
+        "controls": [
+            "LEFT/RIGHT arrows: Rotate ship",
+            "UP arrow: Thrust",
+            "SPACE: Shoot",
+            "(Multiple keys can be pressed simultaneously)",
+        ],
         "difficulty": "Hard",
         "color": (200, 200, 200),  # Vector gray theme
         "icon": "🚀",
@@ -153,6 +169,7 @@ def get_game_info(name: str) -> Optional[Dict[str, Any]]:
         - name: Display name
         - description: Short description
         - actions: List of action names
+        - controls: Human-readable keyboard controls
         - difficulty: Difficulty rating
         - color: Theme color (RGB tuple)
         - icon: Emoji icon
@@ -192,6 +209,9 @@ __all__ = [
     "VecAsteroids",
     "BaseGame",
     "BaseVecGame",
+    "ControlDisplayProvider",
+    "HumanActionProvider",
+    "HumanStepProvider",
     "ParticleSystem",
     "TrailRenderer",
     "GameMenu",

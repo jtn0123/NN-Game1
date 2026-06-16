@@ -17,6 +17,16 @@ except ImportError:
 pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
 
 
+def parse_csp(header: str) -> dict[str, set[str]]:
+    """Parse a Content-Security-Policy header into exact directive sources."""
+    directives = {}
+    for directive in header.split(";"):
+        parts = directive.strip().split()
+        if parts:
+            directives[parts[0]] = set(parts[1:])
+    return directives
+
+
 class TestWebDashboardRoutes:
 
     @pytest.fixture
@@ -140,6 +150,7 @@ class TestWebDashboardRoutes:
             "/api/games",
             "/api/models",
             "/api/save-status",
+            "/api/performance-modes",
             "/api/game-stats",
             "/api/layers",
         ],
@@ -177,8 +188,15 @@ class TestWebDashboardRoutes:
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
         assert response.headers["Referrer-Policy"] == "no-referrer"
-        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
-        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+        csp = parse_csp(response.headers["Content-Security-Policy"])
+        assert csp["default-src"] == {"'self'"}
+        assert csp["script-src"] == {
+            "'self'",
+            "'unsafe-inline'",
+            "https://cdn.jsdelivr.net",
+            "https://cdn.socket.io",
+        }
+        assert csp["frame-ancestors"] == {"'none'"}
         assert f'<meta name="dashboard-token" content="{web_dashboard.access_token}">' in html
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "Training Dashboard" in html
@@ -197,6 +215,9 @@ class TestWebDashboardRoutes:
         with dashboard.app.test_client() as client:
             unauthorized = client.get("/")
             response = client.get(f"/?token={dashboard.access_token}")
+            launcher_css_response = client.get("/static/launcher.css")
+            core_response = client.get("/static/dashboard_core.js")
+            launcher_response = client.get("/static/launcher.js")
 
         html = response.data.decode("utf-8")
         unauthorized_html = unauthorized.data.decode("utf-8")
@@ -205,11 +226,42 @@ class TestWebDashboardRoutes:
         assert dashboard.access_token not in unauthorized_html
         assert response.status_code == 200
         assert response.headers["Referrer-Policy"] == "no-referrer"
-        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
-        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+        csp = parse_csp(response.headers["Content-Security-Policy"])
+        assert csp["default-src"] == {"'self'"}
+        assert csp["script-src"] == {
+            "'self'",
+            "'unsafe-inline'",
+            "https://cdn.jsdelivr.net",
+            "https://cdn.socket.io",
+        }
+        assert csp["frame-ancestors"] == {"'none'"}
         assert f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
         assert '<meta name="referrer" content="no-referrer">' in html
-        assert "auth: { token: DASHBOARD_TOKEN }" in html
+        assert "launcher.css" in html
+        assert html.index("launcher.css") < html.index("dashboard_core.js")
+        assert html.index("dashboard_core.js") < html.index("launcher.js")
+        assert launcher_css_response.status_code == 200
+        assert core_response.status_code == 200
+        assert launcher_response.status_code == 200
+
+    def test_api_performance_modes_returns_shared_presets(self, web_dashboard):
+        """GET /api/performance-modes should expose dashboard preset contracts."""
+        web_dashboard.app.config["TESTING"] = True
+        with web_dashboard.app.test_client() as client:
+            response = client.get(
+                "/api/performance-modes",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["modes"]["ultra"] == {
+            "label": "Ultra",
+            "learn_every": 32,
+            "batch_size": 128,
+            "gradient_steps": 2,
+            "description": "Learn every 32 steps + 2 gradient updates",
+        }
 
     def test_api_models_uses_opaque_ids(self, tmp_path):
         """Model list should not expose absolute local filesystem paths."""

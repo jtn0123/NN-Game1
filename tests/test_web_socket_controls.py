@@ -115,6 +115,84 @@ class TestWebDashboardSocketControls:
         }
         client.disconnect()
 
+    @pytest.mark.parametrize(
+        ("action", "payload", "callback_attr", "expected_error", "blocked_events"),
+        [
+            ("pause", {"action": "pause"}, "on_pause_callback", "Pause failed", []),
+            ("reset", {"action": "reset"}, "on_reset_callback", "Reset failed", []),
+            (
+                "speed",
+                {"action": "speed", "value": 2},
+                "on_speed_callback",
+                "Speed change failed",
+                [],
+            ),
+            (
+                "config_change",
+                {"action": "config_change", "config": {"batch_size": 64}},
+                "on_config_change_callback",
+                "Config change failed",
+                [],
+            ),
+            (
+                "performance_mode",
+                {"action": "performance_mode", "mode": "fast"},
+                "on_performance_mode_callback",
+                "Performance mode failed",
+                [],
+            ),
+            (
+                "save_and_quit",
+                {"action": "save_and_quit"},
+                "on_save_and_quit_callback",
+                "Save and quit failed",
+                [],
+            ),
+            (
+                "select_game",
+                {"action": "select_game", "game": "breakout", "mode": "ai"},
+                "on_game_selected_callback",
+                "Game selection failed",
+                ["game_starting"],
+            ),
+            (
+                "restart_with_game",
+                {"action": "restart_with_game", "game": "snake"},
+                "on_restart_with_game_callback",
+                "Restart failed",
+                ["restarting"],
+            ),
+            (
+                "go_to_launcher",
+                {"action": "go_to_launcher"},
+                "on_save_and_quit_callback",
+                "Launcher switch failed",
+                ["redirect_to_launcher"],
+            ),
+        ],
+    )
+    def test_socket_control_callback_failures_return_acks_without_side_effect_events(
+        self, web_dashboard, action, payload, callback_attr, expected_error, blocked_events
+    ):
+        """Callback crashes should not tear down the socket handler or emit success events."""
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+
+        def fail_callback(*_args):
+            raise RuntimeError("boom")
+
+        setattr(web_dashboard, callback_attr, fail_callback)
+        payload = {**payload, "token": web_dashboard.access_token}
+
+        ack = client.emit("control", payload, callback=True)
+        received_names = {event["name"] for event in client.get_received()}
+
+        assert ack == {"success": False, "action": action, "error": expected_error}
+        assert not received_names.intersection(blocked_events)
+        client.disconnect()
+
     def test_control_ack_helpers_have_stable_shapes(self, web_dashboard):
         """Control responses should keep a predictable browser contract."""
         assert web_dashboard._success_ack("pause") == {"success": True, "action": "pause"}

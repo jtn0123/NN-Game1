@@ -32,7 +32,9 @@ const MAX_CONSOLE_LOGS = 500;
 let lastRenderedLogCount = 0;  // Track for incremental updates
 let currentPerformanceMode = 'normal';
 let trainingStartTime = 0;
-const DASHBOARD_TOKEN = DashboardCore.readToken(document);
+const DASHBOARD_TOKEN = (
+    typeof DashboardCore !== 'undefined' && typeof document !== 'undefined'
+) ? DashboardCore.readToken(document) : '';
 
 // Speed slider state - prevent server updates from fighting with user input
 let lastSpeedChangeTime = 0;
@@ -40,6 +42,49 @@ const SPEED_UPDATE_DEBOUNCE = 2000; // Ignore server speed updates for 2s after 
 
 // Fetch timeout configuration
 const FETCH_TIMEOUT_MS = 10000; // 10 second timeout for API calls
+
+const PERFORMANCE_MODES = Object.freeze({
+    normal: { label: 'Normal', learnEvery: 1, batchSize: 128, gradientSteps: 1, log: 'Normal (learn every step)' },
+    fast: { label: 'Fast', learnEvery: 4, batchSize: 128, gradientSteps: 1, log: 'Fast (learn every 4 steps)' },
+    turbo: { label: 'Turbo', learnEvery: 8, batchSize: 128, gradientSteps: 2, log: 'Turbo (learn every 8, batch 128, 2 grad steps)' },
+    ultra: { label: 'Ultra', learnEvery: 32, batchSize: 128, gradientSteps: 2, log: 'Ultra (learn every 32, batch 128, 2 grad steps)' }
+});
+
+const DASHBOARD_ACTIONS = Object.freeze({
+    'switch-game': (target, event) => event.type === 'change' && switchGame(target.value),
+    'go-to-launcher': () => goToLauncher(),
+    'reset-chart': (target) => resetChartView(target.dataset.chart || 'all'),
+    'toggle-nn-panel': () => toggleNNPanel(),
+    'toggle-nn-visualization': () => toggleNNVisualization(),
+    'set-log-filter': (target) => setLogFilter(target.dataset.filter || 'all'),
+    'copy-logs': () => copyLogsToClipboard(),
+    'clear-logs': () => clearLogs(),
+    'refresh-screenshot': () => fetchScreenshot(),
+    'set-performance-mode': (target) => setPerformanceMode(target.dataset.mode),
+    'toggle-pause': () => togglePause(),
+    'save-model': () => saveModel(),
+    'reset-episode': () => resetEpisode(),
+    'show-load-modal': () => showLoadModal(),
+    'start-fresh': () => startFresh(),
+    'save-and-quit': () => saveAndQuit(),
+    'update-speed': (target, event) => event.type !== 'click' && updateSpeed(target.value),
+    'save-model-as': () => saveModelAs(),
+    'toggle-settings': () => toggleSettings(),
+    'update-learn-every-label': (target, event) => event.type !== 'click' && updateLearnEveryLabel(target.value),
+    'apply-settings': () => applySettings(),
+    'toggle-comparison': () => toggleComparison(),
+    'refresh-game-stats': () => loadGameStats(),
+    'hide-load-modal': () => hideLoadModal(),
+    'load-model': (target) => loadModel(target.dataset.modelId),
+    'delete-model': (target, event) => {
+        event.stopPropagation();
+        deleteModel(target.dataset.modelId, target.dataset.modelName);
+    },
+    'copy-restart-command': (_target, event) => copyRestartCommand(event),
+    'close-restart-banner': () => closeRestartBanner(),
+    'close-neuron-inspection': () => closeNeuronInspection(),
+    'close-layer-analysis': () => closeLayerAnalysis()
+});
 
 /**
  * Fetch with timeout wrapper
@@ -51,6 +96,49 @@ function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
 
     return fetch(url, { ...authorizedOptions, signal: controller.signal })
         .finally(() => clearTimeout(timeoutId));
+}
+
+function emitDashboardControl(payload, failureContext = 'Command failed') {
+    return DashboardCore.emitControl(socket, payload).then((response) => {
+        if (!response || !response.success) {
+            addConsoleLog(
+                `❌ ${failureContext}: ${DashboardCore.controlErrorMessage(response)}`,
+                'error'
+            );
+        }
+        return response;
+    });
+}
+
+function setPendingButton(button, pendingText, className = '') {
+    if (!button) {
+        return () => {};
+    }
+
+    const originalText = button.textContent;
+    button.textContent = pendingText;
+    button.disabled = true;
+    if (className) {
+        button.classList.add(className);
+    }
+
+    return () => {
+        button.textContent = originalText;
+        button.disabled = false;
+        if (className) {
+            button.classList.remove(className);
+        }
+    };
+}
+
+function showTemporaryButtonText(button, text, restore, delay = 1500) {
+    if (!button) {
+        restore();
+        return;
+    }
+
+    button.textContent = text;
+    setTimeout(restore, delay);
 }
 
 /**
@@ -137,8 +225,15 @@ function downsampleLTTB(data, targetPoints) {
 const CHART_DOWNSAMPLE_THRESHOLD = 2000;
 const CHART_DOWNSAMPLE_TARGET = 500;
 
-// Initialize on DOM load
-document.addEventListener('DOMContentLoaded', () => {
+function initDashboard() {
+    registerDashboardActions();
+    if (typeof DashboardCore === 'undefined') {
+        console.error('Dashboard core failed to load; dashboard startup stopped.');
+        addConsoleLog('Dashboard core failed to load; refresh the page', 'error');
+        updateConnectionStatus(false);
+        return;
+    }
+
     initCharts();
     initNNVisualizer();
     connectSocket();
@@ -148,12 +243,33 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();  // This will call initVecEnvsHandler() after config is loaded
     loadGames();
     loadGameStats();
-});
+    fetchInitialData();
+}
+
+// Initialize on DOM load
+if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+}
 
 /**
  * Initialize Chart.js charts
  */
 function initCharts() {
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js failed to load; charts are disabled.');
+        addConsoleLog('Charts unavailable: Chart.js failed to load', 'error');
+        return false;
+    }
+
+    const scoreCanvas = document.getElementById('scoreChart');
+    const lossCanvas = document.getElementById('lossChart');
+    const qvalueCanvas = document.getElementById('qvalueChart');
+    if (!scoreCanvas || !lossCanvas || !qvalueCanvas) {
+        console.error('Chart canvases are missing; charts are disabled.');
+        addConsoleLog('Charts unavailable: chart canvases are missing', 'error');
+        return false;
+    }
+
     const chartOptions = {
         responsive: true,
         maintainAspectRatio: false,
@@ -241,7 +357,7 @@ function initCharts() {
     };
 
     // Score Chart
-    const scoreCtx = document.getElementById('scoreChart').getContext('2d');
+    const scoreCtx = scoreCanvas.getContext('2d');
     scoreChart = new Chart(scoreCtx, {
         type: 'line',
         data: {
@@ -293,7 +409,7 @@ function initCharts() {
         },
         options: chartOptions
     });
-    
+
     // Track pan/zoom events for score chart
     scoreChart.canvas.addEventListener('mousemove', (e) => {
         if (e.buttons === 1) { // Left mouse button held down
@@ -313,7 +429,7 @@ function initCharts() {
     };
 
     // Loss Chart
-    const lossCtx = document.getElementById('lossChart').getContext('2d');
+    const lossCtx = lossCanvas.getContext('2d');
     lossChart = new Chart(lossCtx, {
         type: 'line',
         data: {
@@ -379,7 +495,7 @@ function initCharts() {
     };
 
     // Q-Value Chart
-    const qvalueCtx = document.getElementById('qvalueChart').getContext('2d');
+    const qvalueCtx = qvalueCanvas.getContext('2d');
     qvalueChart = new Chart(qvalueCtx, {
         type: 'line',
         data: {
@@ -438,6 +554,7 @@ function initCharts() {
     
     // Initialize scrollbars
     initializeChartScrollbars();
+    return true;
 }
 
 /**
@@ -764,6 +881,13 @@ function resetChartView(chartName = 'all') {
  * Connect to SocketIO server
  */
 function connectSocket() {
+    if (typeof io !== 'function') {
+        console.error('Socket.IO failed to load; live updates are disabled.');
+        updateConnectionStatus(false);
+        addConsoleLog('Live connection unavailable: Socket.IO failed to load', 'error');
+        return false;
+    }
+
     socket = DashboardCore.createAuthorizedSocket(io, DASHBOARD_TOKEN);
 
     // Throttle dashboard updates to 60fps max (prevent excessive DOM manipulation)
@@ -914,6 +1038,8 @@ function connectSocket() {
             console.error('Error processing NN update:', err);
         }
     });
+
+    return true;
 }
 
 /**
@@ -922,6 +1048,7 @@ function connectSocket() {
 function updateConnectionStatus(connected) {
     const dot = document.querySelector('.status-dot');
     const text = document.querySelector('.status-text');
+    if (!dot || !text) return;
     
     if (connected) {
         dot.classList.add('connected');
@@ -1077,6 +1204,10 @@ let scrollbarDragState = {
  * @param {number} currentEpisode - The actual current episode number
  */
 function updateCharts(history, currentEpisode) {
+    if (!scoreChart || !lossChart || !qvalueChart) {
+        return;
+    }
+
     // Store all available history data (up to 500 from backend)
     const allScores = history.scores || [];
     const allLosses = history.losses || [];
@@ -1277,10 +1408,44 @@ function addConsoleLog(message, level = 'info', timestamp = null, data = null, r
 }
 
 /**
+ * Create a console log row without interpolating untrusted HTML.
+ */
+function createConsoleLogElement(log) {
+    const line = document.createElement('div');
+    const level = String(log.level || 'info').replace(/[^a-z-]/gi, '').toLowerCase() || 'info';
+    line.className = `console-line ${level}`;
+
+    const time = document.createElement('span');
+    time.className = 'log-time';
+    time.textContent = log.time || '';
+    line.appendChild(time);
+
+    const levelLabel = document.createElement('span');
+    levelLabel.className = 'log-level';
+    levelLabel.textContent = level.toUpperCase();
+    line.appendChild(levelLabel);
+
+    const message = document.createElement('span');
+    message.className = 'log-message';
+    message.textContent = log.message || '';
+    line.appendChild(message);
+
+    if (log.data) {
+        const data = document.createElement('span');
+        data.className = 'log-data';
+        data.textContent = JSON.stringify(log.data);
+        line.appendChild(data);
+    }
+
+    return line;
+}
+
+/**
  * Render console logs based on current filter
  */
 function renderConsoleLogs() {
     const container = document.getElementById('console-output');
+    if (!container) return;
     
     let filteredLogs = consoleLogs;
     if (currentLogFilter !== 'all') {
@@ -1300,16 +1465,7 @@ function renderConsoleLogs() {
         const newLogs = visibleLogs.slice(-newLogsCount);
         const fragment = document.createDocumentFragment();
         newLogs.forEach(log => {
-            const div = document.createElement('div');
-            div.className = `console-line ${log.level}`;
-            let dataStr = log.data ? `<span class="log-data">${JSON.stringify(log.data)}</span>` : '';
-            div.innerHTML = `
-                <span class="log-time">${log.time}</span>
-                <span class="log-level">${log.level.toUpperCase()}</span>
-                <span class="log-message">${escapeHtml(log.message)}</span>
-                ${dataStr}
-            `;
-            fragment.appendChild(div);
+            fragment.appendChild(createConsoleLogElement(log));
         });
         container.appendChild(fragment);
 
@@ -1320,26 +1476,15 @@ function renderConsoleLogs() {
         lastRenderedLogCount = visibleLogs.length;
     } else {
         // Full rebuild (first render, filter change, or log trimmed)
-        container.innerHTML = visibleLogs.map(log => {
-            let dataStr = '';
-            if (log.data) {
-                dataStr = `<span class="log-data">${escapeHtml(JSON.stringify(log.data))}</span>`;
-            }
-            return `
-                <div class="console-line ${log.level}">
-                    <span class="log-time">${log.time}</span>
-                    <span class="log-level">${log.level.toUpperCase()}</span>
-                    <span class="log-message">${escapeHtml(log.message)}</span>
-                    ${dataStr}
-                </div>
-            `;
-        }).join('');
+        container.replaceChildren(...visibleLogs.map(createConsoleLogElement));
         lastRenderedLogCount = visibleLogs.length;
     }
 
     // Auto-scroll to bottom
     const consoleContainer = document.getElementById('console-container');
-    consoleContainer.scrollTop = consoleContainer.scrollHeight;
+    if (consoleContainer) {
+        consoleContainer.scrollTop = consoleContainer.scrollHeight;
+    }
 }
 
 /**
@@ -1363,7 +1508,9 @@ function setLogFilter(filter) {
  */
 function clearLogs() {
     consoleLogs = [];
-    socket.emit('clear_logs', {});
+    if (socket && typeof socket.emit === 'function') {
+        socket.emit('clear_logs', {});
+    }
     renderConsoleLogs();
     addConsoleLog('Console cleared', 'info');
 }
@@ -1432,32 +1579,35 @@ function escapeHtmlAttribute(text) {
  * Toggle pause state
  */
 function togglePause() {
-    socket.emit('control', { action: 'pause' });
+    emitDashboardControl({ action: 'pause' }, 'Pause failed');
 }
 
 /**
  * Save model
  */
 function saveModel() {
-    socket.emit('control', { action: 'save' });
-    
     // Visual feedback
     const btn = document.querySelector('.control-btn.save');
-    const originalText = btn.textContent;
-    btn.textContent = '✓ Saving...';
-    btn.classList.add('saving');
-    setTimeout(() => {
-        btn.textContent = originalText;
-        btn.classList.remove('saving');
-    }, 1500);
+    const restoreButton = setPendingButton(btn, '✓ Saving...', 'saving');
+
+    emitDashboardControl({ action: 'save' }, 'Save failed')
+        .then((response) => {
+            if (response && response.success) {
+                addConsoleLog('Save requested', 'action');
+            }
+        })
+        .finally(restoreButton);
 }
 
 /**
  * Reset current episode
  */
 function resetEpisode() {
-    socket.emit('control', { action: 'reset' });
-    addConsoleLog('Episode reset requested', 'action');
+    emitDashboardControl({ action: 'reset' }, 'Episode reset failed').then((response) => {
+        if (response && response.success) {
+            addConsoleLog('Episode reset requested', 'action');
+        }
+    });
 }
 
 /**
@@ -1492,31 +1642,34 @@ function startFresh() {
     
     // Update button to show loading state
     const btn = document.querySelector('.control-btn.fresh');
-    if (btn) {
-        const originalText = btn.textContent;
-        btn.textContent = '⏳ Resetting...';
-        btn.disabled = true;
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.disabled = false;
-        }, 2000);
-    }
-    
+    const restoreFreshButton = setPendingButton(btn, '⏳ Resetting...');
+
+    const requestFreshStart = () => {
+        return emitDashboardControl({ action: 'start_fresh' }, 'Start fresh failed')
+            .then((response) => {
+                if (response && response.success) {
+                    addConsoleLog('🔄 Starting fresh training...', 'warning');
+                    showTemporaryButtonText(btn, '✓ Resetting...', restoreFreshButton);
+                } else {
+                    restoreFreshButton();
+                }
+                return response;
+            });
+    };
+
     if (saveFirst) {
         // Save current model first, then reset after the server confirms handling it.
         addConsoleLog('💾 Saving current progress before reset...', 'action');
 
-        socket.emit('control', { action: 'save' }, (response) => {
+        emitDashboardControl({ action: 'save' }, 'Save before reset failed').then((response) => {
             if (response && response.success) {
-                socket.emit('control', { action: 'start_fresh' });
-                addConsoleLog('🔄 Starting fresh training...', 'warning');
+                requestFreshStart();
             } else {
-                addConsoleLog(`❌ Save before reset failed: ${response?.error || 'Unknown error'}`, 'error');
+                restoreFreshButton();
             }
         });
     } else {
-        socket.emit('control', { action: 'start_fresh' });
-        addConsoleLog('🔄 Starting fresh training...', 'warning');
+        requestFreshStart();
     }
 }
 
@@ -1539,51 +1692,57 @@ function saveAndQuit() {
 
     // Update button to show saving state
     const btn = document.querySelector('.control-btn.quit');
-    if (btn) {
-        const originalText = btn.textContent;
-        btn.textContent = '⏳ Saving...';
-        btn.classList.add('quitting');
-        btn.disabled = true;
-    }
+    const restoreButton = setPendingButton(btn, '⏳ Saving...', 'quitting');
 
-    socket.emit('control', { action: 'save_and_quit' });
     addConsoleLog('💾 Saving and shutting down...', 'warning');
 
-    // Show shutdown message after a delay
-    setTimeout(() => {
-        showShutdownOverlay();
-    }, 1000);
+    emitDashboardControl({ action: 'save_and_quit' }, 'Save & Quit failed')
+        .then((response) => {
+            if (response && response.success) {
+                showShutdownOverlay();
+            } else {
+                restoreButton();
+            }
+        });
+}
+
+/**
+ * Append a text element to a parent and return it.
+ */
+function appendTextElement(parent, tagName, className, text) {
+    const element = document.createElement(tagName);
+    if (className) {
+        element.className = className;
+    }
+    element.textContent = text;
+    parent.appendChild(element);
+    return element;
+}
+
+function createAppOverlay(id, icon, title, text, subtext, titleClass = '') {
+    const overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.className = 'app-overlay';
+    appendTextElement(overlay, 'div', 'app-overlay-icon', icon);
+    appendTextElement(overlay, 'h2', `app-overlay-title ${titleClass}`.trim(), title);
+    appendTextElement(overlay, 'p', 'app-overlay-text', text);
+    if (subtext) {
+        appendTextElement(overlay, 'p', 'app-overlay-subtext', subtext);
+    }
+    return overlay;
 }
 
 /**
  * Show shutdown overlay when server is stopping
  */
 function showShutdownOverlay() {
-    const overlay = document.createElement('div');
-    overlay.id = 'shutdown-overlay';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(10, 10, 15, 0.95);
-        z-index: 10000;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        font-family: 'JetBrains Mono', monospace;
-    `;
-
-    overlay.innerHTML = `
-        <div style="font-size: 4rem; margin-bottom: 20px;">👋</div>
-        <h2 style="color: #4caf50; margin: 0 0 15px 0; font-size: 1.5rem;">Training Saved & Stopped</h2>
-        <p style="color: #7a7e8c; margin: 0;">Your progress has been saved. You can close this tab.</p>
-        <p style="color: #5a5e72; margin: 15px 0 0 0; font-size: 0.85rem;">To resume: python main.py --headless --web</p>
-    `;
-
-    document.body.appendChild(overlay);
+    document.body.appendChild(createAppOverlay(
+        'shutdown-overlay',
+        '👋',
+        'Training Saved & Stopped',
+        'Your progress has been saved. You can close this tab.',
+        'To resume: python main.py --headless --web'
+    ));
 }
 
 /**
@@ -1613,7 +1772,7 @@ function updateSpeed(value) {
     
     // Display as integer
     document.getElementById('speed-value').textContent = speed + 'x';
-    socket.emit('control', { action: 'speed', value: speed });
+    emitDashboardControl({ action: 'speed', value: speed }, 'Speed update failed');
 }
 
 /**
@@ -1752,9 +1911,14 @@ function stopScreenshotPollingInternal() {
 function toggleSettings() {
     const card = document.getElementById('settings-card');
     const icon = document.getElementById('settings-icon');
+    const trigger = document.querySelector('[data-action="toggle-settings"]');
     
     card.classList.toggle('collapsed');
-    icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
+    const isExpanded = !card.classList.contains('collapsed');
+    icon.textContent = isExpanded ? '▲' : '▼';
+    if (trigger) {
+        trigger.setAttribute('aria-expanded', String(isExpanded));
+    }
 }
 
 // loadConfig and applySettings moved to end of file with enhancements
@@ -1778,8 +1942,11 @@ function showLoadModal() {
             list.innerHTML = DashboardCore.modelListHtml(data.models);
         })
         .catch(err => {
-            document.getElementById('model-list').innerHTML = 
-                '<div class="error">Failed to load models</div>';
+            const list = document.getElementById('model-list');
+            const error = document.createElement('div');
+            error.className = 'error';
+            error.textContent = 'Failed to load models';
+            list.replaceChildren(error);
         });
 }
 
@@ -1795,9 +1962,13 @@ function hideLoadModal() {
  * Load a specific model
  */
 function loadModel(modelId) {
-    socket.emit('control', { action: 'load_model', id: modelId });
-    hideLoadModal();
-    addConsoleLog(`Loading model: ${DashboardCore.modelDisplayName(modelId)}`, 'action');
+    emitDashboardControl({ action: 'load_model', id: modelId }, 'Load model failed')
+        .then((response) => {
+            if (response && response.success) {
+                hideLoadModal();
+                addConsoleLog(`Loading model: ${DashboardCore.modelDisplayName(modelId)}`, 'action');
+            }
+        });
 }
 
 /**
@@ -1832,43 +2003,60 @@ function deleteModel(modelId, name) {
     });
 }
 
-// Close modal on outside click (click on backdrop, not content)
-document.addEventListener('click', (e) => {
-    const actionTarget = e.target.closest('[data-action]');
-    if (actionTarget) {
-        const action = actionTarget.dataset.action;
-        if (action === 'load-model') {
-            loadModel(actionTarget.dataset.modelId);
-            return;
-        }
-        if (action === 'delete-model') {
-            e.stopPropagation();
-            deleteModel(actionTarget.dataset.modelId, actionTarget.dataset.modelName);
-            return;
-        }
-        if (action === 'copy-restart-command') {
-            copyRestartCommand(e);
-            return;
-        }
-        if (action === 'close-restart-banner') {
-            closeRestartBanner();
-            return;
-        }
-        if (action === 'close-neuron-inspection') {
-            closeNeuronInspection();
-            return;
-        }
-        if (action === 'close-layer-analysis') {
-            closeLayerAnalysis();
-            return;
-        }
+function dispatchDashboardAction(actionTarget, event) {
+    const action = actionTarget?.dataset?.action;
+    const handler = DASHBOARD_ACTIONS[action];
+    if (!handler) {
+        console.warn(`No dashboard action handler registered for "${action}"`);
+        return false;
     }
+    const result = handler(actionTarget, event);
+    return result !== false;
+}
 
-    // Check if click was directly on an element with 'modal' class
-    if (e.target.classList && e.target.classList.contains('modal')) {
-        hideLoadModal();
+function registerDashboardActions() {
+    document.addEventListener('click', (event) => {
+        const actionTarget = event.target.closest('[data-action]');
+        if (actionTarget && dispatchDashboardAction(actionTarget, event)) {
+            return;
+        }
+
+        // Close modal on outside click (click on backdrop, not content)
+        if (event.target.classList && event.target.classList.contains('modal')) {
+            hideLoadModal();
+        }
+    });
+
+    document.addEventListener('change', (event) => {
+        const actionTarget = event.target.closest('[data-action]');
+        if (actionTarget) {
+            dispatchDashboardAction(actionTarget, event);
+        }
+    });
+
+    document.addEventListener('input', (event) => {
+        const actionTarget = event.target.closest('[data-action]');
+        if (actionTarget) {
+            dispatchDashboardAction(actionTarget, event);
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        const actionTarget = event.target.closest('[role="button"][data-action]');
+        if (!actionTarget || (event.key !== 'Enter' && event.key !== ' ')) {
+            return;
+        }
+        event.preventDefault();
+        dispatchDashboardAction(actionTarget, event);
+    });
+}
+
+function isInteractiveKeyboardTarget(target) {
+    if (!target || !target.closest) {
+        return false;
     }
-});
+    return Boolean(target.closest('input, textarea, select, button, [role="button"]'));
+}
 
 // ============================================================
 // UTILITY FUNCTIONS
@@ -1900,13 +2088,11 @@ function fetchInitialData() {
         });
 }
 
-// Fetch initial data immediately (socket will also send state on connect)
-fetchInitialData();
-
 // Keyboard shortcuts
+if (typeof document !== 'undefined') {
 document.addEventListener('keydown', (e) => {
     // Don't trigger if typing in input
-    if (e.target.tagName === 'INPUT') return;
+    if (isInteractiveKeyboardTarget(e.target)) return;
     
     switch(e.key.toLowerCase()) {
         case 'p':
@@ -1949,6 +2135,7 @@ document.addEventListener('keydown', (e) => {
             break;
     }
 });
+}
 
 // ============================================================
 // PERFORMANCE MODE FUNCTIONS
@@ -1958,47 +2145,33 @@ document.addEventListener('keydown', (e) => {
  * Set performance mode preset
  */
 function setPerformanceMode(mode) {
-    currentPerformanceMode = mode;
-    socket.emit('control', { action: 'performance_mode', mode: mode });
-    updatePerformanceModeUI(mode);
-    
-    // Update settings inputs to match the mode
-    syncSettingsFromMode(mode);
-    
-    // Log the change
-    const modeNames = {
-        'normal': 'Normal (learn every step)',
-        'fast': 'Fast (learn every 4 steps)',
-        'turbo': 'Turbo (learn every 8, batch 128, 2 grad steps)',
-        'ultra': 'Ultra (learn every 32, batch 128, 2 grad steps)'
-    };
-    addConsoleLog(`Performance mode: ${modeNames[mode]}`, 'action');
+    const preset = PERFORMANCE_MODES[mode];
+    if (!preset) {
+        addConsoleLog(`Unknown performance mode: ${mode}`, 'warning');
+        return;
+    }
+
+    emitDashboardControl({ action: 'performance_mode', mode: mode }, 'Performance mode failed')
+        .then((response) => {
+            if (response && response.success) {
+                currentPerformanceMode = mode;
+                updatePerformanceModeUI(mode);
+
+                // Update settings inputs to match the mode
+                syncSettingsFromMode(mode);
+
+                addConsoleLog(`Performance mode: ${preset.log}`, 'action');
+            }
+        });
 }
 
 /**
  * Sync settings inputs when performance mode changes
  */
 function syncSettingsFromMode(mode) {
-    let learnEvery, batchSize, gradientSteps;
-
-    if (mode === 'normal') {
-        learnEvery = 1;
-        batchSize = 128;
-        gradientSteps = 1;
-    } else if (mode === 'fast') {
-        learnEvery = 4;
-        batchSize = 128;
-        gradientSteps = 1;
-    } else if (mode === 'turbo') {
-        // Match backend turbo preset - optimized for M4 CPU based on benchmarks
-        learnEvery = 8;
-        batchSize = 128;
-        gradientSteps = 2;
-    } else if (mode === 'ultra') {
-        // Maximum throughput: 4x less learning than turbo
-        learnEvery = 32;
-        batchSize = 128;
-        gradientSteps = 2;
+    const preset = PERFORMANCE_MODES[mode];
+    if (!preset) {
+        return;
     }
     
     // Update the settings inputs
@@ -2007,14 +2180,14 @@ function syncSettingsFromMode(mode) {
     const gradStepsInput = document.getElementById('setting-grad-steps');
     
     if (learnEveryInput) {
-        learnEveryInput.value = learnEvery;
-        updateLearnEveryLabel(learnEvery);
+        learnEveryInput.value = preset.learnEvery;
+        updateLearnEveryLabel(preset.learnEvery);
     }
     if (batchInput) {
-        batchInput.value = batchSize;
+        batchInput.value = preset.batchSize;
     }
     if (gradStepsInput) {
-        gradStepsInput.value = gradientSteps;
+        gradStepsInput.value = preset.gradientSteps;
     }
 }
 
@@ -2024,10 +2197,12 @@ function syncSettingsFromMode(mode) {
 function updatePerformanceModeUI(mode) {
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
     });
     const activeBtn = document.getElementById(`mode-${mode}`);
     if (activeBtn) {
         activeBtn.classList.add('active');
+        activeBtn.setAttribute('aria-pressed', 'true');
     }
 }
 
@@ -2153,16 +2328,19 @@ function applySettings() {
         gradient_steps: parseInt(document.getElementById('setting-grad-steps').value)
     };
 
-    socket.emit('control', { action: 'config_change', config: config });
-    addConsoleLog('Settings updated', 'action', null, config);
-
     // Visual feedback
     const btn = document.querySelector('.apply-btn');
-    const originalText = btn.textContent;
-    btn.textContent = '✓ Applied!';
-    setTimeout(() => {
-        btn.textContent = originalText;
-    }, 1500);
+    const restoreButton = setPendingButton(btn, 'Applying...');
+
+    emitDashboardControl({ action: 'config_change', config: config }, 'Settings update failed')
+        .then((response) => {
+            if (response && response.success) {
+                addConsoleLog('Settings updated', 'action', null, config);
+                showTemporaryButtonText(btn, '✓ Applied!', restoreButton);
+            } else {
+                restoreButton();
+            }
+        });
 }
 
 // Track original vec-envs value
@@ -2350,20 +2528,24 @@ function saveModelAs() {
         filename = 'custom_save';
     }
     
-    socket.emit('control', { action: 'save_as', filename: filename });
-    addConsoleLog(`Saving as: ${filename}.pth`, 'action');
-    
     // Clear input and show feedback
-    input.value = '';
     const btn = document.querySelector('.save-as-btn');
-    const originalText = btn.textContent;
-    btn.textContent = '✓ Saved!';
-    setTimeout(() => {
-        btn.textContent = originalText;
-    }, 1500);
+    const restoreButton = setPendingButton(btn, 'Saving...');
+
+    emitDashboardControl({ action: 'save_as', filename: filename }, 'Save As failed')
+        .then((response) => {
+            if (response && response.success) {
+                addConsoleLog(`Saving as: ${filename}.pth`, 'action');
+                input.value = '';
+                showTemporaryButtonText(btn, '✓ Saved!', restoreButton);
+            } else {
+                restoreButton();
+            }
+        });
 }
 
 // Periodically update save status time
+if (typeof document !== 'undefined') {
 setInterval(() => {
     fetchWithTimeout('/api/save-status', {}, 5000)  // 5s timeout for periodic update
         .then(response => response.json())
@@ -2375,6 +2557,7 @@ setInterval(() => {
         })
         .catch(() => {});  // Silently ignore errors for periodic updates
 }, 10000);  // Update every 10 seconds
+}
 
 // ============================================================
 // GAME SELECTION FUNCTIONS
@@ -2445,9 +2628,16 @@ function switchGame(gameId) {
     if (confirmed) {
         addConsoleLog(`🔄 Switching to ${gameId}...`, 'warning');
         addConsoleLog(`💾 Saving current progress...`, 'info');
-        
+
         // Request game switch - server will save and restart
-        socket.emit('control', { action: 'restart_with_game', game: gameId });
+        emitDashboardControl(
+            { action: 'restart_with_game', game: gameId },
+            'Game switch failed'
+        ).then((response) => {
+            if (!response || !response.success) {
+                loadGames();
+            }
+        });
     } else {
         // Reset dropdown to current game
         loadGames();
@@ -2466,7 +2656,7 @@ function goToLauncher() {
     if (confirmed) {
         addConsoleLog('🎮 Returning to launcher...', 'warning');
         // Tell server to switch back to launcher mode
-        socket.emit('control', { action: 'go_to_launcher' });
+        emitDashboardControl({ action: 'go_to_launcher' }, 'Return to launcher failed');
     }
 }
 
@@ -2480,18 +2670,97 @@ function goToLauncher() {
 function toggleComparison() {
     const card = document.getElementById('comparison-card');
     const icon = document.getElementById('comparison-icon');
+    const trigger = document.querySelector('[data-action="toggle-comparison"]');
     
     if (!card) return;
     
     card.classList.toggle('collapsed');
+    const isExpanded = !card.classList.contains('collapsed');
     if (icon) {
-        icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
+        icon.textContent = isExpanded ? '▲' : '▼';
+    }
+    if (trigger) {
+        trigger.setAttribute('aria-expanded', String(isExpanded));
     }
     
     // Load stats when opening
     if (!card.classList.contains('collapsed')) {
         loadGameStats();
     }
+}
+
+/**
+ * Clamp a numeric percentage for inline width styles.
+ */
+function clampPercent(value) {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(100, numberValue));
+}
+
+function safeRgb(color) {
+    const channels = Array.isArray(color) ? color : [100, 181, 246];
+    const normalized = channels.slice(0, 3).map((channel) => {
+        const value = Number(channel);
+        return Number.isFinite(value) ? Math.max(0, Math.min(255, Math.round(value))) : 0;
+    });
+    while (normalized.length < 3) {
+        normalized.push(0);
+    }
+    return `rgb(${normalized[0]}, ${normalized[1]}, ${normalized[2]})`;
+}
+
+function formatFixedValue(value, digits, fallback = 'N/A') {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue.toFixed(digits) : fallback;
+}
+
+function createGameStatsElement(gameId, game, currentGame, maxScore) {
+    const isCurrent = gameId === currentGame;
+    const item = document.createElement('div');
+    item.className = `comparison-item${isCurrent ? ' current' : ''}`;
+
+    const icon = document.createElement('div');
+    icon.className = 'comparison-icon';
+    icon.textContent = game.icon || '';
+    item.appendChild(icon);
+
+    const info = document.createElement('div');
+    info.className = 'comparison-info';
+    item.appendChild(info);
+
+    const name = document.createElement('div');
+    name.className = 'comparison-name';
+    name.textContent = `${game.name || gameId}${isCurrent ? ' (current)' : ''}`;
+    info.appendChild(name);
+
+    const trainingTime = Number(game.total_training_time) || 0;
+    let timeStr = 'No training';
+    if (trainingTime > 0) {
+        const hours = Math.floor(trainingTime / 3600);
+        const mins = Math.floor((trainingTime % 3600) / 60);
+        timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    }
+
+    const stats = document.createElement('div');
+    stats.className = 'comparison-stats';
+    const bestScore = Number(game.best_score) || 0;
+    const totalEpisodes = Number(game.total_episodes) || 0;
+    stats.textContent = `Best: ${bestScore} | Episodes: ${totalEpisodes.toLocaleString()} | Time: ${timeStr}`;
+    info.appendChild(stats);
+
+    const bar = document.createElement('div');
+    bar.className = 'comparison-bar';
+    const fill = document.createElement('div');
+    fill.className = 'comparison-bar-fill';
+    fill.style.width = `${clampPercent((bestScore / maxScore) * 100)}%`;
+    fill.style.background = safeRgb(game.color);
+    bar.appendChild(fill);
+    info.appendChild(bar);
+
+    return item;
 }
 
 /**
@@ -2510,49 +2779,34 @@ function loadGameStats() {
             // Find max score for bar scaling
             let maxScore = 0;
             for (const gameId in stats) {
-                if (stats[gameId].best_score > maxScore) {
-                    maxScore = stats[gameId].best_score;
+                const bestScore = Number(stats[gameId].best_score) || 0;
+                if (bestScore > maxScore) {
+                    maxScore = bestScore;
                 }
             }
             maxScore = maxScore || 1; // Avoid division by zero
-            
-            // Build comparison items
-            let html = '';
+
+            const fragment = document.createDocumentFragment();
             for (const gameId in stats) {
                 const game = stats[gameId];
-                const isCurrent = gameId === currentGame;
-                const barWidth = (game.best_score / maxScore) * 100;
-                const colorRgb = `rgb(${game.color[0]}, ${game.color[1]}, ${game.color[2]})`;
-                
-                // Format training time
-                let timeStr = 'No training';
-                if (game.total_training_time > 0) {
-                    const hours = Math.floor(game.total_training_time / 3600);
-                    const mins = Math.floor((game.total_training_time % 3600) / 60);
-                    timeStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-                }
-                
-                html += `
-                    <div class="comparison-item ${isCurrent ? 'current' : ''}">
-                        <div class="comparison-icon">${game.icon}</div>
-                        <div class="comparison-info">
-                            <div class="comparison-name">${game.name} ${isCurrent ? '(current)' : ''}</div>
-                            <div class="comparison-stats">
-                                Best: ${game.best_score} | Episodes: ${game.total_episodes.toLocaleString()} | Time: ${timeStr}
-                            </div>
-                            <div class="comparison-bar">
-                                <div class="comparison-bar-fill" style="width: ${barWidth}%; background: ${colorRgb};"></div>
-                            </div>
-                        </div>
-                    </div>
-                `;
+                fragment.appendChild(createGameStatsElement(gameId, game, currentGame, maxScore));
             }
-            
-            grid.innerHTML = html || '<div class="no-data">No game data available</div>';
+
+            if (fragment.childNodes.length > 0) {
+                grid.replaceChildren(fragment);
+            } else {
+                const noData = document.createElement('div');
+                noData.className = 'no-data';
+                noData.textContent = 'No game data available';
+                grid.replaceChildren(noData);
+            }
         })
         .catch(err => {
             console.error('Failed to load game stats:', err);
-            grid.innerHTML = '<div class="error">Failed to load game statistics</div>';
+            const error = document.createElement('div');
+            error.className = 'error';
+            error.textContent = 'Failed to load game statistics';
+            grid.replaceChildren(error);
         });
 }
 
@@ -2567,63 +2821,37 @@ function refreshGameStats() {
  * Show a restart banner for game switching
  */
 function showRestartBanner(game, command) {
-    // Create banner element
     const banner = document.createElement('div');
     banner.id = 'restart-banner';
-    banner.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 2px solid #4caf50;
-        border-radius: 16px;
-        padding: 30px 40px;
-        z-index: 10000;
-        text-align: center;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-        max-width: 500px;
-    `;
-    
-    banner.innerHTML = `
-        <h2 style="color: #4caf50; margin: 0 0 15px 0; font-size: 1.5rem;">🔄 Ready to Switch Games</h2>
-        <p style="color: #e4e6f0; margin: 0 0 20px 0;">Progress has been saved. Restart with the new game:</p>
-        <div style="background: #0d0e12; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-            <code id="restart-command" style="color: #64b5f6; font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; word-break: break-all;">${escapeHtml(command)}</code>
-        </div>
-        <div style="display: flex; gap: 12px; justify-content: center;">
-            <button data-action="copy-restart-command" style="
-                background: #4caf50;
-                border: none;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-weight: 500;
-            ">📋 Copy Command</button>
-            <button data-action="close-restart-banner" style="
-                background: #2a2e3d;
-                border: 1px solid #3a3e4d;
-                color: #e4e6f0;
-                padding: 10px 20px;
-                border-radius: 8px;
-                cursor: pointer;
-            ">Close</button>
-        </div>
-    `;
-    
-    // Add overlay
+    banner.className = 'restart-banner';
+
+    appendTextElement(banner, 'h2', 'restart-title', '🔄 Ready to Switch Games');
+    appendTextElement(
+        banner,
+        'p',
+        'restart-text',
+        'Progress has been saved. Restart with the new game:'
+    );
+
+    const commandBox = document.createElement('div');
+    commandBox.className = 'restart-command-box';
+    const code = document.createElement('code');
+    code.id = 'restart-command';
+    code.textContent = command;
+    commandBox.appendChild(code);
+    banner.appendChild(commandBox);
+
+    const actions = document.createElement('div');
+    actions.className = 'restart-actions';
+    const copyButton = appendTextElement(actions, 'button', 'restart-copy-btn', '📋 Copy Command');
+    copyButton.dataset.action = 'copy-restart-command';
+    const closeButton = appendTextElement(actions, 'button', 'restart-close-btn', 'Close');
+    closeButton.dataset.action = 'close-restart-banner';
+    banner.appendChild(actions);
+
     const overlay = document.createElement('div');
     overlay.id = 'restart-overlay';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.7);
-        z-index: 9999;
-    `;
+    overlay.className = 'restart-overlay';
     overlay.addEventListener('click', closeRestartBanner);
     
     document.body.appendChild(overlay);
@@ -2660,38 +2888,19 @@ function closeRestartBanner() {
  * Show restarting overlay while process restarts
  */
 function showRestartingOverlay(game) {
-    const overlay = document.createElement('div');
-    overlay.id = 'restarting-overlay';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(10, 10, 15, 0.95);
-        z-index: 10000;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        font-family: 'JetBrains Mono', monospace;
-    `;
-    
-    // Sanitize game name to prevent XSS
-    const safeGameName = escapeHtml(game.replace('_', ' ').toUpperCase());
-    overlay.innerHTML = `
-        <div style="font-size: 4rem; margin-bottom: 20px; animation: pulse 1s ease-in-out infinite;">🔄</div>
-        <h2 style="color: #00d4ff; margin: 0 0 15px 0; font-size: 1.5rem;">Restarting with ${safeGameName}</h2>
-        <p style="color: #7a7e8c; margin: 0;">Please wait while the server restarts...</p>
-        <p style="color: #5a5e72; margin: 15px 0 0 0; font-size: 0.85rem;">Page will auto-refresh when ready</p>
-        <style>
-            @keyframes pulse {
-                0%, 100% { transform: scale(1); opacity: 1; }
-                50% { transform: scale(1.1); opacity: 0.8; }
-            }
-        </style>
-    `;
-    
+    const gameName = String(game || '').replace('_', ' ').toUpperCase();
+    const overlay = createAppOverlay(
+        'restarting-overlay',
+        '🔄',
+        `Restarting with ${gameName}`,
+        'Please wait while the server restarts...',
+        'Page will auto-refresh when ready',
+        'info'
+    );
+    const icon = overlay.querySelector('.app-overlay-icon');
+    if (icon) {
+        icon.classList.add('pulse');
+    }
     document.body.appendChild(overlay);
     
     // Start checking if server is back up
@@ -2895,57 +3104,71 @@ class NeuralNetworkVisualizer {
             return;
         }
 
+        const layerName = escapeHtml(neuronData.layer_name || `Layer ${neuronData.layer_idx ?? '?'}`);
+        const neuronIdx = Number.isFinite(Number(neuronData.neuron_idx)) ? Number(neuronData.neuron_idx) : '?';
+        const previousLayerIdx = Number.isFinite(Number(neuronData.layer_idx))
+            ? Number(neuronData.layer_idx) - 1
+            : '?';
+        const activation = Number(neuronData.current_activation) || 0;
+        const activationWidth = clampPercent(Math.abs(activation) * 100);
+        const incoming = neuronData.incoming_weight_stats;
+        const outgoing = neuronData.outgoing_weight_stats;
+        const qContribHtml = Object.entries(neuronData.q_value_contributions || {}).map(([action, contrib]) => `
+            <div class="q-contrib">
+                <span>${escapeHtml(action)}:</span>
+                <span>${formatFixedValue(contrib, 4, '0.0000')}</span>
+            </div>
+        `).join('');
+        const activationHistory = Array.isArray(neuronData.activation_history)
+            ? neuronData.activation_history
+            : [];
+
         // Build HTML for neuron details
         const html = `
             <div class="neuron-header">
-                <h3>${neuronData.layer_name} - Neuron #${neuronData.neuron_idx}</h3>
-                <button class="close-btn" data-action="close-neuron-inspection">×</button>
+                <h3>${layerName} - Neuron #${neuronIdx}</h3>
+                <button class="close-btn" data-action="close-neuron-inspection" aria-label="Close neuron inspection">×</button>
             </div>
 
             <div class="neuron-content">
                 <div class="stat-group">
                     <h4>Activation</h4>
-                    <div class="stat-value">${neuronData.current_activation.toFixed(4)}</div>
+                    <div class="stat-value">${formatFixedValue(activation, 4, '0.0000')}</div>
                     <div class="stat-bar">
-                        <div class="stat-fill" style="width: ${Math.abs(neuronData.current_activation) * 100}%"></div>
+                        <div class="stat-fill" style="width: ${activationWidth}%"></div>
                     </div>
                 </div>
 
                 <div class="stat-group">
-                    <h4>Incoming Weights (from layer ${neuronData.layer_idx - 1})</h4>
-                    ${neuronData.incoming_weight_stats ? `
+                    <h4>Incoming Weights (from layer ${previousLayerIdx})</h4>
+                    ${incoming ? `
                         <div class="weight-stats">
-                            <div>Mean: ${neuronData.incoming_weight_stats.mean?.toFixed(4) || 'N/A'}</div>
-                            <div>Range: [${neuronData.incoming_weight_stats.min?.toFixed(4) || 'N/A'},
-                                         ${neuronData.incoming_weight_stats.max?.toFixed(4) || 'N/A'}]</div>
+                            <div>Mean: ${formatFixedValue(incoming.mean, 4)}</div>
+                            <div>Range: [${formatFixedValue(incoming.min, 4)},
+                                         ${formatFixedValue(incoming.max, 4)}]</div>
                         </div>
                     ` : '<div>No data</div>'}
                 </div>
 
                 <div class="stat-group">
                     <h4>Outgoing Weights (to next layer)</h4>
-                    ${neuronData.outgoing_weight_stats ? `
+                    ${outgoing ? `
                         <div class="weight-stats">
-                            <div>Mean: ${neuronData.outgoing_weight_stats.mean?.toFixed(4) || 'N/A'}</div>
-                            <div>Range: [${neuronData.outgoing_weight_stats.min?.toFixed(4) || 'N/A'},
-                                         ${neuronData.outgoing_weight_stats.max?.toFixed(4) || 'N/A'}]</div>
+                            <div>Mean: ${formatFixedValue(outgoing.mean, 4)}</div>
+                            <div>Range: [${formatFixedValue(outgoing.min, 4)},
+                                         ${formatFixedValue(outgoing.max, 4)}]</div>
                         </div>
                     ` : '<div>No data</div>'}
                 </div>
 
                 <div class="stat-group">
                     <h4>Q-Value Contributions</h4>
-                    ${Object.entries(neuronData.q_value_contributions || {}).map(([action, contrib]) => `
-                        <div class="q-contrib">
-                            <span>${action}:</span>
-                            <span>${contrib.toFixed(4)}</span>
-                        </div>
-                    `).join('')}
+                    ${qContribHtml}
                 </div>
 
-                ${neuronData.activation_history?.length > 0 ? `
+                ${activationHistory.length > 0 ? `
                     <div class="stat-group">
-                        <h4>Recent Activation History (${neuronData.activation_history.length} samples)</h4>
+                        <h4>Recent Activation History (${activationHistory.length} samples)</h4>
                         <div class="sparkline-container">
                             <canvas id="neuron-sparkline" width="300" height="40"></canvas>
                         </div>
@@ -2958,8 +3181,8 @@ class NeuralNetworkVisualizer {
         panel.style.display = 'block';
 
         // Draw sparkline if data available
-        if (neuronData.activation_history && neuronData.activation_history.length > 0) {
-            this.drawSparkline(document.getElementById('neuron-sparkline'), neuronData.activation_history);
+        if (activationHistory.length > 0) {
+            this.drawSparkline(document.getElementById('neuron-sparkline'), activationHistory);
         }
     }
 
@@ -3074,12 +3297,16 @@ class NeuralNetworkVisualizer {
             healthStatus = '✗ Critical';
             healthColor = 'var(--accent-danger)';
         }
+        const layerName = escapeHtml(layerData.layer_name || `Layer ${layerData.layer_idx ?? '?'}`);
+        const neuronCount = Number(layerData.neuron_count) || 0;
+        const deadCount = Number(layerData.dead_neuron_count) || 0;
+        const saturatedCount = Number(layerData.saturated_neuron_count) || 0;
 
         // Build HTML for layer details
         const html = `
             <div class="layer-header">
-                <h3>${layerData.layer_name || `Layer ${layerData.layer_idx}`}</h3>
-                <button class="close-btn" data-action="close-layer-analysis">×</button>
+                <h3>${layerName}</h3>
+                <button class="close-btn" data-action="close-layer-analysis" aria-label="Close layer analysis">×</button>
             </div>
 
             <div class="layer-content">
@@ -3092,7 +3319,7 @@ class NeuralNetworkVisualizer {
                     </div>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Neurons:</span>
-                        <span class="layer-stat-value">${layerData.neuron_count || 0}</span>
+                        <span class="layer-stat-value">${neuronCount}</span>
                     </div>
                 </div>
 
@@ -3101,22 +3328,22 @@ class NeuralNetworkVisualizer {
                     <span class="layer-stat-group-title">Activation Stats</span>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Mean:</span>
-                        <span class="layer-stat-value">${(layerData.avg_activation || 0).toFixed(4)}</span>
+                        <span class="layer-stat-value">${formatFixedValue(layerData.avg_activation, 4, '0.0000')}</span>
                     </div>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Std Dev:</span>
-                        <span class="layer-stat-value">${(layerData.activation_std || 0).toFixed(4)}</span>
+                        <span class="layer-stat-value">${formatFixedValue(layerData.activation_std, 4, '0.0000')}</span>
                     </div>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Dead Neurons:</span>
                         <span class="layer-stat-value" style="color: ${deadPercent > 10 ? 'var(--accent-warning)' : 'inherit'}">
-                            ${layerData.dead_neuron_count || 0} (${deadPercent.toFixed(1)}%)
+                            ${deadCount} (${formatFixedValue(deadPercent, 1, '0.0')}%)
                         </span>
                     </div>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Saturated:</span>
                         <span class="layer-stat-value" style="color: ${saturatedPercent > 50 ? 'var(--accent-warning)' : 'inherit'}">
-                            ${layerData.saturated_neuron_count || 0} (${saturatedPercent.toFixed(1)}%)
+                            ${saturatedCount} (${formatFixedValue(saturatedPercent, 1, '0.0')}%)
                         </span>
                     </div>
                 </div>
@@ -3127,11 +3354,11 @@ class NeuralNetworkVisualizer {
                     <div class="weight-stats-container">
                         <div class="weight-stat">
                             <div class="weight-stat-label">Mean</div>
-                            <div class="weight-stat-value">${(layerData.weight_mean || 0).toFixed(4)}</div>
+                            <div class="weight-stat-value">${formatFixedValue(layerData.weight_mean, 4, '0.0000')}</div>
                         </div>
                         <div class="weight-stat">
                             <div class="weight-stat-label">Std</div>
-                            <div class="weight-stat-value">${(layerData.weight_std || 0).toFixed(4)}</div>
+                            <div class="weight-stat-value">${formatFixedValue(layerData.weight_std, 4, '0.0000')}</div>
                         </div>
                     </div>
                 </div>
@@ -3141,15 +3368,15 @@ class NeuralNetworkVisualizer {
                     <span class="layer-stat-group-title">Gradient Flow</span>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Mean Magnitude:</span>
-                        <span class="layer-stat-value">${(layerData.gradient_mean || 0).toFixed(6)}</span>
+                        <span class="layer-stat-value">${formatFixedValue(layerData.gradient_mean, 6, '0.000000')}</span>
                     </div>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Std Dev:</span>
-                        <span class="layer-stat-value">${(layerData.gradient_std || 0).toFixed(6)}</span>
+                        <span class="layer-stat-value">${formatFixedValue(layerData.gradient_std, 6, '0.000000')}</span>
                     </div>
                     <div class="layer-stat-row">
                         <span class="layer-stat-label">Max Magnitude:</span>
-                        <span class="layer-stat-value">${(layerData.gradient_max_magnitude || 0).toFixed(6)}</span>
+                        <span class="layer-stat-value">${formatFixedValue(layerData.gradient_max_magnitude, 6, '0.000000')}</span>
                     </div>
                 </div>
             </div>
@@ -3838,12 +4065,17 @@ function updateNNVisualizerRenderRate(stepsPerSec) {
 function toggleNNPanel() {
     const card = document.getElementById('nn-viz-card');
     const icon = document.getElementById('nn-viz-icon');
+    const trigger = document.querySelector('[data-action="toggle-nn-panel"]');
 
     if (!card) return;
 
     card.classList.toggle('collapsed');
+    const isExpanded = !card.classList.contains('collapsed');
     if (icon) {
-        icon.textContent = card.classList.contains('collapsed') ? '▼' : '▲';
+        icon.textContent = isExpanded ? '▲' : '▼';
+    }
+    if (trigger) {
+        trigger.setAttribute('aria-expanded', String(isExpanded));
     }
 }
 
