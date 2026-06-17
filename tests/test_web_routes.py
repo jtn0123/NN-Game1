@@ -183,6 +183,12 @@ class TestWebDashboardRoutes:
             core_response = client.get("/static/dashboard_core.js")
             charts_response = client.get("/static/dashboard_charts.js")
             app_response = client.get("/static/app.js")
+            logs_response = client.get("/static/dashboard_logs.js")
+            controls_response = client.get("/static/dashboard_controls.js")
+            settings_response = client.get("/static/dashboard_settings.js")
+            games_response = client.get("/static/dashboard_games.js")
+            nn_response = client.get("/static/dashboard_nn.js")
+            nn_panels_response = client.get("/static/dashboard_nn_panels.js")
 
         html = response.data.decode("utf-8")
 
@@ -203,9 +209,21 @@ class TestWebDashboardRoutes:
         assert "Training Dashboard" in html
         assert html.index("dashboard_core.js") < html.index("dashboard_charts.js")
         assert html.index("dashboard_charts.js") < html.index("app.js")
+        assert html.index("app.js") < html.index("dashboard_logs.js")
+        assert html.index("dashboard_logs.js") < html.index("dashboard_controls.js")
+        assert html.index("dashboard_controls.js") < html.index("dashboard_settings.js")
+        assert html.index("dashboard_settings.js") < html.index("dashboard_games.js")
+        assert html.index("dashboard_games.js") < html.index("dashboard_nn.js")
+        assert html.index("dashboard_nn.js") < html.index("dashboard_nn_panels.js")
         assert core_response.status_code == 200
         assert charts_response.status_code == 200
         assert app_response.status_code == 200
+        assert logs_response.status_code == 200
+        assert controls_response.status_code == 200
+        assert settings_response.status_code == 200
+        assert games_response.status_code == 200
+        assert nn_response.status_code == 200
+        assert nn_panels_response.status_code == 200
 
     def test_launcher_page_serves_tokenized_frontend_contract(self):
         """Launcher mode should also serve an authenticated Socket.IO page."""
