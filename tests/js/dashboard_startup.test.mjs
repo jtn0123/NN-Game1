@@ -130,9 +130,20 @@ function createDashboardContext() {
   });
 
   const chartsSource = readFileSync(resolve('src/web/static/dashboard_charts.js'), 'utf8');
-  const source = readFileSync(resolve('src/web/static/app.js'), 'utf8');
+  const dashboardSources = [
+    'app.js',
+    'dashboard_logs.js',
+    'dashboard_controls.js',
+    'dashboard_settings.js',
+    'dashboard_games.js',
+    'dashboard_nn.js',
+    'dashboard_nn_panels.js',
+  ];
   vm.runInContext(chartsSource, context, { filename: 'dashboard_charts.js' });
-  vm.runInContext(source, context, { filename: 'app.js' });
+  for (const filename of dashboardSources) {
+    const source = readFileSync(resolve(`src/web/static/${filename}`), 'utf8');
+    vm.runInContext(source, context, { filename });
+  }
   return { context, elements, errors, listeners };
 }
 
