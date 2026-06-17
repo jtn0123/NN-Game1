@@ -18,7 +18,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.game.asteroids import Asteroid, Asteroids, Ship, VecAsteroids
+from src.game.asteroids import Asteroid, Asteroids, Bullet, Ship, VecAsteroids, Vector2
+from src.game.asteroids_entities import Asteroid as EntityAsteroid
 
 
 @pytest.fixture
@@ -200,6 +201,33 @@ class TestAsteroidsCollisions:
         children = asteroid.split()
         assert len(children) == 0
 
+    def test_ship_collision_loses_life_and_respawns(self, game):
+        """A ship collision with remaining lives should respawn safely."""
+        game.asteroids = [Asteroid(game.ship.x, game.ship.y, Asteroid.SMALL)]
+        game.ship.invincible_timer = 0
+        initial_lives = game.lives
+
+        reward = game._check_collisions()
+
+        assert reward == -100.0
+        assert game.lives == initial_lives - 1
+        assert not game.game_over
+        assert game.ship.alive
+        assert game.ship.invincible_timer == Asteroids.RESPAWN_INVINCIBILITY
+
+    def test_ship_collision_with_last_life_ends_game(self, game):
+        """The last ship collision should mark the game over and kill the ship."""
+        game.lives = 1
+        game.asteroids = [Asteroid(game.ship.x, game.ship.y, Asteroid.SMALL)]
+        game.ship.invincible_timer = 0
+
+        reward = game._check_collisions()
+
+        assert reward == -100.0
+        assert game.lives == 0
+        assert game.game_over
+        assert not game.ship.alive
+
 
 class TestAsteroidsReset:
     """Test game reset functionality."""
@@ -279,6 +307,37 @@ class TestShip:
         initial_speed = ship.velocity.length()
         ship.thrust()
         assert ship.velocity.length() > initial_speed
+
+
+class TestAsteroidsEntities:
+    """Test extracted Asteroids entity behavior."""
+
+    def test_entities_are_reexported_from_game_module(self):
+        """Existing imports from src.game.asteroids should keep working."""
+        assert Asteroid is EntityAsteroid
+        assert Vector2(3, 4).length() == 5
+
+    def test_zero_vector_normalizes_to_zero_vector(self):
+        """Normalizing a zero vector should not produce NaN values."""
+        normalized = Vector2(0, 0).normalize()
+
+        assert normalized.x == 0
+        assert normalized.y == 0
+
+    def test_bullet_wraps_and_expires_after_lifetime(self):
+        """Bullets should wrap around the playfield and expire deterministically."""
+        bullet = Bullet(99, 50, 0)
+
+        still_alive = bullet.update(width=100, height=100)
+
+        assert still_alive is True
+        assert 0 <= bullet.x < 100
+        assert bullet.lifetime == 49
+
+        for _ in range(49):
+            still_alive = bullet.update(width=100, height=100)
+
+        assert still_alive is False
 
 
 class TestVecAsteroids:

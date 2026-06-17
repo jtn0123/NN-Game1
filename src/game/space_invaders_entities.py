@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+from functools import lru_cache
 from typing import List, Tuple
 
 import pygame
@@ -78,6 +79,11 @@ ALIEN_PATTERNS = {
 }
 
 
+@lru_cache(maxsize=16)
+def _font(size: int) -> pygame.font.Font:
+    return pygame.font.Font(None, size)
+
+
 class Particle:
     """A visual particle for explosions."""
 
@@ -131,7 +137,7 @@ class ScorePopup:
         if self.life <= 0:
             return
 
-        font = pygame.font.Font(None, 24)
+        font = _font(24)
 
         # Create text with current alpha
         text = f"+{self.score}"
@@ -184,7 +190,7 @@ class WaveAnnouncement:
             scale = 1.0
 
         font_size = int(72 * scale)
-        font = pygame.font.Font(None, font_size)
+        font = _font(font_size)
 
         text = f"WAVE {self.wave}"
         color = (255, 200, 50)  # Gold

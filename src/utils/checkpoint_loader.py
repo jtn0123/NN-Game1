@@ -9,9 +9,18 @@ from __future__ import annotations
 
 import os
 import warnings
+from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 import torch
+
+
+@dataclass(frozen=True)
+class CheckpointLoadResult:
+    """Checkpoint payload plus whether unrestricted compatibility loading was used."""
+
+    checkpoint: Any
+    used_unsafe_fallback: bool = False
 
 
 def _is_under_trusted_dir(filepath: str, trusted_dirs: Optional[Iterable[str]]) -> bool:
@@ -46,10 +55,33 @@ def load_checkpoint(
     loaded with `weights_only=False` when the caller opts in and the file lives
     under an explicitly trusted directory.
     """
+    return load_checkpoint_with_status(
+        filepath,
+        map_location=map_location,
+        trusted_dirs=trusted_dirs,
+        allow_unsafe_fallback=allow_unsafe_fallback,
+    ).checkpoint
+
+
+def load_checkpoint_with_status(
+    filepath: str,
+    map_location: Any = "cpu",
+    *,
+    trusted_dirs: Optional[Iterable[str]] = None,
+    allow_unsafe_fallback: bool = False,
+) -> CheckpointLoadResult:
+    """
+    Load a checkpoint and report whether legacy unrestricted loading was needed.
+
+    This is useful for model browsers and migration tooling that need to warn
+    users about old checkpoint formats without changing the normal load API.
+    """
     try:
-        return torch.load(filepath, map_location=map_location, weights_only=True)
+        checkpoint = torch.load(filepath, map_location=map_location, weights_only=True)
+        return CheckpointLoadResult(checkpoint=checkpoint)
     except Exception as safe_error:
         if allow_unsafe_fallback and _is_under_trusted_dir(filepath, trusted_dirs):
+            checkpoint = torch.load(filepath, map_location=map_location, weights_only=False)
             warnings.warn(
                 (
                     f"Falling back to unrestricted checkpoint load for trusted local file: "
@@ -58,7 +90,7 @@ def load_checkpoint(
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return torch.load(filepath, map_location=map_location, weights_only=False)
+            return CheckpointLoadResult(checkpoint=checkpoint, used_unsafe_fallback=True)
 
         raise RuntimeError(
             "Checkpoint could not be loaded with PyTorch's restricted loader. "

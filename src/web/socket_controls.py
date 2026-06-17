@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 import os
-from typing import Any, Callable, Dict, Optional, Protocol, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union
 
 from config import Config
 from src.app.performance_modes import PERFORMANCE_MODES
@@ -19,25 +20,77 @@ class DashboardControlContext(Protocol):
 
     config: Config
     launcher_mode: bool
-    publisher: Any
-    on_game_selected_callback: Optional[Callable[[str, str], Any]]
-    on_restart_with_game_callback: Optional[Callable[[str], Any]]
-    on_pause_callback: Optional[Callable[[], Any]]
-    on_save_callback: Optional[Callable[[], Any]]
-    on_save_as_callback: Optional[Callable[[str], Any]]
-    on_speed_callback: Optional[Callable[[float], Any]]
-    on_reset_callback: Optional[Callable[[], Any]]
-    on_start_fresh_callback: Optional[Callable[[], Any]]
-    on_load_model_callback: Optional[Callable[[str], Any]]
-    on_config_change_callback: Optional[Callable[[Dict[str, Any]], Any]]
-    on_performance_mode_callback: Optional[Callable[[str], Any]]
-    on_save_and_quit_callback: Optional[Callable[[], Any]]
+    publisher: "DashboardControlPublisher"
+    on_game_selected_callback: Optional[Callable[[str, str], "CommandCallbackResult"]]
+    on_restart_with_game_callback: Optional[Callable[[str], "CommandCallbackResult"]]
+    on_pause_callback: Optional[Callable[[], "CommandCallbackResult"]]
+    on_save_callback: Optional[Callable[[], "CommandCallbackResult"]]
+    on_save_as_callback: Optional[Callable[[str], "CommandCallbackResult"]]
+    on_speed_callback: Optional[Callable[[float], "CommandCallbackResult"]]
+    on_reset_callback: Optional[Callable[[], "CommandCallbackResult"]]
+    on_start_fresh_callback: Optional[Callable[[], "CommandCallbackResult"]]
+    on_load_model_callback: Optional[Callable[[str], "CommandCallbackResult"]]
+    on_config_change_callback: Optional[Callable[[Dict[str, Any]], "CommandCallbackResult"]]
+    on_performance_mode_callback: Optional[Callable[[str], "CommandCallbackResult"]]
+    on_save_and_quit_callback: Optional[Callable[[], "CommandCallbackResult"]]
 
     def _resolve_model_ref(self, model_ref: str) -> Optional[str]:
         """Resolve a browser model id into a safe local path."""
         ...
 
 
+class ClearableLogs(Protocol):
+    """Minimal log container contract needed by clear-log controls."""
+
+    def clear(self) -> None:
+        """Remove all logs from the container."""
+        ...
+
+
+class DashboardControlPublisher(Protocol):
+    """Publisher methods used by socket controls."""
+
+    console_logs: ClearableLogs
+
+    def log(
+        self,
+        message: str,
+        level: str = "info",
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Publish a dashboard log entry."""
+        ...
+
+    def set_speed(self, speed: float) -> None:
+        """Update the dashboard speed setting."""
+        ...
+
+    def update_config(self, config_data: Dict[str, Any]) -> None:
+        """Publish normalized config changes."""
+        ...
+
+    def set_performance_mode(self, mode: str) -> None:
+        """Publish the current performance mode."""
+        ...
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Explicit result for dashboard control callbacks."""
+
+    success: bool
+    error: str = ""
+
+    @classmethod
+    def ok(cls) -> "CommandResult":
+        return cls(success=True)
+
+    @classmethod
+    def failed(cls, error: str) -> "CommandResult":
+        return cls(success=False, error=error)
+
+
+CommandCallbackResult = Union[CommandResult, Dict[str, Any], bool, None]
 EventEmitter = Callable[[str, Dict[str, Any]], None]
 ControlHandler = Callable[[DashboardControlContext, Dict[str, Any], EventEmitter], ControlAck]
 
@@ -59,7 +112,7 @@ def unauthorized_ack() -> ControlAck:
 
 def callback_ack(
     action: str,
-    callback: Optional[Callable[..., Any]],
+    callback: Optional[Callable[..., CommandCallbackResult]],
     *args: Any,
     failure_message: str,
 ) -> ControlAck:
@@ -72,14 +125,27 @@ def callback_ack(
         _logger.exception("Dashboard control callback failed for %s", action)
         return error_ack(action, failure_message)
 
+    command_result = normalize_command_result(result, failure_message)
+    if command_result.success:
+        return success_ack(action)
+    return error_ack(action, command_result.error or failure_message)
+
+
+def normalize_command_result(
+    result: CommandCallbackResult,
+    failure_message: str,
+) -> CommandResult:
+    """Translate legacy callback returns into an explicit command result."""
+    if isinstance(result, CommandResult):
+        return result
     if isinstance(result, dict):
         success = bool(result.get("success", False))
         if success:
-            return success_ack(action)
-        return error_ack(action, str(result.get("error", failure_message)))
+            return CommandResult.ok()
+        return CommandResult.failed(str(result.get("error", failure_message)))
     if result is False:
-        return error_ack(action, failure_message)
-    return success_ack(action)
+        return CommandResult.failed(failure_message)
+    return CommandResult.ok()
 
 
 def handle_save_control(context: DashboardControlContext) -> ControlAck:

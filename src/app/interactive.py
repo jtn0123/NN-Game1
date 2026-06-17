@@ -14,6 +14,7 @@ import pygame
 
 from config import Config
 from src.ai.agent import Agent
+from src.app.dashboard_bindings import DashboardCallbacks, bind_dashboard_callbacks
 from src.app.game_factory import create_single_game
 from src.app.interactive_dashboard import InteractiveDashboardMixin
 from src.app.interactive_rendering import InteractiveRenderingMixin
@@ -226,22 +227,7 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
             self.web_dashboard = existing_dashboard
             self.web_dashboard.launcher_mode = False  # Switch out of launcher mode
 
-            # Setup callbacks
-            self.web_dashboard.on_pause_callback = self._toggle_pause
-            self.web_dashboard.on_save_callback = lambda: self._save_model(
-                f"{config.GAME_NAME}_web_save.pth", save_reason="manual"
-            )
-            self.web_dashboard.on_save_as_callback = self._save_model_as
-            self.web_dashboard.on_speed_callback = self._set_speed
-            self.web_dashboard.on_reset_callback = self._reset_episode
-            self.web_dashboard.on_start_fresh_callback = self._start_fresh
-            self.web_dashboard.on_load_model_callback = self._load_model
-            self.web_dashboard.on_config_change_callback = self._apply_config
-            self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
-            self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(
-                game, args
-            )
-            self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
+            self._bind_web_callbacks(args)
 
             # Send system info to dashboard
             self._send_system_info()
@@ -253,21 +239,7 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
             self.web_dashboard = WebDashboard(
                 config, port=args.port, host=getattr(args, "host", "127.0.0.1")
             )
-            self.web_dashboard.on_pause_callback = self._toggle_pause
-            self.web_dashboard.on_save_callback = lambda: self._save_model(
-                f"{config.GAME_NAME}_web_save.pth", save_reason="manual"
-            )
-            self.web_dashboard.on_save_as_callback = self._save_model_as
-            self.web_dashboard.on_speed_callback = self._set_speed
-            self.web_dashboard.on_reset_callback = self._reset_episode
-            self.web_dashboard.on_start_fresh_callback = self._start_fresh
-            self.web_dashboard.on_load_model_callback = self._load_model
-            self.web_dashboard.on_config_change_callback = self._apply_config
-            self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
-            self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(
-                game, args
-            )
-            self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
+            self._bind_web_callbacks(args)
             self.web_dashboard.start()
 
             # Show URL prominently
@@ -298,6 +270,29 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
             explicit_path,
             state_size=state_size,
             action_size=action_size,
+        )
+
+    def _bind_web_callbacks(self, args: Any) -> None:
+        """Bind runtime commands to the web dashboard."""
+        if not self.web_dashboard:
+            return
+        bind_dashboard_callbacks(
+            self.web_dashboard,
+            DashboardCallbacks(
+                pause=self._toggle_pause,
+                save=lambda: self._save_model(
+                    f"{self.config.GAME_NAME}_web_save.pth", save_reason="manual"
+                ),
+                save_as=self._save_model_as,
+                speed=self._set_speed,
+                reset=self._reset_episode,
+                start_fresh=self._start_fresh,
+                load_model=self._load_model,
+                config_change=self._apply_config,
+                performance_mode=self._set_performance_mode,
+                restart_with_game=lambda game: restart_with_game(game, args),
+                save_and_quit=self._save_and_quit,
+            ),
         )
 
     def _toggle_pause(self) -> None:

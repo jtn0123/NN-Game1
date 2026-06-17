@@ -104,8 +104,30 @@ async function main() {
     await page.locator('[data-action="show-load-modal"]').first().click();
     await expect(page.locator('#load-modal')).toHaveClass(/visible/);
     await expect(page.locator('#model-list')).not.toContainText('Failed to load models');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#load-modal')).not.toHaveClass(/visible/);
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => document.activeElement?.dataset?.action)).toBe('show-load-modal');
+
+    await page.locator('[data-action="show-load-modal"]').first().click();
+    await expect(page.locator('#load-modal')).toHaveClass(/visible/);
     await page.locator('[data-action="hide-load-modal"]').click();
     await expect(page.locator('#load-modal')).not.toHaveClass(/visible/);
+
+    await page.locator('[data-action="start-fresh"]').click();
+    await expect(page.locator('.action-dialog')).toContainText('Start Fresh Training');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#console-output')).toContainText('Fresh start cancelled', {
+      timeout: 5000,
+    });
+
+    await page.locator('[data-action="start-fresh"]').click();
+    await page.getByRole('button', { name: 'Skip save' }).click();
+    await expect(page.locator('.action-dialog')).toContainText('Confirm Fresh Start');
+    await page.locator('.action-dialog').getByRole('button', { name: 'Start fresh' }).click();
+    await expect(page.locator('#console-output')).toContainText('Starting fresh training', {
+      timeout: 5000,
+    });
 
     await page.locator('[data-action="set-performance-mode"][data-mode="turbo"]').click();
     await expect(page.locator('#console-output')).toContainText('Performance mode: Turbo', {
@@ -119,6 +141,10 @@ async function main() {
       timeout: 5000,
     });
 
+    await expect(page.locator('#game-select')).toHaveValue('breakout');
+    await page.locator('#game-select').selectOption('snake');
+    await expect(page.locator('.action-dialog')).toContainText('Switch to SNAKE?');
+    await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.locator('#game-select')).toHaveValue('breakout');
 
     const relevantHttpFailures = httpFailures.filter((entry) => !entry.endsWith('/favicon.ico'));

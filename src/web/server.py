@@ -26,7 +26,8 @@ import os
 import secrets
 import socket
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 from urllib.parse import urlencode
 
 import numpy as np
@@ -35,13 +36,23 @@ DASHBOARD_CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
     "connect-src 'self' ws: wss:; "
     "img-src 'self' data:; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.socket.io; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com data:; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "font-src 'self' data:; "
     "object-src 'none'; "
     "base-uri 'self'; "
     "frame-ancestors 'none'"
 )
+DASHBOARD_SESSION_COOKIE = "nn_game_dashboard_session"
+MUTATING_CONTROL_ACTIONS = {
+    "clear_logs",
+    "delete_model",
+    "go_to_launcher",
+    "restart_with_game",
+    "save",
+    "save_and_quit",
+    "start_fresh",
+}
 
 try:
     # Suppress werkzeug logging BEFORE importing Flask
@@ -60,10 +71,9 @@ except ImportError:
     print("Install with: pip install flask flask-socketio eventlet")
 
 from config import Config
-from src.app.model_paths import model_id, model_search_dirs
+from src.app.model_paths import model_search_dirs
 from src.utils.logger import get_logger
 from src.web import socket_controls
-from src.web.contracts import ControlAck
 from src.web.json_utils import make_json_safe
 from src.web.metrics_publisher import (
     LayerAnalysisData,
@@ -84,6 +94,7 @@ _logger = get_logger(__name__)
 __all__ = [
     "FLASK_AVAILABLE",
     "DASHBOARD_CONTENT_SECURITY_POLICY",
+    "DASHBOARD_SESSION_COOKIE",
     "WebDashboard",
     "create_web_templates",
     "MetricsPublisher",
@@ -146,9 +157,15 @@ class WebDashboard:
         self.host = host
         self.launcher_mode = launcher_mode
         self.access_token = os.environ.get("NN_GAME_DASHBOARD_TOKEN") or secrets.token_urlsafe(24)
+        self._control_cooldown_seconds = 0.25
+        self._control_timestamps: Dict[Tuple[str, str], float] = {}
         self.model_service = ModelService(self._model_search_dirs())
-        self.on_game_selected_callback: Optional[Callable[[str, str], None]] = None  # (game, mode)
-        self.on_restart_with_game_callback: Optional[Callable[[str], None]] = None
+        self.on_game_selected_callback: Optional[
+            Callable[[str, str], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_restart_with_game_callback: Optional[
+            Callable[[str], socket_controls.CommandCallbackResult]
+        ] = None
 
         # Metrics publisher
         self.publisher = MetricsPublisher()
@@ -179,16 +196,30 @@ class WebDashboard:
         self._running = False
 
         # Control callbacks
-        self.on_pause_callback: Optional[Callable[[], None]] = None
-        self.on_save_callback: Optional[Callable[[], None]] = None
-        self.on_save_as_callback: Optional[Callable[[str], None]] = None
-        self.on_speed_callback: Optional[Callable[[float], None]] = None
-        self.on_reset_callback: Optional[Callable[[], None]] = None
-        self.on_start_fresh_callback: Optional[Callable[[], None]] = None
-        self.on_load_model_callback: Optional[Callable[[str], None]] = None
-        self.on_config_change_callback: Optional[Callable[[Dict[str, Any]], None]] = None
-        self.on_performance_mode_callback: Optional[Callable[[str], None]] = None
-        self.on_save_and_quit_callback: Optional[Callable[[], None]] = None
+        self.on_pause_callback: Optional[Callable[[], socket_controls.CommandCallbackResult]] = None
+        self.on_save_callback: Optional[Callable[[], socket_controls.CommandCallbackResult]] = None
+        self.on_save_as_callback: Optional[
+            Callable[[str], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_speed_callback: Optional[
+            Callable[[float], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_reset_callback: Optional[Callable[[], socket_controls.CommandCallbackResult]] = None
+        self.on_start_fresh_callback: Optional[
+            Callable[[], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_load_model_callback: Optional[
+            Callable[[str], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_config_change_callback: Optional[
+            Callable[[Dict[str, Any]], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_performance_mode_callback: Optional[
+            Callable[[str], socket_controls.CommandCallbackResult]
+        ] = None
+        self.on_save_and_quit_callback: Optional[
+            Callable[[], socket_controls.CommandCallbackResult]
+        ] = None
 
     def _is_authorized_token(self, token: Optional[str]) -> bool:
         """Validate a dashboard mutation token."""
@@ -196,11 +227,50 @@ class WebDashboard:
 
     def _is_authorized_request(self) -> bool:
         """Validate mutating HTTP requests from the served dashboard."""
-        token = request.headers.get("X-Dashboard-Token") or request.args.get("token")
+        token = request.headers.get("X-Dashboard-Token") or request.cookies.get(
+            DASHBOARD_SESSION_COOKIE
+        )
         return self._is_authorized_token(token)
 
+    def _is_authorized_bootstrap_request(self) -> bool:
+        """Validate the one-time URL token used to set the dashboard session cookie."""
+        return self._is_authorized_token(request.args.get("token"))
+
+    def _set_session_cookie(self, response: Any) -> Any:
+        """Attach the HttpOnly dashboard session cookie to a response."""
+        response.set_cookie(
+            DASHBOARD_SESSION_COOKIE,
+            self.access_token,
+            httponly=True,
+            samesite="Strict",
+            secure=False,
+            path="/",
+        )
+        return response
+
+    def _is_authorized_socket_token(self, token: Optional[str]) -> bool:
+        """Validate a socket token or same-origin dashboard session cookie."""
+        return self._is_authorized_token(token) or self._is_authorized_token(
+            request.cookies.get(DASHBOARD_SESSION_COOKIE)
+        )
+
+    def _control_retry_after(self, action: str) -> Optional[float]:
+        """Return retry seconds when a destructive control is repeated too quickly."""
+        if action not in MUTATING_CONTROL_ACTIONS:
+            return None
+
+        now = time.monotonic()
+        key = (self.access_token, action)
+        previous = self._control_timestamps.get(key)
+        if previous is not None:
+            elapsed = now - previous
+            if elapsed < self._control_cooldown_seconds:
+                return self._control_cooldown_seconds - elapsed
+        self._control_timestamps[key] = now
+        return None
+
     def dashboard_url(self) -> str:
-        """Return the tokenized URL needed to open the dashboard page."""
+        """Return the one-time token URL needed to bootstrap the dashboard cookie."""
         display_host = self.host
         if display_host in {"0.0.0.0", "::"}:
             display_host = "127.0.0.1"
@@ -208,7 +278,7 @@ class WebDashboard:
         return f"http://{display_host}:{self.port}/?{query}"
 
     def dashboard_network_url(self) -> str:
-        """Return a best-effort LAN URL for dashboards bound to all interfaces."""
+        """Return a best-effort LAN bootstrap URL for wildcard dashboard bindings."""
         display_host = self._network_host()
         query = urlencode({"token": self.access_token})
         return f"http://{display_host}:{self.port}/?{query}"
@@ -231,96 +301,17 @@ class WebDashboard:
         """Return allowed model directories as (directory, source) pairs."""
         return model_search_dirs(self.config)
 
-    @staticmethod
-    def _model_id(source: str, filename: str) -> str:
-        """Create a browser-safe model identifier without exposing local paths."""
-        return model_id(source, filename)
-
     def _resolve_model_ref(self, model_ref: str) -> Optional[str]:
         """Resolve a model id, or a legacy absolute path, to an allowed .pth file."""
         return self.model_service.resolve(model_ref)
 
-    @staticmethod
-    def _success_ack(action: str) -> ControlAck:
-        return socket_controls.success_ack(action)
-
-    @staticmethod
-    def _error_ack(action: str, error: str) -> ControlAck:
-        return socket_controls.error_ack(action, error)
-
-    @staticmethod
-    def _unauthorized_ack() -> ControlAck:
-        return socket_controls.unauthorized_ack()
-
-    def _callback_ack(
-        self,
-        action: str,
-        callback: Optional[Callable[..., Any]],
-        *args: Any,
-        failure_message: str,
-    ) -> ControlAck:
-        return socket_controls.callback_ack(
-            action,
-            callback,
-            *args,
-            failure_message=failure_message,
-        )
-
-    def _handle_save_control(self) -> ControlAck:
-        return socket_controls.handle_save_control(self)
-
-    def _handle_save_as_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_save_as_control(self, data)
-
-    def _handle_start_fresh_control(self) -> ControlAck:
-        return socket_controls.handle_start_fresh_control(self, emit)
-
-    def _handle_speed_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_speed_control(self, data)
-
-    def _handle_config_change_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_config_change_control(self, data)
-
-    def _handle_performance_mode_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_performance_mode_control(self, data)
-
-    def _handle_save_and_quit_control(self) -> ControlAck:
-        return socket_controls.handle_save_and_quit_control(self)
-
-    def _handle_select_game_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_select_game_control(self, data, emit)
-
-    def _handle_load_model_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_load_model_control(self, data)
-
-    def _handle_restart_with_game_control(self, data: Dict[str, Any]) -> ControlAck:
-        return socket_controls.handle_restart_with_game_control(self, data, emit)
-
-    @staticmethod
-    def _is_known_game(game_name: Any) -> bool:
-        return socket_controls.is_known_game(game_name)
-
-    @staticmethod
-    def _valid_performance_modes() -> set[str]:
-        return socket_controls.valid_performance_modes()
-
-    @staticmethod
-    def _parse_speed(value: Any) -> Optional[float]:
-        return socket_controls.parse_speed(value)
-
-    def _normalize_config_change(
-        self, config_data: Dict[str, Any]
-    ) -> Tuple[bool, Dict[str, Any], str]:
-        return socket_controls.normalize_config_change(self.config, config_data)
-
-    def _handle_go_to_launcher_control(self) -> ControlAck:
-        return socket_controls.handle_go_to_launcher_control(self, emit)
-
     def _register_routes(self) -> None:
         """Register Flask routes."""
-        from src.web.routes import register_dashboard_routes
+        from src.web.routes import DashboardRouteContext, register_dashboard_routes
 
-        register_dashboard_routes(self, DASHBOARD_CONTENT_SECURITY_POLICY)
+        register_dashboard_routes(
+            cast(DashboardRouteContext, self), DASHBOARD_CONTENT_SECURITY_POLICY
+        )
 
     def _register_socket_events(self) -> None:
         """Register SocketIO events."""
@@ -328,7 +319,7 @@ class WebDashboard:
         @self.socketio.on("connect")
         def handle_connect(auth=None):
             auth = auth or {}
-            if not self._is_authorized_token(auth.get("token")):
+            if not self._is_authorized_socket_token(auth.get("token")):
                 return False
             # Send current state on connect (convert NumPy types for JSON serialization)
             emit(
@@ -352,18 +343,29 @@ class WebDashboard:
         @self.socketio.on("control")
         def handle_control(data):
             data = data if isinstance(data, dict) else {}
-            if not self._is_authorized_token(data.get("token")):
+            if not self._is_authorized_socket_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
-                return self._unauthorized_ack()
+                return socket_controls.unauthorized_ack()
+
+            action = data.get("action")
+            if isinstance(action, str):
+                retry_after = self._control_retry_after(action)
+                if retry_after is not None:
+                    emit("control_error", {"error": "Too many requests"})
+                    return socket_controls.error_ack(action, "Too many requests")
 
             return socket_controls.dispatch_control(self, data, emit)
 
         @self.socketio.on("clear_logs")
         def handle_clear_logs(data=None):
             data = data or {}
-            if not self._is_authorized_token(data.get("token")):
+            if not self._is_authorized_socket_token(data.get("token")):
                 emit("control_error", {"error": "Unauthorized"})
-                return self._unauthorized_ack()
+                return socket_controls.unauthorized_ack()
+            retry_after = self._control_retry_after("clear_logs")
+            if retry_after is not None:
+                emit("control_error", {"error": "Too many requests"})
+                return socket_controls.error_ack("clear_logs", "Too many requests")
             return socket_controls.clear_logs(self, emit)
 
         # Auto-emit on metric updates

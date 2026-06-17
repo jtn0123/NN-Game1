@@ -11,6 +11,7 @@ These tests verify:
 
 import os
 import sys
+from collections import deque
 
 import numpy as np
 import pytest
@@ -148,18 +149,34 @@ class TestSnakeCollisions:
 
     def test_self_collision_game_over(self, game):
         """Hitting self should end game."""
-        # Create a scenario where snake can hit itself
         game.snake.clear()
-        game.snake.append((10, 10))  # Head
-        game.snake.append((10, 9))
-        game.snake.append((10, 8))
-        game.snake.append((9, 8))
-        game.snake.append((9, 9))
-        game.snake.append((9, 10))
-        game.direction = Snake.DOWN
+        game.snake.extend(
+            [
+                (10, 10),  # Head
+                (11, 10),  # Body directly below head
+                (11, 9),
+                (10, 9),
+            ]
+        )
+        game.direction = Snake.RIGHT
         _, reward, done, _ = game.step(Snake.DOWN)
-        # Should hit itself
-        assert done or not done  # May or may not hit depending on exact mechanics
+
+        assert done
+        assert game.game_over
+        assert reward == -10.0
+
+    def test_moving_into_vacated_tail_is_allowed(self, game):
+        """The snake may move into the current tail cell when no food is eaten."""
+        game.snake.clear()
+        game.snake.extend([(10, 10), (10, 9), (11, 9), (11, 10)])
+        game.direction = Snake.RIGHT
+        game.food_pos = (0, 0)
+
+        _, reward, done, _ = game.step(Snake.DOWN)
+
+        assert not done
+        assert game.snake[0] == (11, 10)
+        assert reward > -10.0
 
 
 class TestSnakeReset:
@@ -333,6 +350,16 @@ class TestStarvationTimeout:
             # If food was eaten, counter should be reset
             if game.score > initial_score:
                 assert game.steps_since_food == 0
+
+    def test_full_board_spawn_marks_win_state(self, game):
+        """Food spawning should report no cell when the snake fills the board."""
+        game.snake = deque(
+            (row, col) for row in range(Snake.GRID_SIZE) for col in range(Snake.GRID_SIZE)
+        )
+
+        game._spawn_food()
+
+        assert game.food_pos == (-1, -1)
 
 
 if __name__ == "__main__":

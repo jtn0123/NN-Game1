@@ -4,17 +4,21 @@
     }
 
     function withDashboardToken(options = {}, token = '') {
+        const headers = { ...(options.headers || {}) };
+        if (token) {
+            headers['X-Dashboard-Token'] = token;
+        }
         return {
             ...options,
-            headers: {
-                ...(options.headers || {}),
-                'X-Dashboard-Token': token,
-            },
+            headers,
         };
     }
 
     function authorizedControlPayload(payload = {}, token = '') {
         if (!payload || typeof payload !== 'object') {
+            return payload;
+        }
+        if (!token) {
             return payload;
         }
         return { ...payload, token };
@@ -186,6 +190,89 @@
         };
     }
 
+    function chartRanges(labels, scoresLength, visibleWindow) {
+        return {
+            autoScrollRange: scoresLength > visibleWindow
+                ? {
+                    min: Math.max(1, labels[Math.max(0, scoresLength - visibleWindow)]),
+                    max: labels[scoresLength - 1],
+                }
+                : null,
+            showAllRange: scoresLength > 0 && scoresLength <= visibleWindow
+                ? { min: Math.max(1, labels[0]), max: undefined }
+                : null,
+        };
+    }
+
+    function appendChartUpdateModel(previous = {}, history = {}, currentEpisode = 0, options = {}) {
+        const previousScores = Array.isArray(previous?.scores) ? previous.scores : [];
+        const previousLabels = Array.isArray(previous?.labels) ? previous.labels : [];
+        const scores = Array.isArray(history?.scores) ? history.scores : [];
+        if (
+            previousScores.length === 0
+            || previousLabels.length !== previousScores.length
+            || scores.length !== previousScores.length + 1
+        ) {
+            return null;
+        }
+
+        const episodeNumber = Number(currentEpisode);
+        const nextLabel = Number.isFinite(episodeNumber) ? episodeNumber : previousLabels.at(-1) + 1;
+        if (!Number.isFinite(nextLabel) || nextLabel <= previousLabels.at(-1)) {
+            return null;
+        }
+
+        const visibleWindow = Math.max(
+            1,
+            Number.isFinite(options.visibleWindow) ? Math.floor(options.visibleWindow) : 200,
+        );
+        const averageWindow = Math.max(
+            1,
+            Number.isFinite(options.averageWindow) ? Math.floor(options.averageWindow) : 20,
+        );
+        const losses = Array.isArray(history?.losses) ? history.losses : [];
+        const qValues = Array.isArray(history?.q_values) ? history.q_values : [];
+        const nextScores = previousScores.concat(scores.at(-1));
+        const nextLosses = (Array.isArray(previous?.losses) ? previous.losses : []).slice();
+        if (losses.length === scores.length) {
+            nextLosses.push(Math.max(Number(losses.at(-1)) || 0, 0.0001));
+        }
+        const previousQValues = Array.isArray(previous?.q_values)
+            ? previous.q_values
+            : (Array.isArray(previous?.qValues) ? previous.qValues : []);
+        const nextQValues = previousQValues.slice();
+        if (qValues.length === scores.length) {
+            nextQValues.push(qValues.at(-1));
+        }
+        const nextLabels = previousLabels.concat(nextLabel);
+        const averageScores = Array.isArray(previous?.averageScores)
+            ? previous.averageScores.slice()
+            : calculateRunningAverage(previousScores, averageWindow);
+        const averageSlice = nextScores.slice(-averageWindow);
+        const nextAverage = averageSlice.reduce(
+            (sum, value) => sum + (Number(value) || 0),
+            0,
+        ) / averageSlice.length;
+        averageScores.push(nextAverage);
+        const previousBestAverageScores = Array.isArray(previous?.bestAverageScores)
+            ? previous.bestAverageScores.slice()
+            : calculateRunningMax(averageScores.slice(0, -1));
+        const nextBestAverage = Math.max(previousBestAverageScores.at(-1) || -Infinity, nextAverage);
+        previousBestAverageScores.push(nextBestAverage);
+        const ranges = chartRanges(nextLabels, nextScores.length, visibleWindow);
+
+        return {
+            labels: nextLabels,
+            scores: nextScores,
+            losses: nextLosses,
+            qValues: nextQValues,
+            averageScores,
+            bestAverageScores: previousBestAverageScores,
+            autoScrollRange: ranges.autoScrollRange,
+            showAllRange: ranges.showAllRange,
+        };
+    }
+
     function modelId(model) {
         return model?.id || model?.path || '';
     }
@@ -215,6 +302,9 @@
             const loadWarning = isLoadable
                 ? ''
                 : `<span class="reason-badge error" title="${escapeHtmlAttribute(model?.load_error || 'Unreadable checkpoint')}">unreadable</span>`;
+            const legacyWarning = model?.requires_unsafe_load
+                ? `<span class="reason-badge warning" title="${escapeHtmlAttribute(model?.security_warning || 'Legacy checkpoint requires compatibility fallback')}">legacy</span>`
+                : '';
             const reasonBadge = reason
                 ? `<span class="reason-badge ${escapeHtmlAttribute(reason)}">${escapeHtml(reason)}</span>`
                 : '';
@@ -227,6 +317,7 @@
                                     📁 ${escapeHtml(model?.name || modelDisplayName(modelRef))}
                                     ${reasonBadge}
                                     ${loadWarning}
+                                    ${legacyWarning}
                                 </div>
                                 <span class="model-size">${formatMegabytes(model?.size)}</span>
                             </div>
@@ -273,6 +364,7 @@
         calculateRunningAverage,
         calculateRunningMax,
         buildChartUpdateModel,
+        appendChartUpdateModel,
         modelId,
         modelDisplayName,
         modelListHtml,

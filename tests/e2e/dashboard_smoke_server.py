@@ -68,9 +68,7 @@ def main() -> int:
             dashboard.publisher.set_paused(not dashboard.publisher.state.is_paused) or True
         )
         dashboard.on_reset_callback = lambda: dashboard.log("E2E reset requested", "action") or True
-        dashboard.on_start_fresh_callback = (
-            lambda: dashboard.publisher.reset_training_state() or True
-        )
+        dashboard.on_start_fresh_callback = lambda: dashboard.publisher.reset_all_state() or True
         dashboard.on_config_change_callback = (
             lambda config: dashboard.log(f"E2E config changed: {config}", "action") or True
         )

@@ -39,6 +39,10 @@ __all__ = [
     "TrainingState",
 ]
 
+SnapshotCallback = Callable[[Dict[str, Any]], None]
+LogCallback = Callable[[LogMessage], None]
+SaveCallback = Callable[[Dict[str, Any]], None]
+
 
 class MetricsPublisher:
     """
@@ -89,9 +93,9 @@ class MetricsPublisher:
         self._callback_lock = threading.Lock()
 
         # Callbacks
-        self._on_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
-        self._on_log_callbacks: List[Callable[[LogMessage], None]] = []
-        self._on_save_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._on_update_callbacks: List[SnapshotCallback] = []
+        self._on_log_callbacks: List[LogCallback] = []
+        self._on_save_callbacks: List[SaveCallback] = []
 
         # Screenshot storage
         self._screenshot_data: Optional[str] = None
@@ -108,7 +112,7 @@ class MetricsPublisher:
 
         # Neural network visualization data
         self._nn_data = NNVisualizationData()
-        self._on_nn_update_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._on_nn_update_callbacks: List[SnapshotCallback] = []
         self._last_nn_update_time: float = 0.0
         self._nn_update_interval: float = 0.1  # 10 FPS throttle (adaptive)
         self._adaptive_update_enabled: bool = True  # Enable adaptive updates
@@ -118,8 +122,8 @@ class MetricsPublisher:
             {}
         )  # (layer, neuron) -> data
         self._layer_analysis_data: Dict[int, LayerAnalysisData] = {}  # layer_idx -> data
-        self._on_neuron_select_callbacks: List[Callable[[Dict[str, Any]], None]] = []
-        self._on_layer_analysis_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._on_neuron_select_callbacks: List[SnapshotCallback] = []
+        self._on_layer_analysis_callbacks: List[SnapshotCallback] = []
 
     def _calculate_adaptive_update_rate(self, steps_per_sec: float) -> None:
         """
@@ -296,7 +300,7 @@ class MetricsPublisher:
         for callback in callbacks:
             callback(log_entry)
 
-    def set_screenshot(self, surface) -> None:
+    def set_screenshot(self, surface: Any) -> None:
         """Store a screenshot from pygame surface."""
         try:
             import pygame
@@ -363,12 +367,12 @@ class MetricsPublisher:
         logs = list(self.console_logs)[-limit:]
         return [log.to_dict() for log in logs]
 
-    def on_update(self, callback) -> None:
+    def on_update(self, callback: SnapshotCallback) -> None:
         """Register a callback for metric updates."""
         with self._callback_lock:
             self._on_update_callbacks.append(callback)
 
-    def on_log(self, callback) -> None:
+    def on_log(self, callback: LogCallback) -> None:
         """Register a callback for log messages."""
         with self._callback_lock:
             self._on_log_callbacks.append(callback)
@@ -457,7 +461,7 @@ class MetricsPublisher:
             return f"{int(seconds // 60)}m ago"
         return f"{int(seconds // 3600)}h {int((seconds % 3600) // 60)}m ago"
 
-    def on_save(self, callback) -> None:
+    def on_save(self, callback: SaveCallback) -> None:
         """Register a callback for save events."""
         with self._callback_lock:
             self._on_save_callbacks.append(callback)
@@ -526,7 +530,7 @@ class MetricsPublisher:
         """
         return self._nn_data.to_dict(include_weights=include_weights)
 
-    def on_nn_update(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+    def on_nn_update(self, callback: SnapshotCallback) -> None:
         """Register a callback for neural network visualization updates."""
         with self._callback_lock:
             self._on_nn_update_callbacks.append(callback)
@@ -722,12 +726,12 @@ class MetricsPublisher:
             for data in sorted(self._layer_analysis_data.values(), key=lambda x: x.layer_idx)
         ]
 
-    def on_neuron_select(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+    def on_neuron_select(self, callback: SnapshotCallback) -> None:
         """Phase 2: Register callback for neuron selection."""
         with self._callback_lock:
             self._on_neuron_select_callbacks.append(callback)
 
-    def on_layer_analysis(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+    def on_layer_analysis(self, callback: SnapshotCallback) -> None:
         """Phase 2: Register callback for layer analysis updates."""
         with self._callback_lock:
             self._on_layer_analysis_callbacks.append(callback)

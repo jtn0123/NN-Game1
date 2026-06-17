@@ -6,9 +6,13 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from functools import lru_cache
+from inspect import signature
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
+
+NN_ANALYSIS_INTERVAL = 100
 
 
 @dataclass
@@ -131,7 +135,13 @@ def should_emit_episode_metrics(
     return interval > 0 and episode % interval == 0
 
 
-def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:
+def build_nn_snapshot(
+    agent: Any,
+    game: Any,
+    state: np.ndarray,
+    *,
+    include_analysis: bool = True,
+) -> NNSnapshot:
     """Build sampled and full neural-network dashboard payloads once."""
     agent.policy_net.capture_activations = True
     try:
@@ -147,7 +157,8 @@ def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:
     analysis_activations: Dict[str, List[float]] = {}
     for key, activation in raw_activations.items():
         current = activation[0] if len(activation.shape) > 1 else activation
-        analysis_activations[key] = current.tolist()
+        if include_analysis:
+            analysis_activations[key] = current.tolist()
         activations[key] = current[: min(max_neurons, len(current))].tolist()
 
     sampled_weights: List[List[List[float]]] = []
@@ -157,7 +168,8 @@ def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:
             continue
         sampled = weight[: min(max_neurons, weight.shape[0]), : min(max_neurons, weight.shape[1])]
         sampled_weights.append(sampled.tolist())
-        analysis_weights.append(weight.tolist())
+        if include_analysis:
+            analysis_weights.append(weight.tolist())
 
     action_labels = ["LEFT", "STAY", "RIGHT"]
     if hasattr(game, "get_action_labels"):
@@ -173,6 +185,41 @@ def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:
         analysis_activations=analysis_activations,
         analysis_weights=analysis_weights,
     )
+
+
+def should_include_nn_analysis(step: int, interval: int = NN_ANALYSIS_INTERVAL) -> bool:
+    """Return whether a live NN update should include full inspection payloads."""
+    if interval <= 0:
+        return True
+    return step <= 0 or step % interval == 0
+
+
+@lru_cache(maxsize=32)
+def _snapshot_builder_accepts_include_analysis(
+    snapshot_builder: Callable[..., NNSnapshot],
+) -> bool:
+    return "include_analysis" in signature(snapshot_builder).parameters
+
+
+def build_runtime_nn_snapshot(
+    agent: Any,
+    game: Any,
+    state: np.ndarray,
+    *,
+    step: int,
+    snapshot_builder: Callable[..., NNSnapshot] = build_nn_snapshot,
+    analysis_interval: int = NN_ANALYSIS_INTERVAL,
+) -> NNSnapshot:
+    """Build a dashboard NN snapshot, including full analysis data only periodically."""
+    include_analysis = should_include_nn_analysis(step, analysis_interval)
+    try:
+        accepts_include_analysis = _snapshot_builder_accepts_include_analysis(snapshot_builder)
+    except (TypeError, ValueError):
+        accepts_include_analysis = False
+
+    if accepts_include_analysis:
+        return snapshot_builder(agent, game, state, include_analysis=include_analysis)
+    return snapshot_builder(agent, game, state)
 
 
 def emit_nn_snapshot_to_dashboard(
@@ -192,6 +239,6 @@ def emit_nn_snapshot_to_dashboard(
         step=step,
         action_labels=snapshot.action_labels,
         input_state=snapshot.input_state,
-        analysis_activations=snapshot.analysis_activations,
-        analysis_weights=snapshot.analysis_weights,
+        analysis_activations=snapshot.analysis_activations or None,
+        analysis_weights=snapshot.analysis_weights or None,
     )

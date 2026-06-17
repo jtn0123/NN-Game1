@@ -1,4 +1,4 @@
-.PHONY: setup test coverage typecheck typecheck-audit dashboard-test dashboard-smoke perf-smoke format format-check lint audit size-check build build-if-available release-config hygiene check verify
+.PHONY: setup test coverage typecheck typecheck-audit dashboard-test dashboard-smoke perf-smoke benchmark-quick format format-check lint audit deps-check deps-refresh clean size-check build build-if-available release-config hygiene check verify
 
 PYTHON ?= python
 
@@ -9,7 +9,7 @@ test:
 	$(PYTHON) -m pytest -q
 
 coverage:
-	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=75 -q
+	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=80 -q
 
 typecheck:
 	$(PYTHON) -m mypy --config-file mypy.ini --follow-imports=silent src main.py config.py
@@ -26,6 +26,9 @@ dashboard-smoke:
 perf-smoke:
 	$(PYTHON) -m pytest -q tests/test_performance_budgets.py
 
+benchmark-quick:
+	$(PYTHON) benchmark.py --quick --config turbo --duration 1 --quiet --save .benchmark-quick.json
+
 format:
 	$(PYTHON) -m black main.py config.py src tests
 
@@ -38,7 +41,20 @@ lint:
 audit:
 	# CVE-2025-3000 currently has no patched torch release on PyPI.
 	# Keep auditing all other advisories and remove this once torch ships a fix.
+	$(PYTHON) .github/scripts/check_audit_waivers.py
 	$(PYTHON) .github/scripts/run_dependency_audit.py -r requirements.txt --ignore-vuln CVE-2025-3000
+
+deps-check:
+	$(PYTHON) .github/scripts/check_dependency_files.py
+	npm audit --audit-level=moderate
+	$(MAKE) audit
+
+deps-refresh:
+	$(PYTHON) -m pip install -e ".[web,test,dev]"
+	npm install
+
+clean:
+	rm -rf build dist *.egg-info .coverage .pytest_cache .mypy_cache .ruff_cache htmlcov playwright-report test-results .benchmark-quick.json
 
 build:
 	$(PYTHON) -m build
@@ -57,7 +73,11 @@ hygiene:
 	$(PYTHON) .github/scripts/check_repo_hygiene.py
 
 size-check:
-	$(PYTHON) .github/scripts/check_file_size.py --max-lines 1000
+	$(PYTHON) .github/scripts/check_file_size.py --max-lines 1000 \
+		--budget "src/app/*.py=950" \
+		--budget "src/game/*.py=950" \
+		--budget "src/web/static/*.js=950" \
+		--budget "src/web/static/*.css=990"
 
 check: format-check lint typecheck dashboard-test perf-smoke coverage
 

@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Protocol, Tuple
+from typing import Any, List, Protocol, Tuple, cast
 
-from flask import jsonify, make_response, render_template, request
+from flask import jsonify, make_response, redirect, render_template, request, url_for
 from werkzeug import Response
 
 from src.app.performance_modes import performance_mode_payload
 from src.utils.logger import get_logger
-from src.web.contracts import DashboardConfigPayload, GameInfoPayload, GamesResponse, ModelsResponse
+from src.web.contracts import (
+    DashboardConfigPayload,
+    GameInfoPayload,
+    GamesResponse,
+    ModelPayload,
+    ModelsResponse,
+)
 from src.web.game_stats_service import build_game_stats
 from src.web.json_utils import make_json_safe
 
@@ -18,18 +24,104 @@ _logger = get_logger(__name__)
 RouteResponse = Response | Tuple[Response, int]
 
 
+class DashboardConfigContext(Protocol):
+    """Config fields read by dashboard routes."""
+
+    BATCH_SIZE: int
+    DEVICE: Any
+    EPSILON_DECAY: float
+    EPSILON_END: float
+    EPSILON_START: float
+    GAMMA: float
+    GAME_NAME: str
+    GRAD_CLIP: float
+    GRADIENT_STEPS: int
+    HIDDEN_LAYERS: Any
+    LEARN_EVERY: int
+    LEARNING_RATE: float
+    MEMORY_SIZE: int
+    TARGET_UPDATE: int
+
+
+class DashboardModelServiceContext(Protocol):
+    """Model-service methods used by dashboard routes."""
+
+    def list_models(self) -> List[dict[str, Any]]:
+        """Return browser-safe model metadata."""
+        ...
+
+    def delete(self, model_id: str) -> Tuple[bool, str | None, str | None]:
+        """Delete a model by opaque id."""
+        ...
+
+
+class DashboardPublisherStateContext(Protocol):
+    """Publisher state fields read directly by route handlers."""
+
+    headless: bool
+    num_envs: int
+
+
+class DashboardPublisherContext(Protocol):
+    """Publisher methods used by dashboard routes."""
+
+    DEFAULT_SNAPSHOT_HISTORY_LIMIT: int
+    history_length: int
+    state: DashboardPublisherStateContext
+
+    def get_snapshot(self, history_limit: int) -> dict[str, Any]:
+        """Return a bounded dashboard snapshot."""
+        ...
+
+    def get_screenshot(self) -> str | None:
+        """Return an encoded screenshot, if available."""
+        ...
+
+    def log(self, message: str, level: str = "info", data: dict[str, Any] | None = None) -> None:
+        """Publish a dashboard log entry."""
+        ...
+
+    def get_save_status(self) -> dict[str, Any]:
+        """Return the latest save status."""
+        ...
+
+    def get_neuron_details(self, layer_idx: int, neuron_idx: int) -> dict[str, Any]:
+        """Return neuron inspection details."""
+        ...
+
+    def get_layer_analysis(self, layer_idx: int) -> dict[str, Any]:
+        """Return layer analysis details."""
+        ...
+
+    def get_all_layer_analysis(self) -> List[dict[str, Any]]:
+        """Return all layer analysis details."""
+        ...
+
+
 class DashboardRouteContext(Protocol):
     """Dashboard attributes consumed by Flask route registration."""
 
     app: Any
     access_token: str
-    config: Any
+    config: DashboardConfigContext
     launcher_mode: bool
-    model_service: Any
-    publisher: Any
+    model_service: DashboardModelServiceContext
+    publisher: DashboardPublisherContext
 
     def _is_authorized_request(self) -> bool:
         """Return whether the current Flask request is authorized."""
+        ...
+
+    def _is_authorized_bootstrap_request(self) -> bool:
+        """Return whether the current request has a valid bootstrap URL token."""
+        ...
+
+    def _set_session_cookie(self, response: Response) -> Response:
+        """Attach the dashboard session cookie to a response."""
+        ...
+
+    def _control_retry_after(self, action: str) -> float | None:
+        """Return retry seconds when a mutating action is throttled."""
         ...
 
 
@@ -81,6 +173,21 @@ def register_dashboard_routes(
 
     @dashboard.app.route("/")
     def index() -> Response:
+        if request.args.get("token"):
+            if not dashboard._is_authorized_bootstrap_request():
+                response = make_response("Dashboard token required", 401)
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                return response
+
+            response = make_response(redirect(url_for("index"), code=303))
+            dashboard._set_session_cookie(response)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
         if not dashboard._is_authorized_request():
             response = make_response("Dashboard token required", 401)
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -89,17 +196,9 @@ def register_dashboard_routes(
             return response
 
         if dashboard.launcher_mode:
-            response = make_response(
-                render_template("launcher.html", access_token=dashboard.access_token)
-            )
+            response = make_response(render_template("launcher.html"))
         else:
-            response = make_response(
-                render_template(
-                    "dashboard.html",
-                    access_token=dashboard.access_token,
-                    control_token=dashboard.access_token,
-                )
-            )
+            response = make_response(render_template("dashboard.html"))
         # Prevent browser caching to ensure fresh content
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
@@ -188,7 +287,7 @@ def register_dashboard_routes(
         Searches both game-specific directory and legacy models directory.
         """
         payload: ModelsResponse = {
-            "models": dashboard.model_service.list_models(),
+            "models": cast(List[ModelPayload], dashboard.model_service.list_models()),
             "current_game": dashboard.config.GAME_NAME,
         }
         return jsonify(payload)
@@ -200,6 +299,9 @@ def register_dashboard_routes(
         Security: Validates that the path is within the model directory
         to prevent path traversal attacks.
         """
+        if dashboard._control_retry_after("delete_model") is not None:
+            return api_error("Too many requests", 429)
+
         try:
             success, filename, error = dashboard.model_service.delete(model_id)
             if not success:

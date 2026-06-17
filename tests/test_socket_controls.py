@@ -109,6 +109,16 @@ def test_callback_ack_translates_callback_results() -> None:
         lambda: {"success": False, "error": "bad result"},
         failure_message="failed",
     ) == {"success": False, "action": "save", "error": "bad result"}
+    assert socket_controls.callback_ack(
+        "save",
+        lambda: socket_controls.CommandResult.ok(),
+        failure_message="failed",
+    ) == {"success": True, "action": "save"}
+    assert socket_controls.callback_ack(
+        "save",
+        lambda: socket_controls.CommandResult.failed("blocked"),
+        failure_message="failed",
+    ) == {"success": False, "action": "save", "error": "blocked"}
     assert socket_controls.callback_ack("save", lambda: False, failure_message="failed") == {
         "success": False,
         "action": "save",

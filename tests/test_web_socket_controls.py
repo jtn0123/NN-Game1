@@ -91,6 +91,35 @@ class TestWebDashboardSocketControls:
         assert any(event["name"] == "training_reset" for event in client.get_received())
         client.disconnect()
 
+    def test_socket_repeated_destructive_control_is_throttled(self, web_dashboard):
+        """Repeated destructive Socket.IO controls should get a stable throttle ack."""
+        called = []
+        client = web_dashboard.socketio.test_client(
+            web_dashboard.app,
+            auth={"token": web_dashboard.access_token},
+        )
+        web_dashboard.on_save_callback = lambda: called.append("save")
+
+        first = client.emit(
+            "control",
+            {"action": "save", "token": web_dashboard.access_token},
+            callback=True,
+        )
+        second = client.emit(
+            "control",
+            {"action": "save", "token": web_dashboard.access_token},
+            callback=True,
+        )
+
+        assert first == {"success": True, "action": "save"}
+        assert second == {
+            "success": False,
+            "action": "save",
+            "error": "Too many requests",
+        }
+        assert called == ["save"]
+        client.disconnect()
+
     def test_socket_control_reports_failed_save_callback(self, web_dashboard):
         """Save ack should fail when the app save callback reports failure."""
         client = web_dashboard.socketio.test_client(
@@ -192,13 +221,15 @@ class TestWebDashboardSocketControls:
 
     def test_control_ack_helpers_have_stable_shapes(self, web_dashboard):
         """Control responses should keep a predictable browser contract."""
-        assert web_dashboard._success_ack("pause") == {"success": True, "action": "pause"}
-        assert web_dashboard._error_ack("save", "Save failed") == {
+        from src.web import socket_controls
+
+        assert socket_controls.success_ack("pause") == {"success": True, "action": "pause"}
+        assert socket_controls.error_ack("save", "Save failed") == {
             "success": False,
             "action": "save",
             "error": "Save failed",
         }
-        assert web_dashboard._unauthorized_ack() == {
+        assert socket_controls.unauthorized_ack() == {
             "success": False,
             "error": "Unauthorized",
         }

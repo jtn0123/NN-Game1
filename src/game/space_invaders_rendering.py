@@ -10,6 +10,16 @@ import pygame
 
 
 class SpaceInvadersRenderingMixin:
+    def _font(self: Any, size: int) -> pygame.font.Font:
+        """Return a cached pygame font for recurring render paths."""
+        font_cache = getattr(self, "_font_cache", None)
+        if font_cache is None:
+            font_cache = {}
+            self._font_cache = font_cache
+        if size not in font_cache:
+            font_cache[size] = pygame.font.Font(None, size)
+        return font_cache[size]
+
     def render(self: Any, screen: pygame.Surface) -> None:
         if self.headless:
             return
@@ -207,8 +217,8 @@ class SpaceInvadersRenderingMixin:
     def _draw_hud(self: Any, screen: pygame.Surface) -> None:
         """Draw heads-up display with retro style."""
         # Use a pixelated font effect
-        font = pygame.font.Font(None, 36)
-        small_font = pygame.font.Font(None, 28)
+        font = self._font(36)
+        small_font = self._font(28)
 
         # Score with glow (left side)
         score_text = f"SCORE: {self.score}"
@@ -257,7 +267,7 @@ class SpaceInvadersRenderingMixin:
 
         # Game over message
         if self.game_over:
-            big_font = pygame.font.Font(None, 72)
+            big_font = self._font(72)
             msg = "GAME OVER"
             color = (255, 50, 50)
 
@@ -276,7 +286,7 @@ class SpaceInvadersRenderingMixin:
             screen.blit(text, text_rect)
 
             # Final stats
-            score_font = pygame.font.Font(None, 36)
+            score_font = self._font(36)
             stats_y = self.height // 2 + 50
 
             final_score = f"Final Score: {self.score}"

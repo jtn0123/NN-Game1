@@ -905,15 +905,15 @@ function toggleNNPanel() {
 function closeNeuronInspection() {
     const panel = document.getElementById('neuron-inspection-panel');
     if (panel) {
-        panel.style.display = 'none';
-        panel.innerHTML = '';
+        panel.classList.add('is-hidden');
+        panel.replaceChildren();
     }
 }
 
 function closeLayerAnalysis() {
     const panel = document.getElementById('layer-analysis-panel');
     if (panel) {
-        panel.style.display = 'none';
-        panel.innerHTML = '';
+        panel.classList.add('is-hidden');
+        panel.replaceChildren();
     }
 }

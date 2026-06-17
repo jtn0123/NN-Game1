@@ -6,7 +6,7 @@ import tempfile
 import pytest
 import torch
 
-from src.utils.checkpoint_loader import load_checkpoint
+from src.utils.checkpoint_loader import load_checkpoint, load_checkpoint_with_status
 
 
 def test_load_checkpoint_uses_restricted_loader_by_default(tmp_path):
@@ -62,6 +62,33 @@ def test_load_checkpoint_allows_trusted_compatibility_fallback(monkeypatch):
 
         assert checkpoint == {"loaded": True}
         assert calls == [True, False]
+
+
+def test_load_checkpoint_with_status_reports_unsafe_fallback(monkeypatch, tmp_path):
+    """Model browsers can warn when a trusted legacy checkpoint needs fallback."""
+    path = tmp_path / "checkpoint.pth"
+    path.write_bytes(b"placeholder")
+    calls = []
+
+    def fake_load(filepath, map_location=None, weights_only=True):
+        calls.append(weights_only)
+        if weights_only:
+            raise ValueError("restricted load failed")
+        return {"loaded": True}
+
+    monkeypatch.setattr(torch, "load", fake_load)
+
+    with pytest.warns(RuntimeWarning, match="unrestricted checkpoint load"):
+        result = load_checkpoint_with_status(
+            str(path),
+            map_location="cpu",
+            trusted_dirs=[str(tmp_path)],
+            allow_unsafe_fallback=True,
+        )
+
+    assert result.checkpoint == {"loaded": True}
+    assert result.used_unsafe_fallback is True
+    assert calls == [True, False]
 
 
 def test_load_checkpoint_rejects_trusted_dir_symlink_to_outside(monkeypatch, tmp_path):

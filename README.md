@@ -4,7 +4,7 @@ A complete, educational implementation of a Deep Q-Learning (DQN) agent that lea
 
 **Supported Games:** 🎮 Breakout | 👾 Space Invaders | 🏓 Pong | 🐍 Snake | ☄️ Asteroids
 
-![Project Architecture](docs/architecture.png)
+[Architecture notes](docs/architecture.md) describe the current runtime surfaces, validation gates, and where to make common changes.
 
 ---
 
@@ -53,20 +53,26 @@ This project demonstrates **reinforcement learning** by training a neural networ
 
 ```
 NN-Game1/
-├── README.md                    # This file
-├── requirements.txt             # Python dependencies
-├── config.py                    # All hyperparameters & settings
-├── main.py                      # Entry point - run this!
+├── README.md                    # Project guide
+├── config.py                    # Runtime/config compatibility facade
+├── main.py                      # CLI entry point
+├── pyproject.toml               # Packaging, coverage, and tool config
+├── requirements.txt             # Python install compatibility
+├── constraints.txt              # Reproducible dependency pins
 │
 ├── src/
+│   ├── app/                     # CLI/runtime orchestration and dashboard binding
+│   ├── web/                     # Flask/Socket.IO dashboard, routes, static JS/CSS
+│   ├── utils/                   # Logging, checkpoint loading, shared helpers
 │   ├── game/
 │   │   ├── __init__.py
-│   │   ├── base_game.py         # Abstract base class for games
-│   │   ├── breakout.py          # Breakout game logic
-│   │   ├── space_invaders.py    # Space Invaders game logic
-│   │   ├── pong.py              # Pong game logic
-│   │   ├── snake.py             # Snake game logic
-│   │   └── asteroids.py         # Asteroids game logic
+│   │   ├── base_game.py         # Game and vectorized-game contracts
+│   │   ├── breakout.py          # Breakout facade and game logic
+│   │   ├── space_invaders.py    # Space Invaders facade and game logic
+│   │   ├── pong.py              # Pong facade and game logic
+│   │   ├── snake.py             # Snake facade and game logic
+│   │   ├── asteroids.py         # Asteroids facade
+│   │   └── asteroids_entities.py
 │   │
 │   ├── ai/
 │   │   ├── __init__.py
@@ -80,14 +86,22 @@ NN-Game1/
 │       ├── nn_visualizer.py     # Neural network visualization
 │       └── dashboard.py         # Training metrics display
 │
+├── tests/
+│   ├── e2e/                     # Playwright dashboard smoke tests
+│   ├── js/                      # Node tests for dashboard helpers
+│   └── test_*.py                # Python unit/integration tests
+│
+├── docs/
+│   └── architecture.md          # Maintainer-oriented architecture map
+│
+├── .github/
+│   ├── workflows/               # CI, CodeQL, dependency review
+│   └── scripts/                 # Audit, hygiene, size, release checks
+│
 ├── models/                      # Saved model checkpoints
 │   └── .gitkeep
 │
-└── tests/
-    ├── __init__.py
-    ├── test_game.py
-    ├── test_agent.py
-    └── test_network.py
+└── scripts/                     # Developer/demo entrypoints
 ```
 
 ### Component Interaction Diagram
@@ -614,9 +628,9 @@ Buffer Size    Steps/sec    Sampling Method
 
 The web dashboard starts on `127.0.0.1` by default. Use `--host 0.0.0.0` only on a trusted network because the dashboard can pause training, save models, start fresh, load checkpoints, and delete saved model files.
 
-Each dashboard session generates an access token and prints a tokenized dashboard URL. Open that full URL; anonymous requests to `/` are rejected before the page can bootstrap control access. If you need a stable token for automation, set `NN_GAME_DASHBOARD_TOKEN` before launching.
+Each dashboard session generates an access token and prints a tokenized bootstrap URL. Open that full URL once; the server sets an HttpOnly same-site session cookie and redirects the browser back to `/` so the token is not left in the visible dashboard URL. Anonymous requests to `/` and `/api/*` are rejected before the page can bootstrap control access. If you need a stable token for automation, set `NN_GAME_DASHBOARD_TOKEN` before launching and send it with `X-Dashboard-Token`.
 
-Checkpoint loading uses PyTorch's restricted loader first. Legacy checkpoints that require unrestricted pickle loading should only be loaded from model directories you trust.
+Checkpoint loading uses PyTorch's restricted loader first. Legacy checkpoints that require unrestricted pickle loading should only be loaded from model directories you trust. The dashboard model browser marks checkpoints that need the trusted compatibility fallback; after loading one, re-save it to migrate toward the restricted format.
 
 ---
 
@@ -642,8 +656,14 @@ make format-check
 # Ruff lint, installing ruff locally if needed
 make lint
 
+# Quick local performance artifact
+make benchmark-quick
+
 # Dependency audit, installing pip-audit locally if needed
 make audit
+
+# Dependency parity and audit checks
+make deps-check
 
 # Keep tracked source files below the refactor budget
 make size-check
@@ -651,8 +671,8 @@ make size-check
 # Fast local gate used by CI
 make check
 
-# Fuller local verification, including release config, hygiene, file size,
-# dependency audit, and build when available
+# Fuller local verification, including Playwright smoke, performance smoke,
+# release config, hygiene, file size, dependency audit, and build when available
 make verify
 ```
 
@@ -662,7 +682,7 @@ The project supports Python 3.10 through 3.12. Install with pinned constraints f
 pip install -r requirements.txt -c constraints.txt
 ```
 
-Node dashboard tests are run against Node 24. The dependency audit intentionally ignores CVE-2025-3000 until a patched torch release is available on PyPI; all other reported advisories still fail the audit.
+Node dashboard tests are run against Node 24. The Python coverage gate is 80%. The dependency audit intentionally ignores CVE-2025-3000 until a patched torch release is available on PyPI; `.github/scripts/check_audit_waivers.py` fails once that waiver needs review, and all other reported advisories still fail the audit.
 
 ---
 
@@ -670,40 +690,68 @@ Node dashboard tests are run against Node 24. The dependency audit intentionally
 
 This architecture is designed to be **game-agnostic**. To add a new game:
 
-### 1. Create a New Game Class
+### 1. Create the Game Contract
 
 ```python
 # src/game/your_game.py
+from typing import Tuple
+
+import numpy as np
+
 from src.game.base_game import BaseGame
 
 class YourGame(BaseGame):
-    def __init__(self):
-        self.state_size = ...    # How many input values
-        self.action_size = ...   # How many possible actions
-    
+    @property
+    def state_size(self) -> int:
+        return ...  # How many input values
+
+    @property
+    def action_size(self) -> int:
+        return ...  # How many discrete actions
+
     def reset(self) -> np.ndarray:
-        """Reset game and return initial state"""
-        pass
-    
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool]:
-        """Execute action, return (next_state, reward, done)"""
-        pass
-    
-    def render(self, screen):
-        """Draw game to pygame screen"""
-        pass
+        ...
+
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, dict]:
+        ...
+
+    def render(self, screen) -> None:
+        ...
+
+    def get_state(self) -> np.ndarray:
+        ...
 ```
 
-### 2. Register in Config
+Implement `BaseVecGame` too when the game can run in vectorized headless training. Single-game mode works with only `BaseGame`, but the fastest trainer and dashboard metadata expect a vectorized constructor when available.
+
+### 2. Register the Game
 
 ```python
-# config.py
-GAME = "your_game"  # Changed from "breakout"
+# src/game/__init__.py
+GAME_REGISTRY["your_game"] = {
+    "class": YourGame,
+    "vec_class": VecYourGame,  # optional, but preferred for headless training
+    "name": "Your Game",
+    "description": "Short dashboard description",
+    "actions": ["LEFT", "STAY", "RIGHT"],
+    "controls": ["Arrow keys: Move"],
+    "difficulty": "Medium",
+    "color": (100, 150, 255),
+    "icon": "🎮",
+}
 ```
 
-### 3. That's It!
+The registry drives the CLI choices, launcher cards, dashboard game selector, action labels, and game stats. `config.GAME_NAME` selects the active game at runtime; it is not where new games are registered.
 
-The agent, visualizer, and training loop work with any game that follows the `BaseGame` interface.
+### 3. Validate the Integration
+
+```bash
+python main.py --game your_game --headless --episodes 1
+make test
+make dashboard-test
+```
+
+Add focused tests for reset, step rewards, terminal states, registry metadata, and any vectorized behavior. The agent, visualizer, and training loop work with any registered game that follows the `BaseGame` interface.
 
 ---
 

@@ -210,6 +210,23 @@ function updateSpeed(value) {
  * Refresh screenshot
  * Returns true if polling should continue, false if headless mode detected
  */
+function setPreviewPlaceholder(kind) {
+    const placeholder = document.getElementById('preview-placeholder');
+    if (!placeholder) return;
+
+    if (kind === 'headless') {
+        const label = document.createTextNode('🚀 Headless Mode');
+        const subtext = document.createElement('span');
+        subtext.style.fontSize = '0.8em';
+        subtext.style.opacity = '0.7';
+        subtext.textContent = 'No preview available';
+        placeholder.replaceChildren(label, document.createElement('br'), subtext);
+    } else {
+        placeholder.textContent = '🎮 Game Preview';
+    }
+    placeholder.classList.remove('hidden');
+}
+
 function refreshScreenshot() {
     return fetchWithTimeout('/api/screenshot')
         .then(response => response.json())
@@ -219,10 +236,7 @@ function refreshScreenshot() {
 
             // Check if headless mode - stop polling and show headless placeholder
             if (data.headless) {
-                if (placeholder) {
-                    placeholder.innerHTML = '🚀 Headless Mode<br><span style="font-size: 0.8em; opacity: 0.7;">No preview available</span>';
-                    placeholder.classList.remove('hidden');
-                }
+                setPreviewPlaceholder('headless');
                 if (img) img.classList.remove('visible');
                 return false; // Signal to stop polling
             }
@@ -244,10 +258,7 @@ function refreshScreenshot() {
                 tempImg.src = 'data:image/png;base64,' + data.image;
             } else {
                 // No image data
-                if (placeholder) {
-                    placeholder.innerHTML = '🎮 Game Preview';
-                    placeholder.classList.remove('hidden');
-                }
+                setPreviewPlaceholder('default');
                 if (img) img.classList.remove('visible');
             }
             return true; // Continue polling
@@ -358,22 +369,93 @@ function toggleSettings() {
 // MODEL LOADING
 // ============================================================
 
+let loadModalFocusReturnTarget = null;
+const loadModalFocusableSelector = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function loadModalFocusableElements(modal) {
+    return Array.from(modal.querySelectorAll(loadModalFocusableSelector))
+        .filter(element => {
+            const style = window.getComputedStyle(element);
+            return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && element.getClientRects().length > 0;
+        });
+}
+
+function handleLoadModalKeydown(event) {
+    const modal = document.getElementById('load-modal');
+    if (!modal || !modal.classList.contains('visible')) return;
+
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        hideLoadModal();
+        return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    const focusable = loadModalFocusableElements(modal);
+    if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!modal.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+        return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
 /**
  * Show load model modal with enhanced metadata
  */
 function showLoadModal() {
     const modal = document.getElementById('load-modal');
+    if (!modal) return;
+
+    loadModalFocusReturnTarget = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     modal.classList.add('visible');
+    document.addEventListener('keydown', handleLoadModalKeydown);
+
+    const closeButton = modal.querySelector('[data-action="hide-load-modal"]');
+    if (closeButton && typeof closeButton.focus === 'function') {
+        const focusCloseButton = () => closeButton.focus({ preventScroll: true });
+        focusCloseButton();
+        requestAnimationFrame(focusCloseButton);
+        setTimeout(focusCloseButton, 0);
+    }
 
     // Fetch available models
     fetchWithTimeout('/api/models')
         .then(response => response.json())
         .then(data => {
             const list = document.getElementById('model-list');
-            list.innerHTML = DashboardCore.modelListHtml(data.models);
+            if (list) {
+                DashboardModelList.renderModelList(list, data.models);
+            }
         })
         .catch(err => {
             const list = document.getElementById('model-list');
+            if (!list) return;
             const error = document.createElement('div');
             error.className = 'error';
             error.textContent = 'Failed to load models';
@@ -386,7 +468,17 @@ function showLoadModal() {
  */
 function hideLoadModal() {
     const modal = document.getElementById('load-modal');
+    if (!modal) return;
     modal.classList.remove('visible');
+    document.removeEventListener('keydown', handleLoadModalKeydown);
+    if (
+        loadModalFocusReturnTarget
+        && document.contains(loadModalFocusReturnTarget)
+        && typeof loadModalFocusReturnTarget.focus === 'function'
+    ) {
+        loadModalFocusReturnTarget.focus();
+    }
+    loadModalFocusReturnTarget = null;
 }
 
 /**

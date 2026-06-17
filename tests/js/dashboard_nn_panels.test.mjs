@@ -5,9 +5,21 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 function createElement(tagName = 'div') {
+  const classes = new Set();
   const element = {
     tagName: tagName.toUpperCase(),
     children: [],
+    classList: {
+      add(...names) {
+        names.forEach((name) => classes.add(name));
+      },
+      remove(...names) {
+        names.forEach((name) => classes.delete(name));
+      },
+      contains(name) {
+        return classes.has(name);
+      },
+    },
     className: '',
     dataset: {},
     id: '',
