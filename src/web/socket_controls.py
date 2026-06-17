@@ -39,6 +39,7 @@ class DashboardControlContext(Protocol):
 
 
 EventEmitter = Callable[[str, Dict[str, Any]], None]
+ControlHandler = Callable[[DashboardControlContext, Dict[str, Any], EventEmitter], ControlAck]
 
 
 def success_ack(action: str) -> ControlAck:
@@ -282,6 +283,101 @@ def handle_go_to_launcher_control(
     return success_ack("go_to_launcher")
 
 
+def _handle_pause(
+    context: DashboardControlContext, _data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return callback_ack("pause", context.on_pause_callback, failure_message="Pause failed")
+
+
+def _handle_save(
+    context: DashboardControlContext, _data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_save_control(context)
+
+
+def _handle_save_as(
+    context: DashboardControlContext, data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_save_as_control(context, data)
+
+
+def _handle_speed(
+    context: DashboardControlContext, data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_speed_control(context, data)
+
+
+def _handle_reset(
+    context: DashboardControlContext, _data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return callback_ack("reset", context.on_reset_callback, failure_message="Reset failed")
+
+
+def _handle_start_fresh(
+    context: DashboardControlContext, _data: Dict[str, Any], emit: EventEmitter
+) -> ControlAck:
+    return handle_start_fresh_control(context, emit)
+
+
+def _handle_load_model(
+    context: DashboardControlContext, data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_load_model_control(context, data)
+
+
+def _handle_config_change(
+    context: DashboardControlContext, data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_config_change_control(context, data)
+
+
+def _handle_performance_mode(
+    context: DashboardControlContext, data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_performance_mode_control(context, data)
+
+
+def _handle_save_and_quit(
+    context: DashboardControlContext, _data: Dict[str, Any], _emit: EventEmitter
+) -> ControlAck:
+    return handle_save_and_quit_control(context)
+
+
+def _handle_select_game(
+    context: DashboardControlContext, data: Dict[str, Any], emit: EventEmitter
+) -> ControlAck:
+    return handle_select_game_control(context, data, emit)
+
+
+def _handle_restart_with_game(
+    context: DashboardControlContext, data: Dict[str, Any], emit: EventEmitter
+) -> ControlAck:
+    return handle_restart_with_game_control(context, data, emit)
+
+
+def _handle_go_to_launcher(
+    context: DashboardControlContext, _data: Dict[str, Any], emit: EventEmitter
+) -> ControlAck:
+    return handle_go_to_launcher_control(context, emit)
+
+
+CONTROL_HANDLERS: Dict[str, ControlHandler] = {
+    "pause": _handle_pause,
+    "save": _handle_save,
+    "save_as": _handle_save_as,
+    "speed": _handle_speed,
+    "reset": _handle_reset,
+    "start_fresh": _handle_start_fresh,
+    "load_model": _handle_load_model,
+    "config_change": _handle_config_change,
+    "performance_mode": _handle_performance_mode,
+    "save_and_quit": _handle_save_and_quit,
+    "select_game": _handle_select_game,
+    "restart_with_game": _handle_restart_with_game,
+    "go_to_launcher": _handle_go_to_launcher,
+}
+
+
 def dispatch_control(
     context: DashboardControlContext,
     data: Dict[str, Any],
@@ -289,36 +385,14 @@ def dispatch_control(
 ) -> ControlAck:
     """Route a validated control payload to its action handler."""
     action = data.get("action")
-    if action not in CONTROL_ACTIONS:
+    if not isinstance(action, str) or action not in CONTROL_ACTIONS:
         return error_ack(str(action), "Unknown action")
 
-    if action == "pause":
-        return callback_ack("pause", context.on_pause_callback, failure_message="Pause failed")
-    if action == "save":
-        return handle_save_control(context)
-    if action == "save_as":
-        return handle_save_as_control(context, data)
-    if action == "speed":
-        return handle_speed_control(context, data)
-    if action == "reset":
-        return callback_ack("reset", context.on_reset_callback, failure_message="Reset failed")
-    if action == "start_fresh":
-        return handle_start_fresh_control(context, emit_event)
-    if action == "load_model":
-        return handle_load_model_control(context, data)
-    if action == "config_change":
-        return handle_config_change_control(context, data)
-    if action == "performance_mode":
-        return handle_performance_mode_control(context, data)
-    if action == "save_and_quit":
-        return handle_save_and_quit_control(context)
-    if action == "select_game":
-        return handle_select_game_control(context, data, emit_event)
-    if action == "restart_with_game":
-        return handle_restart_with_game_control(context, data, emit_event)
-    if action == "go_to_launcher":
-        return handle_go_to_launcher_control(context, emit_event)
-    return success_ack(str(action))
+    handler = CONTROL_HANDLERS.get(action)
+    if handler is None:
+        _logger.error("Dashboard control action %s has no registered handler", action)
+        return error_ack(action, "Unknown action")
+    return handler(context, data, emit_event)
 
 
 def clear_logs(context: DashboardControlContext, emit_event: EventEmitter) -> ControlAck:

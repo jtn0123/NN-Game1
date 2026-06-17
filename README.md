@@ -133,8 +133,8 @@ cd /Users/justin/Documents/Github/NN-Game1
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# 3. Install dependencies with the tested constraint pins
-pip install -r requirements.txt -c constraints.txt
+# 3. Install Python/Node dependencies and local pre-commit hooks
+make setup
 
 # 4. Verify installation
 python -c "import torch; import pygame; print('Ready!')"
@@ -623,6 +623,9 @@ Checkpoint loading uses PyTorch's restricted loader first. Legacy checkpoints th
 ## 🛠️ Developer Checks
 
 ```bash
+# One-command Python/Node dev bootstrap
+make setup
+
 # Fast test run
 make test
 

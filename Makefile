@@ -1,12 +1,15 @@
-.PHONY: test coverage typecheck typecheck-audit dashboard-test dashboard-smoke format format-check lint audit size-check build build-if-available release-config hygiene check verify
+.PHONY: setup test coverage typecheck typecheck-audit dashboard-test dashboard-smoke perf-smoke format format-check lint audit size-check build build-if-available release-config hygiene check verify
 
 PYTHON ?= python
+
+setup:
+	$(PYTHON) scripts/bootstrap_dev.py
 
 test:
 	$(PYTHON) -m pytest -q
 
 coverage:
-	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=70 -q
+	$(PYTHON) -m pytest --cov=src --cov=main --cov-report=term-missing:skip-covered --cov-fail-under=75 -q
 
 typecheck:
 	$(PYTHON) -m mypy --config-file mypy.ini --follow-imports=silent src main.py config.py
@@ -19,6 +22,9 @@ dashboard-test:
 
 dashboard-smoke:
 	npm run dashboard-smoke
+
+perf-smoke:
+	$(PYTHON) -m pytest -q tests/test_performance_budgets.py
 
 format:
 	$(PYTHON) -m black main.py config.py src tests
@@ -53,6 +59,6 @@ hygiene:
 size-check:
 	$(PYTHON) .github/scripts/check_file_size.py --max-lines 1000
 
-check: format-check lint typecheck dashboard-test coverage
+check: format-check lint typecheck dashboard-test perf-smoke coverage
 
-verify: check typecheck-audit release-config hygiene size-check audit build-if-available
+verify: check dashboard-smoke typecheck-audit release-config hygiene size-check audit build-if-available

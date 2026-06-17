@@ -7,7 +7,31 @@ import pytest
 
 from config import Config
 from src.ai.agent import Agent
-from src.app.training_runtime import build_nn_snapshot, resolve_model_path
+from src.app.training_runtime import (
+    NNSnapshot,
+    build_nn_snapshot,
+    emit_nn_snapshot_to_dashboard,
+    is_new_best_score,
+    request_save_and_stop,
+    resolve_model_path,
+    should_emit_episode_metrics,
+)
+
+
+@pytest.mark.parametrize(
+    ("score", "best_score", "expected"),
+    [(11, 10, True), (10, 10, False), (9, 10, False)],
+)
+def test_is_new_best_score_compares_against_previous_best(score, best_score, expected):
+    assert is_new_best_score(score, best_score) is expected
+
+
+@pytest.mark.parametrize(
+    ("episode", "is_new_best", "expected"),
+    [(1, False, True), (10, False, True), (11, True, True), (15, False, True), (16, False, False)],
+)
+def test_should_emit_episode_metrics_matches_dashboard_throttle(episode, is_new_best, expected):
+    assert should_emit_episode_metrics(episode, is_new_best) is expected
 
 
 def test_resolve_model_path_uses_latest_compatible_checkpoint(tmp_path):
@@ -68,6 +92,99 @@ def test_resolve_model_path_skips_newer_incompatible_checkpoint(tmp_path):
     )
 
     assert resolved == str(older)
+
+
+def test_resolve_model_path_handles_explicit_checkpoint_compatibility(tmp_path, capsys):
+    config = Config()
+    config.GAME_NAME = "breakout"
+    config.MODEL_DIR = str(tmp_path / "models")
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    checkpoint = model_dir / "explicit.pth"
+    checkpoint.write_bytes(b"model")
+
+    resolved = resolve_model_path(
+        explicit_path=str(checkpoint),
+        state_size=4,
+        action_size=2,
+        config=config,
+        inspect_model=lambda _path, **_kwargs: {"state_size": 4, "action_size": 2},
+    )
+
+    assert resolved == str(checkpoint)
+
+    rejected = resolve_model_path(
+        explicit_path=str(checkpoint),
+        state_size=4,
+        action_size=2,
+        config=config,
+        inspect_model=lambda _path, **_kwargs: {"state_size": 99, "action_size": 2},
+    )
+
+    assert rejected is None
+    assert "Specified model incompatible" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("save_success", [True, False])
+def test_request_save_and_stop_logs_result(monkeypatch, capsys, save_success):
+    logs = []
+    running = []
+    saved = []
+    dashboard = SimpleNamespace(log=lambda message, level: logs.append((message, level)))
+
+    monkeypatch.setattr("src.app.training_runtime.time.sleep", lambda _seconds: None)
+
+    request_save_and_stop(
+        game_name="breakout",
+        save_model=lambda filename, reason: saved.append((filename, reason)) or save_success,
+        set_running=running.append,
+        dashboard=dashboard,
+    )
+
+    assert saved == [("breakout_final.pth", "shutdown")]
+    assert running == [False]
+    assert logs[0][1] == "warning"
+    output = capsys.readouterr().out
+    if save_success:
+        assert "Model saved. Exiting" in output
+        assert logs[-1][1] == "success"
+    else:
+        assert "Save may have failed. Exiting" in output
+        assert logs[-1][1] == "warning"
+
+
+def test_emit_nn_snapshot_to_dashboard_forwards_full_payload():
+    emitted = []
+    dashboard = SimpleNamespace(
+        emit_nn_visualization=lambda **payload: emitted.append(payload),
+    )
+    snapshot = NNSnapshot(
+        layer_info=[{"name": "input", "neurons": 2, "type": "input"}],
+        activations={"layer_0": [0.1, 0.2]},
+        q_values=[1.0, 2.0],
+        weights=[[[0.1, 0.2]]],
+        action_labels=["LEFT", "RIGHT"],
+        input_state=[0.0, 1.0],
+        analysis_activations={"layer_0": [0.1, 0.2, 0.3]},
+        analysis_weights=[[[0.1, 0.2, 0.3]]],
+    )
+
+    emit_nn_snapshot_to_dashboard(dashboard, snapshot, selected_action=1, step=42)
+
+    assert emitted == [
+        {
+            "layer_info": snapshot.layer_info,
+            "activations": snapshot.activations,
+            "q_values": snapshot.q_values,
+            "selected_action": 1,
+            "weights": snapshot.weights,
+            "step": 42,
+            "action_labels": snapshot.action_labels,
+            "input_state": snapshot.input_state,
+            "analysis_activations": snapshot.analysis_activations,
+            "analysis_weights": snapshot.analysis_weights,
+        }
+    ]
 
 
 def test_build_nn_snapshot_creates_sampled_and_full_payloads():

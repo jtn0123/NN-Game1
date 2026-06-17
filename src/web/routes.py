@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Any, List, Protocol, Tuple
 
 from flask import jsonify, make_response, render_template, request
 from werkzeug import Response
@@ -14,6 +14,23 @@ from src.web.game_stats_service import build_game_stats
 from src.web.json_utils import make_json_safe
 
 _logger = get_logger(__name__)
+
+RouteResponse = Response | Tuple[Response, int]
+
+
+class DashboardRouteContext(Protocol):
+    """Dashboard attributes consumed by Flask route registration."""
+
+    app: Any
+    access_token: str
+    config: Any
+    launcher_mode: bool
+    model_service: Any
+    publisher: Any
+
+    def _is_authorized_request(self) -> bool:
+        """Return whether the current Flask request is authorized."""
+        ...
 
 
 def api_error(message: str, status: int) -> Tuple[Response, int]:
@@ -30,16 +47,30 @@ def model_delete_error_status(error: str | None) -> int:
     return 403
 
 
-def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> None:
+def parse_history_limit(value: str | None, default: int, maximum: int) -> int:
+    """Parse a bounded dashboard history window size."""
+    if value is None:
+        return default
+    try:
+        limit = int(value)
+    except ValueError:
+        return default
+    return max(0, min(limit, maximum))
+
+
+def register_dashboard_routes(
+    dashboard: DashboardRouteContext, content_security_policy: str
+) -> None:
     """Register Flask routes."""
 
     @dashboard.app.before_request
-    def require_dashboard_token_for_api():
+    def require_dashboard_token_for_api() -> RouteResponse | None:
         if request.path.startswith("/api/") and not dashboard._is_authorized_request():
             return api_error("Unauthorized", 401)
+        return None
 
     @dashboard.app.after_request
-    def apply_security_headers(response):
+    def apply_security_headers(response: Response) -> Response:
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault(
@@ -49,7 +80,7 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         return response
 
     @dashboard.app.route("/")
-    def index():
+    def index() -> Response:
         if not dashboard._is_authorized_request():
             response = make_response("Dashboard token required", 401)
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -76,13 +107,18 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         return response
 
     @dashboard.app.route("/api/status")
-    def api_status():
-        snapshot = dashboard.publisher.get_snapshot()
+    def api_status() -> Response:
+        history_limit = parse_history_limit(
+            request.args.get("history_limit"),
+            dashboard.publisher.DEFAULT_SNAPSHOT_HISTORY_LIMIT,
+            dashboard.publisher.history_length,
+        )
+        snapshot = dashboard.publisher.get_snapshot(history_limit=history_limit)
         snapshot["launcher_mode"] = dashboard.launcher_mode
         return jsonify(snapshot)
 
     @dashboard.app.route("/api/config")
-    def api_config():
+    def api_config() -> Response:
         payload: DashboardConfigPayload = {
             "learning_rate": dashboard.config.LEARNING_RATE,
             "gamma": dashboard.config.GAMMA,
@@ -105,7 +141,7 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         return jsonify(payload)
 
     @dashboard.app.route("/api/games")
-    def api_games():
+    def api_games() -> Response:
         """List all available games with their metadata."""
         from src.game import get_game_info, list_games
 
@@ -131,12 +167,12 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         return jsonify(payload)
 
     @dashboard.app.route("/api/performance-modes")
-    def api_performance_modes():
+    def api_performance_modes() -> Response:
         """List dashboard performance-mode presets."""
         return jsonify({"modes": performance_mode_payload()})
 
     @dashboard.app.route("/api/screenshot")
-    def api_screenshot():
+    def api_screenshot() -> Response:
         # If headless mode, return early with flag (no screenshots available)
         if dashboard.publisher.state.headless:
             return jsonify({"image": None, "headless": True})
@@ -146,7 +182,7 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         return jsonify({"image": None, "headless": False})
 
     @dashboard.app.route("/api/models")
-    def api_models():
+    def api_models() -> Response:
         """List available model files with metadata.
 
         Searches both game-specific directory and legacy models directory.
@@ -158,7 +194,7 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         return jsonify(payload)
 
     @dashboard.app.route("/api/models/<path:model_id>", methods=["DELETE"])
-    def api_delete_model(model_id):
+    def api_delete_model(model_id: str) -> RouteResponse:
         """Delete a model file.
 
         Security: Validates that the path is within the model directory
@@ -183,12 +219,12 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
             return api_error("Failed to delete model", 500)
 
     @dashboard.app.route("/api/save-status")
-    def api_save_status():
+    def api_save_status() -> Response:
         """Get last save information."""
         return jsonify(dashboard.publisher.get_save_status())
 
     @dashboard.app.route("/api/game-stats")
-    def api_game_stats():
+    def api_game_stats() -> Response:
         """Get training statistics for all games (for comparison panel)."""
         stats = build_game_stats(dashboard.config)
         return jsonify({"stats": stats, "current_game": dashboard.config.GAME_NAME})
@@ -196,19 +232,19 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
     # ===== Phase 2: Neuron Inspection & Layer Analysis Endpoints =====
 
     @dashboard.app.route("/api/neuron/<int:layer_idx>/<int:neuron_idx>")
-    def api_neuron_details(layer_idx, neuron_idx):
+    def api_neuron_details(layer_idx: int, neuron_idx: int) -> Response:
         """Phase 2: Get details for a specific neuron."""
         details = dashboard.publisher.get_neuron_details(layer_idx, neuron_idx)
         return jsonify(make_json_safe(details))
 
     @dashboard.app.route("/api/layer/<int:layer_idx>")
-    def api_layer_analysis(layer_idx):
+    def api_layer_analysis(layer_idx: int) -> Response:
         """Phase 2: Get analysis data for a specific layer."""
         analysis = dashboard.publisher.get_layer_analysis(layer_idx)
         return jsonify(make_json_safe(analysis))
 
     @dashboard.app.route("/api/layers")
-    def api_layers_analysis():
+    def api_layers_analysis() -> Response:
         """Phase 2: Get analysis data for all layers."""
         analysis = dashboard.publisher.get_all_layer_analysis()
         return jsonify(make_json_safe(analysis))

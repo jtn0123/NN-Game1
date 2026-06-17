@@ -331,7 +331,14 @@ class WebDashboard:
             if not self._is_authorized_token(auth.get("token")):
                 return False
             # Send current state on connect (convert NumPy types for JSON serialization)
-            emit("state_update", _make_json_safe(self.publisher.get_snapshot()))
+            emit(
+                "state_update",
+                _make_json_safe(
+                    self.publisher.get_snapshot(
+                        history_limit=self.publisher.DEFAULT_SNAPSHOT_HISTORY_LIMIT
+                    )
+                ),
+            )
             # Send recent logs
             emit(
                 "console_logs",

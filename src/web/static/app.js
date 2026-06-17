@@ -142,6 +142,7 @@ function initDashboard() {
         return;
     }
 
+    reportAssetFailures();
     initCharts();
     initNNVisualizer();
     connectSocket();
@@ -152,6 +153,17 @@ function initDashboard() {
     loadGames();
     loadGameStats();
     fetchInitialData();
+}
+
+function reportAssetFailures() {
+    const root = typeof window !== 'undefined' ? window : globalThis;
+    const failures = Array.isArray(root.DASHBOARD_ASSET_FAILURES)
+        ? root.DASHBOARD_ASSET_FAILURES
+        : [];
+    const uniqueFailures = [...new Set(failures)];
+    uniqueFailures.forEach((assetName) => {
+        addConsoleLog(`${assetName} failed to load; dashboard will run in reduced mode`, 'warning');
+    });
 }
 
 // Initialize on DOM load

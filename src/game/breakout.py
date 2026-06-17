@@ -24,85 +24,9 @@ import pygame
 
 from config import Config
 
-from .base_game import BaseGame, validate_action, validate_action_batch
+from .base_game import BaseGame, step_vector_env_no_copy, validate_action, validate_action_batch
+from .breakout_entities import Ball, Brick, Paddle
 from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
-
-
-class Brick:
-    """Represents a single brick in the game."""
-
-    def __init__(self, x: int, y: int, width: int, height: int, color: Tuple[int, int, int]):
-        self.rect = pygame.Rect(x, y, width, height)
-        self.color = color
-        self.alive = True
-
-    def draw(self, screen: pygame.Surface) -> None:
-        """Draw the brick if it's still alive."""
-        if self.alive:
-            # Main brick
-            pygame.draw.rect(screen, self.color, self.rect)
-            # Highlight (3D effect)
-            highlight = pygame.Rect(self.rect.x, self.rect.y, self.rect.width, 3)
-            darker = tuple(max(0, c - 40) for c in self.color)
-            lighter = tuple(min(255, c + 40) for c in self.color)
-            pygame.draw.rect(screen, lighter, highlight)
-            # Shadow
-            shadow = pygame.Rect(self.rect.x, self.rect.bottom - 3, self.rect.width, 3)
-            pygame.draw.rect(screen, darker, shadow)
-
-
-class Ball:
-    """The bouncing ball."""
-
-    def __init__(self, x: float, y: float, radius: int, speed: float):
-        self.x = x
-        self.y = y
-        self.radius = radius
-        self.speed = speed
-        # Initial direction: upward with random horizontal component
-        angle = np.random.uniform(-np.pi / 3, np.pi / 3) - np.pi / 2
-        self.dx = speed * np.cos(angle)
-        self.dy = speed * np.sin(angle)
-
-    @property
-    def rect(self) -> pygame.Rect:
-        """Get bounding rectangle for collision detection."""
-        return pygame.Rect(
-            self.x - self.radius, self.y - self.radius, self.radius * 2, self.radius * 2
-        )
-
-    def move(self) -> None:
-        """Update ball position."""
-        self.x += self.dx
-        self.y += self.dy
-
-
-class Paddle:
-    """Player-controlled paddle at the bottom."""
-
-    def __init__(self, x: int, y: int, width: int, height: int, speed: int):
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-        self.speed = speed
-
-    @property
-    def rect(self) -> pygame.Rect:
-        """Get paddle rectangle."""
-        return pygame.Rect(self.x, self.y, self.width, self.height)
-
-    def move(self, direction: int, screen_width: int) -> None:
-        """
-        Move paddle horizontally.
-
-        Args:
-            direction: -1 for left, 0 for stay, 1 for right
-            screen_width: Width of the game screen
-        """
-        self.x += direction * self.speed
-        # Keep paddle on screen
-        self.x = max(0, min(self.x, screen_width - self.width))
 
 
 class Breakout(BaseGame):
@@ -809,7 +733,6 @@ class VecBreakout:
         self._states = np.empty((num_envs, self.state_size), dtype=np.float32)
         self._rewards = np.empty(num_envs, dtype=np.float32)
         self._dones = np.empty(num_envs, dtype=np.bool_)
-        self._pending_resets = np.zeros(num_envs, dtype=np.bool_)  # Track envs needing reset
 
     def reset(self) -> np.ndarray:
         """
@@ -888,29 +811,7 @@ class VecBreakout:
         Returns:
             Tuple of (next_states, rewards, dones, infos) - arrays are views
         """
-        actions = validate_action_batch(actions, self.num_envs, self.action_size, "VecBreakout")
-        # Process pending resets from previous step (after caller used terminal states)
-        for i in range(self.num_envs):
-            if self._pending_resets[i]:
-                self._states[i] = self.envs[i].get_state()
-                self._pending_resets[i] = False
-
-        infos = []
-
-        for i, (env, action) in enumerate(zip(self.envs, actions)):
-            next_state, reward, done, info = env.step(int(action))
-
-            self._states[i] = next_state
-            self._rewards[i] = reward
-            self._dones[i] = done
-            infos.append(info)
-
-            # Mark for reset but don't overwrite state yet (ensures terminal state is returned)
-            if done:
-                env.reset()  # Reset environment internally
-                self._pending_resets[i] = True  # Will update state array on next call
-
-        return self._states, self._rewards, self._dones, infos
+        return step_vector_env_no_copy(self.envs, self._states, self._rewards, self._dones, actions)
 
     def get_states(self) -> np.ndarray:
         """Get current states of all environments."""

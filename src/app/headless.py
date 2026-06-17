@@ -17,7 +17,12 @@ from src.ai.trainer import calculate_progress_count
 from src.app.game_factory import create_training_environment
 from src.app.headless_dashboard import HeadlessDashboardMixin
 from src.app.model_service import ModelService as AppModelService
-from src.app.training_runtime import build_nn_snapshot, emit_nn_snapshot_to_dashboard
+from src.app.training_runtime import (
+    build_nn_snapshot,
+    emit_nn_snapshot_to_dashboard,
+    is_new_best_score,
+    should_emit_episode_metrics,
+)
 from src.game import BaseGame, BaseVecGame, list_games
 
 WEB_AVAILABLE: bool
@@ -327,9 +332,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
             # Update web dashboard metrics (throttled to every 5 episodes for performance)
             # Always emit on: first 10 episodes, new best score, or every 5th episode
-            is_new_best = info["score"] > getattr(self, "best_score", 0)
+            is_new_best = is_new_best_score(info["score"], getattr(self, "best_score", 0))
             dashboard = self.web_dashboard
-            if dashboard is not None and (episode <= 10 or is_new_best or episode % 5 == 0):
+            if dashboard is not None and should_emit_episode_metrics(episode, is_new_best):
                 avg_loss = self.agent.get_average_loss(100)
 
                 # Calculate average Q-value for current state (was missing from headless)
@@ -408,7 +413,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 steps_since_report = 0
 
             # Save checkpoints
-            if info["score"] > self.best_score:
+            if is_new_best_score(info["score"], self.best_score):
                 self.best_score = info["score"]
                 self._save_model(
                     f"{self.config.GAME_NAME}_best.pth", save_reason="best", quiet=True
@@ -557,8 +562,10 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     self.epsilons.append(self.agent.epsilon)
                     self.rewards.append(float(env_episode_rewards[i]))
 
+                    is_new_best = is_new_best_score(score, self.best_score)
+
                     # Track best score
-                    if score > self.best_score:
+                    if is_new_best:
                         self.best_score = score
                         self._save_model(
                             f"{self.config.GAME_NAME}_best.pth",
@@ -577,10 +584,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
                     # Update web dashboard metrics (throttled to every 5 episodes for performance)
                     # Always emit on: first 10 episodes, new best score, or every 5th episode
-                    is_new_best = score > self.best_score
                     dashboard = self.web_dashboard
                     if dashboard is not None and (
-                        self.current_episode <= 10 or is_new_best or self.current_episode % 5 == 0
+                        should_emit_episode_metrics(self.current_episode, is_new_best)
                     ):
                         bricks_broken = calculate_progress_count(infos[i], config)
 

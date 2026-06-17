@@ -49,6 +49,8 @@ class MetricsPublisher:
     them to connected clients.
     """
 
+    DEFAULT_SNAPSHOT_HISTORY_LIMIT = 1000
+
     def __init__(self, history_length: int = 100000):
         # Keep 100000 episodes of history for full chart scrolling
         # Memory usage: ~100000 * 50 bytes = ~5MB (still negligible)
@@ -333,17 +335,26 @@ class MetricsPublisher:
         """Get the latest screenshot as base64."""
         return self._screenshot_data
 
-    def get_snapshot(self) -> Dict[str, Any]:
-        """Get current state as dictionary."""
+    @staticmethod
+    def _history_values(values: Deque[Any], history_limit: Optional[int]) -> List[Any]:
+        items = list(values)
+        if history_limit is None:
+            return items
+        if history_limit <= 0:
+            return []
+        return items[-history_limit:]
+
+    def get_snapshot(self, history_limit: Optional[int] = None) -> Dict[str, Any]:
+        """Get current state as dictionary, optionally limiting history arrays."""
         return {
             "state": asdict(self.state),
             "history": {
-                "scores": list(self.scores),
-                "losses": list(self.losses),
-                "epsilons": list(self.epsilons),
-                "rewards": list(self.rewards),
-                "q_values": list(self.q_values),
-                "episode_lengths": list(self.episode_lengths),
+                "scores": self._history_values(self.scores, history_limit),
+                "losses": self._history_values(self.losses, history_limit),
+                "epsilons": self._history_values(self.epsilons, history_limit),
+                "rewards": self._history_values(self.rewards, history_limit),
+                "q_values": self._history_values(self.q_values, history_limit),
+                "episode_lengths": self._history_values(self.episode_lengths, history_limit),
             },
         }
 

@@ -200,5 +200,24 @@ class TestConfigDevice:
         assert cfg.DEVICE.type in ["cpu", "cuda", "mps"]
 
 
+class TestConfigGroupedViews:
+    """Test typed grouped config views."""
+
+    def test_grouped_views_reflect_legacy_config_fields(self):
+        cfg = Config()
+        cfg.GAME_NAME = "snake"
+        cfg.HIDDEN_LAYERS = [64, 32]
+        cfg.LEARN_EVERY = 8
+
+        assert cfg.game.game_name == "snake"
+        assert cfg.game.screen_width == cfg.SCREEN_WIDTH
+        assert cfg.network.hidden_layers == (64, 32)
+        assert cfg.network.action_size == cfg.ACTION_SIZE
+        assert cfg.training.learn_every == 8
+        assert cfg.training.batch_size == cfg.BATCH_SIZE
+        assert cfg.runtime.game_model_dir.endswith("models/snake")
+        assert cfg.runtime.device.type in ["cpu", "cuda", "mps"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

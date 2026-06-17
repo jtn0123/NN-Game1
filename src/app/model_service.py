@@ -9,6 +9,7 @@ import numpy as np
 
 from config import Config
 from src.ai.agent import Agent, TrainingHistory
+from src.app.checkpoint_catalog import iter_checkpoint_candidates
 from src.app.model_paths import normalize_checkpoint_filename
 
 
@@ -66,16 +67,12 @@ class ModelService:
         if not os.path.exists(model_dir):
             return None
 
-        model_files = [
-            (os.path.join(model_dir, f), os.path.getmtime(os.path.join(model_dir, f)))
-            for f in os.listdir(model_dir)
-            if f.endswith(".pth")
-        ]
+        model_files = iter_checkpoint_candidates([(model_dir, self.config.GAME_NAME)])
         if not model_files:
             return None
 
-        model_files.sort(key=lambda x: x[1], reverse=True)
-        for model_path, _ in model_files:
+        for candidate in model_files:
+            model_path = candidate.path
             info = Agent.inspect_model(
                 model_path,
                 trusted_dirs=trusted_dirs,

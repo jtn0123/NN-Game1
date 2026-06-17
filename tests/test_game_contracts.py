@@ -10,6 +10,7 @@ import pytest
 from config import Config
 from src.game import GAME_REGISTRY, get_game, get_game_info, list_games
 from src.game.asteroids import VecAsteroids
+from src.game.base_game import step_vector_env_no_copy
 from src.game.breakout import VecBreakout
 from src.game.pong import VecPong
 from src.game.snake import VecSnake
@@ -27,6 +28,41 @@ def _assert_valid_state(state: np.ndarray, expected_size: int) -> None:
     assert state.shape == (expected_size,)
     assert state.dtype == np.float32
     assert np.isfinite(state).all()
+
+
+class _DoneOnceEnv:
+    action_size = 2
+
+    def __init__(self):
+        self.did_step = False
+
+    def step(self, action):
+        self.did_step = True
+        return np.array([99.0], dtype=np.float32), 1.0, True, {"score": 1}
+
+    def reset(self):
+        return np.array([0.5], dtype=np.float32)
+
+
+def test_step_vector_env_no_copy_returns_reset_state_for_completed_envs():
+    envs = [_DoneOnceEnv()]
+    states = np.empty((1, 1), dtype=np.float32)
+    rewards = np.empty(1, dtype=np.float32)
+    dones = np.empty(1, dtype=np.bool_)
+
+    next_states, next_rewards, next_dones, infos = step_vector_env_no_copy(
+        envs,
+        states,
+        rewards,
+        dones,
+        np.array([1], dtype=np.int64),
+    )
+
+    assert envs[0].did_step is True
+    assert next_states[0, 0] == 0.5
+    assert next_rewards.tolist() == [1.0]
+    assert next_dones.tolist() == [True]
+    assert infos == [{"score": 1}]
 
 
 @pytest.mark.parametrize("game_id", list_games())

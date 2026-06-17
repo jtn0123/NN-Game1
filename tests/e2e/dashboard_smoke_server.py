@@ -71,6 +71,12 @@ def main() -> int:
         dashboard.on_start_fresh_callback = (
             lambda: dashboard.publisher.reset_training_state() or True
         )
+        dashboard.on_config_change_callback = (
+            lambda config: dashboard.log(f"E2E config changed: {config}", "action") or True
+        )
+        dashboard.on_performance_mode_callback = (
+            lambda mode: dashboard.log(f"E2E performance mode: {mode}", "action") or True
+        )
 
         dashboard.start()
         dashboard.log("E2E dashboard ready", "success")
