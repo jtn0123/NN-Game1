@@ -181,6 +181,7 @@ class TestWebDashboardRoutes:
         with web_dashboard.app.test_client() as client:
             response = client.get(f"/?token={web_dashboard.access_token}")
             core_response = client.get("/static/dashboard_core.js")
+            charts_response = client.get("/static/dashboard_charts.js")
             app_response = client.get("/static/app.js")
 
         html = response.data.decode("utf-8")
@@ -200,8 +201,10 @@ class TestWebDashboardRoutes:
         assert f'<meta name="dashboard-token" content="{web_dashboard.access_token}">' in html
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "Training Dashboard" in html
-        assert html.index("dashboard_core.js") < html.index("app.js")
+        assert html.index("dashboard_core.js") < html.index("dashboard_charts.js")
+        assert html.index("dashboard_charts.js") < html.index("app.js")
         assert core_response.status_code == 200
+        assert charts_response.status_code == 200
         assert app_response.status_code == 200
 
     def test_launcher_page_serves_tokenized_frontend_contract(self):

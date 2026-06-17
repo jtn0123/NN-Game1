@@ -12,10 +12,15 @@ To add a new game:
 4. Register in __init__.py
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Dict, List, Protocol, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Protocol, Sequence, Tuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from config import Config
 
 
 def validate_action(action: int, action_size: int, game_name: str = "game") -> int:
@@ -143,7 +148,7 @@ class BaseGame(ABC):
 class BaseVecGame(Protocol):
     """Protocol for vectorized game environments used by headless training."""
 
-    envs: List[BaseGame]
+    envs: Sequence[BaseGame]
 
     def reset(self) -> np.ndarray:
         """Reset every environment and return batched states."""
@@ -165,6 +170,22 @@ class BaseVecGame(Protocol):
 
     def seed(self, seeds: List[int]) -> None:
         """Seed every environment."""
+        ...
+
+
+class GameConstructor(Protocol):
+    """Constructor contract for registered single-game environments."""
+
+    def __call__(self, config: Config | None = None, headless: bool = False) -> BaseGame:
+        """Create a single game environment."""
+        ...
+
+
+class VecGameConstructor(Protocol):
+    """Constructor contract for registered vectorized game environments."""
+
+    def __call__(self, num_envs: int, config: Config, headless: bool = True) -> BaseVecGame:
+        """Create a vectorized game environment."""
         ...
 
 

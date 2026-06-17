@@ -129,7 +129,9 @@ function createDashboardContext() {
     clearTimeout() {},
   });
 
+  const chartsSource = readFileSync(resolve('src/web/static/dashboard_charts.js'), 'utf8');
   const source = readFileSync(resolve('src/web/static/app.js'), 'utf8');
+  vm.runInContext(chartsSource, context, { filename: 'dashboard_charts.js' });
   vm.runInContext(source, context, { filename: 'app.js' });
   return { context, elements, errors, listeners };
 }

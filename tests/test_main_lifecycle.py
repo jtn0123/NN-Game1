@@ -1,6 +1,7 @@
 """Tests for application lifecycle helpers in main.py."""
 
 from collections import deque
+import importlib
 from types import SimpleNamespace
 
 import numpy as np
@@ -119,7 +120,8 @@ def test_runtime_nn_visualization_uses_shared_snapshot_builder(runtime_cls, monk
         builder_calls.append((agent, game, state.copy()))
         return snapshot
 
-    monkeypatch.setattr(main, "build_nn_snapshot", fake_build_nn_snapshot)
+    runtime_module = importlib.import_module(runtime_cls.__module__)
+    monkeypatch.setattr(runtime_module, "build_nn_snapshot", fake_build_nn_snapshot)
 
     runtime = runtime_cls.__new__(runtime_cls)
     runtime.web_dashboard = FakeWebDashboard()

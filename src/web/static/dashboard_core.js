@@ -110,6 +110,82 @@
         return Number.isFinite(value) ? value.toLocaleString() : fallback;
     }
 
+    function calculateRunningAverage(data = [], windowSize = 20) {
+        if (!Array.isArray(data) || data.length === 0) {
+            return [];
+        }
+        const safeWindow = Math.max(1, Number.isFinite(windowSize) ? Math.floor(windowSize) : 20);
+        const result = [];
+        let runningSum = 0;
+
+        for (let i = 0; i < data.length; i += 1) {
+            const value = Number(data[i]);
+            runningSum += Number.isFinite(value) ? value : 0;
+            if (i >= safeWindow) {
+                const expired = Number(data[i - safeWindow]);
+                runningSum -= Number.isFinite(expired) ? expired : 0;
+            }
+            result.push(runningSum / Math.min(i + 1, safeWindow));
+        }
+        return result;
+    }
+
+    function calculateRunningMax(data = []) {
+        if (!Array.isArray(data) || data.length === 0) {
+            return [];
+        }
+        const result = [];
+        let runningMax = -Infinity;
+        for (const value of data) {
+            const numberValue = Number(value);
+            runningMax = Math.max(runningMax, Number.isFinite(numberValue) ? numberValue : 0);
+            result.push(runningMax);
+        }
+        return result;
+    }
+
+    function buildChartUpdateModel(history = {}, currentEpisode = 0, options = {}) {
+        const scores = Array.isArray(history?.scores) ? history.scores : [];
+        const losses = Array.isArray(history?.losses) ? history.losses : [];
+        const qValues = Array.isArray(history?.q_values) ? history.q_values : [];
+        const visibleWindow = Math.max(
+            1,
+            Number.isFinite(options.visibleWindow) ? Math.floor(options.visibleWindow) : 200,
+        );
+        const averageWindow = Math.max(
+            1,
+            Number.isFinite(options.averageWindow) ? Math.floor(options.averageWindow) : 20,
+        );
+        const parsedEpisode = Number(currentEpisode);
+        const episodeNumber = Number.isFinite(parsedEpisode) ? parsedEpisode : 0;
+        const startEpisode = Math.max(0, episodeNumber - scores.length);
+        const labels = scores.map((_, index) => startEpisode + index + 1);
+        const averageScores = calculateRunningAverage(scores, averageWindow);
+        const bestAverageScores = calculateRunningMax(averageScores);
+        const validLosses = losses.map((loss) => Math.max(Number(loss) || 0, 0.0001));
+        const autoScrollRange = scores.length > visibleWindow
+            ? {
+                min: Math.max(1, labels[Math.max(0, scores.length - visibleWindow)]),
+                max: labels[scores.length - 1],
+            }
+            : null;
+        const showAllRange = scores.length > 0 && scores.length <= visibleWindow
+            ? { min: Math.max(1, labels[0]), max: undefined }
+            : null;
+
+        return {
+            labels,
+            scores,
+            losses: validLosses,
+            qValues,
+            averageScores,
+            bestAverageScores,
+            visibleWindow,
+            autoScrollRange,
+            showAllRange,
+        };
+    }
+
     function modelId(model) {
         return model?.id || model?.path || '';
     }
@@ -194,6 +270,9 @@
         formatMegabytes,
         formatFixed,
         formatNumber,
+        calculateRunningAverage,
+        calculateRunningMax,
+        buildChartUpdateModel,
         modelId,
         modelDisplayName,
         modelListHtml,

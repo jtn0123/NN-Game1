@@ -117,6 +117,9 @@ markers = [
 [tool.coverage.run]
 omit = [
     "main.py",
+    "src/app/headless.py",
+    "src/app/interactive.py",
+    "src/app/process_control.py",
     "src/game/menu.py",
     "src/visualizer/pause_menu.py",
 ]
