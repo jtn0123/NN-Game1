@@ -4,22 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
-    <meta name="dashboard-token" content="{{ access_token }}">
     <title>Neural Network AI - Training Dashboard</title>
-    <script>
-        window.DASHBOARD_ASSET_FAILURES = [];
-        window.reportDashboardAssetFailure = function(assetName) {
-            window.DASHBOARD_ASSET_FAILURES.push(assetName);
-        };
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Chart.js')"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Chart.js zoom plugin')"></script>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Socket.IO')"></script>
-    <script>window.DASHBOARD_CONTROL_TOKEN = {{ control_token|tojson }};</script>
+    <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/chartjs-plugin-zoom.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
@@ -152,12 +141,12 @@
                 </div>
 
                 <!-- Phase 2: Neuron Inspection Panel -->
-                <div class="neuron-inspection-panel" id="neuron-inspection-panel" style="display: none;">
+                <div class="neuron-inspection-panel is-hidden" id="neuron-inspection-panel">
                     <!-- Content will be populated dynamically by JavaScript -->
                 </div>
 
                 <!-- Phase 2: Layer Analysis Panel -->
-                <div class="layer-analysis-panel" id="layer-analysis-panel" style="display: none;">
+                <div class="layer-analysis-panel is-hidden" id="layer-analysis-panel">
                     <!-- Content will be populated dynamically by JavaScript -->
                 </div>
 
@@ -526,6 +515,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='dashboard_core.js') }}"></script>
+    <script src="{{ url_for('static', filename='dashboard_model_list.js') }}"></script>
     <script src="{{ url_for('static', filename='dashboard_charts.js') }}"></script>
     <script src="{{ url_for('static', filename='dashboard_state.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>

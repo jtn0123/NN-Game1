@@ -29,8 +29,8 @@
     }
 }
 
-.neuron-inspection-panel[style*="display: none"] {
-    animation: slideOutRight 0.3s ease-out forwards;
+.neuron-inspection-panel.is-hidden {
+    display: none;
 }
 
 @keyframes slideOutRight {
@@ -377,8 +377,8 @@
     }
 }
 
-.layer-analysis-panel[style*="display: none"] {
-    animation: slideOutLeft 0.3s ease-out forwards;
+.layer-analysis-panel.is-hidden {
+    display: none;
 }
 
 @keyframes slideOutLeft {

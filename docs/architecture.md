@@ -39,10 +39,12 @@ Use this area for browser controls, model management, live metrics, neural-net i
 ## Tooling And Release
 
 - `Makefile` defines local validation commands.
-- `.github/workflows/ci.yml` runs formatting, ruff linting, typing, dashboard JS tests, Python coverage, build, dependency audit, dependency review, and CodeQL.
+- `.github/workflows/ci.yml` runs formatting, ruff linting, typing, dashboard JS tests, Python coverage, Playwright dashboard smoke, build, dependency audit, dependency review, and CodeQL.
 - `.github/scripts/check_release_config.py` validates release automation config.
 - `.github/scripts/check_repo_hygiene.py` catches tracked scratch files.
-- `.github/scripts/check_file_size.py` keeps tracked source files below the 1000-line refactor budget.
+- `.github/scripts/check_file_size.py` keeps tracked source files below the configured source-size refactor budgets.
+- `.github/scripts/check_audit_waivers.py` fails when an ignored dependency advisory needs review.
+- `.github/scripts/check_dependency_files.py` checks dependency-file parity before audits.
 - `.github/scripts/run_dependency_audit.py` runs `pip-audit` and installs the audit tool locally if the active environment is missing it.
 - `.github/scripts/run_ruff.py` runs ruff and installs the lint tool locally if the active environment is missing it.
 - `pyproject.toml`, `requirements.txt`, and `constraints.txt` define packaging and dependency pins.
@@ -55,13 +57,13 @@ Use this area for CI, release, dependency, packaging, and repo hygiene changes.
 make check
 ```
 
-Fast local gate: formatting, ruff linting, strict mypy across `src`, `main.py`, and `config.py`, dashboard JS helper tests, and Python coverage with a 70% floor.
+Fast local gate: formatting, ruff linting, strict mypy across `src`, `main.py`, and `config.py`, dashboard JS helper tests, performance smoke, and Python coverage with an 80% floor.
 
 ```bash
 make verify
 ```
 
-Fuller local gate: `make check`, release config validation, repo hygiene, source file size budget, dependency audit, and package build when the `build` package is installed.
+Fuller local gate: `make check`, Playwright dashboard smoke, strict type-audit, release config validation, repo hygiene, source file size budgets, dependency audit, and package build when the `build` package is installed.
 
 ```bash
 make typecheck-audit

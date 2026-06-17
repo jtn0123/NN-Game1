@@ -26,6 +26,12 @@ test('withDashboardToken does not mutate original options', () => {
   assert.equal(options.headers['X-Dashboard-Token'], 'new-token');
 });
 
+test('withDashboardToken omits the header when cookie auth is used', () => {
+  const options = DashboardCore.withDashboardToken({ headers: { Accept: 'application/json' } }, '');
+
+  assert.deepEqual(options.headers, { Accept: 'application/json' });
+});
+
 test('readToken reads dashboard token from meta tag', () => {
   const documentRef = {
     querySelector(selector) {
@@ -47,6 +53,12 @@ test('authorizedControlPayload preserves existing payload fields', () => {
 test('authorizedControlPayload ignores non-object payloads', () => {
   assert.equal(DashboardCore.authorizedControlPayload(null, 'token'), null);
   assert.equal(DashboardCore.authorizedControlPayload('bad', 'token'), 'bad');
+});
+
+test('authorizedControlPayload leaves payload untouched for cookie auth', () => {
+  const payload = { action: 'save' };
+
+  assert.equal(DashboardCore.authorizedControlPayload(payload, ''), payload);
 });
 
 test('createAuthorizedSocket injects token into mutating events only', () => {
@@ -181,6 +193,41 @@ test('buildChartUpdateModel exposes show-all range for short histories', () => {
   assert.deepEqual(model.showAllRange, { min: 1, max: undefined });
 });
 
+test('appendChartUpdateModel extends a one-point chart update without full rebuild', () => {
+  const previous = DashboardCore.buildChartUpdateModel(
+    { scores: [10, 20], losses: [0.5, 0.25], q_values: [1, 2] },
+    2,
+    { averageWindow: 2 },
+  );
+
+  const model = DashboardCore.appendChartUpdateModel(
+    previous,
+    { scores: [10, 20, 50], losses: [0.5, 0.25, 0], q_values: [1, 2, 4] },
+    3,
+    { averageWindow: 2 },
+  );
+
+  assert.deepEqual(model.labels, [1, 2, 3]);
+  assert.deepEqual(model.scores, [10, 20, 50]);
+  assert.deepEqual(model.losses, [0.5, 0.25, 0.0001]);
+  assert.deepEqual(model.qValues, [1, 2, 4]);
+  assert.deepEqual(model.averageScores, [10, 15, 35]);
+  assert.deepEqual(model.bestAverageScores, [10, 15, 35]);
+});
+
+test('appendChartUpdateModel returns null for non-append history shapes', () => {
+  const previous = DashboardCore.buildChartUpdateModel({ scores: [10, 20] }, 2);
+
+  assert.equal(
+    DashboardCore.appendChartUpdateModel(previous, { scores: [5, 10, 20, 50] }, 4),
+    null,
+  );
+  assert.equal(
+    DashboardCore.appendChartUpdateModel(previous, { scores: [10, 20, 50] }, 2),
+    null,
+  );
+});
+
 test('escape helpers encode html and attribute-sensitive characters', () => {
   const hostile = `<img src=x onerror="alert('x')">&`;
 
@@ -241,4 +288,20 @@ test('modelListHtml marks unreadable checkpoints without load action', () => {
   assert.doesNotMatch(html, /data-action="load-model"/);
   assert.match(html, /title="bad &quot;checkpoint&quot;"/);
   assert.match(html, />\? MB</);
+});
+
+test('modelListHtml marks trusted legacy fallback checkpoints', () => {
+  const html = DashboardCore.modelListHtml([{
+    id: 'breakout:legacy.pth',
+    name: 'legacy model',
+    size: 1024,
+    is_loadable: true,
+    requires_unsafe_load: true,
+    security_warning: 'Re-save <soon>',
+  }]);
+
+  assert.match(html, /reason-badge warning/);
+  assert.match(html, /title="Re-save &lt;soon&gt;"/);
+  assert.match(html, />legacy</);
+  assert.match(html, /data-action="load-model"/);
 });

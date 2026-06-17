@@ -14,12 +14,28 @@ import os
 import sys
 
 import numpy as np
+import pygame
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.game.space_invaders import SpaceInvaders, VecSpaceInvaders
+from src.game.space_invaders_entities import (
+    UFO,
+    Alien,
+    Bullet,
+    Particle,
+    ScorePopup,
+    Shield,
+    ShieldBlock,
+    Ship,
+    Star,
+    WaveAnnouncement,
+)
+from src.game.space_invaders_entities import (
+    _font as entity_font,
+)
 
 
 @pytest.fixture
@@ -269,6 +285,169 @@ class TestSpaceInvadersGameOver:
         """Info dict should contain aliens_remaining."""
         _, _, _, info = game.step(1)
         assert "aliens_remaining" in info
+
+
+class TestSpaceInvadersRenderingResources:
+    """Test cached rendering resources."""
+
+    def test_hud_font_cache_reuses_font_instances(self, game):
+        pygame.font.init()
+
+        assert game._font(36) is game._font(36)
+        assert game._font(28) is game._font(28)
+
+    def test_entity_font_cache_reuses_popup_fonts(self):
+        pygame.font.init()
+        entity_font.cache_clear()
+
+        assert entity_font(24) is entity_font(24)
+
+
+class TestSpaceInvadersRendering:
+    """Render Space Invaders visual paths on offscreen pygame surfaces."""
+
+    @pytest.fixture
+    def screen(self, config):
+        pygame.init()
+        pygame.font.init()
+        return pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
+
+    def test_entity_draw_paths_complete_on_surface(self, screen):
+        """Entity draw methods should render without mutating liveness unexpectedly."""
+        particle = Particle(50, 50, (200, 100, 50))
+        particle.draw(screen)
+        particle.life = 0
+        particle.draw(screen)
+
+        popup = ScorePopup(80, 80, 100, (255, 200, 50))
+        popup.draw(screen)
+        assert popup.update() is True
+        popup.life = 0
+        popup.draw(screen)
+
+        announcement = WaveAnnouncement(3, screen.get_width(), screen.get_height())
+        announcement.draw(screen)
+        assert announcement.update(0.1) is True
+        announcement.timer = announcement.duration
+        assert announcement.update(0.1) is False
+        announcement.draw(screen)
+
+        star = Star(20, 20, 2.0, 100)
+        star.draw(screen, time=0.5)
+        star.y = screen.get_height() + 1
+        star.update(screen.get_height())
+        assert star.y == 0.0
+
+        bullet = Bullet(100, 100, -8, True, (100, 255, 200))
+        for _ in range(7):
+            bullet.update()
+        assert len(bullet.trail) == 5
+        bullet.draw(screen)
+        bullet.alive = False
+        bullet.draw(screen)
+
+        alien = Alien(120, 80, 32, 24, 1, (0, 255, 100))
+        alien.draw(screen, time=0.0)
+        alien.draw(screen, time=0.6)
+        alien.alive = False
+        alien.draw(screen, time=0.0)
+
+        ship = Ship(200, 250, 34, 24, 6, (100, 255, 100))
+        ship.draw(screen, time=0.0)
+        ship.move(-100, screen.get_width())
+        assert ship.x == 0
+        ship.move(1000, screen.get_width())
+        assert ship.x == screen.get_width() - ship.width
+
+        ufo = UFO(-50, 40, 5, (255, 80, 80))
+        ufo.draw(screen, time=0.25)
+        ufo.update()
+        assert ufo.x == -45
+        ufo.alive = False
+        ufo.draw(screen, time=0.25)
+
+    def test_shield_damage_and_draw_paths(self, screen):
+        """Shield blocks should fade, outline when damaged, and report liveness."""
+        block = ShieldBlock(10, 10, 8, (0, 255, 100))
+        block.draw(screen)
+        assert block.hit() is False
+        assert block.health == 3
+        block.draw(screen)
+        block.hit()
+        block.hit()
+        assert block.hit() is True
+        assert not block.alive
+        block.draw(screen)
+
+        shield = Shield(40, 40, 48, 24, (0, 255, 100))
+        assert shield.alive
+        assert shield.check_collision(shield.blocks[0].rect) is True
+        shield.draw(screen)
+        for shield_block in shield.blocks:
+            shield_block.alive = False
+        assert not shield.alive
+
+    def test_full_render_restores_shaken_positions(self, config, screen):
+        """Full visual rendering should restore positions after shake offsets."""
+        config.SI_SHIELDS_ENABLED = True
+        game = SpaceInvaders(config, headless=False)
+        game.screen_shake = 4
+        game.flash_alpha = 50
+        game.player_invincible = True
+        game._time = 0.1  # Exercises the ghost invincibility branch.
+        game.ufo = UFO(30, 40, 3, config.SI_COLOR_UFO)
+        game.player_bullets.append(Bullet(100, 200, -8, True, (100, 255, 200)))
+        game.alien_bullets.append(Bullet(120, 250, 5, False, (255, 80, 80)))
+        game.score_popups.append(ScorePopup(150, 150, 30, (255, 200, 50)))
+        game.wave_announcement = WaveAnnouncement(2, game.width, game.height)
+        game.game_over = True
+        game.score = 123
+        game.total_aliens_killed = 7
+
+        original_alien_pos = (game.aliens[0].x, game.aliens[0].y)
+        original_ship_pos = (game.ship.x, game.ship.y)
+        original_ufo_pos = (game.ufo.x, game.ufo.y)
+        original_player_bullet_pos = (game.player_bullets[0].x, game.player_bullets[0].y)
+        original_alien_bullet_pos = (game.alien_bullets[0].x, game.alien_bullets[0].y)
+
+        game.render(screen)
+
+        assert (game.aliens[0].x, game.aliens[0].y) == original_alien_pos
+        assert (game.ship.x, game.ship.y) == original_ship_pos
+        assert (game.ufo.x, game.ufo.y) == original_ufo_pos
+        assert (game.player_bullets[0].x, game.player_bullets[0].y) == original_player_bullet_pos
+        assert (game.alien_bullets[0].x, game.alien_bullets[0].y) == original_alien_bullet_pos
+
+        game.player_invincible = False
+        game.game_over = False
+        game.render(screen)
+
+    def test_visual_effect_updates_spawn_and_expire(self, config):
+        """Visual-mode effects should update, decay, and spawn particles."""
+        game = SpaceInvaders(config, headless=False)
+        game._spawn_explosion(40, 50, (255, 100, 50), count=3)
+        assert len(game.particles) == 3
+
+        game._spawn_player_death_explosion()
+        assert len(game.particles) == 63
+
+        game.particles[0].life = 0
+        game.score_popups.append(ScorePopup(80, 80, 10, (255, 200, 50)))
+        game.score_popups[0].life = 0
+        game.wave_announcement = WaveAnnouncement(2, game.width, game.height)
+        game.wave_announcement.timer = game.wave_announcement.duration
+        game.screen_shake = 0.4
+        game.flash_alpha = 20
+        star_y = game.stars[0].y
+
+        game._update_effects()
+
+        assert len(game.particles) == 62
+        assert game.score_popups == []
+        assert game.wave_announcement is None
+        assert game.screen_shake == 0
+        assert game.flash_alpha == 5
+        assert game.stars[0].y != star_y
 
 
 class TestVecSpaceInvaders:

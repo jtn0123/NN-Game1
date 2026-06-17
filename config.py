@@ -607,6 +607,43 @@ class Config:
             max_steps_per_episode=self.MAX_STEPS_PER_EPISODE,
         )
 
+    def apply_game_settings(self, settings: GameSettings) -> None:
+        """Apply typed game settings to the legacy config fields."""
+        self.GAME_NAME = settings.game_name
+        self.SCREEN_WIDTH = settings.screen_width
+        self.SCREEN_HEIGHT = settings.screen_height
+        self.FPS = settings.fps
+        self.LIVES = settings.lives
+        self.__post_init__()
+
+    def apply_network_settings(self, settings: NetworkSettings) -> None:
+        """Apply typed network settings to the legacy config fields."""
+        self.ACTION_SIZE = settings.action_size
+        self.HIDDEN_LAYERS = list(settings.hidden_layers)
+        self.ACTIVATION = settings.activation
+        self.USE_DUELING = settings.use_dueling
+        self.USE_NOISY_NETWORKS = settings.use_noisy_networks
+        self.__post_init__()
+
+    def apply_training_settings(self, settings: TrainingSettings) -> None:
+        """Apply typed training settings to the legacy config fields."""
+        self.LEARNING_RATE = settings.learning_rate
+        self.GAMMA = settings.gamma
+        self.BATCH_SIZE = settings.batch_size
+        self.MEMORY_SIZE = settings.memory_size
+        self.TARGET_UPDATE = settings.target_update
+        self.LEARN_EVERY = settings.learn_every
+        self.GRADIENT_STEPS = settings.gradient_steps
+        self.__post_init__()
+
+    def apply_runtime_settings(self, settings: RuntimeSettings) -> None:
+        """Apply typed runtime path and limit settings to the legacy config fields."""
+        self.MODEL_DIR = settings.model_dir
+        self.LOG_DIR = settings.log_dir
+        self.MAX_EPISODES = settings.max_episodes
+        self.MAX_STEPS_PER_EPISODE = settings.max_steps_per_episode
+        self.__post_init__()
+
     # Random seed for reproducibility (None for random)
     SEED: Optional[int] = None
 

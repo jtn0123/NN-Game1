@@ -8,7 +8,7 @@ import pytest
 import torch
 
 try:
-    from src.web.server import FLASK_AVAILABLE
+    from src.web.server import DASHBOARD_SESSION_COOKIE, FLASK_AVAILABLE
 
     WEB_AVAILABLE = FLASK_AVAILABLE
 except ImportError:
@@ -188,11 +188,16 @@ class TestWebDashboardRoutes:
         assert web_dashboard.access_token not in html
 
     def test_dashboard_page_serves_tokenized_frontend_contract(self, web_dashboard):
-        """Authorized dashboard HTML should expose the token and load core JS before app JS."""
+        """Authorized dashboard HTML should use a cookie session and local assets."""
         web_dashboard.app.config["TESTING"] = True
         with web_dashboard.app.test_client() as client:
-            response = client.get(f"/?token={web_dashboard.access_token}")
+            bootstrap = client.get(f"/?token={web_dashboard.access_token}")
+            response = client.get("/")
+            chart_response = client.get("/static/vendor/chart.umd.min.js")
+            zoom_response = client.get("/static/vendor/chartjs-plugin-zoom.min.js")
+            socketio_response = client.get("/static/vendor/socket.io.min.js")
             core_response = client.get("/static/dashboard_core.js")
+            model_list_response = client.get("/static/dashboard_model_list.js")
             charts_response = client.get("/static/dashboard_charts.js")
             state_response = client.get("/static/dashboard_state.js")
             app_response = client.get("/static/app.js")
@@ -206,22 +211,34 @@ class TestWebDashboardRoutes:
 
         html = response.data.decode("utf-8")
 
+        assert bootstrap.status_code == 303
+        assert f"{DASHBOARD_SESSION_COOKIE}=" in bootstrap.headers["Set-Cookie"]
+        assert "HttpOnly" in bootstrap.headers["Set-Cookie"]
+        assert "SameSite=Strict" in bootstrap.headers["Set-Cookie"]
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-cache, no-store, must-revalidate"
         assert response.headers["Referrer-Policy"] == "no-referrer"
         csp = parse_csp(response.headers["Content-Security-Policy"])
         assert csp["default-src"] == {"'self'"}
-        assert csp["script-src"] == {
-            "'self'",
-            "'unsafe-inline'",
-            "https://cdn.jsdelivr.net",
-            "https://cdn.socket.io",
-        }
+        assert csp["script-src"] == {"'self'"}
+        assert csp["style-src"] == {"'self'"}
+        assert all("'unsafe-inline'" not in sources for sources in csp.values())
         assert csp["frame-ancestors"] == {"'none'"}
-        assert f'<meta name="dashboard-token" content="{web_dashboard.access_token}">' in html
+        assert web_dashboard.access_token not in html
+        assert "https://cdn.jsdelivr.net" not in html
+        assert "https://cdn.socket.io" not in html
+        assert "https://fonts.googleapis.com" not in html
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "Training Dashboard" in html
-        assert html.index("dashboard_core.js") < html.index("dashboard_charts.js")
+        assert html.index("vendor/chart.umd.min.js") < html.index(
+            "vendor/chartjs-plugin-zoom.min.js"
+        )
+        assert html.index("vendor/chartjs-plugin-zoom.min.js") < html.index(
+            "vendor/socket.io.min.js"
+        )
+        assert html.index("vendor/socket.io.min.js") < html.index("dashboard_core.js")
+        assert html.index("dashboard_core.js") < html.index("dashboard_model_list.js")
+        assert html.index("dashboard_model_list.js") < html.index("dashboard_charts.js")
         assert html.index("dashboard_charts.js") < html.index("dashboard_state.js")
         assert html.index("dashboard_state.js") < html.index("app.js")
         assert html.index("app.js") < html.index("dashboard_dialogs.js")
@@ -231,7 +248,11 @@ class TestWebDashboardRoutes:
         assert html.index("dashboard_settings.js") < html.index("dashboard_games.js")
         assert html.index("dashboard_games.js") < html.index("dashboard_nn.js")
         assert html.index("dashboard_nn.js") < html.index("dashboard_nn_panels.js")
+        assert chart_response.status_code == 200
+        assert zoom_response.status_code == 200
+        assert socketio_response.status_code == 200
         assert core_response.status_code == 200
+        assert model_list_response.status_code == 200
         assert charts_response.status_code == 200
         assert state_response.status_code == 200
         assert app_response.status_code == 200
@@ -253,8 +274,10 @@ class TestWebDashboardRoutes:
         dashboard.app.config["TESTING"] = True
         with dashboard.app.test_client() as client:
             unauthorized = client.get("/")
-            response = client.get(f"/?token={dashboard.access_token}")
+            bootstrap = client.get(f"/?token={dashboard.access_token}")
+            response = client.get("/")
             launcher_css_response = client.get("/static/launcher.css")
+            socketio_response = client.get("/static/vendor/socket.io.min.js")
             core_response = client.get("/static/dashboard_core.js")
             launcher_response = client.get("/static/launcher.js")
 
@@ -263,23 +286,26 @@ class TestWebDashboardRoutes:
 
         assert unauthorized.status_code == 401
         assert dashboard.access_token not in unauthorized_html
+        assert bootstrap.status_code == 303
+        assert f"{DASHBOARD_SESSION_COOKIE}=" in bootstrap.headers["Set-Cookie"]
         assert response.status_code == 200
         assert response.headers["Referrer-Policy"] == "no-referrer"
         csp = parse_csp(response.headers["Content-Security-Policy"])
         assert csp["default-src"] == {"'self'"}
-        assert csp["script-src"] == {
-            "'self'",
-            "'unsafe-inline'",
-            "https://cdn.jsdelivr.net",
-            "https://cdn.socket.io",
-        }
+        assert csp["script-src"] == {"'self'"}
+        assert csp["style-src"] == {"'self'"}
+        assert all("'unsafe-inline'" not in sources for sources in csp.values())
         assert csp["frame-ancestors"] == {"'none'"}
-        assert f'<meta name="dashboard-token" content="{dashboard.access_token}">' in html
+        assert dashboard.access_token not in html
+        assert "https://cdn.socket.io" not in html
+        assert "https://fonts.googleapis.com" not in html
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "launcher.css" in html
+        assert html.index("vendor/socket.io.min.js") < html.index("launcher.css")
         assert html.index("launcher.css") < html.index("dashboard_core.js")
         assert html.index("dashboard_core.js") < html.index("launcher.js")
         assert launcher_css_response.status_code == 200
+        assert socketio_response.status_code == 200
         assert core_response.status_code == 200
         assert launcher_response.status_code == 200
 
@@ -447,6 +473,34 @@ class TestWebDashboardRoutes:
         assert authorized.status_code == 200
         assert not os.path.exists(model_path)
 
+    def test_delete_model_repeated_requests_are_throttled(self, tmp_path):
+        """Destructive HTTP model deletes should have a small double-submit guard."""
+        from config import Config
+        from src.web.server import WebDashboard
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        os.makedirs(config.GAME_MODEL_DIR)
+        torch.save({"steps": 1}, os.path.join(config.GAME_MODEL_DIR, "one.pth"))
+        torch.save({"steps": 2}, os.path.join(config.GAME_MODEL_DIR, "two.pth"))
+
+        dashboard = WebDashboard(port=5114, config=config)
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            first = client.delete(
+                "/api/models/breakout:one.pth",
+                headers={"X-Dashboard-Token": dashboard.access_token},
+            )
+            second = client.delete(
+                "/api/models/breakout:two.pth",
+                headers={"X-Dashboard-Token": dashboard.access_token},
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert json.loads(second.data) == {"error": "Too many requests"}
+
     def test_delete_model_hides_internal_exception_details(self, tmp_path):
         """Unexpected delete failures should not expose server internals to clients."""
         from config import Config
@@ -522,11 +576,17 @@ class TestWebDashboardRoutes:
 
     def test_control_callback_errors_use_generic_ack(self, web_dashboard, tmp_path):
         """Socket control acks should not leak callback exception details."""
+        from src.web import socket_controls
+
         web_dashboard.on_save_as_callback = lambda _filename: (_ for _ in ()).throw(
             RuntimeError(f"secret path: {tmp_path}")
         )
 
-        ack = web_dashboard._handle_save_as_control({"filename": "demo.pth"})
+        ack = socket_controls.dispatch_control(
+            web_dashboard,
+            {"action": "save_as", "filename": "demo.pth"},
+            lambda _event, _payload: None,
+        )
 
         assert ack == {"success": False, "action": "save_as", "error": "Save failed"}
 

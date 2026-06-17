@@ -130,7 +130,7 @@ NeuralNetworkVisualizer.prototype.displayNeuronInspection = function(neuronData)
     }
 
     panel.replaceChildren(header, content);
-    panel.style.display = 'block';
+    panel.classList.remove('is-hidden');
 
     if (sparklineCanvas) {
         this.drawSparkline(sparklineCanvas, activationHistory);
@@ -281,5 +281,5 @@ NeuralNetworkVisualizer.prototype.displayLayerAnalysis = function(layerData) {
     );
 
     panel.replaceChildren(header, content);
-    panel.style.display = 'block';
+    panel.classList.remove('is-hidden');
 };

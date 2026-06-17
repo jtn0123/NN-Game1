@@ -14,7 +14,11 @@ import numpy as np
 from src.ai.agent import Agent, TrainingHistory
 from src.app.lifecycle_types import EpisodeMetrics
 from src.app.performance_modes import apply_performance_mode
-from src.app.training_runtime import build_nn_snapshot, emit_nn_snapshot_to_dashboard
+from src.app.training_runtime import (
+    build_nn_snapshot,
+    build_runtime_nn_snapshot,
+    emit_nn_snapshot_to_dashboard,
+)
 from src.utils.checkpoint_loader import load_checkpoint
 
 
@@ -578,7 +582,13 @@ class InteractiveDashboardMixin:
         try:
             runtime_module = sys.modules.get(self.__class__.__module__)
             snapshot_builder = getattr(runtime_module, "build_nn_snapshot", build_nn_snapshot)
-            snapshot = snapshot_builder(self.agent, self.game, state)
+            snapshot = build_runtime_nn_snapshot(
+                self.agent,
+                self.game,
+                state,
+                step=self.agent.steps,
+                snapshot_builder=snapshot_builder,
+            )
             emit_nn_snapshot_to_dashboard(
                 self.web_dashboard,
                 snapshot,

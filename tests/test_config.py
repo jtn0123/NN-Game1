@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import Config
+from config import Config, GameSettings, NetworkSettings, RuntimeSettings, TrainingSettings
 
 
 class TestConfigValidation:
@@ -217,6 +217,57 @@ class TestConfigGroupedViews:
         assert cfg.training.batch_size == cfg.BATCH_SIZE
         assert cfg.runtime.game_model_dir.endswith("models/snake")
         assert cfg.runtime.device.type in ["cpu", "cuda", "mps"]
+
+    def test_grouped_settings_apply_back_to_legacy_fields(self):
+        cfg = Config()
+
+        cfg.apply_game_settings(
+            GameSettings(
+                game_name="snake",
+                screen_width=640,
+                screen_height=480,
+                fps=30,
+                lives=5,
+            )
+        )
+        cfg.apply_network_settings(
+            NetworkSettings(
+                action_size=4,
+                hidden_layers=(32, 16),
+                activation="relu",
+                use_dueling=False,
+                use_noisy_networks=True,
+            )
+        )
+        cfg.apply_training_settings(
+            TrainingSettings(
+                learning_rate=0.002,
+                gamma=0.9,
+                batch_size=32,
+                memory_size=1000,
+                target_update=25,
+                learn_every=2,
+                gradient_steps=1,
+            )
+        )
+        cfg.apply_runtime_settings(
+            RuntimeSettings(
+                model_dir="tmp-models",
+                game_model_dir="tmp-models/snake",
+                log_dir="tmp-logs",
+                device=cfg.DEVICE,
+                max_episodes=10,
+                max_steps_per_episode=200,
+            )
+        )
+
+        assert cfg.GAME_NAME == "snake"
+        assert cfg.SCREEN_WIDTH == 640
+        assert cfg.HIDDEN_LAYERS == [32, 16]
+        assert cfg.USE_NOISY_NETWORKS is True
+        assert cfg.LEARNING_RATE == 0.002
+        assert cfg.MODEL_DIR == "tmp-models"
+        assert cfg.MAX_EPISODES == 10
 
 
 if __name__ == "__main__":

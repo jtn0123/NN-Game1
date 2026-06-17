@@ -4,17 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
-    <meta name="dashboard-token" content="{{ access_token }}">
     <title>🧠 Neural Network AI - Game Launcher</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <script>
-        window.DASHBOARD_ASSET_FAILURES = [];
-        window.reportDashboardAssetFailure = function(assetName) {
-            window.DASHBOARD_ASSET_FAILURES.push(assetName);
-        };
-    </script>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Socket.IO')"></script>
+    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='launcher.css') }}">
 </head>
 <body>

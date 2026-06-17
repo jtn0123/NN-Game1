@@ -9,7 +9,7 @@ import numpy as np
 
 from config import Config
 from src.ai.agent import Agent, TrainingHistory
-from src.app.checkpoint_catalog import iter_checkpoint_candidates
+from src.app.checkpoint_catalog import CheckpointRepository
 from src.app.model_paths import normalize_checkpoint_filename
 
 
@@ -18,6 +18,9 @@ class ModelService:
 
     def __init__(self, config: Config):
         self.config = config
+        self._checkpoint_repository = CheckpointRepository(
+            [(self.config.GAME_MODEL_DIR, self.config.GAME_NAME)]
+        )
 
     def ensure_model_dir(self) -> str:
         """Create and return the active game-specific model directory."""
@@ -67,7 +70,7 @@ class ModelService:
         if not os.path.exists(model_dir):
             return None
 
-        model_files = iter_checkpoint_candidates([(model_dir, self.config.GAME_NAME)])
+        model_files = self._checkpoint_repository.candidates()
         if not model_files:
             return None
 

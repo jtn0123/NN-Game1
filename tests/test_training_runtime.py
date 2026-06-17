@@ -10,11 +10,13 @@ from src.ai.agent import Agent
 from src.app.training_runtime import (
     NNSnapshot,
     build_nn_snapshot,
+    build_runtime_nn_snapshot,
     emit_nn_snapshot_to_dashboard,
     is_new_best_score,
     request_save_and_stop,
     resolve_model_path,
     should_emit_episode_metrics,
+    should_include_nn_analysis,
 )
 
 
@@ -32,6 +34,14 @@ def test_is_new_best_score_compares_against_previous_best(score, best_score, exp
 )
 def test_should_emit_episode_metrics_matches_dashboard_throttle(episode, is_new_best, expected):
     assert should_emit_episode_metrics(episode, is_new_best) is expected
+
+
+@pytest.mark.parametrize(
+    ("step", "interval", "expected"),
+    [(0, 100, True), (1, 100, False), (100, 100, True), (101, 100, False), (7, 0, True)],
+)
+def test_should_include_nn_analysis_throttles_full_payloads(step, interval, expected):
+    assert should_include_nn_analysis(step, interval) is expected
 
 
 def test_resolve_model_path_uses_latest_compatible_checkpoint(tmp_path):
@@ -209,6 +219,73 @@ def test_build_nn_snapshot_creates_sampled_and_full_payloads():
     assert snapshot.analysis_weights
     assert len(snapshot.analysis_weights[0][0]) == config.STATE_SIZE
     assert len(snapshot.weights[0]) <= 15
+
+
+def test_build_nn_snapshot_can_skip_full_analysis_payloads():
+    config = Config()
+    config.HIDDEN_LAYERS = [32, 16]
+    config.USE_DUELING = False
+    config.USE_N_STEP_RETURNS = False
+    agent = Agent(
+        state_size=config.STATE_SIZE,
+        action_size=config.ACTION_SIZE,
+        config=config,
+    )
+    game = SimpleNamespace(get_action_labels=lambda: ["LEFT", "RIGHT"])
+    state = np.zeros(config.STATE_SIZE, dtype=np.float32)
+
+    snapshot = build_nn_snapshot(agent, game, state, include_analysis=False)
+
+    assert snapshot.weights
+    assert snapshot.activations
+    assert snapshot.analysis_weights == []
+    assert snapshot.analysis_activations == {}
+
+
+def test_build_runtime_nn_snapshot_passes_analysis_cadence_to_modern_builders():
+    calls = []
+
+    def snapshot_builder(agent, game, state, *, include_analysis=True):
+        calls.append(include_analysis)
+        return NNSnapshot(
+            layer_info=[],
+            activations={},
+            q_values=[],
+            weights=[],
+            action_labels=[],
+            input_state=[],
+            analysis_activations={"full": [1.0]} if include_analysis else {},
+            analysis_weights=[[[1.0]]] if include_analysis else [],
+        )
+
+    build_runtime_nn_snapshot(None, None, np.array([]), step=1, snapshot_builder=snapshot_builder)
+    build_runtime_nn_snapshot(None, None, np.array([]), step=100, snapshot_builder=snapshot_builder)
+
+    assert calls == [False, True]
+
+
+def test_build_runtime_nn_snapshot_keeps_legacy_builders_supported():
+    def snapshot_builder(agent, game, state):
+        return NNSnapshot(
+            layer_info=[],
+            activations={},
+            q_values=[],
+            weights=[],
+            action_labels=[],
+            input_state=[],
+            analysis_activations={},
+            analysis_weights=[],
+        )
+
+    snapshot = build_runtime_nn_snapshot(
+        None,
+        None,
+        np.array([]),
+        step=1,
+        snapshot_builder=snapshot_builder,
+    )
+
+    assert isinstance(snapshot, NNSnapshot)
 
 
 @pytest.mark.parametrize(

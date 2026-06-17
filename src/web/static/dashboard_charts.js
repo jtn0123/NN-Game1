@@ -21,7 +21,9 @@
         losses: [],
         q_values: [],
         epsilons: [],
-        labels: []
+        labels: [],
+        averageScores: [],
+        bestAverageScores: []
     };
 
     /**
@@ -742,7 +744,11 @@
             return;
         }
 
-        const chartModel = DashboardCore.buildChartUpdateModel(history, currentEpisode);
+        const chartModel = DashboardCore.appendChartUpdateModel(
+            fullHistory,
+            history,
+            currentEpisode,
+        ) || DashboardCore.buildChartUpdateModel(history, currentEpisode);
         const allScores = chartModel.scores;
         const allQValues = chartModel.qValues;
         const labels = chartModel.labels;
@@ -752,6 +758,8 @@
         fullHistory.losses = chartModel.losses;
         fullHistory.q_values = allQValues;
         fullHistory.labels = labels;
+        fullHistory.averageScores = chartModel.averageScores;
+        fullHistory.bestAverageScores = chartModel.bestAverageScores;
 
         // Get current viewport ranges for each chart (to maintain user's pan position)
         let scoreXRange = null;
@@ -894,7 +902,9 @@
             losses: [],
             q_values: [],
             epsilons: [],
-            labels: []
+            labels: [],
+            averageScores: [],
+            bestAverageScores: []
         };
         userHasPanned = { score: false, loss: false, qvalue: false };
     }

@@ -71,6 +71,8 @@ class ModelPayload(TypedDict, total=False):
     modified_str: str
     is_loadable: bool
     has_metadata: bool
+    requires_unsafe_load: bool
+    security_warning: str
     metadata: Optional[Dict[str, Any]]
     steps: Any
     epsilon: Any

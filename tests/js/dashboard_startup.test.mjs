@@ -130,6 +130,7 @@ function createDashboardContext() {
   });
 
   const chartsSource = readFileSync(resolve('src/web/static/dashboard_charts.js'), 'utf8');
+  const modelListSource = readFileSync(resolve('src/web/static/dashboard_model_list.js'), 'utf8');
   const dashboardSources = [
     'app.js',
     'dashboard_dialogs.js',
@@ -140,6 +141,7 @@ function createDashboardContext() {
     'dashboard_nn.js',
     'dashboard_nn_panels.js',
   ];
+  vm.runInContext(modelListSource, context, { filename: 'dashboard_model_list.js' });
   vm.runInContext(chartsSource, context, { filename: 'dashboard_charts.js' });
   vm.runInContext(readFileSync(resolve('src/web/static/dashboard_state.js'), 'utf8'), context, {
     filename: 'dashboard_state.js',

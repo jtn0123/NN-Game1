@@ -16,7 +16,7 @@ function loadGames() {
             select.dataset.currentGame = data.current_game;
 
             // Clear existing options
-            select.innerHTML = '';
+            select.replaceChildren();
 
             // Add games
             data.games.forEach(game => {

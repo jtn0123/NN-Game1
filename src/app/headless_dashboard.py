@@ -11,10 +11,12 @@ from typing import Any, Optional
 import numpy as np
 
 from src.ai.agent import Agent, TrainingHistory
+from src.app.dashboard_bindings import DashboardCallbacks, bind_dashboard_callbacks
 from src.app.performance_modes import apply_performance_mode
 from src.app.process_control import restart_with_game
 from src.app.training_runtime import (
     build_nn_snapshot,
+    build_runtime_nn_snapshot,
     emit_nn_snapshot_to_dashboard,
     request_save_and_stop,
 )
@@ -69,22 +71,23 @@ class HeadlessDashboardMixin:
         if not self.web_dashboard:
             return
 
-        self.web_dashboard.on_pause_callback = self._toggle_pause
-        self.web_dashboard.on_save_callback = lambda: self._save_model(
-            f"{self.config.GAME_NAME}_web_save.pth", save_reason="manual"
+        bind_dashboard_callbacks(
+            self.web_dashboard,
+            DashboardCallbacks(
+                pause=self._toggle_pause,
+                save=lambda: self._save_model(
+                    f"{self.config.GAME_NAME}_web_save.pth", save_reason="manual"
+                ),
+                save_as=self._save_model_as,
+                reset=self._reset_episode,
+                start_fresh=self._start_fresh,
+                load_model=self._load_model,
+                config_change=self._apply_config,
+                performance_mode=self._set_performance_mode,
+                restart_with_game=lambda game: restart_with_game(game, self.args),
+                save_and_quit=self._save_and_quit,
+            ),
         )
-        self.web_dashboard.on_save_as_callback = self._save_model_as
-        self.web_dashboard.on_reset_callback = self._reset_episode
-        self.web_dashboard.on_start_fresh_callback = self._start_fresh
-        self.web_dashboard.on_load_model_callback = self._load_model
-        self.web_dashboard.on_config_change_callback = self._apply_config
-        self.web_dashboard.on_performance_mode_callback = self._set_performance_mode
-        self.web_dashboard.on_restart_with_game_callback = lambda game: restart_with_game(
-            game, self.args
-        )
-        self.web_dashboard.on_save_and_quit_callback = self._save_and_quit
-        # Speed control doesn't apply to headless (no frame timing)
-        self.web_dashboard.on_speed_callback = lambda x: None
 
     def _send_system_info(self: Any) -> None:
         """Send system information to web dashboard."""
@@ -396,7 +399,13 @@ class HeadlessDashboardMixin:
         try:
             runtime_module = sys.modules.get(self.__class__.__module__)
             snapshot_builder = getattr(runtime_module, "build_nn_snapshot", build_nn_snapshot)
-            snapshot = snapshot_builder(self.agent, self.game, state)
+            snapshot = build_runtime_nn_snapshot(
+                self.agent,
+                self.game,
+                state,
+                step=self.agent.steps,
+                snapshot_builder=snapshot_builder,
+            )
             emit_nn_snapshot_to_dashboard(
                 self.web_dashboard,
                 snapshot,

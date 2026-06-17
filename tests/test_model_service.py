@@ -3,6 +3,7 @@ import os
 import pytest
 import torch
 
+from src.utils.checkpoint_loader import CheckpointLoadResult
 from src.web.model_service import ModelService
 
 
@@ -33,6 +34,30 @@ def test_model_service_marks_unreadable_checkpoints(tmp_path):
     assert models[0]["has_metadata"] is False
     assert "load_error" in models[0]
     assert "path" not in models[0]
+
+
+def test_model_service_marks_legacy_compatibility_fallback(monkeypatch, tmp_path):
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    (model_dir / "legacy.pth").write_bytes(b"legacy checkpoint")
+
+    def fake_load_checkpoint_with_status(*args, **kwargs):
+        return CheckpointLoadResult(
+            checkpoint={"steps": 3, "epsilon": 0.75},
+            used_unsafe_fallback=True,
+        )
+
+    monkeypatch.setattr(
+        "src.web.model_service.load_checkpoint_with_status",
+        fake_load_checkpoint_with_status,
+    )
+
+    service = ModelService([(str(model_dir), "breakout")])
+    models = service.list_models()
+
+    assert models[0]["is_loadable"] is True
+    assert models[0]["requires_unsafe_load"] is True
+    assert "restricted format" in models[0]["security_warning"]
 
 
 def test_model_service_resolves_ids_and_rejects_traversal(tmp_path):

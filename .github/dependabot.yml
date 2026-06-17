@@ -18,3 +18,13 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      dashboard-js:
+        update-types:
+          - "minor"
+          - "patch"
