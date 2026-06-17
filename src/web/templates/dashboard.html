@@ -6,9 +6,15 @@
     <meta name="referrer" content="no-referrer">
     <meta name="dashboard-token" content="{{ access_token }}">
     <title>Neural Network AI - Training Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        window.DASHBOARD_ASSET_FAILURES = [];
+        window.reportDashboardAssetFailure = function(assetName) {
+            window.DASHBOARD_ASSET_FAILURES.push(assetName);
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Chart.js')"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Chart.js zoom plugin')"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Socket.IO')"></script>
     <script>window.DASHBOARD_CONTROL_TOKEN = {{ control_token|tojson }};</script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">

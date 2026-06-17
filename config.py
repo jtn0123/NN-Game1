@@ -17,6 +17,53 @@ from typing import List, Optional, Tuple
 import torch
 
 
+@dataclass(frozen=True)
+class GameSettings:
+    """Typed view of game and screen settings."""
+
+    game_name: str
+    screen_width: int
+    screen_height: int
+    fps: int
+    lives: int
+
+
+@dataclass(frozen=True)
+class NetworkSettings:
+    """Typed view of neural-network architecture settings."""
+
+    action_size: int
+    hidden_layers: Tuple[int, ...]
+    activation: str
+    use_dueling: bool
+    use_noisy_networks: bool
+
+
+@dataclass(frozen=True)
+class TrainingSettings:
+    """Typed view of core learning hyperparameters."""
+
+    learning_rate: float
+    gamma: float
+    batch_size: int
+    memory_size: int
+    target_update: int
+    learn_every: int
+    gradient_steps: int
+
+
+@dataclass(frozen=True)
+class RuntimeSettings:
+    """Typed view of runtime paths and execution limits."""
+
+    model_dir: str
+    game_model_dir: str
+    log_dir: str
+    device: torch.device
+    max_episodes: int
+    max_steps_per_episode: int
+
+
 @dataclass
 class Config:
     """
@@ -512,6 +559,53 @@ class Config:
         import os
 
         return os.path.join(self.MODEL_DIR, self.GAME_NAME)
+
+    @property
+    def game(self) -> GameSettings:
+        """Return grouped game settings for new code paths."""
+        return GameSettings(
+            game_name=self.GAME_NAME,
+            screen_width=self.SCREEN_WIDTH,
+            screen_height=self.SCREEN_HEIGHT,
+            fps=self.FPS,
+            lives=self.LIVES,
+        )
+
+    @property
+    def network(self) -> NetworkSettings:
+        """Return grouped neural-network settings for new code paths."""
+        return NetworkSettings(
+            action_size=self.ACTION_SIZE,
+            hidden_layers=tuple(self.HIDDEN_LAYERS),
+            activation=self.ACTIVATION,
+            use_dueling=self.USE_DUELING,
+            use_noisy_networks=self.USE_NOISY_NETWORKS,
+        )
+
+    @property
+    def training(self) -> TrainingSettings:
+        """Return grouped training settings for new code paths."""
+        return TrainingSettings(
+            learning_rate=self.LEARNING_RATE,
+            gamma=self.GAMMA,
+            batch_size=self.BATCH_SIZE,
+            memory_size=self.MEMORY_SIZE,
+            target_update=self.TARGET_UPDATE,
+            learn_every=self.LEARN_EVERY,
+            gradient_steps=self.GRADIENT_STEPS,
+        )
+
+    @property
+    def runtime(self) -> RuntimeSettings:
+        """Return grouped runtime settings for new code paths."""
+        return RuntimeSettings(
+            model_dir=self.MODEL_DIR,
+            game_model_dir=self.GAME_MODEL_DIR,
+            log_dir=self.LOG_DIR,
+            device=self.DEVICE,
+            max_episodes=self.MAX_EPISODES,
+            max_steps_per_episode=self.MAX_STEPS_PER_EPISODE,
+        )
 
     # Random seed for reproducibility (None for random)
     SEED: Optional[int] = None

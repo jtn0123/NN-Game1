@@ -107,6 +107,18 @@ async function main() {
     await page.locator('[data-action="hide-load-modal"]').click();
     await expect(page.locator('#load-modal')).not.toHaveClass(/visible/);
 
+    await page.locator('[data-action="set-performance-mode"][data-mode="turbo"]').click();
+    await expect(page.locator('#console-output')).toContainText('Performance mode: Turbo', {
+      timeout: 5000,
+    });
+
+    await page.locator('[data-action="toggle-settings"]').click();
+    await page.locator('#setting-lr').fill('0.0002');
+    await page.locator('[data-action="apply-settings"]').click();
+    await expect(page.locator('#console-output')).toContainText('Settings updated', {
+      timeout: 5000,
+    });
+
     await expect(page.locator('#game-select')).toHaveValue('breakout');
 
     const relevantHttpFailures = httpFailures.filter((entry) => !entry.endsWith('/favicon.ico'));

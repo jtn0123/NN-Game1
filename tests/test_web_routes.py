@@ -3,6 +3,7 @@
 import json
 import os
 
+import numpy as np
 import pytest
 import torch
 
@@ -14,6 +15,18 @@ except ImportError:
     WEB_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(not WEB_AVAILABLE, reason="Flask/SocketIO not installed")
+
+
+def test_route_helpers_parse_status_bounds():
+    from src.web.routes import model_delete_error_status, parse_history_limit
+
+    assert parse_history_limit(None, default=100, maximum=1000) == 100
+    assert parse_history_limit("bad", default=100, maximum=1000) == 100
+    assert parse_history_limit("-5", default=100, maximum=1000) == 0
+    assert parse_history_limit("5000", default=100, maximum=1000) == 1000
+    assert model_delete_error_status("Model not found") == 404
+    assert model_delete_error_status("Invalid file type") == 400
+    assert model_delete_error_status("Traversal") == 403
 
 
 def parse_csp(header: str) -> dict[str, set[str]]:
@@ -288,6 +301,101 @@ class TestWebDashboardRoutes:
             "gradient_steps": 2,
             "description": "Learn every 32 steps + 2 gradient updates",
         }
+
+    def test_api_games_save_status_and_game_stats_routes(self, web_dashboard):
+        """Miscellaneous read routes should return stable dashboard payload shapes."""
+        web_dashboard.publisher.record_save("best.pth", "best_score", episode=2, best_score=50)
+        web_dashboard.app.config["TESTING"] = True
+        with web_dashboard.app.test_client() as client:
+            games_response = client.get(
+                "/api/games",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+            save_response = client.get(
+                "/api/save-status",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+            stats_response = client.get(
+                "/api/game-stats",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+
+        games = json.loads(games_response.data)
+        save_status = json.loads(save_response.data)
+        stats = json.loads(stats_response.data)
+        assert games_response.status_code == 200
+        assert save_response.status_code == 200
+        assert stats_response.status_code == 200
+        assert games["current_game"] == web_dashboard.config.GAME_NAME
+        assert any(game["id"] == web_dashboard.config.GAME_NAME for game in games["games"])
+        assert save_status["last_save_filename"] == "best.pth"
+        assert stats["current_game"] == web_dashboard.config.GAME_NAME
+        assert "stats" in stats
+
+    def test_screenshot_and_nn_analysis_routes(self, web_dashboard):
+        """Dashboard analysis routes should expose JSON-safe publisher data."""
+        web_dashboard.publisher.update_neuron_inspection(
+            layer_idx=1,
+            neuron_idx=2,
+            layer_name="hidden",
+            current_activation=0.4,
+            incoming_weights=[0.1, 0.2],
+        )
+        web_dashboard.publisher.update_layer_analysis(
+            layer_idx=1,
+            layer_name="hidden",
+            neuron_count=2,
+            activations=np.array([0.1, 0.9], dtype=np.float32),
+        )
+        web_dashboard.publisher._screenshot_data = "encoded-image"
+        web_dashboard.app.config["TESTING"] = True
+
+        with web_dashboard.app.test_client() as client:
+            screenshot_response = client.get(
+                "/api/screenshot",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+            neuron_response = client.get(
+                "/api/neuron/1/2",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+            layer_response = client.get(
+                "/api/layer/1",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+            layers_response = client.get(
+                "/api/layers",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+
+            web_dashboard.publisher.state.headless = True
+            headless_response = client.get(
+                "/api/screenshot",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+
+        assert json.loads(screenshot_response.data) == {
+            "headless": False,
+            "image": "encoded-image",
+        }
+        assert json.loads(headless_response.data) == {"headless": True, "image": None}
+        assert json.loads(neuron_response.data)["current_activation"] == 0.4
+        assert json.loads(layer_response.data)["layer_idx"] == 1
+        assert json.loads(layers_response.data)[0]["layer_idx"] == 1
+
+    def test_screenshot_route_returns_empty_payload_without_image(self, web_dashboard):
+        web_dashboard.publisher.state.headless = False
+        web_dashboard.publisher._screenshot_data = None
+        web_dashboard.app.config["TESTING"] = True
+
+        with web_dashboard.app.test_client() as client:
+            response = client.get(
+                "/api/screenshot",
+                headers={"X-Dashboard-Token": web_dashboard.access_token},
+            )
+
+        assert response.status_code == 200
+        assert json.loads(response.data) == {"headless": False, "image": None}
 
     def test_api_models_uses_opaque_ids(self, tmp_path):
         """Model list should not expose absolute local filesystem paths."""

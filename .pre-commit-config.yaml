@@ -1,0 +1,28 @@
+repos:
+  - repo: local
+    hooks:
+      - id: format-check
+        name: black format check
+        entry: make format-check
+        language: system
+        pass_filenames: false
+      - id: lint
+        name: ruff lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+      - id: typecheck
+        name: mypy typecheck
+        entry: make typecheck
+        language: system
+        pass_filenames: false
+      - id: dashboard-test
+        name: dashboard javascript tests
+        entry: make dashboard-test
+        language: system
+        pass_filenames: false
+      - id: size-check
+        name: file size check
+        entry: make size-check
+        language: system
+        pass_filenames: false

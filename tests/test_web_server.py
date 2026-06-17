@@ -9,7 +9,9 @@ Tests cover:
 """
 
 import re
+import sys
 from datetime import datetime
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -250,11 +252,145 @@ class TestMetricsPublisher:
         assert snapshot["state"]["episode"] == 5
         assert snapshot["state"]["score"] == 25
 
+    def test_get_snapshot_can_limit_history_payload(self):
+        """Initial dashboard payloads should be able to send only recent history."""
+        publisher = MetricsPublisher(history_length=100)
+
+        for episode in range(5):
+            publisher.update(
+                episode=episode,
+                score=episode * 10,
+                epsilon=0.8,
+                loss=0.05,
+                reward=float(episode),
+                avg_q_value=float(episode) / 10,
+                episode_length=episode + 1,
+            )
+
+        snapshot = publisher.get_snapshot(history_limit=2)
+
+        assert snapshot["history"]["scores"] == [30, 40]
+        assert snapshot["history"]["losses"] == [0.05, 0.05]
+        assert snapshot["history"]["rewards"] == [3.0, 4.0]
+        assert snapshot["history"]["q_values"] == [0.3, 0.4]
+        assert snapshot["history"]["episode_lengths"] == [4, 5]
+
+    def test_update_log_and_save_callbacks_receive_payloads(self, monkeypatch):
+        """Registered callbacks should receive immutable payload snapshots."""
+        from src.web import metrics_publisher as metrics_module
+
+        publisher = MetricsPublisher(history_length=100)
+        updates = []
+        logs = []
+        saves = []
+        publisher.on_update(updates.append)
+        publisher.on_log(logs.append)
+        publisher.on_save(saves.append)
+
+        now = iter([100.0, 101.0, 102.0])
+        monkeypatch.setattr(metrics_module.time, "time", lambda: next(now))
+
+        publisher.update(
+            episode=1,
+            score=20,
+            epsilon=0.5,
+            loss=0.01,
+            total_steps=10,
+            won=True,
+            reward=3.0,
+            memory_size=50,
+            avg_q_value=1.5,
+            exploration_actions=2,
+            exploitation_actions=8,
+            target_updates=1,
+            bricks_broken=4,
+            episode_length=30,
+            q_value_left=0.1,
+            q_value_stay=0.2,
+            q_value_right=0.3,
+            selected_action=2,
+        )
+        publisher.log("Saved checkpoint", level="success", data={"episode": 1})
+        publisher.record_save("best.pth", "best_score", episode=1, best_score=20)
+
+        assert updates[0]["state"]["episode"] == 1
+        assert updates[0]["state"]["win_rate"] == 1.0
+        assert updates[0]["history"]["scores"] == [20]
+        assert publisher.action_frequency["right"] == 1
+        assert publisher.action_frequency["exploration"] == 2
+        assert publisher.action_frequency["exploitation"] == 8
+        assert logs[0].message == "Saved checkpoint"
+        assert saves[0]["last_save_filename"] == "best.pth"
+        assert saves[0]["saves_this_session"] == 1
+        assert saves[0]["time_since_save_str"] == "1s ago"
+
+    def test_state_mutators_and_console_log_limit_readback(self):
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.set_paused(True)
+        publisher.set_speed(2.5)
+        publisher.update_config(
+            {
+                "learning_rate": 0.002,
+                "batch_size": 64,
+                "learn_every": 4,
+                "gradient_steps": 2,
+            }
+        )
+        publisher.set_performance_mode("fast")
+        publisher.set_system_info("cpu", torch_compiled=True, target_episodes=500, headless=True)
+        publisher.log("first")
+        publisher.log("second")
+
+        assert publisher.state.is_paused is True
+        assert publisher.state.game_speed == 2.5
+        assert publisher.state.learning_rate == 0.002
+        assert publisher.state.batch_size == 64
+        assert publisher.state.learn_every == 4
+        assert publisher.state.gradient_steps == 2
+        assert publisher.state.performance_mode == "fast"
+        assert publisher.state.device == "cpu"
+        assert publisher.state.torch_compiled is True
+        assert publisher.state.target_episodes == 500
+        assert publisher.state.headless is True
+        assert [entry["message"] for entry in publisher.get_console_logs(limit=1)] == ["second"]
+
+    @pytest.mark.parametrize(
+        ("seconds", "expected"),
+        [(0, "Never"), (59, "59s ago"), (120, "2m ago"), (3660, "1h 1m ago")],
+    )
+    def test_format_time_ago(self, seconds, expected):
+        assert MetricsPublisher()._format_time_ago(seconds) == expected
+
     def test_screenshot_handling(self):
         """MetricsPublisher should handle screenshot retrieval."""
         publisher = MetricsPublisher(history_length=100)
 
         # get_screenshot should return None initially
+        assert publisher.get_screenshot() is None
+
+    def test_set_screenshot_encodes_png_or_clears_on_error(self, monkeypatch):
+        class FakeSurface:
+            def get_size(self):
+                return (1, 1)
+
+            def copy(self):
+                return self
+
+        fake_image = SimpleNamespace(
+            tostring=lambda _surface, _fmt: b"\x00\x00\x00",
+            save=lambda _surface, buffer: buffer.write(b"png"),
+        )
+        monkeypatch.setitem(sys.modules, "pygame", SimpleNamespace(image=fake_image))
+
+        publisher = MetricsPublisher(history_length=100)
+        publisher.set_screenshot(FakeSurface())
+
+        assert publisher.get_screenshot()
+
+        fake_image.tostring = lambda _surface, _fmt: (_ for _ in ()).throw(RuntimeError("boom"))
+        publisher.set_screenshot(FakeSurface())
+
         assert publisher.get_screenshot() is None
 
     def test_set_running(self):
@@ -304,3 +440,84 @@ class TestMetricsPublisher:
 
         layers = publisher.get_all_layer_analysis()
         assert [layer["layer_idx"] for layer in layers] == [1, 2]
+
+    def test_nn_visualization_callbacks_and_analysis_details(self, monkeypatch):
+        from src.web import metrics_publisher as metrics_module
+
+        publisher = MetricsPublisher(history_length=100)
+        nn_updates = []
+        publisher.on_nn_update(nn_updates.append)
+        monkeypatch.setattr(metrics_module.time, "time", lambda: 10.0)
+
+        publisher.update_nn_visualization(
+            layer_info=[{"name": "hidden", "neurons": 2, "type": "dense"}],
+            activations={"hidden": [0.1, 0.2]},
+            q_values=[1.0, 2.0],
+            selected_action=1,
+            weights=[[[0.1, 0.2], [0.3, 0.4]]],
+            step=7,
+            action_labels=["LEFT", "RIGHT"],
+        )
+
+        assert nn_updates[0]["step"] == 7
+        assert nn_updates[0]["action_labels"] == ["LEFT", "RIGHT"]
+        assert nn_updates[0]["weights"] == []
+        assert publisher.get_nn_visualization(include_weights=True)["weights"]
+        assert publisher.should_update_nn_visualization(current_time=10.0) is False
+
+        publisher.update_neuron_inspection(
+            layer_idx=1,
+            neuron_idx=2,
+            layer_name="hidden",
+            current_activation=0.75,
+            activation_history=list(range(600)),
+            incoming_weights=[0.1, 0.2, 0.3],
+            outgoing_weights=[0.4, 0.5],
+            q_contributions={"LEFT": 0.2},
+        )
+        neuron = publisher.get_neuron_details(1, 2)
+        assert neuron["current_activation"] == 0.75
+        assert len(neuron["activation_history"]) == 100
+        assert neuron["incoming_weight_stats"]["mean"] == pytest.approx(0.2)
+        assert neuron["outgoing_weight_stats"]["max"] == pytest.approx(0.5)
+        assert publisher.get_neuron_details(9, 9) == {"error": "Neuron not found"}
+
+        publisher.update_layer_analysis(
+            layer_idx=3,
+            layer_name="dense",
+            neuron_count=4,
+            activations=np.array([0.0, 0.5, 0.96, -0.97], dtype=np.float32),
+            weights=np.array([[0.1, -0.2], [0.3, 0.4]], dtype=np.float32),
+            gradients=np.array([0.1, -0.3], dtype=np.float32),
+        )
+        layer = publisher.get_layer_analysis(3)
+        assert layer["dead_neuron_count"] == 1
+        assert layer["saturated_neuron_count"] == 2
+        assert layer["weight_max"] == pytest.approx(0.4)
+        assert layer["gradient_max_magnitude"] == pytest.approx(0.3)
+        assert publisher.get_layer_analysis(99) == {"error": "Layer not found"}
+
+    def test_reset_all_state_clears_runtime_payloads(self):
+        publisher = MetricsPublisher(history_length=100)
+        publisher.update(episode=3, score=50, epsilon=0.4, loss=0.1)
+        publisher.log("before reset")
+        publisher.record_save("best.pth", "best", episode=3, best_score=50)
+        publisher._screenshot_data = "encoded"
+        publisher.update_nn_visualization(
+            layer_info=[{"name": "hidden", "neurons": 1, "type": "dense"}],
+            activations={"hidden": [1.0]},
+            q_values=[1.0],
+            selected_action=0,
+            weights=[],
+            step=1,
+        )
+
+        publisher.reset_all_state()
+
+        assert publisher.state.episode == 0
+        assert publisher.state.epsilon == 1.0
+        assert list(publisher.scores) == []
+        assert list(publisher.console_logs) == []
+        assert publisher.get_screenshot() is None
+        assert publisher.get_save_status()["saves_this_session"] == 0
+        assert publisher.get_nn_visualization()["step"] == 0

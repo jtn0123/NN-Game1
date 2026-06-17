@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import main
+from src.app import training_runtime
 
 
 class FakeDashboard:
@@ -25,7 +26,7 @@ def test_game_app_save_and_quit_requests_loop_shutdown(monkeypatch):
     app.web_dashboard = FakeDashboard()
     app.running = True
     app._save_model = lambda *args, **kwargs: True
-    monkeypatch.setattr(main.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(training_runtime.time, "sleep", lambda _seconds: None)
 
     app._save_and_quit()
 
@@ -40,7 +41,7 @@ def test_headless_save_and_quit_requests_loop_shutdown(monkeypatch):
     trainer.web_dashboard = FakeDashboard()
     trainer.running = True
     trainer._save_model = lambda *args, **kwargs: True
-    monkeypatch.setattr(main.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(training_runtime.time, "sleep", lambda _seconds: None)
 
     trainer._save_and_quit()
 

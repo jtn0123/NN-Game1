@@ -218,7 +218,12 @@ def step_vector_env_no_copy(
     dones: np.ndarray,
     actions: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[dict]]:
-    """Step vectorized envs and return reusable internal buffers."""
+    """Step vectorized envs and return reusable internal buffers.
+
+    Completed envs are reset before returning so the state buffer is ready for
+    the next batched action selection. The done mask still tells replay logic to
+    ignore the reset next-state value for terminal transitions.
+    """
     if not envs:
         return states, rewards, dones, []
     actions = validate_action_batch(
@@ -238,6 +243,6 @@ def step_vector_env_no_copy(
         infos.append(info)
 
         if done:
-            env.reset()
+            states[i] = env.reset()
 
     return states, rewards, dones, infos

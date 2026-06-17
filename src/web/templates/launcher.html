@@ -8,7 +8,13 @@
     <title>🧠 Neural Network AI - Game Launcher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        window.DASHBOARD_ASSET_FAILURES = [];
+        window.reportDashboardAssetFailure = function(assetName) {
+            window.DASHBOARD_ASSET_FAILURES.push(assetName);
+        };
+    </script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js" crossorigin="anonymous" referrerpolicy="no-referrer" onerror="window.reportDashboardAssetFailure && window.reportDashboardAssetFailure('Socket.IO')"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='launcher.css') }}">
 </head>
 <body>

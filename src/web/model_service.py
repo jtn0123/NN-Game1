@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from src.app.checkpoint_catalog import iter_checkpoint_candidates
 from src.app.model_paths import (
     ModelDirectory,
     allowed_model_roots,
@@ -34,52 +35,39 @@ class ModelService:
 
     def list_models(self) -> List[Dict[str, Any]]:
         models: List[Dict[str, Any]] = []
-        seen_paths = set()
 
-        for entry in self._model_dirs:
-            if not os.path.exists(entry.path):
-                continue
+        for candidate in iter_checkpoint_candidates(self.model_dirs):
+            model_info: Dict[str, Any] = {
+                "name": candidate.filename,
+                "id": self.model_id(candidate.source, candidate.filename),
+                "source": candidate.source,
+                "size": os.path.getsize(candidate.path),
+                "modified": candidate.modified,
+                "modified_str": datetime.fromtimestamp(candidate.modified).strftime(
+                    "%Y-%m-%d %H:%M"
+                ),
+                "is_loadable": True,
+                "has_metadata": False,
+                "metadata": None,
+            }
 
-            for filename in os.listdir(entry.path):
-                if not filename.endswith(".pth"):
-                    continue
+            try:
+                checkpoint = load_checkpoint(
+                    candidate.path,
+                    map_location="cpu",
+                    trusted_dirs=[candidate.directory],
+                    allow_unsafe_fallback=False,
+                )
+                model_info["steps"] = checkpoint.get("steps", None)
+                model_info["epsilon"] = checkpoint.get("epsilon", None)
+                if "metadata" in checkpoint:
+                    model_info["has_metadata"] = True
+                    model_info["metadata"] = checkpoint["metadata"]
+            except Exception as exc:
+                model_info["is_loadable"] = False
+                model_info["load_error"] = type(exc).__name__
 
-                path = os.path.join(entry.path, filename)
-                if path in seen_paths:
-                    continue
-                seen_paths.add(path)
-
-                model_info: Dict[str, Any] = {
-                    "name": filename,
-                    "id": self.model_id(entry.source, filename),
-                    "source": entry.source,
-                    "size": os.path.getsize(path),
-                    "modified": os.path.getmtime(path),
-                    "modified_str": datetime.fromtimestamp(os.path.getmtime(path)).strftime(
-                        "%Y-%m-%d %H:%M"
-                    ),
-                    "is_loadable": True,
-                    "has_metadata": False,
-                    "metadata": None,
-                }
-
-                try:
-                    checkpoint = load_checkpoint(
-                        path,
-                        map_location="cpu",
-                        trusted_dirs=[entry.path],
-                        allow_unsafe_fallback=False,
-                    )
-                    model_info["steps"] = checkpoint.get("steps", None)
-                    model_info["epsilon"] = checkpoint.get("epsilon", None)
-                    if "metadata" in checkpoint:
-                        model_info["has_metadata"] = True
-                        model_info["metadata"] = checkpoint["metadata"]
-                except Exception as exc:
-                    model_info["is_loadable"] = False
-                    model_info["load_error"] = type(exc).__name__
-
-                models.append(model_info)
+            models.append(model_info)
 
         models.sort(key=lambda item: item["modified"], reverse=True)
         return models

@@ -31,7 +31,9 @@ def resolve_model_path(
     inspect_model: Callable[..., Optional[Dict[str, Any]]],
 ) -> Optional[str]:
     """Resolve an explicit or latest compatible game checkpoint path."""
-    trusted_dirs = [config.MODEL_DIR, config.GAME_MODEL_DIR]
+    model_root = str(config.MODEL_DIR)
+    model_dir = str(config.GAME_MODEL_DIR)
+    trusted_dirs = [model_root, model_dir]
 
     if explicit_path and os.path.exists(explicit_path):
         info = inspect_model(
@@ -50,7 +52,6 @@ def resolve_model_path(
             )
         return None
 
-    model_dir = config.GAME_MODEL_DIR
     if not os.path.exists(model_dir):
         return None
 
@@ -108,6 +109,26 @@ def request_save_and_stop(
     sys.stderr.flush()
     time.sleep(0.5)
     set_running(False)
+
+
+def is_new_best_score(score: int, best_score: int) -> bool:
+    """Return whether an episode score should be treated as a new best."""
+    return score > best_score
+
+
+def should_emit_episode_metrics(
+    episode: int,
+    is_new_best: bool,
+    *,
+    warmup_episodes: int = 10,
+    interval: int = 5,
+) -> bool:
+    """Return whether an episode should be emitted to the live dashboard."""
+    if episode <= warmup_episodes:
+        return True
+    if is_new_best:
+        return True
+    return interval > 0 and episode % interval == 0
 
 
 def build_nn_snapshot(agent: Any, game: Any, state: np.ndarray) -> NNSnapshot:

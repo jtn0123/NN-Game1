@@ -3,9 +3,33 @@
 // ============================================================
 
 (function(global) {
+    const FOCUSABLE_SELECTOR = [
+        'a[href]',
+        'button:not([disabled])',
+        'textarea:not([disabled])',
+        'input:not([disabled])',
+        'select:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+
     function removeDialog(backdrop) {
         if (backdrop && backdrop.parentNode) {
             backdrop.parentNode.removeChild(backdrop);
+        }
+    }
+
+    function focusableElements(container) {
+        if (!container || typeof container.querySelectorAll !== 'function') {
+            return [];
+        }
+        return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR)).filter((element) => (
+            !element.disabled && element.getAttribute?.('aria-hidden') !== 'true'
+        ));
+    }
+
+    function restoreFocus(element) {
+        if (element && typeof element.focus === 'function') {
+            element.focus();
         }
     }
 
@@ -38,7 +62,7 @@
         button.type = 'button';
         button.className = `dialog-btn ${choice.variant || 'secondary'}`.trim();
         button.textContent = choice.label;
-        button.dataset.choice = choice.value;
+        button.dataset.choice = choice.value ?? '';
         return button;
     }
 
@@ -49,11 +73,13 @@
                 return;
             }
 
+            const previouslyFocused = document.activeElement;
             const backdrop = document.createElement('div');
             backdrop.className = 'action-dialog-backdrop';
 
             const dialog = document.createElement('section');
             dialog.className = 'action-dialog';
+            dialog.tabIndex = -1;
             dialog.setAttribute('role', 'dialog');
             dialog.setAttribute('aria-modal', 'true');
             dialog.setAttribute('aria-labelledby', 'action-dialog-title');
@@ -84,12 +110,39 @@
             const finish = (value) => {
                 document.removeEventListener('keydown', onKeyDown);
                 removeDialog(backdrop);
+                restoreFocus(previouslyFocused);
                 resolve(value);
             };
+
+            function trapFocus(event) {
+                const focusable = focusableElements(dialog);
+                if (focusable.length === 0) {
+                    event.preventDefault();
+                    dialog.focus();
+                    return;
+                }
+
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                const activeElement = document.activeElement;
+                if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+                    event.preventDefault();
+                    last.focus();
+                    return;
+                }
+                if (!event.shiftKey && activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            }
 
             function onKeyDown(event) {
                 if (event.key === 'Escape') {
                     finish(cancelChoice.value);
+                    return;
+                }
+                if (event.key === 'Tab') {
+                    trapFocus(event);
                 }
             }
 
@@ -107,9 +160,12 @@
             });
             document.addEventListener('keydown', onKeyDown);
 
-            const preferredButton = footer.querySelector('.primary, .danger, button');
+            const preferredButton = footer.querySelector('.primary, .danger, button')
+                || focusableElements(dialog)[0];
             if (preferredButton && typeof preferredButton.focus === 'function') {
                 preferredButton.focus();
+            } else {
+                dialog.focus();
             }
         });
     }
