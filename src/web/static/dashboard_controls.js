@@ -40,29 +40,35 @@ function resetEpisode() {
 /**
  * Start fresh training - reset agent and clear all training state
  */
-function startFresh() {
-    // First, ask if they want to save current progress
-    const saveFirst = confirm(
-        '⚠️ Start Fresh Training\n\n' +
-        'Would you like to SAVE your current progress first?\n\n' +
-        'Click OK to save before resetting\n' +
-        'Click Cancel to skip saving'
-    );
+async function startFresh() {
+    const saveChoice = await DashboardDialogs.choose({
+        title: 'Start Fresh Training',
+        message: 'Choose whether to save the current model before resetting training.',
+        choices: [
+            { value: 'save', label: 'Save first', variant: 'primary' },
+            { value: 'skip', label: 'Skip save', variant: 'danger' },
+        ],
+        cancelText: 'Cancel',
+    });
 
-    // Now confirm the fresh start
-    const confirmReset = confirm(
-        '🔄 Confirm Fresh Start\n\n' +
-        'This will:\n' +
-        '• Reset the neural network to random weights\n' +
-        '• Clear all training memory (replay buffer)\n' +
-        '• Reset episode count, scores, and charts to 0\n' +
-        '• Clear console logs\n\n' +
-        '✓ Saved models on disk will NOT be deleted\n' +
-        '✓ You can load them later from the Load menu\n\n' +
-        'Continue with fresh start?'
-    );
+    if (!saveChoice) {
+        addConsoleLog('Fresh start cancelled', 'info');
+        return;
+    }
 
-    if (!confirmReset) {
+    const shouldReset = await DashboardDialogs.ask({
+        title: 'Confirm Fresh Start',
+        message: 'This resets the neural network, replay memory, episode count, charts, and console logs. Saved model files on disk are preserved.',
+        details: [
+            'Neural-network weights return to random initialization.',
+            'Replay memory and training charts are cleared.',
+            'Saved models stay available from the Load menu.',
+        ],
+        confirmText: 'Start fresh',
+        danger: true,
+    });
+
+    if (!shouldReset) {
         addConsoleLog('Fresh start cancelled', 'info');
         return;
     }
@@ -84,7 +90,7 @@ function startFresh() {
             });
     };
 
-    if (saveFirst) {
+    if (saveChoice === 'save') {
         // Save current model first, then reset after the server confirms handling it.
         addConsoleLog('💾 Saving current progress before reset...', 'action');
 
@@ -103,14 +109,12 @@ function startFresh() {
 /**
  * Save model and quit the application
  */
-function saveAndQuit() {
-    const confirmed = confirm(
-        '🚪 Save & Quit\n\n' +
-        'This will:\n' +
-        '• Save your current training progress\n' +
-        '• Shut down the training server\n\n' +
-        'Continue?'
-    );
+async function saveAndQuit() {
+    const confirmed = await DashboardDialogs.ask({
+        title: 'Save & Quit',
+        message: 'This saves the current training progress and shuts down the training server.',
+        confirmText: 'Save & quit',
+    });
 
     if (!confirmed) {
         addConsoleLog('Save & Quit cancelled', 'info');
@@ -401,8 +405,14 @@ function loadModel(modelId) {
 /**
  * Delete a model file
  */
-function deleteModel(modelId, name) {
-    if (!confirm(`Are you sure you want to delete "${name}"?\n\nThis action cannot be undone.`)) {
+async function deleteModel(modelId, name) {
+    const confirmed = await DashboardDialogs.ask({
+        title: 'Delete Model',
+        message: `Delete "${name}"? This action cannot be undone.`,
+        confirmText: 'Delete',
+        danger: true,
+    });
+    if (!confirmed) {
         return;
     }
 

@@ -1,13 +1,13 @@
 import os
-from types import SimpleNamespace
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from src.app.training_runtime import build_nn_snapshot, resolve_model_path
-from src.ai.agent import Agent
 from config import Config
+from src.ai.agent import Agent
+from src.app.training_runtime import build_nn_snapshot, resolve_model_path
 
 
 def test_resolve_model_path_uses_latest_compatible_checkpoint(tmp_path):

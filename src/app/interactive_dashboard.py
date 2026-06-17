@@ -6,7 +6,6 @@ import math
 import os
 import sys
 import time
-import traceback
 from collections import deque
 from typing import Any, Optional
 
@@ -159,7 +158,6 @@ class InteractiveDashboardMixin:
 
     def _start_fresh(self: Any) -> None:
         """Start fresh training - reset agent, clear memory, reset all training state."""
-        from src.ai.agent import Agent
 
         if self.web_dashboard:
             # Clear logs first, then log the fresh start

@@ -12,7 +12,8 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
+
 import torch
 
 
@@ -587,15 +588,15 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"\n📺 Game: {cfg.SCREEN_WIDTH}x{cfg.SCREEN_HEIGHT}")
     print(f"🧱 Bricks: {cfg.BRICK_ROWS}x{cfg.BRICK_COLS} = {cfg.BRICK_ROWS * cfg.BRICK_COLS}")
-    print(f"\n🧠 Neural Network:")
+    print("\n🧠 Neural Network:")
     print(f"   Input size: {cfg.STATE_SIZE}")
     print(f"   Hidden layers: {cfg.HIDDEN_LAYERS}")
     print(f"   Output size: {cfg.ACTION_SIZE}")
-    print(f"\n📊 Training:")
+    print("\n📊 Training:")
     print(f"   Learning rate: {cfg.LEARNING_RATE}")
     print(f"   Batch size: {cfg.BATCH_SIZE}")
     print(f"   Gamma: {cfg.GAMMA}")
-    print(f"\n🎲 Exploration:")
+    print("\n🎲 Exploration:")
     print(f"   Epsilon: {cfg.EPSILON_START} → {cfg.EPSILON_END}")
     print(f"   Decay: {cfg.EPSILON_DECAY}")
     print(f"\n💻 Device: {cfg.DEVICE}")

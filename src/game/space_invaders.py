@@ -12,15 +12,17 @@ Key Features:
 - Particle explosions and screen effects
 """
 
-import numpy as np
-import pygame
-from typing import Tuple, List, Optional
+import heapq
 import math
 import random
-import heapq
+from typing import List, Optional, Tuple
 
-from .base_game import BaseGame, validate_action
+import numpy as np
+import pygame
+
+from config import Config
 from src.game.space_invaders_entities import (
+    UFO,
     Alien,
     Bullet,
     Particle,
@@ -28,11 +30,9 @@ from src.game.space_invaders_entities import (
     Shield,
     Ship,
     Star,
-    UFO,
     WaveAnnouncement,
 )
 from src.game.space_invaders_rendering import SpaceInvadersRenderingMixin
-from config import Config
 from src.game.space_invaders_rules import (
     alien_points,
     alien_pressure_ratio,
@@ -43,6 +43,8 @@ from src.game.space_invaders_rules import (
     level_speed,
     level_y_offset,
 )
+
+from .base_game import BaseGame, validate_action
 
 
 class SpaceInvaders(SpaceInvadersRenderingMixin, BaseGame):
@@ -835,6 +837,9 @@ class SpaceInvaders(SpaceInvadersRenderingMixin, BaseGame):
 
 
 from src.game.space_invaders_vec import VecSpaceInvaders
+
+__all__ = ["SpaceInvaders", "VecSpaceInvaders"]
+
 
 if __name__ == "__main__":
     pygame.init()

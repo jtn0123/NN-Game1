@@ -3,26 +3,22 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sys
 import time
 from collections import deque
-from typing import Any, Callable, Iterable, List, Optional, cast
+from typing import Any, Iterable, List, Optional, cast
 
 import numpy as np
 import pygame
 
 from config import Config
-from src.ai.agent import Agent, TrainingHistory
-from src.ai.evaluator import Evaluator
-from src.ai.trainer import Trainer, calculate_progress_count
+from src.ai.agent import Agent
 from src.app.game_factory import create_single_game
 from src.app.interactive_dashboard import InteractiveDashboardMixin
 from src.app.interactive_rendering import InteractiveRenderingMixin
 from src.app.lifecycle_types import EpisodeMetrics
 from src.app.model_service import ModelService as AppModelService
-from src.app.performance_modes import apply_performance_mode
 from src.app.process_control import restart_with_game
 from src.app.training_runtime import (
     build_nn_snapshot,
@@ -32,13 +28,11 @@ from src.app.training_runtime import (
 from src.game import (
     BaseGame,
     ControlDisplayProvider,
-    GameMenu,
     HumanActionProvider,
     HumanStepProvider,
     get_game_info,
     list_games,
 )
-from src.utils.checkpoint_loader import load_checkpoint
 from src.visualizer.dashboard import Dashboard
 from src.visualizer.hud import TrainingHUD
 from src.visualizer.pause_menu import PauseMenu
@@ -53,6 +47,8 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
     WebDashboard = None
+
+__all__ = ["GameApp", "build_nn_snapshot", "emit_nn_snapshot_to_dashboard"]
 
 
 class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
@@ -481,12 +477,12 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         print(f"   Batch Size:     {self.config.BATCH_SIZE}")
         print(f"   Learn Every:    {self.config.LEARN_EVERY} steps")
         print(f"   Gradient Steps: {self.config.GRADIENT_STEPS}")
-        print(f"\n   Controls:")
-        print(f"   - P: Pause/Resume")
-        print(f"   - S: Save model")
-        print(f"   - +/-: Speed up/down")
-        print(f"   - F: Toggle fullscreen")
-        print(f"   - Q/ESC: Quit")
+        print("\n   Controls:")
+        print("   - P: Pause/Resume")
+        print("   - S: Save model")
+        print("   - +/-: Speed up/down")
+        print("   - F: Toggle fullscreen")
+        print("   - Q/ESC: Quit")
         print("=" * 60 + "\n")
 
         state = self.game.reset()
@@ -503,7 +499,6 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         # At 1000x: 1000 training steps per render (~60000 steps/sec!)
 
         # Track step time for performance logging (bounded deque)
-        avg_step_time = 0.001
         step_time_samples: deque[float] = deque(maxlen=100)
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
@@ -551,7 +546,7 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
                     self.agent.remember(state, action, reward, next_state, done)
 
                     # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
-                    loss = self.agent.learn()
+                    self.agent.learn()
 
                     # Track target network updates
                     if (
@@ -725,7 +720,6 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
                     frame_training_time = time.time() - training_start
                     measured_step_time = frame_training_time / steps_this_frame
                     step_time_samples.append(measured_step_time)  # deque auto-trims to maxlen=100
-                    avg_step_time = sum(step_time_samples) / len(step_time_samples)
 
                     # Log performance occasionally
                     if self.steps % 500 == 0 and self.web_dashboard:
@@ -889,7 +883,6 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
                 elapsed_since_report >= self.config.REPORT_INTERVAL_SECONDS
                 or episode % self.config.LOG_EVERY == 0
             ):
-                elapsed_total = current_time - start_time
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )

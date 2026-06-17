@@ -46,7 +46,7 @@ function loadGames() {
 /**
  * Switch to a different game
  */
-function switchGame(gameId) {
+async function switchGame(gameId) {
     if (!gameId) return;
 
     // Get current game from dropdown's data
@@ -58,11 +58,11 @@ function switchGame(gameId) {
         return;
     }
 
-    // Confirm switch
-    const confirmed = confirm(
-        `Switch to ${gameId.replace('_', ' ').toUpperCase()}?\n\n` +
-        `This will save your current progress and restart with the new game.`
-    );
+    const confirmed = await DashboardDialogs.ask({
+        title: `Switch to ${gameId.replace('_', ' ').toUpperCase()}?`,
+        message: 'This saves the current progress and restarts training with the selected game.',
+        confirmText: 'Switch game',
+    });
 
     if (confirmed) {
         addConsoleLog(`🔄 Switching to ${gameId}...`, 'warning');
@@ -86,11 +86,12 @@ function switchGame(gameId) {
 /**
  * Go back to game launcher to select a different game/mode
  */
-function goToLauncher() {
-    const confirmed = confirm(
-        'Go back to Game Launcher?\n\n' +
-        'This will stop the current session. Your progress has been auto-saved.'
-    );
+async function goToLauncher() {
+    const confirmed = await DashboardDialogs.ask({
+        title: 'Go Back To Game Launcher?',
+        message: 'This stops the current session and returns to game selection. Current progress is saved first.',
+        confirmText: 'Open launcher',
+    });
 
     if (confirmed) {
         addConsoleLog('🎮 Returning to launcher...', 'warning');

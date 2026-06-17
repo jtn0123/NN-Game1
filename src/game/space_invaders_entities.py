@@ -104,7 +104,6 @@ class Particle:
     def draw(self, screen: pygame.Surface) -> None:
         if self.life <= 0:
             return
-        alpha = int(255 * self.life)
         color = tuple(min(255, int(c * self.life)) for c in self.color)
         size = int(self.size * self.life)
         if size > 0:
@@ -133,7 +132,6 @@ class ScorePopup:
             return
 
         font = pygame.font.Font(None, 24)
-        alpha = int(255 * self.life)
 
         # Create text with current alpha
         text = f"+{self.score}"

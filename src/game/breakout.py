@@ -17,13 +17,15 @@ Game Rules:
 - 3 lives per game
 """
 
+from typing import List, Optional, Tuple
+
 import numpy as np
 import pygame
-from typing import Tuple, List, Optional
+
+from config import Config
 
 from .base_game import BaseGame, validate_action, validate_action_batch
 from .particles import ParticleSystem, TrailRenderer, create_gradient_surface
-from config import Config
 
 
 class Brick:

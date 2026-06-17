@@ -11,9 +11,10 @@ Features:
     - Styled action buttons
 """
 
-import pygame
-from typing import Optional, Tuple, List, Dict, Any
 import math
+from typing import Any, Dict, List, Optional, Tuple
+
+import pygame
 
 
 def draw_breakout_icon(
@@ -478,7 +479,7 @@ class GameMenu:
 
     def _build_cards(self) -> None:
         """Build game cards from registry."""
-        from . import list_games, get_game_info
+        from . import get_game_info, list_games
 
         games = list_games()
         num_games = len(games)

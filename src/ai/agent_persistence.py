@@ -248,7 +248,7 @@ class AgentPersistenceMixin:
                     print(
                         f"⚠️  Model incompatible: Action size mismatch (saved: {saved_action_size}, current: {self.action_size})"
                     )
-                print(f"❌ Cannot load model - architecture mismatch. Starting fresh training.")
+                print("❌ Cannot load model - architecture mismatch. Starting fresh training.")
             return None, None
 
         # Adapt state dicts for torch.compile() compatibility
@@ -301,7 +301,7 @@ class AgentPersistenceMixin:
             size_mb = file_size / (1024 * 1024)
 
             print(f"\n{'='*60}")
-            print(f"📂 Resuming Training")
+            print("📂 Resuming Training")
             print(f"{'='*60}")
             print(f"   Model: {os.path.basename(filepath)} ({size_mb:.2f} MB)")
 
@@ -342,19 +342,19 @@ class AgentPersistenceMixin:
             else:
                 # Old format - show basic info
                 print(f"\n   Steps: {self.steps:,} | Epsilon: {self.epsilon:.4f}")
-                print(f"   (Legacy save - no detailed metadata)")
+                print("   (Legacy save - no detailed metadata)")
 
             # Report training history status
             if training_history and len(training_history.scores) > 0:
                 print(f"   Training History: {len(training_history.scores)} episodes restored")
             else:
-                print(f"   Training History: Not available (older save format)")
+                print("   Training History: Not available (older save format)")
 
             # Report replay buffer status
             if replay_buffer_loaded:
                 print(f"   Replay Buffer: {len(self.memory):,} experiences restored")
             else:
-                print(f"   Replay Buffer: Starting fresh (not saved or incompatible)")
+                print("   Replay Buffer: Starting fresh (not saved or incompatible)")
 
             print(f"{'='*60}\n")
 

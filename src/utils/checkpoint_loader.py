@@ -8,8 +8,8 @@ for checkpoints from explicitly trusted local model directories.
 from __future__ import annotations
 
 import os
-from typing import Any, Iterable, Optional
 import warnings
+from typing import Any, Iterable, Optional
 
 import torch
 

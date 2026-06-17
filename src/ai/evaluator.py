@@ -18,12 +18,13 @@ Usage:
         evaluator.log_results(eval_results, episode)
 """
 
-import numpy as np
 import json
 import os
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
+from typing import Any, Dict, List
+
+import numpy as np
 
 
 @dataclass

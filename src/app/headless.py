@@ -3,30 +3,22 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sys
 import time
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 import numpy as np
 
 from config import Config
-from src.ai.agent import Agent, TrainingHistory
+from src.ai.agent import Agent
 from src.ai.evaluator import Evaluator
-from src.ai.trainer import Trainer, calculate_progress_count
+from src.ai.trainer import calculate_progress_count
 from src.app.game_factory import create_training_environment
 from src.app.headless_dashboard import HeadlessDashboardMixin
 from src.app.model_service import ModelService as AppModelService
-from src.app.performance_modes import apply_performance_mode
-from src.app.process_control import restart_with_game
-from src.app.training_runtime import (
-    build_nn_snapshot,
-    emit_nn_snapshot_to_dashboard,
-    request_save_and_stop,
-)
+from src.app.training_runtime import build_nn_snapshot, emit_nn_snapshot_to_dashboard
 from src.game import BaseGame, BaseVecGame, list_games
-from src.utils.checkpoint_loader import load_checkpoint
 
 WEB_AVAILABLE: bool
 WebDashboard: Optional[type[Any]]
@@ -38,6 +30,8 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
     WebDashboard = None
+
+__all__ = ["HeadlessTrainer", "build_nn_snapshot", "emit_nn_snapshot_to_dashboard"]
 
 
 class HeadlessTrainer(HeadlessDashboardMixin):
@@ -121,7 +115,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         GameClass = game_environment.game_class
         if self.num_envs > 1 and self.vec_env is None:
             print(f"⚠️ Vectorized environments not yet supported for {config.GAME_NAME}")
-            print(f"   Falling back to single environment")
+            print("   Falling back to single environment")
         self.num_envs = game_environment.num_envs
         if self.vec_env is not None:
             print(f"🎮 Vectorized: {self.num_envs} parallel environments")
@@ -507,7 +501,6 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
         # Track last completed episode info for reporting
         last_score = 0
-        last_info: dict = {}
         last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
 
         # MAX_EPISODES == 0 means unlimited (train until manually stopped)
@@ -618,7 +611,6 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
                     # Store for reporting
                     last_score = score
-                    last_info = infos[i]
 
                     # Reset per-environment tracking
                     env_episode_rewards[i] = 0.0
@@ -732,17 +724,12 @@ class HeadlessTrainer(HeadlessDashboardMixin):
             if self.current_episode > last_logged_episode and (
                 should_log_by_episode or should_log_by_time
             ):
-                elapsed_total = current_time - self.training_start_time
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
-                eps_per_hour = episodes_completed / elapsed_total * 3600 if elapsed_total > 0 else 0
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
-
-                # Get level reached from last completed episode
-                level_reached = last_info.get("level", 1) if last_info else 1
 
                 progress_msg = (
                     f"Ep {self.current_episode:5d} | "

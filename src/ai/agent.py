@@ -24,22 +24,25 @@ References:
     Mnih et al., 2015 - "Human-level control through deep reinforcement learning"
 """
 
+import random
+import threading
+from collections import deque
+from typing import Optional, Tuple, Union
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
-import numpy as np
-from typing import Optional, Tuple, List, Dict, Any, Union
-from collections import deque
-import random
-import time
-import threading
 
-from .network import DQN, DuelingDQN
-from .replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from config import Config
+
 from .agent_metadata import SaveMetadata, TrainingHistory
 from .agent_persistence import AgentPersistenceMixin
-from config import Config
+from .network import DQN, DuelingDQN
+from .replay_buffer import PrioritizedReplayBuffer, ReplayBuffer
+
+__all__ = ["Agent", "SaveMetadata", "TrainingHistory"]
 
 
 class Agent(AgentPersistenceMixin):
@@ -735,7 +738,7 @@ if __name__ == "__main__":
     config = Config()
     agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
 
-    print(f"\n📊 Agent Configuration:")
+    print("\n📊 Agent Configuration:")
     print(f"   State size: {agent.state_size}")
     print(f"   Action size: {agent.action_size}")
     print(f"   Device: {agent.device}")
@@ -744,7 +747,7 @@ if __name__ == "__main__":
     # Test action selection
     state = np.random.randn(config.STATE_SIZE).astype(np.float32)
     action = agent.select_action(state)
-    print(f"\n🎮 Test action selection:")
+    print("\n🎮 Test action selection:")
     print(f"   State shape: {state.shape}")
     print(f"   Selected action: {action}")
 

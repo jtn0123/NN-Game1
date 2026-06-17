@@ -5,8 +5,9 @@ Pause Menu
 Interactive pause overlay with button options.
 """
 
+from typing import Dict, List, Optional, Tuple
+
 import pygame
-from typing import Optional, List, Tuple, Dict
 
 
 class PauseButton:

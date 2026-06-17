@@ -6,12 +6,11 @@ import math
 import os
 import sys
 import time
-import traceback
 from typing import Any, Optional
 
 import numpy as np
 
-from src.ai.agent import Agent, SaveMetadata, TrainingHistory
+from src.ai.agent import Agent, TrainingHistory
 from src.app.performance_modes import apply_performance_mode
 from src.app.process_control import restart_with_game
 from src.app.training_runtime import (
@@ -148,7 +147,6 @@ class HeadlessDashboardMixin:
 
     def _start_fresh(self: Any) -> None:
         """Start fresh training - reset agent, clear memory, reset all training state."""
-        from src.ai.agent import Agent
 
         if self.web_dashboard:
             # Clear logs first, then log the fresh start

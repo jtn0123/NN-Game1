@@ -145,7 +145,6 @@ class InteractiveRenderingMixin:
             print(f"⚠️  Invalid speed value: {speed}")
             return
         new_speed = max(1.0, min(1000.0, speed))
-        old_speed = self.game_speed
         self.game_speed = new_speed
 
         if self.web_dashboard:

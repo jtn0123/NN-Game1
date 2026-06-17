@@ -17,13 +17,15 @@ Game Rules:
 - Don't collide with asteroids
 """
 
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
 import numpy as np
 import pygame
-from typing import Tuple, List, Optional
-from dataclasses import dataclass
 
-from .base_game import BaseGame, step_vector_env_no_copy, validate_action, validate_action_batch
 from config import Config
+
+from .base_game import BaseGame, validate_action
 
 
 @dataclass
@@ -385,7 +387,6 @@ class Asteroids(BaseGame):
     def _spawn_asteroids(self, count: int) -> None:
         """Spawn asteroids away from the ship (safe spawn zone)."""
         self.asteroids.clear()
-        center_x, center_y = self.width / 2, self.height / 2
 
         for _ in range(count):
             # Spawn at edges of screen, never too close to center
@@ -796,7 +797,6 @@ class Asteroids(BaseGame):
 
             # Glow effect (draw multiple times with decreasing alpha)
             for glow in range(3):
-                offset = glow * 2
                 glow_verts = [(v[0], v[1]) for v in verts]
                 alpha = 100 - glow * 30
                 pygame.draw.polygon(screen, (alpha, alpha, alpha), glow_verts, 1)
@@ -924,7 +924,10 @@ class Asteroids(BaseGame):
         np.random.seed(seed)
 
 
-from .asteroids_vec import VecAsteroids
+from src.game.asteroids_vec import VecAsteroids
+
+__all__ = ["Asteroid", "Asteroids", "Ship", "VecAsteroids", "Vector2"]
+
 
 # Test the game
 if __name__ == "__main__":

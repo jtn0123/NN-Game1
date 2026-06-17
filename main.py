@@ -60,48 +60,29 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 
-import pygame
-import numpy as np
 import argparse
-import sys
 import os
+import sys
 import time
-from typing import Optional, Any, Type
+from typing import Any, Optional, Type
+
+import numpy as np
+import pygame
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
-from src.utils.logger import setup_logging, get_logger, LogLevel
+from src.ai.agent import Agent
+from src.app.cli import parse_args
+from src.app.headless import HeadlessTrainer
+from src.app.interactive import GameApp
 from src.game import (
-    BaseGame,
-    BaseVecGame,
-    ControlDisplayProvider,
     GameMenu,
-    HumanActionProvider,
-    HumanStepProvider,
     get_game_info,
     list_games,
 )
-from src.app.game_factory import create_single_game, create_training_environment
-from src.app.headless import HeadlessTrainer
-from src.app.interactive import GameApp
-from src.app.model_service import ModelService as AppModelService
-from src.app.process_control import restart_with_game
-from src.ai.agent import Agent, TrainingHistory
-from src.app.cli import parse_args
-from src.app.training_runtime import (
-    build_nn_snapshot,
-    emit_nn_snapshot_to_dashboard,
-    request_save_and_stop,
-)
-from src.app.performance_modes import apply_performance_mode
-from src.ai.trainer import Trainer, calculate_progress_count
-from src.ai.evaluator import Evaluator  # Deterministic performance tracking
-from src.utils.checkpoint_loader import load_checkpoint
-from src.visualizer.dashboard import Dashboard  # Still used for internal tracking
-from src.visualizer.hud import TrainingHUD
-from src.visualizer.pause_menu import PauseMenu
+from src.utils.logger import LogLevel, setup_logging
 
 # Optional web dashboard
 WEB_AVAILABLE: bool
@@ -118,7 +99,6 @@ except ImportError:
 
 def inspect_model(filepath: str) -> None:
     """Inspect a model file and display its metadata."""
-    from src.ai.agent import Agent
 
     info = Agent.inspect_model(filepath)
     if not info:
@@ -144,8 +124,8 @@ def inspect_model(filepath: str) -> None:
 
     if info["has_metadata"] and info["metadata"]:
         meta = info["metadata"]
-        print(f"\n   📊 Training Metadata:")
-        print(f"   ─────────────────────")
+        print("\n   📊 Training Metadata:")
+        print("   ─────────────────────")
         print(f"   Save Reason:    {meta.get('save_reason', 'unknown')}")
         print(
             f"   Episode:        {meta.get('episode', 'unknown'):,}"
@@ -163,23 +143,21 @@ def inspect_model(filepath: str) -> None:
             minutes = int((training_time % 3600) // 60)
             print(f"   Training Time:  {hours}h {minutes}m")
 
-        print(f"\n   ⚙️ Config Snapshot:")
-        print(f"   ─────────────────────")
+        print("\n   ⚙️ Config Snapshot:")
+        print("   ─────────────────────")
         print(f"   Learning Rate:  {meta.get('learning_rate', 'unknown')}")
         print(f"   Gamma:          {meta.get('gamma', 'unknown')}")
         print(f"   Batch Size:     {meta.get('batch_size', 'unknown')}")
         print(f"   Hidden Layers:  {meta.get('hidden_layers', 'unknown')}")
         print(f"   Dueling DQN:    {meta.get('use_dueling', 'unknown')}")
     else:
-        print(f"\n   ⚠️ No detailed metadata (legacy save format)")
+        print("\n   ⚠️ No detailed metadata (legacy save format)")
 
     print("=" * 60 + "\n")
 
 
 def list_models(model_dir: str = "models") -> None:
     """List all model files in the models directory."""
-    from src.ai.agent import Agent
-    from datetime import datetime
 
     models = Agent.list_models(model_dir)
 
@@ -222,7 +200,7 @@ def list_models(model_dir: str = "models") -> None:
         print(f"{filename:<35} {ep_str:>8} {steps_str:>12} {best_str:>6} {eps_str:>8} {size_mb:>8}")
 
     print("=" * 80)
-    print(f"\nUse --inspect <path> to see detailed info about a specific model.\n")
+    print("\nUse --inspect <path> to see detailed info about a specific model.\n")
 
 
 def run_web_mode(config: Config, args: argparse.Namespace) -> None:
@@ -234,9 +212,8 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
     - If game specified: starts immediately with web dashboard
     - If no game: shows web launcher for game selection, then starts training
     """
-    import threading
-
     import socket
+    import threading
 
     try:
         from src.web.server import WebDashboard
@@ -285,7 +262,6 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
     dashboard.start()
 
     # Wait for server to print its startup message
-    import time
 
     time.sleep(0.3)
 
@@ -452,7 +428,7 @@ def terminal_game_selector() -> Optional[str]:
         else:
             print(f"\n  [{i}] {game_name}")
 
-    print(f"\n  [0] Exit")
+    print("\n  [0] Exit")
     print("\n" + "=" * 60)
 
     while True:
@@ -516,7 +492,6 @@ def main():
         console_output=config.LOG_TO_CONSOLE,
         file_output=config.LOG_TO_FILE,
     )
-    logger = get_logger(__name__)
 
     # Web mode: use web interface for everything
     if hasattr(args, "web") and args.web and WEB_AVAILABLE:

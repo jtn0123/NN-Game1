@@ -9,21 +9,11 @@
  * - Model management
  */
 
-// State
-let isPaused = false;
-let socket = null;
-let currentLogFilter = 'all';
-let consoleLogs = [];
 const MAX_CONSOLE_LOGS = 500;
-let lastRenderedLogCount = 0;  // Track for incremental updates
-let currentPerformanceMode = 'normal';
-let trainingStartTime = 0;
 const DASHBOARD_TOKEN = (
     typeof DashboardCore !== 'undefined' && typeof document !== 'undefined'
 ) ? DashboardCore.readToken(document) : '';
 
-// Speed slider state - prevent server updates from fighting with user input
-let lastSpeedChangeTime = 0;
 const SPEED_UPDATE_DEBOUNCE = 2000; // Ignore server speed updates for 2s after user change
 
 // Fetch timeout configuration

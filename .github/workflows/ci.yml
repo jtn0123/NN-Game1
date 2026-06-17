@@ -46,6 +46,9 @@ jobs:
       - name: Format check
         run: make format-check
 
+      - name: Lint
+        run: make lint
+
       - name: Validate release config
         run: python .github/scripts/check_release_config.py
 

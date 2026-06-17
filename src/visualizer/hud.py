@@ -5,9 +5,10 @@ Training HUD (Heads-Up Display)
 On-screen overlay showing training statistics and progress during AI training.
 """
 
-import pygame
-import numpy as np
 from typing import List, Optional
+
+import pygame
+
 from config import Config
 
 

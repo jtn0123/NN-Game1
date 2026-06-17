@@ -132,6 +132,7 @@ function createDashboardContext() {
   const chartsSource = readFileSync(resolve('src/web/static/dashboard_charts.js'), 'utf8');
   const dashboardSources = [
     'app.js',
+    'dashboard_dialogs.js',
     'dashboard_logs.js',
     'dashboard_controls.js',
     'dashboard_settings.js',
@@ -140,6 +141,9 @@ function createDashboardContext() {
     'dashboard_nn_panels.js',
   ];
   vm.runInContext(chartsSource, context, { filename: 'dashboard_charts.js' });
+  vm.runInContext(readFileSync(resolve('src/web/static/dashboard_state.js'), 'utf8'), context, {
+    filename: 'dashboard_state.js',
+  });
   for (const filename of dashboardSources) {
     const source = readFileSync(resolve(`src/web/static/${filename}`), 'utf8');
     vm.runInContext(source, context, { filename });
@@ -181,4 +185,15 @@ test('updateCharts is a no-op before chart instances exist', () => {
     losses: [0.5],
     q_values: [1.25],
   }, 1));
+});
+
+test('DashboardState owns mutable dashboard globals', () => {
+  const { context } = createDashboardContext();
+  const socketRef = { connected: true };
+
+  context.socket = socketRef;
+  context.DashboardState.currentLogFilter = 'error';
+
+  assert.equal(context.DashboardState.socket, socketRef);
+  assert.equal(context.currentLogFilter, 'error');
 });

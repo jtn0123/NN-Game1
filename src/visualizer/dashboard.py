@@ -16,12 +16,12 @@ This provides immediate feedback on training progress and helps
 diagnose issues (e.g., learning rate too high, epsilon not decaying).
 """
 
-import pygame
-import numpy as np
-from typing import Optional, List, Tuple
-from collections import deque
 import math
-import time
+from collections import deque
+from typing import List, Optional, Tuple
+
+import numpy as np
+import pygame
 
 from config import Config
 

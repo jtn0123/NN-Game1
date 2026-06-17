@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, FrozenSet, List, TypedDict
+from typing import Any, Dict, FrozenSet, List, Optional, TypedDict
+
+
+class ApiErrorPayload(TypedDict):
+    """Stable error response shape returned by dashboard APIs."""
+
+    error: str
 
 
 class ControlAck(TypedDict, total=False):
@@ -25,6 +31,65 @@ class GameInfoPayload(TypedDict):
     icon: str
     color: Any
     is_current: bool
+
+
+class GamesResponse(TypedDict):
+    """Game-list API response."""
+
+    games: List[GameInfoPayload]
+    current_game: str
+
+
+class DashboardConfigPayload(TypedDict):
+    """Dashboard training config exposed to the browser."""
+
+    learning_rate: float
+    gamma: float
+    epsilon_start: float
+    epsilon_end: float
+    epsilon_decay: float
+    batch_size: int
+    hidden_layers: List[int]
+    memory_size: int
+    target_update: int
+    grad_clip: float
+    learn_every: int
+    gradient_steps: int
+    device: str
+    vec_envs: int
+    game_name: str
+
+
+class ModelPayload(TypedDict, total=False):
+    """Model metadata returned by `/api/models`."""
+
+    name: str
+    id: str
+    source: str
+    size: int
+    modified: float
+    modified_str: str
+    is_loadable: bool
+    has_metadata: bool
+    metadata: Optional[Dict[str, Any]]
+    steps: Any
+    epsilon: Any
+    load_error: str
+
+
+class ModelsResponse(TypedDict):
+    """Model-list API response."""
+
+    models: List[ModelPayload]
+    current_game: str
+
+
+class DeleteModelResponse(TypedDict):
+    """Successful model-delete API response."""
+
+    success: bool
+    message: str
+    filename: str
 
 
 class PerformanceModePayload(TypedDict):

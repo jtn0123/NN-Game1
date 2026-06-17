@@ -9,11 +9,11 @@ Tests cover:
 - HUD state tracking
 """
 
-import pytest
-import numpy as np
-from unittest.mock import MagicMock, patch
 import os
-import sys
+from unittest.mock import patch
+
+import numpy as np
+import pytest
 
 # Set SDL_VIDEODRIVER before importing pygame to avoid display errors in CI
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -26,9 +26,9 @@ with patch.dict("os.environ", {"SDL_VIDEODRIVER": "dummy"}):
 
 
 from config import Config
-from src.visualizer.nn_visualizer import NeuralNetVisualizer, DataFlowPulse
 from src.visualizer.dashboard import Dashboard
 from src.visualizer.hud import TrainingHUD
+from src.visualizer.nn_visualizer import DataFlowPulse, NeuralNetVisualizer
 
 
 class TestDataFlowPulse:
@@ -219,9 +219,6 @@ class TestDashboard:
         # Add stable losses to build up smoothed_loss
         for i in range(10):
             dashboard.update(episode=i, score=100, epsilon=0.5, loss=0.1)
-
-        # Record the smoothed loss before spike
-        smoothed_before = dashboard.smoothed_loss
 
         # Add a spike (10x increase) - should trigger internal spike timer
         dashboard.update(episode=10, score=100, epsilon=0.5, loss=1.0)

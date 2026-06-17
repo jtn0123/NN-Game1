@@ -1,4 +1,4 @@
-.PHONY: test coverage typecheck typecheck-audit dashboard-test dashboard-smoke format format-check audit build build-if-available release-config hygiene check verify
+.PHONY: test coverage typecheck typecheck-audit dashboard-test dashboard-smoke format format-check lint audit size-check build build-if-available release-config hygiene check verify
 
 PYTHON ?= python
 
@@ -26,10 +26,13 @@ format:
 format-check:
 	$(PYTHON) -m black --check main.py config.py src tests
 
+lint:
+	$(PYTHON) .github/scripts/run_ruff.py check main.py config.py src tests
+
 audit:
 	# CVE-2025-3000 currently has no patched torch release on PyPI.
 	# Keep auditing all other advisories and remove this once torch ships a fix.
-	$(PYTHON) -m pip_audit -r requirements.txt --ignore-vuln CVE-2025-3000
+	$(PYTHON) .github/scripts/run_dependency_audit.py -r requirements.txt --ignore-vuln CVE-2025-3000
 
 build:
 	$(PYTHON) -m build
@@ -47,6 +50,9 @@ release-config:
 hygiene:
 	$(PYTHON) .github/scripts/check_repo_hygiene.py
 
-check: format-check typecheck dashboard-test coverage
+size-check:
+	$(PYTHON) .github/scripts/check_file_size.py --max-lines 1000
 
-verify: check typecheck-audit release-config hygiene build-if-available
+check: format-check lint typecheck dashboard-test coverage
+
+verify: check typecheck-audit release-config hygiene size-check audit build-if-available
