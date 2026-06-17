@@ -1,0 +1,14 @@
+{
+  "name": "nn-game1",
+  "version": "0.0.4",
+  "private": true,
+  "description": "Browser smoke tests for the NN Game1 dashboard.",
+  "scripts": {
+    "dashboard-smoke": "node tests/e2e/dashboard_smoke.mjs",
+    "test": "node --test tests/js/*.test.mjs"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.61.0"
+  }
+}

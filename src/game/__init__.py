@@ -15,7 +15,7 @@ Game Registry:
     Use get_game_info(name) to get metadata about a game
 """
 
-from typing import Any, Dict, List, Optional, Type, cast
+from typing import Any, Dict, List, Optional, Tuple, TypedDict, cast
 
 from .breakout import Breakout, VecBreakout
 from .space_invaders import SpaceInvaders, VecSpaceInvaders
@@ -26,8 +26,10 @@ from .base_game import (
     BaseGame,
     BaseVecGame,
     ControlDisplayProvider,
+    GameConstructor,
     HumanActionProvider,
     HumanStepProvider,
+    VecGameConstructor,
 )
 from .particles import ParticleSystem, TrailRenderer
 from .menu import GameMenu
@@ -35,16 +37,32 @@ from .menu import GameMenu
 # =============================================================================
 # GAME REGISTRY
 # =============================================================================
+GameRegistryEntry = TypedDict(
+    "GameRegistryEntry",
+    {
+        "class": GameConstructor,
+        "vec_class": VecGameConstructor,
+        "name": str,
+        "description": str,
+        "actions": List[str],
+        "controls": List[str],
+        "difficulty": str,
+        "color": Tuple[int, int, int],
+        "icon": str,
+    },
+)
+
+
 # Maps game names to their classes and metadata.
 # To add a new game:
 #   1. Create the game class inheriting from BaseGame
 #   2. Add an entry to GAME_REGISTRY below
 #   3. The game will automatically appear in menus and CLI
 
-GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
+GAME_REGISTRY: Dict[str, GameRegistryEntry] = {
     "breakout": {
         "class": Breakout,
-        "vec_class": VecBreakout,
+        "vec_class": cast(VecGameConstructor, VecBreakout),
         "name": "Breakout",
         "description": "Classic brick-breaking arcade game",
         "actions": ["LEFT", "STAY", "RIGHT"],
@@ -55,7 +73,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "space_invaders": {
         "class": SpaceInvaders,
-        "vec_class": VecSpaceInvaders,
+        "vec_class": cast(VecGameConstructor, VecSpaceInvaders),
         "name": "Space Invaders",
         "description": "Defend Earth from alien invasion",
         "actions": ["LEFT", "STAY", "RIGHT", "SHOOT"],
@@ -66,7 +84,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "pong": {
         "class": Pong,
-        "vec_class": VecPong,
+        "vec_class": cast(VecGameConstructor, VecPong),
         "name": "Pong",
         "description": "Classic paddle vs AI opponent",
         "actions": ["UP", "STAY", "DOWN"],
@@ -77,7 +95,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "snake": {
         "class": Snake,
-        "vec_class": VecSnake,
+        "vec_class": cast(VecGameConstructor, VecSnake),
         "name": "Snake",
         "description": "Grow the snake by eating food",
         "actions": ["UP", "DOWN", "LEFT", "RIGHT"],
@@ -88,7 +106,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "asteroids": {
         "class": Asteroids,
-        "vec_class": VecAsteroids,
+        "vec_class": cast(VecGameConstructor, VecAsteroids),
         "name": "Asteroids",
         "description": "Destroy asteroids with your spaceship",
         "actions": ["ROTATE_LEFT", "ROTATE_RIGHT", "THRUST", "SHOOT", "NOTHING"],
@@ -105,7 +123,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_game(name: str) -> Optional[Type[BaseGame]]:
+def get_game(name: str) -> Optional[GameConstructor]:
     """
     Get a game class by name.
 
@@ -121,11 +139,11 @@ def get_game(name: str) -> Optional[Type[BaseGame]]:
     """
     entry = GAME_REGISTRY.get(name.lower())
     if entry:
-        return cast(Type[BaseGame], entry["class"])
+        return entry["class"]
     return None
 
 
-def get_vec_game(name: str) -> Optional[Type[BaseVecGame]]:
+def get_vec_game(name: str) -> Optional[VecGameConstructor]:
     """
     Get a vectorized game environment class by name.
 
@@ -137,7 +155,7 @@ def get_vec_game(name: str) -> Optional[Type[BaseVecGame]]:
     """
     entry = GAME_REGISTRY.get(name.lower())
     if entry and entry.get("vec_class"):
-        return cast(Type[BaseVecGame], entry["vec_class"])
+        return entry["vec_class"]
     return None
 
 

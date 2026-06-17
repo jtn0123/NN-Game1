@@ -21,6 +21,16 @@ import heapq
 
 from .base_game import BaseGame, validate_action, validate_action_batch
 from config import Config
+from src.game.space_invaders_rules import (
+    alien_points,
+    alien_pressure_ratio,
+    alien_pulse_speed,
+    alien_shoot_chance,
+    alien_speed_after_kill,
+    invasion_reached,
+    level_speed,
+    level_y_offset,
+)
 
 # Classic Space Invader pixel patterns (8x8)
 ALIEN_PATTERNS = {
@@ -930,11 +940,11 @@ class SpaceInvaders(BaseGame):
         # - Aliens start lower (closer to player)
         # - Base speed increases
         # - Aliens shoot more frequently (handled in config multiplier)
-        self.alien_base_speed = self.config.SI_ALIEN_SPEED_X * (1 + 0.15 * (self.level - 1))
+        self.alien_base_speed = level_speed(self.config.SI_ALIEN_SPEED_X, self.level)
         self.alien_speed = self.alien_base_speed
 
         # Move aliens closer to player on higher levels (original game behavior)
-        level_offset = min((self.level - 1) * 20, 100)  # Max 100 pixels closer
+        level_offset = level_y_offset(self.level)
         for alien in self.aliens:
             alien.y += level_offset
 
@@ -1050,7 +1060,7 @@ class SpaceInvaders(BaseGame):
 
         # Check if aliens reached the ground base (invasion!)
         for alien in self.aliens:
-            if alien.alive and alien.y + alien.height >= self.ground_y:
+            if alien.alive and invasion_reached(alien.y, alien.height, self.ground_y):
                 self.game_over = True
                 reward += self.config.SI_REWARD_PLAYER_DEATH * 2  # Extra penalty for invasion
                 break
@@ -1125,10 +1135,9 @@ class SpaceInvaders(BaseGame):
         self.alien_x_offset += self.alien_direction * self.alien_speed
 
         # Update alien pulse phase (speeds up as fewer aliens remain)
-        # Guard against division by zero when no aliens spawned
-        alien_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
-        pulse_speed = 0.5 + (1 - alien_ratio) * 3
-        self.alien_pulse_phase += pulse_speed * (1.0 / 60.0)
+        self.alien_pulse_phase += alien_pulse_speed(self._aliens_remaining, self._num_aliens) * (
+            1.0 / 60.0
+        )
 
         for alien in self.aliens:
             if not alien.alive:
@@ -1145,9 +1154,11 @@ class SpaceInvaders(BaseGame):
         bottom_aliens = self._get_bottom_aliens()
         for alien in bottom_aliens:
             # Increase shoot chance slightly as aliens are destroyed
-            # Guard against division by zero when no aliens spawned
-            alien_ratio = self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
-            shoot_chance = self.config.SI_ALIEN_SHOOT_CHANCE * (1 + 0.5 * (1 - alien_ratio))
+            shoot_chance = alien_shoot_chance(
+                self.config.SI_ALIEN_SHOOT_CHANCE,
+                self._aliens_remaining,
+                self._num_aliens,
+            )
             if random.random() < shoot_chance:
                 actual_x = alien.x + self.alien_x_offset + alien.width // 2
                 bullet = Bullet(
@@ -1230,7 +1241,7 @@ class SpaceInvaders(BaseGame):
                     # Type 0 (squid, top row): 30 points
                     # Type 1 (crab, middle rows): 20 points
                     # Type 2 (octopus, bottom rows): 10 points
-                    points = 30 - alien.alien_type * 10
+                    points = alien_points(alien.alien_type)
                     self.score += points
                     reward += self.config.SI_REWARD_ALIEN_HIT
 
@@ -1257,8 +1268,10 @@ class SpaceInvaders(BaseGame):
                     self.flash_alpha = 30
 
                     # Speed up as aliens are destroyed (classic behavior)
-                    self.alien_speed = self.alien_base_speed * (
-                        1 + (self._num_aliens - self._aliens_remaining) * 0.015
+                    self.alien_speed = alien_speed_after_kill(
+                        self.alien_base_speed,
+                        self._num_aliens,
+                        self._aliens_remaining,
                     )
                     break
 
@@ -1417,9 +1430,7 @@ class SpaceInvaders(BaseGame):
         idx += 1
 
         # Aliens remaining ratio (progress indicator)
-        self._state_array[idx] = (
-            self._aliens_remaining / self._num_aliens if self._num_aliens > 0 else 1.0
-        )
+        self._state_array[idx] = alien_pressure_ratio(self._aliens_remaining, self._num_aliens)
         idx += 1
 
         # Lives remaining (risk awareness)

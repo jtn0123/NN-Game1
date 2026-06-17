@@ -122,6 +122,11 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Node / browser test artifacts
+node_modules/
+playwright-report/
+test-results/
+
 # Generated experiment outputs
 experiments/run_*/
 
@@ -209,6 +214,8 @@ logs/
 # Data files (if large)
 *.csv
 *.json
+!package.json
+!package-lock.json
 *.parquet
 data/
 datasets/

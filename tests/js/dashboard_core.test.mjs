@@ -143,6 +143,44 @@ test('model helpers prefer opaque ids and display filenames', () => {
   assert.equal(DashboardCore.modelDisplayName('breakout:best.pth'), 'best.pth');
 });
 
+test('calculateRunningAverage uses a rolling window without mutating input', () => {
+  const scores = [10, 20, 30, 40];
+
+  assert.deepEqual(DashboardCore.calculateRunningAverage(scores, 2), [10, 15, 25, 35]);
+  assert.deepEqual(scores, [10, 20, 30, 40]);
+});
+
+test('buildChartUpdateModel prepares bounded chart ranges for long histories', () => {
+  const history = {
+    scores: Array.from({ length: 250 }, (_, index) => index + 1),
+    losses: [0, 0.5, -1],
+    q_values: [0.1, 0.2, 0.3],
+  };
+
+  const model = DashboardCore.buildChartUpdateModel(history, 260, { visibleWindow: 50 });
+
+  assert.equal(model.labels.length, 250);
+  assert.equal(model.labels[0], 11);
+  assert.equal(model.labels.at(-1), 260);
+  assert.deepEqual(model.autoScrollRange, { min: 211, max: 260 });
+  assert.equal(model.showAllRange, null);
+  assert.deepEqual(model.losses, [0.0001, 0.5, 0.0001]);
+  assert.equal(model.averageScores.at(-1), 240.5);
+  assert.equal(model.bestAverageScores.at(-1), 240.5);
+});
+
+test('buildChartUpdateModel exposes show-all range for short histories', () => {
+  const model = DashboardCore.buildChartUpdateModel(
+    { scores: [3, 4], losses: [], q_values: [] },
+    '2',
+    { visibleWindow: 200 },
+  );
+
+  assert.deepEqual(model.labels, [1, 2]);
+  assert.equal(model.autoScrollRange, null);
+  assert.deepEqual(model.showAllRange, { min: 1, max: undefined });
+});
+
 test('escape helpers encode html and attribute-sensitive characters', () => {
   const hostile = `<img src=x onerror="alert('x')">&`;
 

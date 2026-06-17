@@ -1,4 +1,4 @@
-.PHONY: test coverage typecheck typecheck-audit dashboard-test format format-check audit build build-if-available release-config hygiene check verify
+.PHONY: test coverage typecheck typecheck-audit dashboard-test dashboard-smoke format format-check audit build build-if-available release-config hygiene check verify
 
 PYTHON ?= python
 
@@ -16,6 +16,9 @@ typecheck-audit:
 
 dashboard-test:
 	node --test tests/js/*.test.mjs
+
+dashboard-smoke:
+	npm run dashboard-smoke
 
 format:
 	$(PYTHON) -m black main.py config.py src tests
