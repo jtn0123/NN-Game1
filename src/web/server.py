@@ -21,12 +21,12 @@ Usage:
     >>> dashboard.stop()
 """
 
-import os
-import threading
-from typing import Optional, Dict, Any, List, Callable, Tuple
 import base64
+import os
 import secrets
 import socket
+import threading
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import numpy as np
@@ -60,21 +60,22 @@ except ImportError:
     print("Install with: pip install flask flask-socketio eventlet")
 
 from config import Config
+from src.app.model_paths import model_id, model_search_dirs
 from src.utils.logger import get_logger
 from src.web import socket_controls
 from src.web.contracts import ControlAck
+from src.web.json_utils import make_json_safe
 from src.web.metrics_publisher import (
     LayerAnalysisData,
     LogLevel,
     LogMessage,
     MetricsPublisher,
-    NNVisualizationData,
     NeuronInspectionData,
+    NNVisualizationData,
     SaveStatus,
     TrainingConfig,
     TrainingState,
 )
-from src.web.json_utils import make_json_safe
 from src.web.model_service import ModelService
 
 # Module logger
@@ -228,15 +229,12 @@ class WebDashboard:
 
     def _model_search_dirs(self) -> List[Tuple[str, str]]:
         """Return allowed model directories as (directory, source) pairs."""
-        return [
-            (self.config.GAME_MODEL_DIR, self.config.GAME_NAME),
-            (self.config.MODEL_DIR, "legacy"),
-        ]
+        return model_search_dirs(self.config)
 
     @staticmethod
     def _model_id(source: str, filename: str) -> str:
         """Create a browser-safe model identifier without exposing local paths."""
-        return ModelService.model_id(source, filename)
+        return model_id(source, filename)
 
     def _resolve_model_ref(self, model_ref: str) -> Optional[str]:
         """Resolve a model id, or a legacy absolute path, to an allowed .pth file."""
@@ -401,7 +399,6 @@ class WebDashboard:
 
         # Suppress Flask/werkzeug logging COMPLETELY - do this BEFORE starting server
         import logging
-        import sys
 
         # Disable werkzeug request logging completely
         werkzeug_log = logging.getLogger("werkzeug")

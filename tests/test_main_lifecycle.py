@@ -1,7 +1,7 @@
 """Tests for application lifecycle helpers in main.py."""
 
-from collections import deque
 import importlib
+from collections import deque
 from types import SimpleNamespace
 
 import numpy as np

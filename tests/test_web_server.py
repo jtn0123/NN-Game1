@@ -8,24 +8,20 @@ Tests cover:
 - Training state management
 """
 
-import pytest
-import json
 import re
-import os
 from datetime import datetime
-from unittest.mock import MagicMock, patch
 
 import numpy as np
-import torch
+import pytest
 
 # Try to import web server components
 try:
     from src.web.server import (
+        FLASK_AVAILABLE,
+        LogMessage,
         MetricsPublisher,
         TrainingState,
-        LogMessage,
         _make_json_safe,
-        FLASK_AVAILABLE,
     )
 
     WEB_AVAILABLE = FLASK_AVAILABLE

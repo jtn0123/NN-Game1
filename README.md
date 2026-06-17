@@ -636,10 +636,20 @@ make typecheck
 make format
 make format-check
 
+# Ruff lint, installing ruff locally if needed
+make lint
+
+# Dependency audit, installing pip-audit locally if needed
+make audit
+
+# Keep tracked source files below the refactor budget
+make size-check
+
 # Fast local gate used by CI
 make check
 
-# Fuller local verification, including release config, hygiene, and build when available
+# Fuller local verification, including release config, hygiene, file size,
+# dependency audit, and build when available
 make verify
 ```
 
@@ -648,6 +658,8 @@ The project supports Python 3.10 through 3.12. Install with pinned constraints f
 ```bash
 pip install -r requirements.txt -c constraints.txt
 ```
+
+Node dashboard tests are run against Node 24. The dependency audit intentionally ignores CVE-2025-3000 until a patched torch release is available on PyPI; all other reported advisories still fail the audit.
 
 ---
 

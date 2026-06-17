@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, List, Tuple
 
 from flask import jsonify, make_response, render_template, request
+from werkzeug import Response
 
 from src.app.performance_modes import performance_mode_payload
 from src.utils.logger import get_logger
-from src.web.contracts import GameInfoPayload
+from src.web.contracts import DashboardConfigPayload, GameInfoPayload, GamesResponse, ModelsResponse
 from src.web.game_stats_service import build_game_stats
 from src.web.json_utils import make_json_safe
 
 _logger = get_logger(__name__)
 
 
-def api_error(message: str, status: int):
+def api_error(message: str, status: int) -> Tuple[Response, int]:
     """Return the dashboard API's stable JSON error shape."""
     return jsonify({"error": message}), status
+
+
+def model_delete_error_status(error: str | None) -> int:
+    """Map model-service delete errors to stable HTTP statuses."""
+    if error == "Model not found":
+        return 404
+    if error == "Invalid file type":
+        return 400
+    return 403
 
 
 def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> None:
@@ -73,32 +83,31 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
 
     @dashboard.app.route("/api/config")
     def api_config():
-        return jsonify(
-            {
-                "learning_rate": dashboard.config.LEARNING_RATE,
-                "gamma": dashboard.config.GAMMA,
-                "epsilon_start": dashboard.config.EPSILON_START,
-                "epsilon_end": dashboard.config.EPSILON_END,
-                "epsilon_decay": dashboard.config.EPSILON_DECAY,
-                "batch_size": dashboard.config.BATCH_SIZE,
-                "hidden_layers": dashboard.config.HIDDEN_LAYERS,
-                "memory_size": dashboard.config.MEMORY_SIZE,
-                "target_update": dashboard.config.TARGET_UPDATE,
-                "grad_clip": dashboard.config.GRAD_CLIP,
-                # Performance settings
-                "learn_every": dashboard.config.LEARN_EVERY,
-                "gradient_steps": dashboard.config.GRADIENT_STEPS,
-                "device": str(dashboard.config.DEVICE),
-                "vec_envs": dashboard.publisher.state.num_envs,
-                # Game settings
-                "game_name": dashboard.config.GAME_NAME,
-            }
-        )
+        payload: DashboardConfigPayload = {
+            "learning_rate": dashboard.config.LEARNING_RATE,
+            "gamma": dashboard.config.GAMMA,
+            "epsilon_start": dashboard.config.EPSILON_START,
+            "epsilon_end": dashboard.config.EPSILON_END,
+            "epsilon_decay": dashboard.config.EPSILON_DECAY,
+            "batch_size": dashboard.config.BATCH_SIZE,
+            "hidden_layers": dashboard.config.HIDDEN_LAYERS,
+            "memory_size": dashboard.config.MEMORY_SIZE,
+            "target_update": dashboard.config.TARGET_UPDATE,
+            "grad_clip": dashboard.config.GRAD_CLIP,
+            # Performance settings
+            "learn_every": dashboard.config.LEARN_EVERY,
+            "gradient_steps": dashboard.config.GRADIENT_STEPS,
+            "device": str(dashboard.config.DEVICE),
+            "vec_envs": dashboard.publisher.state.num_envs,
+            # Game settings
+            "game_name": dashboard.config.GAME_NAME,
+        }
+        return jsonify(payload)
 
     @dashboard.app.route("/api/games")
     def api_games():
         """List all available games with their metadata."""
-        from src.game import list_games, get_game_info
+        from src.game import get_game_info, list_games
 
         games: List[GameInfoPayload] = []
         for game_id in list_games():
@@ -118,7 +127,8 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
                     }
                 )
 
-        return jsonify({"games": games, "current_game": dashboard.config.GAME_NAME})
+        payload: GamesResponse = {"games": games, "current_game": dashboard.config.GAME_NAME}
+        return jsonify(payload)
 
     @dashboard.app.route("/api/performance-modes")
     def api_performance_modes():
@@ -141,12 +151,11 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
 
         Searches both game-specific directory and legacy models directory.
         """
-        return jsonify(
-            {
-                "models": dashboard.model_service.list_models(),
-                "current_game": dashboard.config.GAME_NAME,
-            }
-        )
+        payload: ModelsResponse = {
+            "models": dashboard.model_service.list_models(),
+            "current_game": dashboard.config.GAME_NAME,
+        }
+        return jsonify(payload)
 
     @dashboard.app.route("/api/models/<path:model_id>", methods=["DELETE"])
     def api_delete_model(model_id):
@@ -155,16 +164,12 @@ def register_dashboard_routes(dashboard: Any, content_security_policy: str) -> N
         Security: Validates that the path is within the model directory
         to prevent path traversal attacks.
         """
-        if not dashboard._is_authorized_request():
-            return api_error("Unauthorized", 401)
-
         try:
             success, filename, error = dashboard.model_service.delete(model_id)
             if not success:
-                status = 404 if error == "Model not found" else 403
-                if error == "Invalid file type":
-                    status = 400
-                return api_error(error, status)
+                return api_error(
+                    error or "Failed to delete model", model_delete_error_status(error)
+                )
             dashboard.publisher.log(f"🗑️ Deleted model: {filename}", level="action")
             return jsonify(
                 {

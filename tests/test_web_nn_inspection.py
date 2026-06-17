@@ -1,11 +1,9 @@
 """Neural-network inspection tests for the web dashboard."""
 
 import json
-import os
 
 import numpy as np
 import pytest
-import torch
 
 try:
     from src.web.server import FLASK_AVAILABLE
@@ -23,8 +21,8 @@ class TestWebDashboardNNInspection:
     def web_dashboard(self):
         """Create a WebDashboard instance for testing."""
         try:
-            from src.web.server import WebDashboard
             from config import Config
+            from src.web.server import WebDashboard
 
             config = Config()
             config.GAME_NAME = "breakout"

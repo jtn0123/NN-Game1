@@ -5,8 +5,6 @@ This file is automatically loaded by pytest and applies configuration
 to all tests in the tests/ directory.
 """
 
-import pytest
-
 
 def pytest_configure(config):
     """Configure pytest with custom markers and warning filters."""

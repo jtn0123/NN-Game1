@@ -9,6 +9,7 @@ import numpy as np
 
 from config import Config
 from src.ai.agent import Agent, TrainingHistory
+from src.app.model_paths import normalize_checkpoint_filename
 
 
 class ModelService:
@@ -25,13 +26,7 @@ class ModelService:
 
     def normalize_checkpoint_filename(self, filename: str, default: str = "custom_save") -> str:
         """Return a safe checkpoint filename with a `.pth` suffix."""
-        base = os.path.basename(filename.strip())
-        if base.endswith(".pth"):
-            base = base[:-4]
-        base = "".join(c for c in base if c.isalnum() or c in "_-").strip()
-        if not base:
-            base = default
-        return f"{base}.pth"
+        return normalize_checkpoint_filename(filename, default=default)
 
     def checkpoint_path(self, filename: str) -> str:
         """Return the absolute path for a normalized checkpoint filename."""

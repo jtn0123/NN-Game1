@@ -17,14 +17,16 @@ Game Rules:
 - Maximize score by eating as much food as possible
 """
 
+from collections import deque
+from typing import Deque, List, Optional, Tuple
+
 import numpy as np
 import pygame
-from typing import Tuple, List, Optional, Deque
-from collections import deque
+
+from config import Config
 
 from .base_game import BaseGame, step_vector_env_no_copy, validate_action, validate_action_batch
 from .particles import ParticleSystem
-from config import Config
 
 
 class Snake(BaseGame):

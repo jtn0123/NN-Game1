@@ -21,12 +21,13 @@ Key Features:
     - Forward hooks for visualization
 """
 
+import math
+from typing import Any, Callable, Dict, List, Optional, cast
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Optional, Callable, Dict, Any, cast
-import numpy as np
-import math
 
 from config import Config
 
@@ -575,12 +576,12 @@ if __name__ == "__main__":
     state = torch.randn(batch_size, config.STATE_SIZE)
     q_values = net(state)
 
-    print(f"\nTest forward pass:")
+    print("\nTest forward pass:")
     print(f"  Input shape: {state.shape}")
     print(f"  Output shape: {q_values.shape}")
 
     # Check activations
-    print(f"\nActivations captured:")
+    print("\nActivations captured:")
     for name, act in net.get_activations().items():
         print(f"  {name}: {act.shape}")
 

@@ -17,13 +17,14 @@ This creates a beautiful, informative visualization that helps you
 understand what the network is "thinking" in real-time.
 """
 
-import pygame
-import pygame.gfxdraw
-import numpy as np
-from typing import Optional, List, Tuple, Dict, Any, Union
-from collections import deque
 import math
 import time
+from collections import deque
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pygame
+import pygame.gfxdraw
 
 from config import Config
 

@@ -9,20 +9,19 @@ These tests verify:
     - Save/Load functionality
 """
 
-import pytest
-import numpy as np
-import torch
-import tempfile
 import os
 import sys
+import tempfile
 import warnings
+
+import numpy as np
+import pytest
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.ai.agent import Agent
-from src.ai.network import DQN
-from src.ai.replay_buffer import ReplayBuffer
 from src.utils.checkpoint_loader import load_checkpoint
 
 

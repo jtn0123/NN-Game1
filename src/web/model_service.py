@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import os
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from src.app.model_paths import (
+    ModelDirectory,
+    allowed_model_roots,
+    is_allowed_checkpoint_path,
+    model_id,
+    parse_model_id,
+)
 from src.utils.checkpoint_loader import load_checkpoint
-
-
-@dataclass(frozen=True)
-class ModelDirectory:
-    path: str
-    source: str
 
 
 class ModelService:
@@ -30,7 +30,7 @@ class ModelService:
 
     @staticmethod
     def model_id(source: str, filename: str) -> str:
-        return f"{source}:{filename}"
+        return model_id(source, filename)
 
     def list_models(self) -> List[Dict[str, Any]]:
         models: List[Dict[str, Any]] = []
@@ -92,23 +92,16 @@ class ModelService:
         if os.path.isabs(model_ref):
             return self._resolve_absolute_path(model_ref)
 
-        if ":" not in model_ref:
+        parsed_model_id = parse_model_id(model_ref)
+        if parsed_model_id is None:
             return None
-
-        source, filename = model_ref.split(":", 1)
-        if (
-            not filename
-            or os.path.basename(filename) != filename
-            or "/" in filename
-            or "\\" in filename
-        ):
-            return None
+        source, filename = parsed_model_id
 
         for entry in self._model_dirs:
             if source != entry.source:
                 continue
             candidate = os.path.realpath(os.path.join(entry.path, filename))
-            if self._is_allowed_file(candidate, entry.path):
+            if is_allowed_checkpoint_path(candidate, entry.path):
                 return candidate
         return None
 
@@ -134,22 +127,12 @@ class ModelService:
     def _resolve_absolute_path(self, model_ref: str) -> Optional[str]:
         candidate = os.path.realpath(model_ref)
         for entry in self._model_dirs:
-            if self._is_allowed_file(candidate, entry.path):
+            if is_allowed_checkpoint_path(candidate, entry.path):
                 return candidate
         return None
 
-    @staticmethod
-    def _is_allowed_file(candidate: str, model_dir: str) -> bool:
-        real_dir = os.path.realpath(model_dir)
-        try:
-            return os.path.commonpath([real_dir, candidate]) == real_dir and candidate.endswith(
-                ".pth"
-            )
-        except ValueError:
-            return False
-
     def _contains_symlink(self, full_path: str) -> bool:
-        allowed_roots = [os.path.realpath(entry.path) for entry in self._model_dirs]
+        allowed_roots = allowed_model_roots(self._model_dirs)
         current_path = full_path
         while current_path and current_path not in allowed_roots:
             if os.path.islink(current_path):

@@ -1,11 +1,8 @@
 """Socket.IO control tests for the web dashboard."""
 
-import json
 import os
 
-import numpy as np
 import pytest
-import torch
 
 try:
     from src.web.server import FLASK_AVAILABLE
@@ -23,8 +20,8 @@ class TestWebDashboardSocketControls:
     def web_dashboard(self):
         """Create a WebDashboard instance for testing."""
         try:
-            from src.web.server import WebDashboard
             from config import Config
+            from src.web.server import WebDashboard
 
             config = Config()
             config.GAME_NAME = "breakout"
@@ -277,8 +274,8 @@ class TestWebDashboardSocketControls:
 
     def test_socket_control_rejects_missing_load_model_file(self, tmp_path):
         """A stale allowed model id should fail before invoking load callbacks."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         config = Config()
         config.GAME_NAME = "breakout"

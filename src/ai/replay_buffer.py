@@ -23,9 +23,9 @@ References:
     Mnih et al., 2015 - "Human-level control through deep reinforcement learning"
 """
 
+from typing import List, Tuple
+
 import numpy as np
-from typing import Tuple, Optional, List
-import random
 
 
 class ReplayBuffer:
@@ -829,7 +829,7 @@ if __name__ == "__main__":
     # Sample a batch
     states, actions, rewards, next_states, dones = buffer.sample(32)
 
-    print(f"\nSampled batch shapes:")
+    print("\nSampled batch shapes:")
     print(f"  States: {states.shape}")
     print(f"  Actions: {actions.shape}")
     print(f"  Rewards: {rewards.shape}")

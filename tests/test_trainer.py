@@ -7,16 +7,17 @@ These tests verify:
     - Trainer initialization
 """
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.trainer import Trainer, TrainingMetrics, EpisodeStats
 from src.ai.agent import Agent
+from src.ai.trainer import EpisodeStats, Trainer, TrainingMetrics
 from src.game.breakout import Breakout
 
 
@@ -374,8 +375,8 @@ class TestTrainSavesCheckpoints:
 
     def test_train_saves_best_model(self, game, agent, config):
         """Training should save best model when score improves."""
-        import tempfile
         import os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.MODEL_DIR = tmpdir
@@ -393,8 +394,8 @@ class TestTrainSavesCheckpoints:
 
     def test_train_saves_final_model(self, game, agent, config):
         """Training should save final model at end."""
-        import tempfile
         import os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config.MODEL_DIR = tmpdir
@@ -418,7 +419,7 @@ class TestEvaluateResetsEpsilon:
         trainer.agent.epsilon = 0.5
 
         # Run evaluation
-        results = trainer.evaluate(num_episodes=2, render=False)
+        trainer.evaluate(num_episodes=2, render=False)
 
         # Epsilon should be restored after evaluation
         assert trainer.agent.epsilon == 0.5

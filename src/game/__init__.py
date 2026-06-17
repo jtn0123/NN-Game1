@@ -17,11 +17,8 @@ Game Registry:
 
 from typing import Any, Dict, List, Optional, Tuple, TypedDict, cast
 
-from .breakout import Breakout, VecBreakout
-from .space_invaders import SpaceInvaders, VecSpaceInvaders
-from .pong import Pong, VecPong
-from .snake import Snake, VecSnake
-from .asteroids import Asteroids, VecAsteroids
+from .asteroids import Asteroids
+from .asteroids_vec import VecAsteroids
 from .base_game import (
     BaseGame,
     BaseVecGame,
@@ -31,8 +28,13 @@ from .base_game import (
     HumanStepProvider,
     VecGameConstructor,
 )
-from .particles import ParticleSystem, TrailRenderer
+from .breakout import Breakout, VecBreakout
 from .menu import GameMenu
+from .particles import ParticleSystem, TrailRenderer
+from .pong import Pong, VecPong
+from .snake import Snake, VecSnake
+from .space_invaders import SpaceInvaders
+from .space_invaders_vec import VecSpaceInvaders
 
 # =============================================================================
 # GAME REGISTRY

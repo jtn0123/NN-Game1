@@ -3,7 +3,6 @@
 import json
 import os
 
-import numpy as np
 import pytest
 import torch
 
@@ -33,8 +32,8 @@ class TestWebDashboardRoutes:
     def web_dashboard(self):
         """Create a WebDashboard instance for testing."""
         try:
-            from src.web.server import WebDashboard
             from config import Config
+            from src.web.server import WebDashboard
 
             config = Config()
             config.GAME_NAME = "breakout"
@@ -60,8 +59,8 @@ class TestWebDashboardRoutes:
 
     def test_dashboard_url_uses_openable_localhost_for_wildcard_bind(self):
         """A wildcard bind address should not be printed as the browser URL."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         dashboard = WebDashboard(port=5108, host="0.0.0.0", config=Config())
 
@@ -69,8 +68,8 @@ class TestWebDashboardRoutes:
 
     def test_socket_origins_include_network_url_for_wildcard_bind(self, monkeypatch):
         """The advertised LAN URL should be allowed to open the Socket.IO channel."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         monkeypatch.setattr("src.web.server.socket.gethostbyname", lambda _host: "10.0.0.5")
         dashboard = WebDashboard(port=5112, host="0.0.0.0", config=Config())
@@ -182,7 +181,15 @@ class TestWebDashboardRoutes:
             response = client.get(f"/?token={web_dashboard.access_token}")
             core_response = client.get("/static/dashboard_core.js")
             charts_response = client.get("/static/dashboard_charts.js")
+            state_response = client.get("/static/dashboard_state.js")
             app_response = client.get("/static/app.js")
+            dialogs_response = client.get("/static/dashboard_dialogs.js")
+            logs_response = client.get("/static/dashboard_logs.js")
+            controls_response = client.get("/static/dashboard_controls.js")
+            settings_response = client.get("/static/dashboard_settings.js")
+            games_response = client.get("/static/dashboard_games.js")
+            nn_response = client.get("/static/dashboard_nn.js")
+            nn_panels_response = client.get("/static/dashboard_nn_panels.js")
 
         html = response.data.decode("utf-8")
 
@@ -202,15 +209,31 @@ class TestWebDashboardRoutes:
         assert '<meta name="referrer" content="no-referrer">' in html
         assert "Training Dashboard" in html
         assert html.index("dashboard_core.js") < html.index("dashboard_charts.js")
-        assert html.index("dashboard_charts.js") < html.index("app.js")
+        assert html.index("dashboard_charts.js") < html.index("dashboard_state.js")
+        assert html.index("dashboard_state.js") < html.index("app.js")
+        assert html.index("app.js") < html.index("dashboard_dialogs.js")
+        assert html.index("dashboard_dialogs.js") < html.index("dashboard_logs.js")
+        assert html.index("dashboard_logs.js") < html.index("dashboard_controls.js")
+        assert html.index("dashboard_controls.js") < html.index("dashboard_settings.js")
+        assert html.index("dashboard_settings.js") < html.index("dashboard_games.js")
+        assert html.index("dashboard_games.js") < html.index("dashboard_nn.js")
+        assert html.index("dashboard_nn.js") < html.index("dashboard_nn_panels.js")
         assert core_response.status_code == 200
         assert charts_response.status_code == 200
+        assert state_response.status_code == 200
         assert app_response.status_code == 200
+        assert dialogs_response.status_code == 200
+        assert logs_response.status_code == 200
+        assert controls_response.status_code == 200
+        assert settings_response.status_code == 200
+        assert games_response.status_code == 200
+        assert nn_response.status_code == 200
+        assert nn_panels_response.status_code == 200
 
     def test_launcher_page_serves_tokenized_frontend_contract(self):
         """Launcher mode should also serve an authenticated Socket.IO page."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         config = Config()
         dashboard = WebDashboard(port=5103, config=config, launcher_mode=True)
@@ -268,8 +291,8 @@ class TestWebDashboardRoutes:
 
     def test_api_models_uses_opaque_ids(self, tmp_path):
         """Model list should not expose absolute local filesystem paths."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         config = Config()
         config.GAME_NAME = "breakout"
@@ -293,8 +316,8 @@ class TestWebDashboardRoutes:
 
     def test_delete_model_requires_dashboard_token(self, tmp_path):
         """Mutating model routes should reject requests without the session token."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         config = Config()
         config.GAME_NAME = "breakout"
@@ -318,8 +341,8 @@ class TestWebDashboardRoutes:
 
     def test_delete_model_hides_internal_exception_details(self, tmp_path):
         """Unexpected delete failures should not expose server internals to clients."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         config = Config()
         config.GAME_NAME = "breakout"
@@ -353,8 +376,8 @@ class TestWebDashboardRoutes:
     )
     def test_delete_model_rejects_encoded_and_malformed_ids(self, tmp_path, model_id):
         """HTTP delete route should reject traversal-shaped ids with a valid token."""
-        from src.web.server import WebDashboard
         from config import Config
+        from src.web.server import WebDashboard
 
         config = Config()
         config.GAME_NAME = "breakout"

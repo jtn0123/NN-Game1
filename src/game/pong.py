@@ -17,12 +17,14 @@ Game Rules:
 - Ball bounces off paddles and top/bottom walls
 """
 
+from typing import List, Optional, Tuple
+
 import numpy as np
 import pygame
-from typing import Tuple, List, Optional
+
+from config import Config
 
 from .base_game import BaseGame, step_vector_env_no_copy, validate_action, validate_action_batch
-from config import Config
 
 
 class PongBall:

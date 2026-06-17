@@ -12,11 +12,12 @@ Orchestrates the training process:
 This module ties together the game, agent, and visualizer.
 """
 
-import numpy as np
-import time
-from typing import Optional, List, Dict, Tuple
-from dataclasses import dataclass
 import os
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+import numpy as np
 
 from config import Config
 
@@ -197,7 +198,7 @@ class Trainer:
             self.agent.remember(state, action, reward, next_state, done)
 
             # Learn from experience
-            loss = self.agent.learn()
+            self.agent.learn()
 
             # Update state
             state = next_state
@@ -280,7 +281,6 @@ class Trainer:
             # Log progress
             if episode % self.config.LOG_EVERY == 0:
                 avg_score = self.metrics.get_recent_average("scores", 100)
-                avg_reward = self.metrics.get_recent_average("rewards", 100)
                 win_rate = self.metrics.get_win_rate(100)
 
                 # Handle None values from get_recent_average (returns None if no data)

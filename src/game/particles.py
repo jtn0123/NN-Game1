@@ -12,12 +12,12 @@ The system is designed to be lightweight and integrate
 seamlessly with the pygame rendering loop.
 """
 
-import pygame
-import numpy as np
-from typing import List, Tuple, Optional
-from dataclasses import dataclass
-import random
 import math
+import random
+from dataclasses import dataclass
+from typing import List, Tuple
+
+import pygame
 
 
 @dataclass
@@ -59,9 +59,6 @@ class Particle:
         """Draw the particle with alpha based on life."""
         if self.life <= 0:
             return
-
-        # Calculate alpha based on remaining life
-        alpha = int(255 * min(1.0, self.life * 2))
 
         # Create color with alpha effect (darken as it dies)
         r = int(self.color[0] * self.life)
