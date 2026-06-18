@@ -95,7 +95,7 @@ def test_procedural_config_replaces_caves_and_is_playable():
     cfg.CRYSTAL_CAVES_SEED = 1
     game = CrystalCaves(cfg, headless=True)
 
-    assert len(game.CAVES) == len(THEME_NAMES)
+    assert len(game.CAVES) == len(FAMILY_NAMES)
     assert all(spec.name.startswith("Generated") for spec in game.CAVES)
     assert all(spec.sky_rows == 3 for spec in game.CAVES)
     assert all(grade_cave(spec)["solvable"] for spec in game.CAVES)

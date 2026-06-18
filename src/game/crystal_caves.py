@@ -210,14 +210,16 @@ class CrystalCaves(
         # ones (one per theme, in palette order) so level_index keeps theming them
         # correctly. Authored dressing is cleared since generated caves have none.
         if getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
-            from .crystal_caves_gen import THEME_NAMES, generate_cave
+            from .crystal_caves_gen import FAMILY_NAMES, THEME_NAMES, generate_cave
 
             base = getattr(self.config, "CRYSTAL_CAVES_SEED", 0)
+            # One cave per level family for maximum variety; themes cycle so the
+            # renderer palette (driven by level_index) stays consistent.
             self.CAVES = tuple(
-                generate_cave(base * len(THEME_NAMES) + i, THEME_NAMES[i])
-                for i in range(len(THEME_NAMES))
+                generate_cave(base * 10 + i, THEME_NAMES[i % len(THEME_NAMES)], family)
+                for i, family in enumerate(FAMILY_NAMES)
             )
-            self.CAVE_DRESSING = {i: () for i in range(len(THEME_NAMES))}
+            self.CAVE_DRESSING = {i: () for i in range(len(FAMILY_NAMES))}
         self.level: CaveSpec = self.CAVES[0]
         self.grid: List[List[str]] = []
         self.level_cols = 0
