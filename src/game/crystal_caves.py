@@ -206,6 +206,18 @@ class CrystalCaves(
         self.height = self.config.SCREEN_HEIGHT
 
         self.level_index = 0
+        # Procedural mode: replace the three authored caves with freshly generated
+        # ones (one per theme, in palette order) so level_index keeps theming them
+        # correctly. Authored dressing is cleared since generated caves have none.
+        if getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
+            from .crystal_caves_gen import THEME_NAMES, generate_cave
+
+            base = getattr(self.config, "CRYSTAL_CAVES_SEED", 0)
+            self.CAVES = tuple(
+                generate_cave(base * len(THEME_NAMES) + i, THEME_NAMES[i])
+                for i in range(len(THEME_NAMES))
+            )
+            self.CAVE_DRESSING = {i: () for i in range(len(THEME_NAMES))}
         self.level: CaveSpec = self.CAVES[0]
         self.grid: List[List[str]] = []
         self.level_cols = 0

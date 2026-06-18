@@ -70,6 +70,29 @@ def test_generator_is_deterministic():
     assert a.layout == b.layout
 
 
+def test_procedural_config_replaces_caves_and_is_playable():
+    """CRYSTAL_CAVES_PROCEDURAL swaps the authored caves for generated ones that
+    theme correctly, stay solvable, and drive the game without error."""
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    from config import Config
+    from src.game.crystal_caves import CrystalCaves
+
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_PROCEDURAL = True
+    cfg.CRYSTAL_CAVES_SEED = 1
+    game = CrystalCaves(cfg, headless=True)
+
+    assert len(game.CAVES) == len(THEME_NAMES)
+    assert all(spec.name.startswith("Generated") for spec in game.CAVES)
+    assert all(spec.sky_rows == 3 for spec in game.CAVES)
+    assert all(grade_cave(spec)["solvable"] for spec in game.CAVES)
+
+    game.reset()
+    for _ in range(20):
+        game.step(2)  # RIGHT — walk along the surface toward the shaft
+    assert not game.game_over
+
+
 def test_reachability_oracle_matches_solvable_levels():
     """The exported flood agrees with the grader on a generated level."""
     spec = generate_cave(3, "blue_rock")

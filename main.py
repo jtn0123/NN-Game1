@@ -211,6 +211,11 @@ def main():
         if game_info:
             print(f"🎮 Game: {game_info['icon']} {game_info['name']}")
 
+    # Crystal Caves: procedurally generated caves
+    if getattr(args, "random_caves", False):
+        config.CRYSTAL_CAVES_PROCEDURAL = True
+        print("🎲 Crystal Caves: procedurally generated caves")
+
     # Force CPU if specified (faster for small models on M4)
     if hasattr(args, "cpu") and args.cpu:
         config.FORCE_CPU = True

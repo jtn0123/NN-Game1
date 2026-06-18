@@ -85,6 +85,11 @@ TIPS
         action="store_true",
         help="Show game selection menu on launch (interactive game picker)",
     )
+    parser.add_argument(
+        "--random-caves",
+        action="store_true",
+        help="Crystal Caves: play procedurally generated caves instead of the authored ones",
+    )
 
     parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
 

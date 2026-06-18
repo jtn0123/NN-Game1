@@ -86,6 +86,12 @@ class Config:
     # Options: registered game IDs from src.game, e.g. 'breakout', 'crystal_caves'
     GAME_NAME: str = "breakout"
 
+    # Crystal Caves: when True, the three caves are procedurally generated
+    # (platform-network model) instead of the authored layouts. CRYSTAL_CAVES_SEED
+    # makes a procedural run reproducible.
+    CRYSTAL_CAVES_PROCEDURAL: bool = False
+    CRYSTAL_CAVES_SEED: int = 0
+
     # =========================================================================
     # SCREEN SETTINGS
     # =========================================================================
