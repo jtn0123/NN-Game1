@@ -83,7 +83,7 @@ class Config:
     # =========================================================================
 
     # Current game to play/train
-    # Options: 'breakout', 'space_invaders'
+    # Options: registered game IDs from src.game, e.g. 'breakout', 'crystal_caves'
     GAME_NAME: str = "breakout"
 
     # =========================================================================
@@ -237,6 +237,9 @@ class Config:
             max_player_bullets = 3
             num_aliens = 55  # 5 rows * 11 cols
             return 1 + max_player_bullets * 2 + num_aliens + 5 + 7
+        elif self.GAME_NAME == 'crystal_caves':
+            # Local 11x9 tile window plus 20 metadata features.
+            return 11 * 9 + 20
         else:
             # Default fallback
             return 128
