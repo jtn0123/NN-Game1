@@ -29,7 +29,8 @@ from .base_game import (
     VecGameConstructor,
 )
 from .breakout import Breakout, VecBreakout
-from .crystal_caves import CrystalCaves, VecCrystalCaves
+from .crystal_caves import CrystalCaves
+from .crystal_caves_vec import VecCrystalCaves
 from .menu import GameMenu
 from .particles import ParticleSystem, TrailRenderer
 from .pong import Pong, VecPong

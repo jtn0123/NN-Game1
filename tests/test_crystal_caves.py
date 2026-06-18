@@ -18,8 +18,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 from scripts.render_crystal_caves_gallery import render_gallery
 from src.game import get_game_info, list_games
-from src.game.crystal_caves import CrystalCaves, Enemy, VecCrystalCaves
+from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
+from src.game.crystal_caves_entities import Enemy
+from src.game.crystal_caves_vec import VecCrystalCaves
 
 
 @pytest.fixture
