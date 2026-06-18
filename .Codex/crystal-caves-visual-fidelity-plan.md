@@ -211,6 +211,9 @@ First sprint shipped 2026-06-17 — black-void ratio measured at **0.07-0.08** a
 
 **After CCV-03/13:** Terrain mass **C → A-** (thick grass-topped carved masses at 0.50 density); Background density **B → A-**. Overall UI/UX vs reference **B+ → A-**. Remaining: gem polish (CCV-11) and prop clustering (CCV-10) for the last increment.
 
+| 2026-06-17 | CCV-21 | ✅ done | **Figure-ground + clean masses** (user feedback "nothing inside boundary tiles"): (1) interior solid tiles render as clean carved rock — removed the dark `pipe_shadow` machine-plate and pipe variants that read as embedded tiles; (2) removed the floating background "machinery panels" and the cave-depth machinery rects; (3) reworked the back-wall from chunky beveled blocks to a FLAT recessed diagonal-diamond lattice so open space clearly reads as wall *behind* the chunky foreground terrain; (4) densifier now fills every unreachable open pocket so masses have no interior holes (EP1 0.50→0.64). |
+| 2026-06-17 | CCV-22 | ✅ done | **Text never overflows its border**: `_draw_sign_for_tile` and `_draw_room_label` now size their plates to the *measured* text width plus padding (and account for the DANGER warning-triangle offset), instead of a fixed/capped width. |
+
 ### Remaining first-sprint / follow-on
 
 - **CCV-03** (terrain into carved masses, Medium) — surface tiles already carry lips/bolts/outlines and read well against the dimmer wall; a 3px-outline + thicker-body pass is the next refinement.

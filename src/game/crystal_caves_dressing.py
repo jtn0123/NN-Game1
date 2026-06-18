@@ -265,12 +265,15 @@ class CrystalCavesDressingMixin:
     def _draw_room_label(self: Any, screen, rect: pygame.Rect, label: str) -> None:
         if not self._art or not label:
             return
-        width = max(74, len(label) * 8 + 14)
+        # Fit the plate to the measured text so it never overflows the border.
+        pad = 7
+        text_width = self._art.text(label, EGA["Y"], scale=1).get_width()
+        width = max(34, text_width + pad * 2)
         sign = pygame.Rect(rect.x, rect.y + 7, width, 18)
         pygame.draw.rect(screen, EGA["K"], sign.inflate(4, 4))
         pygame.draw.rect(screen, (28, 28, 54), sign)
         pygame.draw.rect(screen, EGA["Y"], sign, 1)
-        self._art.draw_text(screen, label, sign.x + 7, sign.y + 5, EGA["Y"], scale=1)
+        self._art.draw_text(screen, label, sign.x + pad, sign.y + 5, EGA["Y"], scale=1)
 
     def _draw_cable_run(self: Any, screen, rect: pygame.Rect, length: int) -> None:
         palette = self._episode_palette()
@@ -384,10 +387,16 @@ class CrystalCavesDressingMixin:
         )
         if y < -self.TILE_SIZE or y > self.height - self.HUD_HEIGHT:
             return
+        # Size the plate to its contents so text never spills past the border:
+        # icon width (DANGER triangle) + measured text width + symmetric padding.
         text_width = 0
         if self._art:
             text_width = self._art.text(label, color, scale=1).get_width()
-        sign_width = max(34, min(74, text_width + 18))
+        elif self._tiny_font:
+            text_width = self._tiny_font.size(label)[0]
+        icon_w = 18 if label == "DANGER" else 0
+        pad = 7
+        sign_width = max(34, icon_w + text_width + pad * 2)
         sign = pygame.Rect(x + 1, y + 8, sign_width, 18)
         pygame.draw.rect(screen, (0, 0, 0), sign.inflate(4, 4))
         fill = (86, 0, 0) if label == "DANGER" else (72, 46, 0)
@@ -405,9 +414,9 @@ class CrystalCavesDressingMixin:
             )
             pygame.draw.rect(screen, EGA["K"], (sign.x + 10, sign.y + 8, 2, 4))
             pygame.draw.rect(screen, EGA["K"], (sign.x + 10, sign.y + 13, 2, 2))
-            text_x = sign.x + 22
+            text_x = sign.x + icon_w + pad
         else:
-            text_x = sign.x + 6
+            text_x = sign.x + pad
         if self._art:
             self._art.draw_text(
                 screen,

@@ -218,24 +218,6 @@ class CrystalCavesRenderingMixin:
                     pygame.draw.circle(screen, palette["pipe_light"], (segment.left + 8, y + 2), 3)
                     pygame.draw.circle(screen, palette["pipe_light"], (segment.right - 8, y + 2), 3)
 
-        for i in range(8):
-            panel_x = (i * 173 - camera_x // 4) % (self.width + 96) - 48
-            panel_y = (i * 89 - camera_y // 5) % max(1, play_bottom - 80)
-            panel = pygame.Rect(panel_x, panel_y, 46, 30)
-            pygame.draw.rect(screen, (0, 0, 0), panel.inflate(4, 4))
-            pygame.draw.rect(screen, (18, 28, 54), panel)
-            pygame.draw.rect(screen, palette["pipe_dark"], panel, 2)
-            pygame.draw.rect(
-                screen,
-                palette["pipe_light"],
-                (panel.x + 6, panel.y + 8, 10, 4),
-            )
-            pygame.draw.rect(
-                screen,
-                palette["spark"],
-                (panel.x + 25, panel.y + 17, 12, 4),
-            )
-
     def _draw_wall_fill(
         self: Any,
         screen,
@@ -259,66 +241,32 @@ class CrystalCavesRenderingMixin:
                 int(color[2] * factor),
             )
 
-        style = self.level_index % len(self.CAVES)
-        # Dedicated back-wall role colors (CCV-02) keep the fill intentional and
-        # clearly dimmer than the foreground rock palette.
-        mortar = palette["edge_dark"]
-        block = palette["wall_fill"]
-        block_dark = dim(palette["wall_fill"], 0.66)
-        block_hi = dim(palette["wall_accent"], 0.82)
-        speck = dim(palette["ledge_lip"], 0.70)
+        # A FLAT, recessed back-wall: a dim fill behind everything, textured only
+        # with a faint diagonal diamond lattice. It is deliberately flat (no 3D
+        # bevels) so the open space reads clearly as the wall *behind* the chunky
+        # foreground terrain — nothing here mimics a solid boundary tile.
+        base = palette["wall_fill"]
+        lattice = dim(palette["wall_accent"], 0.55)
 
-        # Flat mortar base so any sub-pixel seam never reveals pure black.
-        pygame.draw.rect(screen, mortar, (0, 0, self.width, play_bottom))
+        pygame.draw.rect(screen, base, (0, 0, self.width, play_bottom))
 
-        ts = self.TILE_SIZE
-        # Parallax: the wall scrolls at half camera speed for a sense of depth.
+        # Parallax: the wall drifts at half camera speed for a sense of depth.
         px = camera_x // 2
         py = camera_y // 2
-        first_col = px // ts - 1
-        last_col = (px + self.width) // ts + 1
-        first_row = py // ts - 1
-        last_row = (py + play_bottom) // ts + 1
-
-        for row in range(first_row, last_row + 1):
-            # Masonry stagger: every other course shifts half a tile.
-            stagger = (ts // 2) if (row & 1) else 0
-            for col in range(first_col, last_col + 1):
-                sx = col * ts - px + stagger
-                sy = row * ts - py
-                if sx > self.width or sx < -ts or sy > play_bottom or sy < -ts:
-                    continue
-                seed = (col * 73 + row * 151 + style * 17) & 0xFFFF
-                body = pygame.Rect(sx + 1, sy + 1, ts - 2, ts - 2)
-                tone = block if (seed % 5) else block_dark
-                pygame.draw.rect(screen, tone, body, border_radius=6)
-                # Top-left bevel highlight + bottom-right shadow = rounded relief.
-                pygame.draw.line(
-                    screen,
-                    block_hi,
-                    (body.left + 3, body.top + 2),
-                    (body.right - 6, body.top + 2),
-                    2,
-                )
-                pygame.draw.line(
-                    screen,
-                    block_hi,
-                    (body.left + 2, body.top + 3),
-                    (body.left + 2, body.bottom - 6),
-                    2,
-                )
-                pygame.draw.line(
-                    screen,
-                    mortar,
-                    (body.left + 4, body.bottom - 2),
-                    (body.right - 2, body.bottom - 2),
-                    2,
-                )
-                # Occasional embedded crystal speck or pit for organic variation.
-                if seed % 9 == 0:
-                    pygame.draw.rect(screen, speck, (body.centerx - 2, body.centery - 2, 4, 4))
-                elif seed % 13 == 0:
-                    pygame.draw.rect(screen, mortar, (body.centerx, body.centery, 3, 3))
+        step = 18
+        # Slope +1 and slope -1 diagonals tile the screen into faint diamonds.
+        offset = (px + py) % step
+        for k in range(-play_bottom - step, self.width + step, step):
+            x0 = k - offset
+            pygame.draw.line(
+                screen, lattice, (x0, 0), (x0 + play_bottom, play_bottom), 1
+            )
+        offset2 = (px - py) % step
+        for k in range(0, self.width + play_bottom + step, step):
+            x0 = k - offset2
+            pygame.draw.line(
+                screen, lattice, (x0, 0), (x0 - play_bottom, play_bottom), 1
+            )
 
     def _draw_cave_depth(
         self: Any,
@@ -358,13 +306,6 @@ class CrystalCavesRenderingMixin:
             if i % 2 == 0:
                 pygame.draw.rect(depth, accent, (base_x + 42, base_y + 45, 54, 5))
                 pygame.draw.rect(depth, accent, (base_x + 48, base_y + 62, 5, 36))
-
-        for i in range(4):
-            x = (i * 257 - camera_x // 9) % (self.width + 160) - 80
-            y = 70 + ((i * 121 - camera_y // 10) % max(1, play_bottom - 150))
-            pygame.draw.rect(depth, (*palette["pipe_shadow"], 60), (x, y, 78, 42))
-            pygame.draw.rect(depth, (*palette["rock_mid"], 45), (x + 8, y + 9, 28, 5))
-            pygame.draw.rect(depth, (*palette["spark"], 45), (x + 51, y + 25, 12, 4))
 
         screen.blit(depth, (0, 0))
 
@@ -551,49 +492,28 @@ class CrystalCavesRenderingMixin:
             pygame.draw.rect(screen, (0, 0, 0), (rect.x, rect.bottom - 4, rect.w, 4))
             pygame.draw.rect(screen, palette["rock_mid"], (rect.x, rect.bottom - 7, rect.w, 3))
 
-        if variant == 0 and not (open_left or open_right or open_top or open_bottom):
-            plate = rect.inflate(-8, -8)
-            pygame.draw.rect(screen, palette["pipe_shadow"], plate)
-            pygame.draw.rect(screen, (110, 116, 132), plate, 2)
-            for px, py in (
-                (plate.left + 4, plate.top + 4),
-                (plate.right - 7, plate.top + 4),
-                (plate.left + 4, plate.bottom - 7),
-                (plate.right - 7, plate.bottom - 7),
-            ):
-                pygame.draw.rect(screen, palette["rock_light"], (px, py, 3, 3))
-        elif variant == 1 and not open_top:
-            pipe_y = rect.y + 13
-            pygame.draw.rect(screen, palette["pipe_shadow"], (rect.x, pipe_y + 4, rect.w, 7))
-            pygame.draw.rect(screen, palette["pipe_dark"], (rect.x, pipe_y, rect.w, 7))
+        # Interior rock texture only — clean carved stone, never an embedded
+        # machine plate or pipe (those read as "tiles inside the boundary").
+        veins = (
+            ((3 + seed % 8, 6), (16 + seed % 7, 4)),
+            ((8, 17 + seed % 6), (25, 21 + seed % 4)),
+            ((4 + seed % 5, 26), (14 + seed % 8, 23)),
+        )
+        for start, end in veins:
             pygame.draw.line(
                 screen,
-                palette["pipe_light"],
-                (rect.x + 2, pipe_y + 1),
-                (rect.right - 3, pipe_y + 1),
-                1,
+                palette["rock_mid"],
+                (rect.x + start[0], rect.y + start[1]),
+                (rect.x + end[0], rect.y + end[1]),
+                2,
             )
-        else:
-            veins = (
-                ((3 + seed % 8, 6), (16 + seed % 7, 4)),
-                ((8, 17 + seed % 6), (25, 21 + seed % 4)),
-                ((4 + seed % 5, 26), (14 + seed % 8, 23)),
-            )
-            for start, end in veins:
-                pygame.draw.line(
+        for x_off, y_off in ((5, 5), (21, 11), (12, 25)):
+            if (seed + x_off + y_off) % 3:
+                pygame.draw.rect(
                     screen,
-                    palette["rock_mid"],
-                    (rect.x + start[0], rect.y + start[1]),
-                    (rect.x + end[0], rect.y + end[1]),
-                    2,
+                    palette["rock_light"],
+                    (rect.x + x_off, rect.y + y_off, 3, 3),
                 )
-            for x_off, y_off in ((5, 5), (21, 11), (12, 25)):
-                if (seed + x_off + y_off) % 3:
-                    pygame.draw.rect(
-                        screen,
-                        palette["rock_light"],
-                        (rect.x + x_off, rect.y + y_off, 3, 3),
-                    )
 
         if self.level_index % len(self.CAVES) == 1 and variant in (3, 7):
             pygame.draw.rect(screen, (255, 188, 80), (rect.x + 8, rect.y + 9, 5, 5))
