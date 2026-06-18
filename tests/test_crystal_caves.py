@@ -20,7 +20,7 @@ from scripts.render_crystal_caves_gallery import render_gallery
 from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
-from src.game.crystal_caves_entities import Enemy
+from src.game.crystal_caves_entities import CAVES, Enemy
 from src.game.crystal_caves_vec import VecCrystalCaves
 
 
@@ -37,14 +37,22 @@ def game(config):
 
 
 def place_on_floor(game: CrystalCaves, col: int | None = None) -> tuple[int, int]:
-    """Place the player on a solid floor tile with empty space above it."""
-    for row in range(2, game.level_rows):
-        for candidate_col in range(1, game.level_cols - 1):
+    """Place the player on a roomy floor tile: a solid tile with several tiles of
+    headroom above it and open space on both sides, so jumping and walking are
+    unobstructed (denser caves have many low-ceiling nooks)."""
+    for row in range(3, game.level_rows):
+        for candidate_col in range(2, game.level_cols - 2):
             if col is not None and candidate_col != col:
                 continue
             if game.grid[row][candidate_col] != CrystalCaves.SOLID:
                 continue
-            if game._solid_at(candidate_col, row - 1):
+            # Three tiles of headroom for a full jump.
+            if any(game._solid_at(candidate_col, row - k) for k in (1, 2, 3)):
+                continue
+            # Open at body height on both sides so horizontal moves are free.
+            if game._solid_at(candidate_col - 1, row - 1) or game._solid_at(
+                candidate_col + 1, row - 1
+            ):
                 continue
             game.player_x = candidate_col * game.TILE_SIZE + 5
             game.player_y = row * game.TILE_SIZE - game.PLAYER_HEIGHT
@@ -52,6 +60,15 @@ def place_on_floor(game: CrystalCaves, col: int | None = None) -> tuple[int, int
             game.vy = 0
             return candidate_col, row
     raise AssertionError("No valid floor tile found")
+
+
+def clear_lane(game: CrystalCaves, col: int, row: int, length: int = 6) -> None:
+    """Open a clear horizontal lane to the right at body height so shooting
+    tests have an unobstructed line of fire in the denser caves."""
+    for dc in range(1, length):
+        c = col + dc
+        if 0 < c < game.level_cols - 1:
+            game.grid[row - 1][c] = CrystalCaves.EMPTY
 
 
 class TestCrystalCavesInitialization:
@@ -229,7 +246,8 @@ class TestCrystalCavesCombatAndDanger:
     """Test enemies, bullets, ammo, hazards, and damage."""
 
     def test_shooting_enemy_kills_it(self, game):
-        place_on_floor(game)
+        floor_col, floor_row = place_on_floor(game)
+        clear_lane(game, floor_col, floor_row)
         game.facing = 1
         game.ammo = 5
         enemy = Enemy(game.player_x + 90, game.player_y + 4, 0.0)
@@ -261,6 +279,7 @@ class TestCrystalCavesCombatAndDanger:
 
     def test_shooting_air_tank_penalizes_and_removes_tank(self, game):
         floor_col, floor_row = place_on_floor(game)
+        clear_lane(game, floor_col, floor_row)
         tank = (floor_col + 3, floor_row - 1)
         game.air_tanks = {tank}
         game.facing = 1
@@ -614,3 +633,88 @@ class TestCrystalCavesRenderAndVectorized:
         assert rewards.shape == (3,)
         assert dones.shape == (3,)
         assert len(infos) == 3
+
+
+def _cave_reachable(layout, start, doors_open, jump=3):
+    """Jump-aware flood of tiles the player can occupy from ``start``."""
+    grid = [list(r) for r in layout]
+    rows, cols = len(grid), len(grid[0])
+
+    def is_open(c, r):
+        if not (0 <= r < rows and 0 <= c < cols):
+            return False
+        ch = grid[r][c]
+        if ch == "#":
+            return False
+        if ch == "D":
+            return doors_open
+        return True
+
+    def grounded(c, r):
+        if r + 1 >= rows:
+            return True
+        below = grid[r + 1][c]
+        return below == "#" or (below == "D" and not doors_open)
+
+    from collections import deque
+
+    sc, sr = start
+    f0 = jump if grounded(sc, sr) else 0
+    seen: set = set()
+    tiles: set = set()
+    queue = deque([(sc, sr, f0)])
+    while queue:
+        c, r, f = queue.popleft()
+        if (c, r, f) in seen:
+            continue
+        seen.add((c, r, f))
+        tiles.add((c, r))
+        if grounded(c, r):
+            f = jump
+        if is_open(c, r + 1):
+            queue.append((c, r + 1, 0))
+        for dc in (-1, 1):
+            if is_open(c + dc, r):
+                nf = jump if grounded(c + dc, r) else f
+                queue.append((c + dc, r, nf))
+        if f > 0 and is_open(c, r - 1):
+            queue.append((c, r - 1, f - 1))
+    return tiles
+
+
+def _find(layout, ch):
+    return [
+        (c, r)
+        for r, row in enumerate(layout)
+        for c, x in enumerate(row)
+        if x == ch
+    ]
+
+
+@pytest.mark.parametrize("cave_index", range(len(CAVES)))
+def test_every_cave_is_solvable(cave_index):
+    """Each authored cave must be winnable: from spawn the player can reach the
+    switch (doors closed), then every crystal and the exit (doors open). This
+    guards the dense layouts against a fill that seals the level."""
+    layout = CAVES[cave_index].layout
+    player = _find(layout, "P")[0]
+    exit_ = _find(layout, "E")[0]
+    crystals = _find(layout, "*")
+    switches = _find(layout, "s")
+
+    reach_closed = _cave_reachable(layout, player, doors_open=False)
+    reach_open = _cave_reachable(layout, player, doors_open=True)
+
+    assert all(s in reach_closed for s in switches), "switch unreachable"
+    assert all(c in reach_open for c in crystals), "a crystal is unreachable"
+    assert exit_ in reach_open, "exit unreachable"
+
+
+@pytest.mark.parametrize("cave_index", range(len(CAVES)))
+def test_every_cave_is_dense(cave_index):
+    """Authored caves are carved rooms, not sparse platforms over void (CCV-13):
+    solid terrain should occupy a substantial fraction of the grid."""
+    layout = CAVES[cave_index].layout
+    total = sum(len(row) for row in layout)
+    solid = sum(row.count("#") for row in layout)
+    assert 0.45 <= solid / total <= 0.85

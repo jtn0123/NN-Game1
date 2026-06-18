@@ -515,7 +515,15 @@ class CrystalCavesRenderingMixin:
             if seed % 5 == 0:
                 pygame.draw.rect(screen, palette["pipe_dark"], (rect.x + 7, rect.y + 22, 18, 4))
                 pygame.draw.rect(screen, palette["pipe_light"], (rect.x + 9, rect.y + 22, 5, 2))
-            pygame.draw.rect(screen, (0, 0, 0), rect, 2)
+            # Edge-aware outline (CCV-03): only the exposed perimeter of a mass is
+            # outlined, so adjacent/stacked tiles fuse into one carved ledge
+            # instead of a grid of bricks. The bright lip stays the top edge.
+            if left_edge:
+                pygame.draw.rect(screen, EGA["K"], (rect.x, rect.y, 3, rect.h))
+            if right_edge:
+                pygame.draw.rect(screen, EGA["K"], (rect.right - 3, rect.y, 3, rect.h))
+            if under_open:
+                pygame.draw.rect(screen, EGA["K"], (rect.x, rect.bottom - 2, rect.w, 2))
             self._draw_ledge_growth(screen, rect, col, row, palette, under_open)
             return
 

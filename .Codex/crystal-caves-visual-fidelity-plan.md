@@ -206,6 +206,11 @@ First sprint shipped 2026-06-17 — black-void ratio measured at **0.07-0.08** a
 
 **Updated grades after CCV-17..20:** Organic detailing **D → B+** (grass/vines on 2 themes); Mechanic visuals **C- → B** (switch wires + gravity treatment); Audio **F → B** (full procedural SFX + music, headless-safe). Overall UI/UX vs reference **B- → B/B+**.
 
+| 2026-06-17 | CCV-03 | ✅ done | Edge-aware terrain outline in `_draw_solid_tile`: only the exposed perimeter of a mass is outlined (3px sides, 2px underside), so adjacent/stacked tiles fuse into one carved ledge instead of a brick grid. |
+| 2026-06-17 | CCV-13 | ✅ done | Densified all three cave layouts from ~0.26 → **0.50** solid via a solvability-preserving fill (a jump-aware reachability checker validates every fill keeps switch/crystals/exit reachable). Levels now read as carved rooms, not floating platforms. Added `test_every_cave_is_solvable` + `test_every_cave_is_dense` parametrized guards; widened the `place_on_floor` test helper to find roomy spots and added `clear_lane` for shooting tests. The module-split refactor put these renderers in `crystal_caves_rendering.py`/`_dressing.py` and the layouts in `crystal_caves_entities.py`. |
+
+**After CCV-03/13:** Terrain mass **C → A-** (thick grass-topped carved masses at 0.50 density); Background density **B → A-**. Overall UI/UX vs reference **B+ → A-**. Remaining: gem polish (CCV-11) and prop clustering (CCV-10) for the last increment.
+
 ### Remaining first-sprint / follow-on
 
 - **CCV-03** (terrain into carved masses, Medium) — surface tiles already carry lips/bolts/outlines and read well against the dimmer wall; a 3px-outline + thicker-body pass is the next refinement.
