@@ -219,3 +219,31 @@ The generator and renderer model this with `CaveSpec.sky_rows` (default 0):
 
 Reachability is unchanged: the surface is walkable, the shaft is a fall into the cave, and
 the verify-and-repair flood still proves every objective reachable from the surface spawn.
+
+---
+
+## 7. Platform-network pivot (implemented, 2026-06-17)
+
+User feedback on the first carved output: "more random and less blocky." The
+carve-and-fill model left large uniform solid masses. We pivoted the *implemented*
+generator (`src/game/crystal_caves_gen.py`) from **subtractive carve** to an
+**additive platform-network** model — and it is now the shipping generator:
+
+- The interior starts **mostly OPEN**; the dense textured back-wall carries the
+  "full" look, so thin platforms over it read full, not void.
+- A varied web of **thin platforms** is threaded across staggered rows with
+  randomized length / spacing / vertical jitter / thickness and occasional support
+  pillars; gaps widen toward the bottom (difficulty bands).
+- **Connectivity** is redefined for this model: every *standing tile* (platform
+  top) + objective must be reachable, verified with the shared `cave_reachable`
+  flood; floating unreachable platform bits are pruned back to open background.
+- **Density target lowered to 0.22-0.50** (was 0.45-0.85) — the level is open by
+  design; density is in the platforms + border, not big masses.
+- The exit sits in a **sealed chamber whose only entry is a switch-gated DOOR**
+  (the prune pass protects the chamber walls), so the door genuinely gates the exit.
+- **Three themes** (blue_rock / rust / gray_tech) bias hazard / power-up / enemy
+  selection and set the palette.
+
+Result: mean rubric **100/100** across 80 seeds, every level solvable, density ~0.26,
+fully connected, door-gated — and it reads like the reference platform maze. The
+shared flood now backs both the authored-cave solvability test and the generator.

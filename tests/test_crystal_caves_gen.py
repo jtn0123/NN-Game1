@@ -1,0 +1,89 @@
+"""Tests for the procedural Crystal Caves level generator.
+
+Generated levels are held to the same bar as authored caves: every one must be
+fully solvable under the jump-aware reachability flood, sit in the platform-model
+density band, start at the top, and be a valid drop-in for the engine.
+"""
+
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.game.crystal_caves_gen import (
+    THEME_NAMES,
+    cave_reachable,
+    generate_cave,
+    grade_cave,
+)
+
+SEEDS = [0, 1, 2, 3, 7, 11]
+
+
+@pytest.mark.parametrize("theme", THEME_NAMES)
+@pytest.mark.parametrize("seed", SEEDS)
+def test_generated_cave_is_solvable_and_well_formed(seed, theme):
+    spec = generate_cave(seed, theme)
+    report = grade_cave(spec)
+
+    assert report["solvable"], f"{theme}/{seed} not solvable"
+    assert report["fully_connected"], "some platform is unreachable"
+    assert report["top_entrance"], "player must spawn at the top"
+    assert report["exit_near_bottom"], "exit must be near the bottom"
+    assert report["door_gates_exit"], "the door must actually gate the exit"
+    assert 0.22 <= report["density"] <= 0.50, f"density {report['density']} off-model"
+    assert report["score"] >= 85
+    assert report["crystals"] >= 8
+    assert report["switches"] >= 1
+
+    flat = "".join(spec.layout)
+    assert flat.count("P") == 1
+    assert flat.count("E") == 1
+    assert spec.sky_rows == 3
+    assert len(spec.layout) == 18
+    assert all(len(row) == 44 for row in spec.layout)
+
+
+def test_generated_cave_loads_and_produces_state():
+    """A generated CaveSpec must be a valid drop-in for the real engine."""
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    from config import Config
+    from src.game.crystal_caves import CrystalCaves
+
+    spec = generate_cave(5, "rust")
+    game = CrystalCaves(Config(), headless=True)
+    game.level = spec
+    game._load_level(spec)
+
+    state = game.get_state()
+    assert state.shape == (game.state_size,)
+    # the player and the exit were parsed out of the layout
+    assert game.exit_pos is not None
+
+
+def test_generator_is_deterministic():
+    """Same seed + theme always yields the identical layout (reproducibility)."""
+    a = generate_cave(42, "gray_tech")
+    b = generate_cave(42, "gray_tech")
+    assert a.layout == b.layout
+
+
+def test_reachability_oracle_matches_solvable_levels():
+    """The exported flood agrees with the grader on a generated level."""
+    spec = generate_cave(3, "blue_rock")
+    player = next(
+        (c, r)
+        for r, row in enumerate(spec.layout)
+        for c, ch in enumerate(row)
+        if ch == "P"
+    )
+    reach = cave_reachable(spec.layout, player, doors_open=True)
+    crystals = [
+        (c, r)
+        for r, row in enumerate(spec.layout)
+        for c, ch in enumerate(row)
+        if ch == "*"
+    ]
+    assert all(crystal in reach for crystal in crystals)

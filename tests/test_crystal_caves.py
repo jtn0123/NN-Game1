@@ -21,6 +21,10 @@ from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
 from src.game.crystal_caves_entities import CAVES, Enemy
+
+# The jump-aware solvability flood is shared with the generator so the authored
+# caves and the procedural ones are verified by one identical oracle.
+from src.game.crystal_caves_gen import cave_reachable as _cave_reachable
 from src.game.crystal_caves_vec import VecCrystalCaves
 
 
@@ -633,53 +637,6 @@ class TestCrystalCavesRenderAndVectorized:
         assert rewards.shape == (3,)
         assert dones.shape == (3,)
         assert len(infos) == 3
-
-
-def _cave_reachable(layout, start, doors_open, jump=3):
-    """Jump-aware flood of tiles the player can occupy from ``start``."""
-    grid = [list(r) for r in layout]
-    rows, cols = len(grid), len(grid[0])
-
-    def is_open(c, r):
-        if not (0 <= r < rows and 0 <= c < cols):
-            return False
-        ch = grid[r][c]
-        if ch == "#":
-            return False
-        if ch == "D":
-            return doors_open
-        return True
-
-    def grounded(c, r):
-        if r + 1 >= rows:
-            return True
-        below = grid[r + 1][c]
-        return below == "#" or (below == "D" and not doors_open)
-
-    from collections import deque
-
-    sc, sr = start
-    f0 = jump if grounded(sc, sr) else 0
-    seen: set = set()
-    tiles: set = set()
-    queue = deque([(sc, sr, f0)])
-    while queue:
-        c, r, f = queue.popleft()
-        if (c, r, f) in seen:
-            continue
-        seen.add((c, r, f))
-        tiles.add((c, r))
-        if grounded(c, r):
-            f = jump
-        if is_open(c, r + 1):
-            queue.append((c, r + 1, 0))
-        for dc in (-1, 1):
-            if is_open(c + dc, r):
-                nf = jump if grounded(c + dc, r) else f
-                queue.append((c + dc, r, nf))
-        if f > 0 and is_open(c, r - 1):
-            queue.append((c, r - 1, f - 1))
-    return tiles
 
 
 def _find(layout, ch):
