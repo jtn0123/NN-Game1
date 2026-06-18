@@ -116,13 +116,27 @@ def _band(r: int, surface: int) -> int:
     return min(3, (r - surface) * 4 // span)
 
 
-def _carve_platforms(grid: Grid, rng: random.Random, surface: int) -> None:
-    """Thread a varied web of thin platforms across the open interior. Platform
-    length, spacing, vertical jitter, thickness, and support pillars are all
-    randomized, and gaps widen toward the bottom (rising difficulty)."""
+# ---------------------------------------------------------------------------
+# Level FAMILIES — each carves a distinct terrain style learned (clean-room) from
+# the VGMaps reference atlas; the shared pipeline then adds the surface entrance,
+# exit chamber, objectives, hazards, and verifies solvability. Signature:
+#   family(grid, rng, surface, shaft) -> None   (mutates grid below the surface)
+# ---------------------------------------------------------------------------
+
+
+def _open_interior(grid: Grid) -> None:
+    for r in range(SKY + 1, ROWS - 1):
+        for c in range(1, COLS - 1):
+            grid[r][c] = EMPTY
+
+
+def _family_platform_network(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
+    """Open level threaded with a varied web of thin platforms (open-platform /
+    small-platform maps): randomized length, spacing, jitter, thickness, pillars."""
+    _open_interior(grid)
     for r in range(surface + 2, ROWS - 1):
         if r % 2 == 0:
-            continue  # leave open lanes between platform rows
+            continue
         depth = (r - surface) / max(1, ROWS - surface)
         place_prob = 0.64 - 0.16 * depth
         gap_min = 2 + int(3 * depth)
@@ -138,7 +152,6 @@ def _carve_platforms(grid: Grid, rng: random.Random, surface: int) -> None:
                     grid[row][cc] = SOLID
                     if thick == 2 and row + 1 < ROWS - 1:
                         grid[row + 1][cc] = SOLID
-                # occasional support pillar dropping from a platform end
                 if rng.random() < 0.16:
                     for pr in range(row + 1, min(row + 1 + rng.randint(2, 3), ROWS - 1)):
                         grid[pr][c] = SOLID
@@ -147,49 +160,89 @@ def _carve_platforms(grid: Grid, rng: random.Random, surface: int) -> None:
                 c += rng.randint(2, 4)
 
 
-Rect = Tuple[int, int, int, int]  # (col0, row0, col1, row1), half-open
+def _family_snake_bands(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
+    """Thick horizontal bands stacked with staggered end-gaps, forcing a
+    left-right-left snake descent (Ep2 L7 style)."""
+    _open_interior(grid)
+    side = rng.randint(0, 1)
+    for r in range(surface + 3, ROWS - 2, 3):
+        gap = rng.randint(6, 10)
+        thickness = rng.choice([1, 2, 2])
+        cols = range(1, COLS - 1 - gap) if side == 0 else range(1 + gap, COLS - 1)
+        for c in cols:
+            for t in range(thickness):
+                if r + t < ROWS - 1:
+                    grid[r + t][c] = SOLID
+        side ^= 1
 
 
-def _build_exit_chamber(grid: Grid, rng: random.Random) -> Tuple[Cell, Cell, Rect]:
-    """Seal a small exit chamber at the bottom whose only entry is a DOOR, so the
-    exit genuinely requires the switch. Returns (door_pos, exit_pos, rect)."""
-    width = 5
-    x0 = rng.randint(max(2, COLS - 4 - width), COLS - 2 - width)
-    roof = ROWS - 4
-    for r in range(roof, ROWS):
-        for c in range(x0 - 1, x0 + width + 1):
+def _family_terrain_climb(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
+    """Open upper area with sparse platforms over a stepped solid terrain mound
+    rising from the floor (Ep1 L1 / L13 style)."""
+    _open_interior(grid)
+    for r in range(surface + 2, ROWS - 7, 2):
+        c = rng.randint(2, 6)
+        while c < COLS - 3:
+            if rng.random() < 0.5:
+                length = rng.randint(3, 7)
+                end = min(c + length, COLS - 1)
+                for cc in range(c, end):
+                    grid[r][cc] = SOLID
+                c = end + rng.randint(3, 6)
+            else:
+                c += rng.randint(3, 5)
+    peak = rng.randint(COLS // 3, 2 * COLS // 3)
+    peak_h = rng.randint(5, 8)
+    slope = rng.choice([2, 3])
+    for c in range(1, COLS - 1):
+        height = max(0, peak_h - abs(c - peak) // slope)
+        for r in range(ROWS - 1 - height, ROWS - 1):
             grid[r][c] = SOLID
-    for r in range(roof + 1, ROWS - 1):
-        for c in range(x0, x0 + width):
-            grid[r][c] = EMPTY
-    door_c = x0 + width // 2
-    grid[roof][door_c] = DOOR
-    # a split landing platform above the door so the player can drop through it
-    for c in range(door_c - 2, door_c + 3):
-        if c != door_c and 1 <= c <= COLS - 2:
-            grid[roof - 2][c] = SOLID
-    exit_pos = (door_c, ROWS - 2)
-    rect = (x0 - 1, roof - 2, x0 + width + 1, ROWS)
-    return (door_c, roof), exit_pos, rect
 
 
-def _prune_unreachable(grid: Grid, start: Cell, surface: int, protect: Rect) -> None:
-    """Turn floating platform bits the player can never stand on back into open
-    background, so connectivity == 'every platform is usable'. The exit chamber
-    ``protect`` rect is left intact so its sealed walls keep gating the exit."""
-    pc0, pr0, pc1, pr1 = protect
-    for _ in range(6):
-        reach = cave_reachable(grid, start, doors_open=True)
-        changed = False
-        for r in range(surface + 1, ROWS - 1):
-            for c in range(1, COLS - 1):
-                if pc0 <= c < pc1 and pr0 <= r < pr1:
-                    continue
-                if grid[r][c] == SOLID and (c, r - 1) not in reach and (c, r) not in reach:
-                    grid[r][c] = EMPTY
-                    changed = True
-        if not changed:
-            break
+def _family_corridor_maze(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
+    """Dense solid mass with thin winding corridors carved through it — the most
+    common reference archetype (Ep1 L4 spiral / corridor maze). Interior stays
+    SOLID; thin 1-tall walkways every 3 rows are carved with solid pillars left
+    between runs (winding), then linked by short jumpable vertical connectors."""
+    rows = list(range(surface + 2, ROWS - 1, 3))
+    for r in rows:
+        c = rng.randint(1, 3)
+        while c < COLS - 1:
+            run = rng.randint(7, 14)  # long corridors -> rows overlap and connect
+            for cc in range(c, min(c + run, COLS - 1)):
+                grid[r][cc] = EMPTY
+            c += run + rng.randint(2, 3)  # solid pillar -> winding maze
+    for i in range(len(rows) - 1):
+        r0, r1 = rows[i], rows[i + 1]
+        for _ in range(rng.randint(5, 8)):  # plenty of links across the width
+            c = rng.randint(2, COLS - 3)
+            for r in range(r0, r1 + 1):  # connector spans <= jump so it climbs
+                grid[r][c] = EMPTY
+                grid[r - 1][c] = EMPTY  # headroom at the connector for the jump
+    for r in range(surface + 1, rows[0] + 1):
+        grid[r][shaft] = EMPTY  # drop the shaft into the top corridor
+
+
+FAMILIES = {
+    "platform_network": _family_platform_network,
+    "snake_bands": _family_snake_bands,
+    "terrain_climb": _family_terrain_climb,
+    "corridor_maze": _family_corridor_maze,
+}
+FAMILY_NAMES = tuple(FAMILIES.keys())
+
+
+def _seal_unreachable_open(grid: Grid, start: Cell, surface: int) -> None:
+    """Fill every open cave tile the player can't reach with solid rock, so the
+    remaining open space is exactly the connected, walkable level ("walk through
+    everything"). This never erodes solid, so it works for open *and* dense-maze
+    families; the exit chamber (reachable with the door open) is left intact."""
+    reach = cave_reachable(grid, start, doors_open=True)
+    for r in range(surface + 1, ROWS - 1):
+        for c in range(1, COLS - 1):
+            if grid[r][c] == EMPTY and (c, r) not in reach:
+                grid[r][c] = SOLID
 
 
 def _standing_tiles(grid: Grid, reach: Set[Cell], surface: int) -> List[Cell]:
@@ -206,7 +259,7 @@ def _standing_tiles(grid: Grid, reach: Set[Cell], surface: int) -> List[Cell]:
     )
 
 
-def _attempt(seed: int, theme: str) -> Optional[CaveSpec]:
+def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
     rng = random.Random(seed)
     spec = THEMES[theme]
     grid: Grid = [[SOLID] * COLS for _ in range(ROWS)]
@@ -219,40 +272,66 @@ def _attempt(seed: int, theme: str) -> Optional[CaveSpec]:
     for c in range(COLS):
         grid[surface][c] = SOLID
 
-    # open interior below the surface
-    for r in range(surface + 1, ROWS - 1):
-        for c in range(1, COLS - 1):
-            grid[r][c] = EMPTY
-
     px, py = 3, SKY - 1
-    grid[py][px] = EMPTY
     shaft = px + rng.randint(4, 7)
+
+    # the chosen family carves the cave terrain below the surface
+    FAMILIES[family](grid, rng, surface, shaft)
+
+    # the mine shaft entrance + a catch ledge, punched after the family so the
+    # drop from the surface is always open regardless of style
+    grid[py][px] = EMPTY
     grid[surface][shaft] = EMPTY
     grid[surface][shaft + 1] = EMPTY
+    for r in range(surface, surface + 3):
+        grid[r][shaft] = EMPTY
     for c in range(shaft - 1, shaft + 3):
         if 1 <= c <= COLS - 2:
             grid[surface + 3][c] = SOLID
 
-    _carve_platforms(grid, rng, surface)
-    (door_pos, exit_pos, chamber) = _build_exit_chamber(grid, rng)
-    _prune_unreachable(grid, (px, py), surface, chamber)
+    _seal_unreachable_open(grid, (px, py), surface)
 
     reach_open = cave_reachable(grid, (px, py), doors_open=True)
-    if exit_pos not in reach_open or door_pos not in reach_open:
-        return None
     standing = _standing_tiles(grid, reach_open, surface)
-    if len(standing) < 18:
+    if len(standing) < 16 or not any(t[1] >= ROWS - 6 for t in standing):
         return None
 
     grid[py][px] = PLAYER
-    grid[exit_pos[1]][exit_pos[0]] = EXIT
+
+    # exit on the deepest, then right-most reachable ledge (near the bottom)
+    ex, ey = max(standing, key=lambda t: (t[1], t[0]))
+    grid[ey][ex] = EXIT
+
+    # gate the exit: a DOOR on an open approach tile chosen so that closing it
+    # isolates the exit. Works for any family (no sealed chamber needed). Falls
+    # back to a plain door on the route if no isolating tile exists.
+    approaches = ((ex, ey - 1), (ex - 1, ey), (ex + 1, ey), (ex - 1, ey - 1), (ex + 1, ey - 1))
+    door_placed = False
+    for dx, dy in approaches:
+        if 1 <= dx < COLS - 1 and surface < dy < ROWS - 1 and grid[dy][dx] == EMPTY:
+            grid[dy][dx] = DOOR
+            if (ex, ey) not in cave_reachable(grid, (px, py), doors_open=False):
+                door_placed = True
+                break
+            grid[dy][dx] = EMPTY
+    if not door_placed:
+        for dx, dy in approaches:
+            if 1 <= dx < COLS - 1 and surface < dy < ROWS - 1 and grid[dy][dx] == EMPTY:
+                grid[dy][dx] = DOOR
+                door_placed = True
+                break
+    if not door_placed:
+        return None
 
     # switch must be reachable with the door CLOSED (it opens the door)
     reach_closed = cave_reachable(grid, (px, py), doors_open=False)
     switch_cands = [
         t
         for t in standing
-        if t in reach_closed and SKY + 2 < t[1] < ROWS - 4 and abs(t[0] - px) + abs(t[1] - py) > 5
+        if t in reach_closed
+        and SKY + 2 < t[1]
+        and (t[0], t[1]) != (ex, ey)
+        and abs(t[0] - px) + abs(t[1] - py) > 5
     ]
     if not switch_cands:
         return None
@@ -326,21 +405,25 @@ def _solvable(rows) -> bool:
     return all(c in reach_open for c in crystals) and exit_ in reach_open
 
 
-def generate_cave(seed: int, theme: Optional[str] = None) -> CaveSpec:
-    """Generate a verified, themed, drop-in CaveSpec. Retries with fresh seeds
-    until a fully solvable level is produced."""
+def generate_cave(
+    seed: int, theme: Optional[str] = None, family: Optional[str] = None
+) -> CaveSpec:
+    """Generate a verified, themed, drop-in CaveSpec in the given level family
+    (default: chosen by seed). Retries with fresh seeds until solvable."""
     if theme is None:
         theme = THEME_NAMES[seed % len(THEME_NAMES)]
-    for attempt in range(40):
-        spec = _attempt(seed * 101 + attempt, theme)
+    if family is None:
+        family = FAMILY_NAMES[seed % len(FAMILY_NAMES)]
+    for attempt in range(60):
+        spec = _attempt(seed * 101 + attempt, theme, family)
         if spec is not None and grade_cave(spec)["score"] >= 80:
             return spec
     # Fall back to the first solvable layout regardless of score.
-    for attempt in range(40):
-        spec = _attempt(seed * 101 + attempt, theme)
+    for attempt in range(60):
+        spec = _attempt(seed * 101 + attempt, theme, family)
         if spec is not None:
             return spec
-    raise RuntimeError(f"could not generate a solvable cave for seed {seed}")
+    raise RuntimeError(f"could not generate a solvable {family} cave for seed {seed}")
 
 
 def grade_cave(spec: CaveSpec) -> dict:
@@ -374,7 +457,7 @@ def grade_cave(spec: CaveSpec) -> dict:
     checks = {
         "solvable": solvable,
         "density": round(density, 3),
-        "density_ok": 0.22 <= density <= 0.50,
+        "density_ok": 0.22 <= density <= 0.82,
         "top_entrance": player[1] <= SKY,
         "exit_near_bottom": exit_[1] >= ROWS - 5,
         "standing_connectivity": round(standing_conn, 3),
