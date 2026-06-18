@@ -66,7 +66,44 @@ class CrystalCavesDressingMixin:
         pygame.draw.circle(screen, base_color, lever_end, 5)
         pygame.draw.rect(screen, (0, 0, 0), (rect.x + 9, rect.y + 24, 14, 3))
 
+    def _draw_surface_props(self: Any, screen, camera_x: int, camera_y: int) -> None:
+        """Transmitter pylons and a MINE -> sign along the planet surface of a
+        sky-entrance level (CaveSpec.sky_rows)."""
+        sky_rows = getattr(self, "sky_rows", 0)
+        if not sky_rows:
+            return
+        surface_y = sky_rows * self.TILE_SIZE - camera_y
+        if surface_y < 10 or surface_y > self.height - self.HUD_HEIGHT:
+            return
+
+        spacing = 112
+        start = 36 - camera_x % spacing
+        for x in range(start, self.width + spacing, spacing):
+            pygame.draw.rect(screen, EGA["K"], (x - 4, surface_y - 22, 10, 24))
+            pygame.draw.rect(screen, (120, 124, 140), (x - 2, surface_y - 22, 5, 24))
+            for ring_y in (surface_y - 20, surface_y - 15, surface_y - 10):
+                pygame.draw.rect(screen, (180, 180, 196), (x - 5, ring_y, 11, 2))
+            pygame.draw.rect(screen, EGA["C"], (x - 1, surface_y - 26, 3, 3))
+
+        sign_x = 150 - camera_x
+        if -80 < sign_x < self.width:
+            sign = pygame.Rect(sign_x, surface_y - 32, 66, 18)
+            pygame.draw.rect(screen, EGA["K"], (sign.x + 6, sign.bottom, 4, 14))
+            pygame.draw.rect(screen, EGA["K"], (sign.right - 12, sign.bottom, 4, 14))
+            pygame.draw.rect(screen, EGA["K"], sign.inflate(4, 4))
+            pygame.draw.rect(screen, (150, 14, 22), sign)
+            pygame.draw.rect(screen, EGA["A"], sign, 2)
+            if self._art:
+                self._art.draw_text(screen, "MINE", sign.x + 6, sign.y + 5, EGA["Y"], scale=1)
+            arrow_x = sign.right - 13
+            pygame.draw.polygon(
+                screen,
+                EGA["Y"],
+                [(arrow_x, sign.y + 5), (arrow_x + 8, sign.y + 9), (arrow_x, sign.y + 13)],
+            )
+
     def _draw_level_dressing(self: Any, screen, camera_x: int, camera_y: int) -> None:
+        self._draw_surface_props(screen, camera_x, camera_y)
         first_col = max(0, camera_x // self.TILE_SIZE)
         last_col = min(self.level_cols, (camera_x + self.width) // self.TILE_SIZE + 2)
         first_row = max(0, camera_y // self.TILE_SIZE)

@@ -179,9 +179,58 @@ class CrystalCavesRenderingMixin:
     ) -> Tuple[int, int]:
         return int(x - camera_x), int(y - camera_y)
 
+    def _draw_space(self: Any, screen, camera_x: int, camera_y: int, surface_y: int) -> None:
+        """Outer-space backdrop above the planet surface: a black starfield with
+        Earth + the Moon and a pink horizon glow fading into the ground — the
+        "you start above everything" entrance (CaveSpec.sky_rows)."""
+        prev = screen.get_clip()
+        screen.set_clip(pygame.Rect(0, 0, self.width, surface_y))
+        pygame.draw.rect(screen, (5, 4, 16), (0, 0, self.width, surface_y))
+
+        star_x = camera_x // 4
+        star_y = camera_y // 4
+        for i in range(70):
+            x = (i * 137 - star_x) % self.width
+            y = (i * 79 - star_y) % max(1, surface_y)
+            shade = 245 if i % 5 == 0 else (180 if i % 2 else 120)
+            size = 2 if i % 9 == 0 else 1
+            pygame.draw.rect(screen, (shade, shade, shade), (x, y, size, size))
+
+        # Earth + Moon, anchored near the top-left of the world (slow parallax).
+        ex = 158 - camera_x // 3
+        ey = 64 - camera_y // 3
+        pygame.draw.circle(screen, (36, 88, 176), (ex, ey), 22)
+        pygame.draw.circle(screen, (58, 158, 92), (ex - 7, ey - 3), 8)
+        pygame.draw.circle(screen, (58, 158, 92), (ex + 8, ey + 7), 6)
+        pygame.draw.circle(screen, (120, 184, 255), (ex - 9, ey - 9), 4)
+        mx, my = ex + 58, ey + 8
+        pygame.draw.circle(screen, (198, 198, 208), (mx, my), 12)
+        pygame.draw.circle(screen, (150, 150, 166), (mx + 3, my - 2), 3)
+        pygame.draw.circle(screen, (150, 150, 166), (mx - 4, my + 4), 2)
+
+        # Pink atmospheric glow fading down into the surface line.
+        band = 28
+        glow = pygame.Surface((self.width, band), pygame.SRCALPHA)
+        for i in range(band):
+            alpha = int(170 * (i / band))
+            pygame.draw.line(glow, (212, 72, 140, alpha), (0, i), (self.width, i))
+        screen.blit(glow, (0, surface_y - band))
+        screen.set_clip(prev)
+
     def _draw_background(self: Any, screen, camera_x: int, camera_y: int) -> None:
         play_bottom = self.height - self.HUD_HEIGHT
         palette = self._episode_palette()
+        sky_rows = getattr(self, "sky_rows", 0)
+        surface_y = sky_rows * self.TILE_SIZE - camera_y if sky_rows else 0
+        cave_top = max(0, min(surface_y, play_bottom)) if sky_rows else 0
+
+        if sky_rows and surface_y > 0:
+            self._draw_space(screen, camera_x, camera_y, min(surface_y, play_bottom))
+
+        # Cave back-wall fill, clipped to below the surface when a sky is present.
+        prev = screen.get_clip()
+        if cave_top > 0:
+            screen.set_clip(pygame.Rect(0, cave_top, self.width, play_bottom - cave_top))
         # Dense theme-colored cave back-wall fill replaces the old black void so
         # terrain reads as carved out of a cave room (backlog V001/V019).
         self._draw_wall_fill(screen, camera_x, camera_y, play_bottom, palette)
@@ -217,6 +266,9 @@ class CrystalCavesRenderingMixin:
                     )
                     pygame.draw.circle(screen, palette["pipe_light"], (segment.left + 8, y + 2), 3)
                     pygame.draw.circle(screen, palette["pipe_light"], (segment.right - 8, y + 2), 3)
+
+        if cave_top > 0:
+            screen.set_clip(prev)
 
     def _draw_wall_fill(
         self: Any,

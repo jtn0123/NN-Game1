@@ -465,6 +465,7 @@ class CrystalCaves(
         self.level_rows = len(rows)
         self.level_width = self.level_cols * self.TILE_SIZE
         self.level_height = self.level_rows * self.TILE_SIZE
+        self.sky_rows = getattr(level, "sky_rows", 0)
 
         self.crystals.clear()
         self.doors.clear()

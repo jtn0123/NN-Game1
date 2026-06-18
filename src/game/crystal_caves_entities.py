@@ -16,6 +16,9 @@ class CaveSpec:
     layout: Tuple[str, ...]
     background: Tuple[int, int, int]
     accent: Tuple[int, int, int]
+    # Number of open rows at the very top rendered as outer space + planet
+    # surface (the "you start above everything" entrance). 0 = all cave.
+    sky_rows: int = 0
 
 
 @dataclass
