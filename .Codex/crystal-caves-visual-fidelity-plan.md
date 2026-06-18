@@ -199,9 +199,46 @@ First sprint shipped 2026-06-17 — black-void ratio measured at **0.07-0.08** a
 | 2026-06-17 | CCV-06 | ✅ done | `_draw_spike_tile` rebuilt with a full-tile dark base, warning crust, 6 teeth, black frame; unreachable post-`return` code deleted. |
 | 2026-06-17 | CCV-07 | ✅ done | `_draw_acid_tile` rebuilt as a full-tile molten pool (maroon body, bright crust, bubbles, black frame); unreachable post-`return` code deleted. |
 | 2026-06-17 | Tests | ✅ added | `test_background_fill_kills_the_black_void` (< 0.15 ratio guard) and `test_episodes_have_distinct_dominant_hues` regression tests added. |
+| 2026-06-17 | CCV-17 | ✅ done | Grass/vine organic detailing: `grass` role color added to EP1 (teal moss) + EP2 (lime); new `_draw_ledge_growth` paints a moss fringe, swaying blades, and hanging vines on walkable ledges. EP3 (tech) stays clean metal. |
+| 2026-06-17 | CCV-18 | ✅ done | `_draw_switch_wires` draws a taut cable from each switch to its nearest door — green core once thrown, amber while armed — making the switch→target relationship readable (ref frame 1). |
+| 2026-06-17 | CCV-19 | ✅ done | `_draw_gravity_overlay`: while the gravity power is active, a violet edge vignette, upward-floating debris, and a REVERSE GRAVITY banner signal the altered field (ref frame 2). |
+| 2026-06-17 | CCV-20 | ✅ done | Audio: new `crystal_caves_audio.py` (`CrystalCavesAudio`) — procedural chiptune SFX (numpy→`Sound`), headless/CI/training-safe (self-disables under `SDL_VIDEODRIVER=dummy`). Wired to gem/pickup/win/door/switch/gravity/jump/land/shoot/damage/lose events + a quiet looping music bed. 5 audio tests. |
+
+**Updated grades after CCV-17..20:** Organic detailing **D → B+** (grass/vines on 2 themes); Mechanic visuals **C- → B** (switch wires + gravity treatment); Audio **F → B** (full procedural SFX + music, headless-safe). Overall UI/UX vs reference **B- → B/B+**.
 
 ### Remaining first-sprint / follow-on
 
 - **CCV-03** (terrain into carved masses, Medium) — surface tiles already carry lips/bolts/outlines and read well against the dimmer wall; a 3px-outline + thicker-body pass is the next refinement.
 - **CCV-09..12** (interior edge variants, prop density, gem anchors, enemy outlines) — P1 polish.
 - **CCV-13** (dense layout redesign, Large) — the natural follow-on sprint; pairs with CCV-03/09.
+
+## 8. UI/UX grade vs references (2026-06-17, satisfies backlog V110)
+
+Graded against three user-supplied reference frames from the modern Crystal Caves
+(purple-brick room w/ grass + switch-wire + minimap; reverse-gravity black-room;
+red-industrial low-gravity room). Bar = "how close to that look/feel," noting we
+render with pygame primitives in a clean-room educational/NN-training project.
+
+| Dimension | Grade | Evidence vs reference |
+|---|---|---|
+| HUD / status bar | **A-** | References (frames 2-3) use exactly `$ <score>` green + gun+ammo green + 3 red hearts; our new footer matches and cleanly adds crystal count + lock icon. |
+| Background fill / density | **B** | Dense themed masonry now fills the screen; references carry richer per-tile art and integrate grass into the fill. |
+| Terrain mass & readability | **C** | Biggest gap: ours are still thinnish platform strips; references are thick masses you stand *on top of*. (CCV-03/13) |
+| Organic detailing (grass/vines/moss) | **D** | Signature reference look (frame 1: bright green grass lips + hanging vines) is entirely absent in our renderer. (new: CCV-17) |
+| Gems / pickups | **B-** | Good faceted diamonds; references are larger/brighter with stronger white highlight + drop shadow. (CCV-11) |
+| Hazards | **B** | Full-tile spike walls + molten acid pools landed this sprint. |
+| Props & clustering | **B-** | Rich set (chests, lamps, barrels, terminals); references add value labels (1K/2K) and tighter clusters. (CCV-10) |
+| Enemies | **B-** | Varied roster exists; references show bigger, more iconic silhouettes (dino, robot, shark). |
+| Signs / diegetic UI | **B** | DANGER/ACID/LOW-G signs present and embedded, close to reference REVERSE/LOW GRAVITY decals. |
+| Theme variety / palette | **B** | 3 distinct registers; references hint at more (purple-brick, red-industrial, reverse-g black). |
+| Mechanic visuals (clear blocks, switch wires, gravity rooms) | **C-** | `clear_blocks` is decorative only; no switch→target wire (frame 1); gravity rooms lack a distinct visual treatment. (new: CCV-18/19) |
+| **Audio / music** | **F** | None. No `pygame.mixer`, no SFX, no music anywhere in the project. (new: CCV-20) |
+
+**Overall UI/UX vs reference: B-** (up from ~C+ pre-sprint). HUD is the standout; dragged down by terrain organic-detailing and the total absence of audio.
+
+### New tasks surfaced by this grade
+
+- **CCV-17** (P0) — Grass/vine lips: bright green moss fringe on walkable surfaces + hanging vines under ledges (frame 1). The single highest-impact "feels like Crystal Caves" addition. Target `_draw_solid_tile` surface branch + a new `_draw_ledge_growth`.
+- **CCV-18** (P1) — Switch→target wire: draw a connecting line from each switch to the door/elevator it drives (frame 1). Target `_draw_lever_switch` + door render.
+- **CCV-19** (P1) — Gravity-room visual treatment: reverse/low-gravity rooms get a distinct backdrop + flipped hazard cues (frames 2-3).
+- **CCV-20** (P1) — Audio layer: optional, headless-safe `pygame.mixer` with procedurally-generated chiptune SFX hooked to existing `visual_events` (pickup/shoot/door/damage/switch/gravity/exit); silent under headless/CI/training.

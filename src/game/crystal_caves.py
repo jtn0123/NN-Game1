@@ -23,6 +23,7 @@ from config import Config
 
 from .base_game import BaseGame, validate_action
 from .crystal_caves_art import EGA, CrystalCavesArt
+from .crystal_caves_audio import CrystalCavesAudio
 
 
 @dataclass(frozen=True)
@@ -406,6 +407,10 @@ class CrystalCaves(BaseGame):
             self._tiny_font = None
             self._art = None
 
+        # Procedural SFX layer; self-disables in headless/training/CI contexts.
+        self.audio = CrystalCavesAudio(enabled=not self.headless)
+        self.audio.start_music()
+
         self.reset()
 
     @property
@@ -506,12 +511,14 @@ class CrystalCaves(BaseGame):
         screen.fill((0, 0, 0))
         self._draw_background(screen, camera_x, camera_y)
         self._draw_tiles(screen, camera_x, camera_y)
+        self._draw_switch_wires(screen, camera_x, camera_y)
         self._draw_level_dressing(screen, camera_x, camera_y)
         self._draw_pickups(screen, camera_x, camera_y)
         self._draw_enemies(screen, camera_x, camera_y)
         self._draw_bullets(screen, camera_x, camera_y)
         self._draw_player(screen, camera_x, camera_y)
         self._draw_visual_events(screen, camera_x, camera_y)
+        self._draw_gravity_overlay(screen)
         self._draw_hud(screen)
 
         if self.game_over and self._font:
@@ -855,14 +862,19 @@ class CrystalCaves(BaseGame):
             self.vy = -self.JUMP_SPEED * self.gravity_dir
             self.grounded = False
             self.coyote_timer = 0
+            self.audio.play("jump")
 
         self.vy += self.GRAVITY * self.gravity_dir
         self.vy = float(np.clip(self.vy, -self.MAX_FALL_SPEED, self.MAX_FALL_SPEED))
 
     def _move_player(self) -> None:
+        was_airborne = not self.grounded
+        falling_speed = abs(self.vy)
         self._move_axis(self.vx, 0.0)
         self._move_axis(0.0, self.vy)
         self.grounded = self._is_on_surface()
+        if was_airborne and self.grounded and falling_speed > 3.0:
+            self.audio.play("land")
 
     def _move_axis(self, dx: float, dy: float) -> None:
         remaining = dx if dx != 0 else dy
@@ -895,6 +907,7 @@ class CrystalCaves(BaseGame):
 
         self.ammo -= 1
         self.shoot_cooldown = self.SHOOT_COOLDOWN
+        self.audio.play("shoot")
         y = self.player_y + self.PLAYER_HEIGHT * 0.45
         x = self.player_x + (self.PLAYER_WIDTH if self.facing > 0 else -8)
         self.bullets.append(
@@ -936,6 +949,7 @@ class CrystalCaves(BaseGame):
                     for door in self.doors:
                         self._add_tile_event(door, "sparkle", "OPEN", EGA["G"], ttl=42)
                     self._mark_progress()
+                    self.audio.play("switch")
                 else:
                     reward += 0.05
                 break
@@ -951,6 +965,7 @@ class CrystalCaves(BaseGame):
             reward += 5.0
             self._add_tile_event(tile, "sparkle", "+100", EGA["Y"], ttl=34)
             self._mark_progress()
+            self.audio.play("gem")
 
         if not self.crystals and not self.exit_unlocked:
             self.exit_unlocked = True
@@ -960,6 +975,7 @@ class CrystalCaves(BaseGame):
                 self.exit_pos, "sparkle", "EXIT OPEN", EGA["G"], ttl=58
             )
             self._mark_progress()
+            self.audio.play("win")
 
         for tile in list(self.ammo_pickups.intersection(touched_tiles)):
             self.ammo_pickups.remove(tile)
@@ -968,6 +984,7 @@ class CrystalCaves(BaseGame):
             reward += 1.0
             self._add_tile_event(tile, "score", "AMMO", EGA["Y"], ttl=30)
             self._mark_progress()
+            self.audio.play("pickup")
 
         for tile in list(self.treasures.intersection(touched_tiles)):
             self.treasures.remove(tile)
@@ -984,12 +1001,14 @@ class CrystalCaves(BaseGame):
             reward += 1.5
             self._add_tile_event(tile, "sparkle", power.upper(), EGA["C"], ttl=42)
             self._mark_progress()
+            self.audio.play("pickup")
             if power == self.POWER_SHOT:
                 self.super_timer = self.MAX_POWER_TIMER
             elif power == self.GRAVITY_POWER:
                 self.gravity_dir *= -1
                 self.gravity_timer = 360
                 self.vy = 0.0
+                self.audio.play("gravity")
             elif power == self.FREEZE_POWER:
                 self.freeze_timer = 300
 
@@ -1110,8 +1129,10 @@ class CrystalCaves(BaseGame):
             self.health = 0
             self.game_over = True
             self.won = False
+            self.audio.play("lose")
             return -12.0
 
+        self.audio.play("damage")
         return -3.0
 
     def _check_exit(self) -> float:
@@ -1124,6 +1145,7 @@ class CrystalCaves(BaseGame):
             self.won = True
             self.score += 1000 + self.health * 250 + self.ammo * 10
             self.level_index = (self.level_index + 1) % len(self.CAVES)
+            self.audio.play("door")
             return 25.0
 
         return 0.0
@@ -1601,6 +1623,7 @@ class CrystalCaves(BaseGame):
                 "wall_accent": (28, 72, 150),
                 "ledge_lip": (106, 150, 255),
                 "edge_dark": (0, 0, 40),
+                "grass": (96, 220, 132),
             },
             {
                 "rock_dark": (70, 24, 0),
@@ -1618,6 +1641,7 @@ class CrystalCaves(BaseGame):
                 "wall_accent": (140, 70, 28),
                 "ledge_lip": (255, 96, 72),
                 "edge_dark": (40, 16, 0),
+                "grass": (150, 230, 64),
             },
             {
                 "rock_dark": (40, 40, 48),
@@ -1638,6 +1662,48 @@ class CrystalCaves(BaseGame):
             },
         )
         return palettes[self.level_index % len(palettes)]
+
+    def _draw_ledge_growth(
+        self,
+        screen,
+        rect: pygame.Rect,
+        col: int,
+        row: int,
+        palette: Dict[str, Tuple[int, int, int]],
+        under_open: bool,
+    ) -> None:
+        """Bright moss fringe + tufts on a walkable ledge, with hanging vines
+        under exposed edges (CCV-17). Only natural-cave themes define ``grass``;
+        industrial/tech episodes skip it for a clean metal look.
+        """
+        grass = palette.get("grass")
+        if grass is None:
+            return
+        grass_dark = (grass[0] * 6 // 10, grass[1] * 6 // 10, grass[2] * 6 // 10)
+        seed = col * 31 + row * 17 + self.level_index * 5
+
+        # Mossy fringe sitting on the very top lip.
+        pygame.draw.rect(screen, grass_dark, (rect.x, rect.y, rect.w, 4))
+        pygame.draw.rect(screen, grass, (rect.x, rect.y, rect.w, 2))
+
+        # Blades poking up above the ledge, with a gentle idle sway.
+        for i, x in enumerate(range(rect.left + 2, rect.right - 1, 7)):
+            blade = 4 + ((seed + i * 5) % 4)
+            sway = -1 if (self.steps // 16 + i) % 2 else 0
+            pygame.draw.rect(screen, grass_dark, (x + sway, rect.y - blade, 2, blade))
+            pygame.draw.rect(
+                screen, grass, (x + sway, rect.y - blade, 1, max(1, blade - 1))
+            )
+
+        # Vines drooping from an exposed underside.
+        if under_open and seed % 3 == 0:
+            for i, x in enumerate(range(rect.left + 5, rect.right - 4, 12)):
+                vine = 6 + ((seed + i * 7) % 8)
+                pygame.draw.rect(screen, grass_dark, (x, rect.bottom - 1, 2, vine))
+                pygame.draw.rect(screen, grass, (x, rect.bottom - 1, 1, vine - 2))
+                pygame.draw.rect(
+                    screen, grass, (x - 1, rect.bottom - 1 + vine, 3, 2)
+                )
 
     def _draw_solid_tile(self, screen, rect: pygame.Rect, col: int, row: int) -> None:
         palette = self._episode_palette()
@@ -1705,6 +1771,7 @@ class CrystalCaves(BaseGame):
                     screen, palette["pipe_light"], (rect.x + 9, rect.y + 22, 5, 2)
                 )
             pygame.draw.rect(screen, (0, 0, 0), rect, 2)
+            self._draw_ledge_growth(screen, rect, col, row, palette, under_open)
             return
 
         open_left = not self._solid_at(col - 1, row)
@@ -1885,6 +1952,35 @@ class CrystalCaves(BaseGame):
         if self._tiny_font:
             label = self._tiny_font.render("EXIT", True, glow)
             screen.blit(label, label.get_rect(center=(rect.centerx, rect.y + 6)))
+
+    def _draw_switch_wires(self, screen, camera_x: int, camera_y: int) -> None:
+        """Draw a taut cable from each switch to the nearest door it controls
+        (CCV-18). The core glows green once thrown, amber while still armed, so
+        the switch->target relationship is readable like the DOS references.
+        """
+        if not self.switches or not self.doors:
+            return
+        half = self.TILE_SIZE // 2
+        for switch in self.switches:
+            sc, sr = switch
+            door = min(
+                self.doors,
+                key=lambda d: (d[0] - sc) ** 2 + (d[1] - sr) ** 2,
+            )
+            sx, sy = self._world_to_screen(
+                sc * self.TILE_SIZE + half, sr * self.TILE_SIZE + half,
+                camera_x, camera_y,
+            )
+            dx, dy = self._world_to_screen(
+                door[0] * self.TILE_SIZE + half, door[1] * self.TILE_SIZE + half,
+                camera_x, camera_y,
+            )
+            core = EGA["G"] if switch in self.used_switches else EGA["A"]
+            pygame.draw.line(screen, EGA["K"], (sx, sy), (dx, dy), 3)
+            pygame.draw.line(screen, core, (sx, sy), (dx, dy), 1)
+            # Small anchor bolts at each end seat the cable into the world.
+            pygame.draw.circle(screen, EGA["m"], (sx, sy), 2)
+            pygame.draw.circle(screen, EGA["m"], (dx, dy), 2)
 
     def _draw_lever_switch(self, screen, rect: pygame.Rect, used: bool) -> None:
         if self._art:
@@ -2718,6 +2814,45 @@ class CrystalCaves(BaseGame):
                     event.color,
                     scale=1,
                 )
+
+    def _draw_gravity_overlay(self, screen) -> None:
+        """Full-screen treatment while the gravity field is inverted (CCV-19):
+        a violet edge vignette, debris floating upward, and a period-style
+        REVERSE GRAVITY banner — so the altered field reads at a glance.
+        """
+        if self.gravity_timer <= 0:
+            return
+        play_bottom = self.height - self.HUD_HEIGHT
+        fade = min(1.0, self.gravity_timer / 60.0)
+        overlay = pygame.Surface((self.width, play_bottom), pygame.SRCALPHA)
+        tint = (150, 60, 230)
+
+        band = 56
+        for i in range(band):
+            alpha = int(64 * fade * (1 - i / band))
+            pygame.draw.line(overlay, (*tint, alpha), (0, i), (self.width, i))
+            pygame.draw.line(
+                overlay,
+                (*tint, alpha),
+                (0, play_bottom - 1 - i),
+                (self.width, play_bottom - 1 - i),
+            )
+
+        # Debris floats upward to sell the inverted field.
+        for k in range(26):
+            sx = (k * 137 + (self.steps * 2)) % self.width
+            sy = play_bottom - ((self.steps * 3 + k * 53) % play_bottom)
+            pygame.draw.rect(overlay, (*EGA["C"], 150), (sx, sy, 2, 4))
+        screen.blit(overlay, (0, 0))
+
+        if self._art:
+            label = "REVERSE GRAVITY"
+            text_w = self._art.text(label, EGA["Y"], scale=2).get_width()
+            bx = (self.width - text_w) // 2
+            sign = pygame.Rect(bx - 8, 10, text_w + 16, 24)
+            pygame.draw.rect(screen, EGA["A"], sign)
+            pygame.draw.rect(screen, EGA["K"], sign, 2)
+            self._art.draw_text(screen, label, bx, 16, EGA["Y"], scale=2)
 
     def _draw_heart(self, screen, x: int, y: int, alive: bool) -> None:
         """Draw a small pixel heart pip (bright-red alive, dark husk when lost)."""
