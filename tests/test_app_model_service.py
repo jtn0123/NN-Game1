@@ -36,6 +36,34 @@ def test_app_model_service_skips_newer_incompatible_checkpoint(tmp_path, monkeyp
     assert resolved == str(older)
 
 
+def test_app_model_service_prefers_best_over_newer_final(tmp_path, monkeypatch):
+    # The peak policy lives in {game}_best.pth; the newer {game}_final.pth can be
+    # a post-collapse save. Auto-resolve must warm-start from best, not newest.
+    config = Config()
+    config.GAME_NAME = "breakout"
+    config.MODEL_DIR = str(tmp_path / "models")
+    model_dir = tmp_path / "models" / "breakout"
+    model_dir.mkdir(parents=True)
+    best = model_dir / "breakout_best.pth"
+    final = model_dir / "breakout_final.pth"
+    best.write_bytes(b"best")
+    final.write_bytes(b"final")
+    # best is OLDER than final — newest-first would wrongly pick final.
+    os.utime(best, (1_700_000_000, 1_700_000_000))
+    os.utime(final, (1_700_000_010, 1_700_000_010))
+
+    monkeypatch.setattr(
+        Agent,
+        "inspect_model",
+        staticmethod(lambda _path, **_kwargs: {"state_size": 4, "action_size": 2}),
+    )
+
+    resolved = ModelService(config).resolve_model_path(
+        explicit_path=None, state_size=4, action_size=2, log=lambda _m: None
+    )
+    assert os.path.basename(resolved) == "breakout_best.pth"
+
+
 def test_app_model_service_resolves_explicit_checkpoint_compatibility(tmp_path, monkeypatch):
     config = Config()
     config.GAME_NAME = "breakout"
