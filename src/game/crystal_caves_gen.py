@@ -131,33 +131,41 @@ def _open_interior(grid: Grid) -> None:
 
 
 def _family_platform_network(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
-    """Open level threaded with a varied web of thin platforms (open-platform /
-    small-platform maps): randomized length, spacing, jitter, thickness, pillars."""
-    _open_interior(grid)
-    for r in range(surface + 2, ROWS - 1):
-        if r % 2 == 0:
-            continue
-        depth = (r - surface) / max(1, ROWS - surface)
-        place_prob = 0.64 - 0.16 * depth
-        gap_min = 2 + int(3 * depth)
-        c = rng.randint(1, 4)
+    """Carved shelf-gallery rooms (open-platforms / room-grid archetype): thick
+    rock with open 2-tall galleries every few rows whose floors are the shelves,
+    so platforms read as ledges cut from the rock rather than islands floating in
+    a void. Solid pillars break each gallery into rooms; adjacent galleries are
+    linked by short jumpable vertical shafts so the cave stays fully traversable.
+
+    Unlike the old open-interior version this leaves the surrounding rock SOLID
+    (the base grid), matching the dense look of the snake/maze families."""
+    gallery_rows = list(range(surface + 3, ROWS - 1, 3))
+    for r in gallery_rows:
+        c = rng.randint(1, 3)
         while c < COLS - 2:
-            if rng.random() < place_prob:
-                length = rng.randint(2, 8)
-                jitter = rng.choice([0, 0, 0, -1, 1])
-                row = max(surface + 2, min(ROWS - 2, r + jitter))
-                thick = 2 if rng.random() < 0.16 else 1
-                end = min(c + length, COLS - 1)
-                for cc in range(c, end):
-                    grid[row][cc] = SOLID
-                    if thick == 2 and row + 1 < ROWS - 1:
-                        grid[row + 1][cc] = SOLID
-                if rng.random() < 0.16:
-                    for pr in range(row + 1, min(row + 1 + rng.randint(2, 3), ROWS - 1)):
-                        grid[pr][c] = SOLID
-                c = end + rng.randint(gap_min, gap_min + 3)
-            else:
-                c += rng.randint(2, 4)
+            run = rng.randint(6, 12)  # wide rooms cut from the rock
+            end = min(c + run, COLS - 1)
+            for cc in range(c, end):
+                grid[r][cc] = SOLID  # the shelf / platform floor
+                grid[r - 1][cc] = EMPTY  # stand
+                grid[r - 2][cc] = EMPTY  # headroom
+            # an occasional rock pillar rises through a room to vary it
+            if rng.random() < 0.16 and end - c > 4:
+                grid[r - 1][rng.randint(c + 1, end - 2)] = SOLID
+            c = end + rng.randint(2, 4)  # rock wall between rooms
+    # link adjacent galleries with vertical shafts punched straight through the
+    # rock at arbitrary columns (same approach the maze uses to stay fully
+    # connected); the carved span plus headroom is <= a jump so the player climbs
+    # out as well as drops in. Unconstrained columns => no sealed-off pockets.
+    for i in range(len(gallery_rows) - 1):
+        r0, r1 = gallery_rows[i], gallery_rows[i + 1]
+        for _ in range(rng.randint(5, 8)):
+            c = rng.randint(2, COLS - 3)
+            for r in range(r0 - 2, r1 + 1):
+                grid[r][c] = EMPTY
+    # mine-shaft drop into the top gallery
+    for r in range(surface + 1, gallery_rows[0]):
+        grid[r][shaft] = EMPTY
 
 
 def _family_snake_bands(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
@@ -355,6 +363,16 @@ def _attempt(
     _seal_unreachable_open(grid, (px, py), surface)
     reach_open = cave_reachable(grid, (px, py), doors_open=True)
     standing = _standing_tiles(grid, reach_open, surface)
+
+    # Coverage gate: reject layouts whose walkable space collapsed to one corner
+    # (carved families can seal off poorly-linked regions, leaving dead rock with
+    # buried items). Require the standing tiles to span most of the width and
+    # depth so the cave reads as a full level; the pipeline retries otherwise.
+    if standing:
+        col_span = max(c for c, _ in standing) - min(c for c, _ in standing)
+        row_span = max(r for _, r in standing) - min(r for _, r in standing)
+        if len(standing) < 24 or col_span < int(COLS * 0.6) or row_span < (ROWS - SKY) // 2:
+            return None
 
     # switch must be reachable with the door CLOSED (it opens the door)
     reach_closed = cave_reachable(grid, (px, py), doors_open=False)
