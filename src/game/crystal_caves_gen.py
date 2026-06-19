@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import random
 from collections import deque
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .crystal_caves_entities import CaveSpec
 
@@ -293,9 +293,22 @@ def _place_gated_exit(grid: Grid, start: Cell, standing: List[Cell], surface: in
     return None
 
 
-def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
+# Difficulty presets scale the objective/threat budget so a curriculum can start
+# on a learnable floor (few crystals, no threats) and ramp to the full game. The
+# terrain family is unchanged; only what gets placed on it changes.
+DIFFICULTY: Dict[str, Dict[str, Any]] = {
+    "easy": {"crystals": (2, 3), "ammo": 2, "hazards": (0, 0), "enemies": (0, 0)},
+    "normal": {"crystals": (10, 14), "ammo": 3, "hazards": (6, 9), "enemies": (3, 6)},
+}
+DIFFICULTY_NAMES = tuple(DIFFICULTY.keys())
+
+
+def _attempt(
+    seed: int, theme: str, family: str, difficulty: str = "normal"
+) -> Optional[CaveSpec]:
     rng = random.Random(seed)
     spec = THEMES[theme]
+    diff = DIFFICULTY.get(difficulty, DIFFICULTY["normal"])
     grid: Grid = [[SOLID] * COLS for _ in range(ROWS)]
 
     # sky band + planet surface
@@ -368,9 +381,9 @@ def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
     def take(n: int) -> List[Cell]:
         return [free.pop() for _ in range(min(n, len(free)))]
 
-    for c, r in take(rng.randint(10, 14)):
+    for c, r in take(rng.randint(*diff["crystals"])):
         grid[r][c] = CRYSTAL
-    for c, r in take(3):
+    for c, r in take(diff["ammo"]):
         grid[r][c] = AMMO
     for c, r in take(1):
         grid[r][c] = rng.choice(spec["powerups"])
@@ -384,8 +397,8 @@ def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
         if grid[t[1]][t[0]] == EMPTY and t[1] >= surface + 4 and abs(t[0] - px) + abs(t[1] - py) > 4
     ]
     rng.shuffle(floors)
-    hazard_budget = rng.randint(6, 9)
-    enemy_budget = rng.randint(3, 6)
+    hazard_budget = rng.randint(*diff["hazards"])
+    enemy_budget = rng.randint(*diff["enemies"])
     for c, r in floors:
         if grid[r][c] != EMPTY:
             continue
@@ -426,21 +439,30 @@ def _solvable(rows) -> bool:
 
 
 def generate_cave(
-    seed: int, theme: Optional[str] = None, family: Optional[str] = None
+    seed: int,
+    theme: Optional[str] = None,
+    family: Optional[str] = None,
+    difficulty: str = "normal",
 ) -> CaveSpec:
     """Generate a verified, themed, drop-in CaveSpec in the given level family
-    (default: chosen by seed). Retries with fresh seeds until solvable."""
+    (default: chosen by seed). Retries with fresh seeds until solvable.
+
+    difficulty scales the objective/threat budget ("easy" = a learnable floor
+    with few crystals and no threats; "normal" = the full game). The quality
+    rubric (>=80) only applies to "normal"; easier presets intentionally fail
+    it (too few crystals) so they accept the first solvable layout."""
     if theme is None:
         theme = THEME_NAMES[seed % len(THEME_NAMES)]
     if family is None:
         family = FAMILY_NAMES[seed % len(FAMILY_NAMES)]
+    if difficulty == "normal":
+        for attempt in range(60):
+            spec = _attempt(seed * 101 + attempt, theme, family, difficulty)
+            if spec is not None and grade_cave(spec)["score"] >= 80:
+                return spec
+    # Fall back to (or, for easy presets, target) the first solvable layout.
     for attempt in range(60):
-        spec = _attempt(seed * 101 + attempt, theme, family)
-        if spec is not None and grade_cave(spec)["score"] >= 80:
-            return spec
-    # Fall back to the first solvable layout regardless of score.
-    for attempt in range(60):
-        spec = _attempt(seed * 101 + attempt, theme, family)
+        spec = _attempt(seed * 101 + attempt, theme, family, difficulty)
         if spec is not None:
             return spec
     raise RuntimeError(f"could not generate a solvable {family} cave for seed {seed}")

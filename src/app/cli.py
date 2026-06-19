@@ -97,6 +97,15 @@ TIPS
         help="Crystal Caves: restrict generated level families (comma-separated, "
         "e.g. platform_network,snake_bands). Used for curriculum training.",
     )
+    parser.add_argument(
+        "--cave-difficulty",
+        type=str,
+        choices=["easy", "normal"],
+        default=None,
+        help="Crystal Caves: objective/threat budget for generated caves. "
+        "'easy' is a learnable curriculum floor (few crystals, no threats); "
+        "'normal' is the full game (default).",
+    )
 
     parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
 

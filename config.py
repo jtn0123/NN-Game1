@@ -94,6 +94,10 @@ class Config:
     CRYSTAL_CAVES_PROCEDURAL: bool = False
     CRYSTAL_CAVES_SEED: int = 0
     CRYSTAL_CAVES_FAMILIES: str = ""
+    # Objective/threat budget for generated caves: "easy" is a learnable
+    # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
+    # game (10-14 crystals + hazards + enemies).
+    CRYSTAL_CAVES_DIFFICULTY: str = "normal"
 
     # =========================================================================
     # SCREEN SETTINGS

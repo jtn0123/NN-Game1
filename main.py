@@ -218,6 +218,9 @@ def main():
     if getattr(args, "cave_families", None):
         config.CRYSTAL_CAVES_FAMILIES = args.cave_families
         print(f"🎓 Crystal Caves families: {args.cave_families}")
+    if getattr(args, "cave_difficulty", None):
+        config.CRYSTAL_CAVES_DIFFICULTY = args.cave_difficulty
+        print(f"🎚️  Crystal Caves difficulty: {args.cave_difficulty}")
 
     # Force CPU if specified (faster for small models on M4)
     if hasattr(args, "cpu") and args.cpu:

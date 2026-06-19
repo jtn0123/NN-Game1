@@ -13,8 +13,12 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.game.crystal_caves_gen import (
+    ACID,
+    CRYSTAL,
     FAMILY_NAMES,
+    SPIKE,
     THEME_NAMES,
+    _find,
     cave_reachable,
     generate_cave,
     grade_cave,
@@ -82,6 +86,28 @@ def test_every_family_generates_solvable_levels(seed, family):
     assert report["solvable"], f"{family}/{seed} unsolvable"
     assert report["fully_connected"], f"{family}/{seed} not fully connected"
     assert report["score"] >= 80
+
+
+@pytest.mark.parametrize("family", FAMILY_NAMES)
+@pytest.mark.parametrize("seed", [0, 1, 5, 9])
+def test_easy_difficulty_is_solvable_and_minimal(seed, family):
+    """The 'easy' curriculum floor must stay solvable while placing only a few
+    crystals and no hazards/enemies, so a fresh agent can earn its first wins."""
+    spec = generate_cave(seed, "blue_rock", family, difficulty="easy")
+    assert grade_cave(spec)["solvable"], f"{family}/{seed} easy unsolvable"
+    crystals = _find(spec.layout, CRYSTAL)
+    hazards = _find(spec.layout, SPIKE) + _find(spec.layout, ACID)
+    assert 1 <= len(crystals) <= 4, f"{family}/{seed} easy crystals={len(crystals)}"
+    assert not hazards, f"{family}/{seed} easy has hazards"
+
+
+def test_normal_difficulty_keeps_full_objective_budget():
+    """'normal' (the default) keeps the full game's crystal + hazard load."""
+    spec = generate_cave(3, "rust", "platform_network", difficulty="normal")
+    crystals = _find(spec.layout, CRYSTAL)
+    hazards = _find(spec.layout, SPIKE) + _find(spec.layout, ACID)
+    assert len(crystals) >= 8
+    assert len(hazards) >= 1
 
 
 def test_procedural_config_replaces_caves_and_is_playable():

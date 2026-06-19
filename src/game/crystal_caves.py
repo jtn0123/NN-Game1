@@ -234,6 +234,7 @@ class CrystalCaves(
                 if f.strip() in FAMILY_NAMES
             ]
             families = wanted or list(FAMILY_NAMES)
+            difficulty = getattr(self.config, "CRYSTAL_CAVES_DIFFICULTY", "normal")
             # Always four caves (themes cycle so the renderer palette stays
             # consistent); the families are drawn from the requested set, which a
             # curriculum widens stage by stage.
@@ -242,6 +243,7 @@ class CrystalCaves(
                     base * 10 + i,
                     THEME_NAMES[i % len(THEME_NAMES)],
                     families[i % len(families)],
+                    difficulty=difficulty,
                 )
                 for i in range(len(FAMILY_NAMES))
             )
