@@ -17,6 +17,7 @@ class CrystalCavesRenderingMixin:
         screen.fill((0, 0, 0))
         self._draw_background(screen, camera_x, camera_y)
         self._draw_tiles(screen, camera_x, camera_y)
+        self._draw_ladders(screen, camera_x, camera_y)
         self._draw_switch_wires(screen, camera_x, camera_y)
         self._draw_level_dressing(screen, camera_x, camera_y)
         self._draw_pickups(screen, camera_x, camera_y)
@@ -625,6 +626,36 @@ class CrystalCavesRenderingMixin:
             bubble_y = rect.y + 16 + ((self.steps // 3 + row + i * 5) % (rect.h - 18))
             pygame.draw.circle(screen, EGA["Y"], (bubble_x, bubble_y), 2)
         pygame.draw.rect(screen, EGA["K"], rect, 2)
+
+    def _draw_ladders(self: Any, screen, camera_x: int, camera_y: int) -> None:
+        """Draw a wooden ladder down every 1-wide vertical shaft (an EMPTY tile
+        flanked by SOLID rock that continues vertically). These are the carved
+        connectors between galleries; dressing them as ladders reads like the
+        DOS-era caves without adding a climb mechanic (the player still jumps).
+        """
+        ts = self.TILE_SIZE
+        first_col = max(1, camera_x // ts)
+        last_col = min(self.level_cols - 1, (camera_x + self.width) // ts + 2)
+        first_row = max(0, camera_y // ts)
+        last_row = min(self.level_rows, (camera_y + self.height - self.HUD_HEIGHT) // ts + 2)
+        rail, rung = EGA["N"], EGA["S"]
+        for row in range(first_row, last_row):
+            grid_row = self.grid[row]
+            for col in range(first_col, last_col):
+                if grid_row[col] != self.EMPTY:
+                    continue
+                if grid_row[col - 1] != self.SOLID or grid_row[col + 1] != self.SOLID:
+                    continue
+                above = row > 0 and self.grid[row - 1][col] == self.EMPTY
+                below = row + 1 < self.level_rows and self.grid[row + 1][col] == self.EMPTY
+                if not (above or below):
+                    continue  # a single pocket, not a climbable shaft
+                x, y = self._world_to_screen(col * ts, row * ts, camera_x, camera_y)
+                lx, rx = x + 7, x + ts - 8
+                pygame.draw.line(screen, rail, (lx, y), (lx, y + ts), 2)
+                pygame.draw.line(screen, rail, (rx, y), (rx, y + ts), 2)
+                for ry in (y + 6, y + 16, y + 26):
+                    pygame.draw.line(screen, rung, (lx, ry), (rx, ry), 2)
 
     def _draw_switch_wires(self: Any, screen, camera_x: int, camera_y: int) -> None:
         """Draw a taut cable from each switch to the nearest door it controls
