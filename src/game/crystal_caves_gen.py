@@ -27,10 +27,17 @@ ROWS, COLS, SKY, JUMP = 18, 44, 3, 3
 
 SOLID, EMPTY = "#", "."
 PLAYER, EXIT, DOOR, SWITCH = "P", "E", "D", "s"
+DOOR2, SWITCH2 = "d", "S"  # a second colour-keyed lever/door pair
 CRYSTAL, AMMO, TREASURE = "*", "A", "$"
 POWER, GRAV, FREEZE = "p", "g", "z"
 SPIKE, ACID, CRAWLER, FLYER = "^", "~", "M", "F"
 ELEVATOR = "="  # a vertical-shaft lift platform; rideable up/down within its run
+
+# Colour-keyed lever/door pairs: a switch opens only the door of its colour.
+DOOR_CHARS = {DOOR, DOOR2}
+SWITCH_CHARS = {SWITCH, SWITCH2}
+DOOR_COLOR = {DOOR: "red", DOOR2: "blue"}
+SWITCH_COLOR = {SWITCH: "red", SWITCH2: "blue"}
 
 Grid = List[List[str]]
 Cell = Tuple[int, int]
@@ -64,12 +71,20 @@ THEMES: Dict[str, dict] = {
 THEME_NAMES = tuple(THEMES.keys())
 
 
-def cave_reachable(rows, start: Cell, doors_open: bool, jump: int = JUMP) -> Set[Cell]:
+def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]:
     """Tiles the player can occupy from ``start`` under jump-aware physics: walk
     or air-drift sideways, fall through EMPTY, jump up to ``jump`` tiles while
-    grounded. A DOOR blocks unless ``doors_open``. Accepts rows of strings or a
-    list-of-lists grid (the single solvability oracle the generator trusts)."""
+    grounded. ``doors_open`` is either a bool (open/close every door) or a set of
+    open colours (a door opens only if its colour is in the set). Accepts rows of
+    strings or a list-of-lists grid (the single solvability oracle generators use)."""
     rows_n, cols_n = len(rows), len(rows[0])
+
+    open_set = doors_open if isinstance(doors_open, (set, frozenset)) else None
+
+    def door_open(ch: str) -> bool:
+        if open_set is not None:
+            return DOOR_COLOR.get(ch, "") in open_set
+        return bool(doors_open)
 
     def is_open(c: int, r: int) -> bool:
         if not (0 <= r < rows_n and 0 <= c < cols_n):
@@ -77,8 +92,8 @@ def cave_reachable(rows, start: Cell, doors_open: bool, jump: int = JUMP) -> Set
         ch = rows[r][c]
         if ch == SOLID:
             return False
-        if ch == DOOR:
-            return doors_open
+        if ch in DOOR_CHARS:
+            return door_open(ch)
         return True
 
     def grounded(c: int, r: int) -> bool:
@@ -89,7 +104,7 @@ def cave_reachable(rows, start: Cell, doors_open: bool, jump: int = JUMP) -> Set
         if r + 1 >= rows_n:
             return True
         below = rows[r + 1][c]
-        return below == SOLID or (below == DOOR and not doors_open)
+        return below == SOLID or (below in DOOR_CHARS and not door_open(below))
 
     def elevator_run(c: int, r: int):
         """Yield every cell of the contiguous elevator shaft through (c, r)."""
@@ -128,6 +143,23 @@ def cave_reachable(rows, start: Cell, doors_open: bool, jump: int = JUMP) -> Set
         if f > 0 and is_open(c, r - 1):
             queue.append((c, r - 1, f - 1))
     return tiles
+
+
+def cave_reachable_keyed(rows, start: Cell, jump: int = JUMP) -> Set[Cell]:
+    """Reachable tiles when each colour-keyed lever opens its own door the moment
+    the player can reach it (a fixpoint). The multi-lock solvability oracle: a
+    lever opens only its colour and may itself sit behind a different door."""
+    open_colors: Set[str] = set()
+    while True:
+        reach = cave_reachable(rows, start, open_colors, jump)
+        newly = {
+            SWITCH_COLOR[rows[r][c]]
+            for (c, r) in reach
+            if rows[r][c] in SWITCH_CHARS and SWITCH_COLOR[rows[r][c]] not in open_colors
+        }
+        if not newly:
+            return reach
+        open_colors |= newly
 
 
 def _band(r: int, surface: int) -> int:
@@ -281,21 +313,27 @@ def _standing_tiles(grid: Grid, reach: Set[Cell], surface: int) -> List[Cell]:
             if grid[r][c] == EMPTY
             and r > surface
             and r + 1 < ROWS
-            and grid[r + 1][c] in (SOLID, DOOR)
+            and (grid[r + 1][c] == SOLID or grid[r + 1][c] in DOOR_CHARS)
         ),
         key=lambda t: (t[1], t[0]),
     )
 
 
 def _place_gated_pocket(
-    grid: Grid, start: Cell, standing: List[Cell], surface: int
+    grid: Grid,
+    start: Cell,
+    standing: List[Cell],
+    surface: int,
+    door_char: str = DOOR,
+    avoid: Optional[Set[Cell]] = None,
 ) -> Optional[Tuple[Cell, Cell]]:
-    """Wall off a small drop-slot capped by a DOOR and leave its floor EMPTY for
-    a crystal. In the real game the switch opens an *obstacle* (a colour-keyed
-    door), not the exit; gating one crystal behind the door makes the switch
-    mandatory (you need every crystal) while the exit opens simply by collecting
-    them all. Returns (pocket_cell, door_cell), or None if nothing gates cleanly.
-    Tries the deepest candidates first for a satisfying tucked-away pocket."""
+    """Wall off a small drop-slot capped by a (colour-keyed) DOOR and leave its
+    floor EMPTY for a crystal. In the real game the switch opens an *obstacle* (a
+    colour-keyed door), not the exit; gating one crystal behind the door makes
+    the switch mandatory (you need every crystal) while the exit opens simply by
+    collecting them all. Returns (pocket_cell, door_cell), or None if nothing
+    gates cleanly. Tries the deepest candidates first for a tucked-away pocket."""
+    avoid = avoid or set()
     reach = cave_reachable(grid, start, doors_open=True)
     for ex, ey in sorted(standing, key=lambda t: (-t[1], t[0])):
         if ey < ROWS - 7:  # deepest-first -> once too shallow, give up
@@ -304,13 +342,15 @@ def _place_gated_pocket(
             continue
         if grid[ey - 1][ex] != EMPTY or grid[ey - 2][ex] != EMPTY:
             continue
+        if (ex, ey) in avoid or (ex, ey - 1) in avoid:
+            continue
         if (ex, ey - 2) not in reach:  # need a landing to drop in from
             continue
         walls = ((ex - 1, ey), (ex + 1, ey), (ex - 1, ey - 1), (ex + 1, ey - 1))
         snap = [(c, r, grid[r][c]) for c, r in (*walls, (ex, ey - 1), (ex, ey))]
         for c, r in walls:
             grid[r][c] = SOLID
-        grid[ey - 1][ex] = DOOR
+        grid[ey - 1][ex] = door_char
         open_reach = cave_reachable(grid, start, doors_open=True)
         closed_reach = cave_reachable(grid, start, doors_open=False)
         # pocket floor reachable only with the door open => switch required
@@ -322,7 +362,7 @@ def _place_gated_pocket(
 
 
 def _place_open_exit(
-    grid: Grid, start: Cell, standing: List[Cell], surface: int, avoid: Cell
+    grid: Grid, start: Cell, standing: List[Cell], surface: int, avoid: Set[Cell]
 ) -> Optional[Cell]:
     """Place the exit on an open, reachable standing tile deep in the cave. The
     exit is NOT walled — collecting every crystal is what unlocks it (the border
@@ -334,7 +374,7 @@ def _place_open_exit(
         (c, r)
         for (c, r) in sorted(standing, key=lambda t: (-t[1], abs(t[0] - COLS // 2)))
         if (c, r) in reach
-        and (c, r) != avoid
+        and (c, r) not in avoid
         and r >= ROWS - 8
         and grid[r][c] == EMPTY
         and abs(c - px) + abs(r - py) > 6
@@ -492,19 +532,29 @@ def _attempt(
 
     grid[py][px] = PLAYER
 
-    # gate one crystal behind a switch-controlled door (the switch opens an
-    # obstacle, as in the original, not the exit). One gated crystal makes the
-    # switch mandatory because every crystal is needed to unlock the exit.
-    gated = _place_gated_pocket(grid, (px, py), standing, surface)
+    # Gate one crystal behind a switch-controlled door per colour (the switch
+    # opens an obstacle, as in the original, not the exit). A gated crystal makes
+    # its switch mandatory because every crystal is needed to unlock the exit.
+    # "normal" caves sometimes add a second, differently-coloured lock (a blue
+    # lever opens only the blue door) for an authentic multi-key puzzle.
+    gated = _place_gated_pocket(grid, (px, py), standing, surface, door_char=DOOR)
     if gated is None:
         return None
-    pocket_cell, door_cell = gated
+    locks = [(*gated, DOOR, SWITCH)]  # (pocket_cell, door_cell, door_char, switch_char)
+    if difficulty == "normal" and rng.random() < 0.5:
+        taken = {gated[0], gated[1]}
+        gated2 = _place_gated_pocket(
+            grid, (px, py), standing, surface, door_char=DOOR2, avoid=taken
+        )
+        if gated2 is not None:
+            locks.append((*gated2, DOOR2, SWITCH2))
 
     # the exit sits openly in the cave; collecting all crystals unlocks it
     _seal_unreachable_open(grid, (px, py), surface)
     reach_open = cave_reachable(grid, (px, py), doors_open=True)
     standing = _standing_tiles(grid, reach_open, surface)
-    exit_cell = _place_open_exit(grid, (px, py), standing, surface, avoid=pocket_cell)
+    pocket_cells = {lk[0] for lk in locks}
+    exit_cell = _place_open_exit(grid, (px, py), standing, surface, avoid=pocket_cells)
     if exit_cell is None:
         return None
     ex, ey = exit_cell
@@ -523,27 +573,33 @@ def _attempt(
         if len(standing) < 24 or col_span < int(COLS * 0.6) or row_span < (ROWS - SKY) // 2:
             return None
 
-    # switch must be reachable with the door CLOSED (it opens the door); place it
-    # near the door it controls so the cable is a short, readable conduit.
+    # each switch must be reachable with every door CLOSED (so no lock depends on
+    # another); place it near the door it controls for a short, readable conduit.
     reach_closed = cave_reachable(grid, (px, py), doors_open=False)
-    dx, dy = door_cell
-    switch_cands = [
-        t
-        for t in standing
-        if t in reach_closed
-        and SKY + 2 < t[1]
-        and t not in (pocket_cell, (ex, ey))
-        and abs(t[0] - px) + abs(t[1] - py) > 5
-    ]
-    if not switch_cands:
-        return None
-    switch_cands.sort(key=lambda t: (t[0] - dx) ** 2 + (t[1] - dy) ** 2)
-    near_door = switch_cands[: max(1, len(switch_cands) // 4)]
-    sx, sy = rng.choice(near_door)
-    grid[sy][sx] = SWITCH
+    used_switch_cells: Set[Cell] = set()
+    for pocket_cell, door_cell, _door_char, switch_char in locks:
+        dx, dy = door_cell
+        switch_cands = [
+            t
+            for t in standing
+            if t in reach_closed
+            and SKY + 2 < t[1]
+            and t not in pocket_cells
+            and t != (ex, ey)
+            and t not in used_switch_cells
+            and abs(t[0] - px) + abs(t[1] - py) > 5
+        ]
+        if not switch_cands:
+            return None
+        switch_cands.sort(key=lambda t: (t[0] - dx) ** 2 + (t[1] - dy) ** 2)
+        near_door = switch_cands[: max(1, len(switch_cands) // 4)]
+        sx, sy = rng.choice(near_door)
+        grid[sy][sx] = switch_char
+        used_switch_cells.add((sx, sy))
 
-    # the gated crystal occupies the pocket; the rest are placed below
-    grid[pocket_cell[1]][pocket_cell[0]] = CRYSTAL
+    # one gated crystal occupies each pocket; the rest are placed below
+    for pc in pocket_cells:
+        grid[pc[1]][pc[0]] = CRYSTAL
 
     free = [
         t
@@ -555,8 +611,8 @@ def _attempt(
     def take(n: int) -> List[Cell]:
         return [free.pop() for _ in range(min(n, len(free)))]
 
-    crystal_cells = [pocket_cell]
-    for c, r in take(max(1, rng.randint(*diff["crystals"]) - 1)):
+    crystal_cells = list(pocket_cells)
+    for c, r in take(max(1, rng.randint(*diff["crystals"]) - len(pocket_cells))):
         grid[r][c] = CRYSTAL
         crystal_cells.append((c, r))
     for c, r in take(diff["ammo"]):
@@ -590,16 +646,23 @@ def _find(rows, ch: str) -> List[Cell]:
     return [(c, r) for r, row in enumerate(rows) for c, x in enumerate(row) if x == ch]
 
 
+def _find_any(rows, chars: Set[str]) -> List[Cell]:
+    return [(c, r) for r, row in enumerate(rows) for c, x in enumerate(row) if x in chars]
+
+
 def _solvable(rows) -> bool:
     player = _find(rows, PLAYER)[0]
     exit_ = _find(rows, EXIT)[0]
     crystals = _find(rows, CRYSTAL)
-    switches = _find(rows, SWITCH)
+    switches = _find_any(rows, SWITCH_CHARS)
+    # with every door shut, all levers must be reachable (no lock needs another)
     reach_closed = cave_reachable(rows, player, doors_open=False)
     if not all(s in reach_closed for s in switches):
         return False
-    reach_open = cave_reachable(rows, player, doors_open=True)
-    return all(c in reach_open for c in crystals) and exit_ in reach_open
+    # with each lever opening its own colour (fixpoint), all crystals + the exit
+    # must be reachable
+    reach = cave_reachable_keyed(rows, player)
+    return all(c in reach for c in crystals) and exit_ in reach
 
 
 def generate_cave(
@@ -642,11 +705,12 @@ def grade_cave(spec: CaveSpec) -> dict:
     player = _find(rows, PLAYER)[0]
     crystals = _find(rows, CRYSTAL)
     exit_ = _find(rows, EXIT)[0]
-    switches = _find(rows, SWITCH)
+    switches = _find_any(rows, SWITCH_CHARS)
     hazards = _find(rows, SPIKE) + _find(rows, ACID)
 
     reach_open = cave_reachable(rows, player, doors_open=True)
     reach_closed = cave_reachable(rows, player, doors_open=False)
+    reach_keyed = cave_reachable_keyed(rows, player)
     grid = [list(r) for r in rows]
     standing = _standing_tiles(grid, reach_open, SKY)
     standing_conn = (
@@ -655,11 +719,11 @@ def grade_cave(spec: CaveSpec) -> dict:
 
     solvable = (
         all(s in reach_closed for s in switches)
-        and all(c in reach_open for c in crystals)
-        and exit_ in reach_open
+        and all(c in reach_keyed for c in crystals)
+        and exit_ in reach_keyed
     )
     crystal_bands = {_band(r, SKY) for (_, r) in crystals}
-    # The switch must matter: at least one crystal sits behind the door (reachable
+    # The switch must matter: at least one crystal sits behind a door (reachable
     # only once it's open), so collecting every crystal genuinely requires the
     # switch — the exit itself opens by collecting them all, as in the original.
     gated_crystals = [c for c in crystals if c in reach_open and c not in reach_closed]

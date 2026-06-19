@@ -691,10 +691,11 @@ class CrystalCavesRenderingMixin:
         half = self.TILE_SIZE // 2
         for switch in self.switches:
             sc, sr = switch
-            door = min(
-                self.doors,
-                key=lambda d: (d[0] - sc) ** 2 + (d[1] - sr) ** 2,
-            )
+            color = self.switch_color.get(switch, "red")
+            same_color = [d for d in self.doors if self.door_color.get(d, "red") == color]
+            if not same_color:
+                continue
+            door = min(same_color, key=lambda d: (d[0] - sc) ** 2 + (d[1] - sr) ** 2)
             sx, sy = self._world_to_screen(
                 sc * self.TILE_SIZE + half,
                 sr * self.TILE_SIZE + half,
@@ -746,12 +747,17 @@ class CrystalCavesRenderingMixin:
                         self._draw_acid_tile(screen, rect, col, row)
                     else:
                         self._draw_spike_tile(screen, rect, col, row)
-                elif tile in self.doors and not self.doors_open:
-                    self._draw_locked_door(screen, rect)
+                elif tile in self.doors and not self._door_open(tile):
+                    self._draw_locked_door(screen, rect, self.door_color.get(tile, "red"))
                 elif tile == self.exit_pos:
                     self._draw_exit_airlock(screen, rect)
                 elif tile in self.switches:
-                    self._draw_lever_switch(screen, rect, tile in self.used_switches)
+                    self._draw_lever_switch(
+                        screen,
+                        rect,
+                        tile in self.used_switches,
+                        self.switch_color.get(tile, "red"),
+                    )
 
     def _draw_gravity_overlay(self: Any, screen) -> None:
         """Full-screen treatment while the gravity field is inverted (CCV-19):

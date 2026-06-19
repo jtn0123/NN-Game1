@@ -110,6 +110,23 @@ def test_normal_difficulty_keeps_full_objective_budget():
     assert len(hazards) >= 1
 
 
+def test_color_keyed_two_lock_levels_are_solvable():
+    """When a normal cave gets a second colour-keyed lock, every crystal sits
+    behind its own colour and the keyed fixpoint flood proves it solvable."""
+    from src.game.crystal_caves_gen import DOOR2, SWITCH2
+
+    found = 0
+    for seed in range(60):
+        spec = generate_cave(seed, "blue_rock", "platform_network", difficulty="normal")
+        flat = "".join(spec.layout)
+        if DOOR2 in flat:
+            found += 1
+            assert SWITCH2 in flat, f"blue door without a blue lever (seed {seed})"
+            assert grade_cave(spec)["solvable"], f"two-lock level {seed} unsolvable"
+            assert grade_cave(spec)["switch_gates_crystal"]
+    assert found >= 3, f"expected two-lock levels; found {found}"
+
+
 def test_elevator_levels_stay_solvable():
     """Elevators appear and never break solvability — the flood treats an
     ELEVATOR run as rideable, a superset of jumpable."""

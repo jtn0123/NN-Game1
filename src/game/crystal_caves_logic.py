@@ -130,12 +130,14 @@ class CrystalCavesLogicMixin:
             if abs(col - player_col) <= 1 and abs(row - player_row) <= 1:
                 if switch not in self.used_switches:
                     self.used_switches.add(switch)
-                    self.doors_open = True
+                    color = self.switch_color.get(switch, "red")
+                    self.open_colors.add(color)  # opens only this lever's colour
                     self.score += 250
                     reward += self.SWITCH_THROW_BONUS
                     self._add_tile_event(switch, "score", "+250", EGA["G"], ttl=34, y_offset=-10)
                     for door in self.doors:
-                        self._add_tile_event(door, "sparkle", "OPEN", EGA["G"], ttl=42)
+                        if self.door_color.get(door, "red") == color:
+                            self._add_tile_event(door, "sparkle", "OPEN", EGA["G"], ttl=42)
                     self._mark_progress()
                     self.audio.play("switch")
                 else:

@@ -11,13 +11,17 @@ from .crystal_caves_entities import DressingPiece
 
 
 class CrystalCavesDressingMixin:
-    def _draw_locked_door(self: Any, screen, rect: pygame.Rect) -> None:
+    def _draw_locked_door(self: Any, screen, rect: pygame.Rect, color: str = "red") -> None:
+        body = (40, 70, 200) if color == "blue" else (160, 0, 0)
+        edge = (96, 150, 255) if color == "blue" else (255, 78, 78)
         if self._art:
             self._art.draw_sprite(screen, "door_locked", rect.x, rect.y, scale=2)
+            # a colour key bar so red vs blue locks read at a glance
+            pygame.draw.rect(screen, edge, (rect.x + 10, rect.y + 2, 12, 4))
             return
         pygame.draw.rect(screen, (8, 8, 16), rect)
-        pygame.draw.rect(screen, (160, 0, 0), rect.inflate(-8, -2))
-        pygame.draw.rect(screen, (255, 78, 78), rect.inflate(-8, -2), 2)
+        pygame.draw.rect(screen, body, rect.inflate(-8, -2))
+        pygame.draw.rect(screen, edge, rect.inflate(-8, -2), 2)
         pygame.draw.rect(screen, (210, 210, 220), (rect.x + 11, rect.y + 6, 10, 20))
         pygame.draw.rect(screen, (0, 0, 0), (rect.x + 14, rect.y + 9, 4, 14))
 
@@ -47,7 +51,10 @@ class CrystalCavesDressingMixin:
             label = self._tiny_font.render("EXIT", True, glow)
             screen.blit(label, label.get_rect(center=(rect.centerx, rect.y + 6)))
 
-    def _draw_lever_switch(self: Any, screen, rect: pygame.Rect, used: bool) -> None:
+    def _draw_lever_switch(
+        self: Any, screen, rect: pygame.Rect, used: bool, color: str = "red"
+    ) -> None:
+        key = (96, 150, 255) if color == "blue" else (255, 80, 48)
         if self._art:
             self._art.draw_sprite(
                 screen,
@@ -56,10 +63,11 @@ class CrystalCavesDressingMixin:
                 rect.y,
                 scale=2,
             )
+            pygame.draw.rect(screen, key, (rect.x + 10, rect.y + 1, 12, 3))
             return
         pygame.draw.rect(screen, (0, 0, 0), rect)
         pygame.draw.rect(screen, (166, 166, 176), (rect.x + 7, rect.y + 20, 18, 8))
-        base_color = (70, 255, 80) if used else (255, 80, 48)
+        base_color = (70, 255, 80) if used else key
         pivot = (rect.x + 16, rect.y + 20)
         lever_end = (rect.x + 23, rect.y + 8) if used else (rect.x + 9, rect.y + 7)
         pygame.draw.line(screen, (230, 230, 230), pivot, lever_end, 3)

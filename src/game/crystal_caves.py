@@ -162,6 +162,10 @@ class CrystalCaves(
 
     SWITCH = "s"
 
+    DOOR2 = "d"  # second colour-keyed door
+
+    SWITCH2 = "S"  # second colour-keyed lever
+
     AMMO = "A"
 
     TREASURE = "$"
@@ -197,7 +201,9 @@ class CrystalCaves(
         TREASURE: 0.32,
         EXIT: 0.42,
         DOOR: 0.58,
+        DOOR2: 0.55,
         SWITCH: 0.68,
+        SWITCH2: 0.70,
         AMMO: 0.76,
         POWER_SHOT: 0.84,
         GRAVITY_POWER: 0.88,
@@ -213,6 +219,10 @@ class CrystalCaves(
 
     # Elevator platform speed (tiles per physics step).
     ELEVATOR_SPEED = 0.06
+
+    # Colour-keyed lever/door pairs: a lever opens only the door of its colour.
+    DOOR_COLOR_OF: Dict[str, str] = {DOOR: "red", DOOR2: "blue"}
+    SWITCH_COLOR_OF: Dict[str, str] = {SWITCH: "red", SWITCH2: "blue"}
 
     GEM_COLORS: Tuple[Tuple[int, int, int], ...] = (
         (82, 170, 255),
@@ -283,7 +293,7 @@ class CrystalCaves(
         self.freeze_timer = 0
         self.gravity_timer = 0
         self.gravity_dir = 1
-        self.doors_open = False
+        self.open_colors: Set[str] = set()
         self.exit_unlocked = False
         self.show_controls = False
         self._end_reason = "running"
@@ -296,6 +306,8 @@ class CrystalCaves(
         self.doors: Set[Tuple[int, int]] = set()
         self.switches: Set[Tuple[int, int]] = set()
         self.used_switches: Set[Tuple[int, int]] = set()
+        self.door_color: Dict[Tuple[int, int], str] = {}
+        self.switch_color: Dict[Tuple[int, int], str] = {}
         self.hazards: Set[Tuple[int, int]] = set()
         self.hazard_kinds: Dict[Tuple[int, int], str] = {}
         self.ammo_pickups: Set[Tuple[int, int]] = set()
@@ -365,7 +377,7 @@ class CrystalCaves(
         self.freeze_timer = 0
         self.gravity_timer = 0
         self.gravity_dir = 1
-        self.doors_open = False
+        self.open_colors = set()
         self.exit_unlocked = False
         self.bullets.clear()
         self.visual_events.clear()
@@ -570,6 +582,8 @@ class CrystalCaves(
         self.doors.clear()
         self.switches.clear()
         self.used_switches.clear()
+        self.door_color.clear()
+        self.switch_color.clear()
         self.hazards.clear()
         self.hazard_kinds.clear()
         self.ammo_pickups.clear()
@@ -590,10 +604,12 @@ class CrystalCaves(
                     self.crystals.add((col, row))
                 elif char == self.EXIT:
                     self.exit_pos = (col, row)
-                elif char == self.DOOR:
+                elif char in (self.DOOR, self.DOOR2):
                     self.doors.add((col, row))
-                elif char == self.SWITCH:
+                    self.door_color[(col, row)] = self.DOOR_COLOR_OF[char]
+                elif char in (self.SWITCH, self.SWITCH2):
                     self.switches.add((col, row))
+                    self.switch_color[(col, row)] = self.SWITCH_COLOR_OF[char]
                 elif char in (self.SPIKE, self.ACID):
                     self.hazards.add((col, row))
                     self.hazard_kinds[(col, row)] = char
@@ -703,12 +719,22 @@ class CrystalCaves(
             return True
         return any(rect.colliderect(er) for er in self._elevator_solid)
 
+    @property
+    def doors_open(self) -> bool:
+        """True once every lever has been thrown (all colour-keyed doors open).
+        Kept as a read-only view for dashboards and target-phase logic; the
+        authoritative state is ``open_colors`` (which colours are open)."""
+        return not (self.switches - self.used_switches)
+
+    def _door_open(self, tile: Tuple[int, int]) -> bool:
+        return self.door_color.get(tile, "red") in self.open_colors
+
     def _solid_at(self, col: int, row: int) -> bool:
         if col < 0 or row < 0 or col >= self.level_cols or row >= self.level_rows:
             return True
         if self.grid[row][col] == self.SOLID:
             return True
-        return (col, row) in self.doors and not self.doors_open
+        return (col, row) in self.doors and not self._door_open((col, row))
 
     def _is_on_surface(self) -> bool:
         rect = self._player_rect()

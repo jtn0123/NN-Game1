@@ -245,6 +245,35 @@ class TestCrystalCavesObjectives:
         assert info["doors_open"]
         assert reward > 0
 
+    def test_colour_keyed_lever_opens_only_its_own_door(self):
+        """A red lever opens only red doors; the blue door stays shut until the
+        blue lever is thrown (authentic colour-keyed locks)."""
+        from src.game.crystal_caves_gen import DOOR2, generate_cave
+
+        spec = None
+        for seed in range(60):
+            cand = generate_cave(seed, "blue_rock", "platform_network", difficulty="normal")
+            if DOOR2 in "".join(cand.layout):
+                spec = cand
+                break
+        assert spec is not None, "expected a two-lock level"
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_PROCEDURAL = True
+        g = CrystalCaves(cfg, headless=True)
+        g.CAVES = (spec,) + g.CAVES[1:]
+        g.level_index = 0
+        g.level = spec
+        g.reset()
+        red_sw = next(s for s, c in g.switch_color.items() if c == "red")
+        red_door = next(d for d, c in g.door_color.items() if c == "red")
+        blue_door = next(d for d, c in g.door_color.items() if c == "blue")
+        g.player_x = red_sw[0] * g.TILE_SIZE + 4
+        g.player_y = red_sw[1] * g.TILE_SIZE + 2
+        g.step(CrystalCaves.INTERACT)
+        assert g._door_open(red_door)
+        assert not g._door_open(blue_door)  # blue lock untouched
+        assert not g.doors_open  # not all doors open yet
+
     def test_elevator_carries_player_up_and_down(self, game):
         """A player standing on an elevator platform is carried as it oscillates
         between the top and bottom of its shaft (no input needed)."""

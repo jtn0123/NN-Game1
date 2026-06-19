@@ -110,7 +110,7 @@ def render_gallery(output_dir: Path) -> list[Path]:
 
     game.crystals.clear()
     game.exit_unlocked = True
-    game.doors_open = True
+    game.open_colors.update(game.door_color.values())  # open every colour-keyed door
     _place_at_tile(game, game.exit_pos)
     exit_path = output_dir / "10_exit_open.png"
     _render(game, exit_path)
