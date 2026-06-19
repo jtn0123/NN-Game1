@@ -132,7 +132,7 @@ class CrystalCavesLogicMixin:
                     self.used_switches.add(switch)
                     self.doors_open = True
                     self.score += 250
-                    reward += 3.0
+                    reward += self.SWITCH_THROW_BONUS
                     self._add_tile_event(switch, "score", "+250", EGA["G"], ttl=34, y_offset=-10)
                     for door in self.doors:
                         self._add_tile_event(door, "sparkle", "OPEN", EGA["G"], ttl=42)
@@ -313,6 +313,7 @@ class CrystalCavesLogicMixin:
             self.health = 0
             self.game_over = True
             self.won = False
+            self._end_reason = "killed"
             self.audio.play("lose")
             return -12.0
 
@@ -327,6 +328,7 @@ class CrystalCavesLogicMixin:
         if self._player_rect().colliderect(exit_rect):
             self.game_over = True
             self.won = True
+            self._end_reason = "won"
             self.score += 1000 + self.health * 250 + self.ammo * 10
             self.level_index = (self.level_index + 1) % len(self.CAVES)
             self.audio.play("door")

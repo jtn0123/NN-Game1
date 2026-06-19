@@ -125,6 +125,12 @@ class CrystalCaves(
     PROGRESS_W_WIN = 0.20  # reached the exit
     PROGRESS_REWARD_SCALE = 6.0  # total shaping reward earned across a full clear
 
+    # TS-01: discrete one-time bonus the step the gating switch is thrown
+    # (closed->open). The switch is the causal crux of a clear yet was rewarded
+    # less than a single crystal (+3 vs +5); reward it sharply on top of the
+    # continuous progress shaping.
+    SWITCH_THROW_BONUS = 8.0
+
     MOVE_SPEED = 4.2
 
     AIR_SPEED = 3.3
@@ -271,6 +277,9 @@ class CrystalCaves(
         self.doors_open = False
         self.exit_unlocked = False
         self.show_controls = False
+        self._end_reason = "running"
+        self._max_depth_row = 0
+        self._progress = 0.0
 
         self.crystals: Set[Tuple[int, int]] = set()
         self.initial_crystals = 0
@@ -353,6 +362,7 @@ class CrystalCaves(
         # Completion-progress tracker (deepest row reached + last potential).
         self._max_depth_row = self._player_tile()[1]
         self._progress = self._progress_potential()[0]
+        self._end_reason = "running"
 
         return self.get_state()
 
@@ -409,9 +419,11 @@ class CrystalCaves(
 
         if self.steps >= self.MAX_STEPS and not self.game_over:
             self.game_over = True
+            self._end_reason = "timeout"
             reward -= 8.0
         elif self.steps_since_progress >= self.MAX_STEPS_WITHOUT_PROGRESS and not self.game_over:
             self.game_over = True
+            self._end_reason = "stalled"
             reward -= 6.0
 
         return self.get_state(), float(reward), self.game_over, self._info()
@@ -610,6 +622,8 @@ class CrystalCaves(
             "steps": self.steps,
             "steps_since_progress": self.steps_since_progress,
             "progress": round(self._progress, 3),
+            "progress_parts": self._progress_potential()[1],
+            "end_reason": self._end_reason,
         }
 
     def _player_rect(self, x: Optional[float] = None, y: Optional[float] = None) -> pygame.Rect:

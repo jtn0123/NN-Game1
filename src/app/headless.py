@@ -150,6 +150,8 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         self.epsilons: list[float] = []  # Track epsilon for chart persistence
         self.rewards: list[float] = []  # Track rewards for chart persistence
         self.progresses: list[float] = []  # Track completion-progress (Crystal Caves)
+        self.end_reasons: list[str] = []  # CA-03: why each episode ended
+        self.progress_parts: list[dict] = []  # CA-03: Phi components at death
         self.total_steps = 0
         self.training_start_time = time.time()
 
@@ -555,6 +557,10 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     self.levels.append(level)
 
                     self.progresses.append(float(infos[i].get("progress", 0.0)))
+                    self.end_reasons.append(str(infos[i].get("end_reason", "")))
+                    parts = infos[i].get("progress_parts")
+                    if isinstance(parts, dict):
+                        self.progress_parts.append(parts)
 
                     # Track metrics for persistence (used by save)
                     avg_loss = self.agent.get_average_loss(100)
@@ -791,7 +797,43 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         if self.progresses:
             print(f"   Final avg prog:   {np.mean(self.progresses[-100:]):.3f}")
             print(f"   Best progress:    {np.max(self.progresses):.3f}")
+        self._print_progress_breakdown()
         print("=" * 70)
 
         if self.web_dashboard:
             self.web_dashboard.log("✅ Vectorized training complete!", "success")
+
+    def _print_progress_breakdown(self, window: int = 100) -> None:
+        """CA-03: print where the agent stalls — the end-reason mix and the mean
+        completion-progress components over the last `window` episodes. This
+        pinpoints the gate (crystals vs switch vs depth) the agent gets stuck on.
+        """
+        if not self.end_reasons and not self.progress_parts:
+            return
+
+        recent_reasons = self.end_reasons[-window:]
+        if recent_reasons:
+            counts: dict[str, int] = {}
+            for reason in recent_reasons:
+                counts[reason] = counts.get(reason, 0) + 1
+            total = len(recent_reasons)
+            mix = ", ".join(
+                f"{name} {count / total * 100:.0f}%"
+                for name, count in sorted(counts.items(), key=lambda kv: -kv[1])
+            )
+            print(f"   End reasons:      {mix}")
+
+        recent_parts = self.progress_parts[-window:]
+        if recent_parts:
+            keys = ("crystal_frac", "switch_done", "depth_frac", "won")
+            means = {
+                key: float(np.mean([float(p.get(key, 0.0)) for p in recent_parts]))
+                for key in keys
+            }
+            print(
+                "   Phi@death parts:  "
+                f"crystals {means['crystal_frac']:.2f} | "
+                f"switch {means['switch_done']:.2f} | "
+                f"depth {means['depth_frac']:.2f} | "
+                f"won {means['won']:.2f}"
+            )
