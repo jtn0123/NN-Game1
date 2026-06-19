@@ -653,11 +653,16 @@ class CrystalCavesRenderingMixin:
                 camera_y,
             )
             core = EGA["G"] if switch in self.used_switches else EGA["A"]
-            pygame.draw.line(screen, EGA["K"], (sx, sy), (dx, dy), 3)
-            pygame.draw.line(screen, core, (sx, sy), (dx, dy), 1)
-            # Small anchor bolts at each end seat the cable into the world.
-            pygame.draw.circle(screen, EGA["m"], (sx, sy), 2)
-            pygame.draw.circle(screen, EGA["m"], (dx, dy), 2)
+            # Route the cable orthogonally (horizontal then vertical) so it reads
+            # as conduit pinned to the rock, not a diagonal debug line strung
+            # across open space. The elbow turns at the door's column.
+            elbow = (dx, sy)
+            points = [(sx, sy), elbow, (dx, dy)]
+            pygame.draw.lines(screen, EGA["K"], False, points, 3)
+            pygame.draw.lines(screen, core, False, points, 1)
+            # Small anchor bolts at each end + the elbow seat the cable.
+            for px_, py_ in ((sx, sy), elbow, (dx, dy)):
+                pygame.draw.circle(screen, EGA["m"], (px_, py_), 2)
 
     def _draw_tiles(self: Any, screen, camera_x: int, camera_y: int) -> None:
         first_col = max(0, camera_x // self.TILE_SIZE)

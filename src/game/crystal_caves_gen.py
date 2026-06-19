@@ -386,7 +386,13 @@ def _attempt(
     ]
     if not switch_cands:
         return None
-    sx, sy = rng.choice(switch_cands)
+    # Place the switch near the exit it gates: a short, coherent switch->door
+    # link reads far better than a wire strung across the whole map, and keeps
+    # the puzzle local. Pick from the candidates closest to the exit (with a
+    # little variety) rather than a random tile anywhere in the cave.
+    switch_cands.sort(key=lambda t: (t[0] - ex) ** 2 + (t[1] - ey) ** 2)
+    near_exit = switch_cands[: max(1, len(switch_cands) // 4)]
+    sx, sy = rng.choice(near_exit)
     grid[sy][sx] = SWITCH
 
     free = [
