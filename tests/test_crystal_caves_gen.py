@@ -110,6 +110,20 @@ def test_normal_difficulty_keeps_full_objective_budget():
     assert len(hazards) >= 1
 
 
+def test_elevator_levels_stay_solvable():
+    """Elevators appear and never break solvability — the flood treats an
+    ELEVATOR run as rideable, a superset of jumpable."""
+    from src.game.crystal_caves_gen import ELEVATOR
+
+    found = 0
+    for seed in range(40):
+        spec = generate_cave(seed, "blue_rock", "platform_network")
+        if ELEVATOR in "".join(spec.layout):
+            found += 1
+            assert grade_cave(spec)["solvable"], f"elevator level {seed} unsolvable"
+    assert found >= 3, f"expected elevators to appear; found {found}"
+
+
 def test_procedural_config_replaces_caves_and_is_playable():
     """CRYSTAL_CAVES_PROCEDURAL swaps the authored caves for generated ones that
     theme correctly, stay solvable, and drive the game without error."""

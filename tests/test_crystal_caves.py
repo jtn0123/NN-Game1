@@ -20,7 +20,7 @@ from scripts.render_crystal_caves_gallery import render_gallery
 from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
-from src.game.crystal_caves_entities import CAVES, Enemy
+from src.game.crystal_caves_entities import CAVES, Elevator, Enemy
 
 # The jump-aware solvability flood is shared with the generator so the authored
 # caves and the procedural ones are verified by one identical oracle.
@@ -244,6 +244,27 @@ class TestCrystalCavesObjectives:
         assert game.doors_open
         assert info["doors_open"]
         assert reward > 0
+
+    def test_elevator_carries_player_up_and_down(self, game):
+        """A player standing on an elevator platform is carried as it oscillates
+        between the top and bottom of its shaft (no input needed)."""
+        ts = game.TILE_SIZE
+        col = 5
+        # carve an open vertical shaft so the player can ride without obstruction
+        for row in range(4, 12):
+            game.grid[row][col] = game.EMPTY
+        game.elevators = [Elevator(col=col, top=4, bottom=10, pos=10.0, direction=-1)]
+        game._refresh_elevator_rects()
+        game.player_x = col * ts + 4
+        game.player_y = 10 * ts - game.PLAYER_HEIGHT  # standing on the platform
+        feet = []
+        for _ in range(260):
+            game.step(CrystalCaves.IDLE)
+            feet.append(game.player_y + game.PLAYER_HEIGHT)
+        # the player must have travelled most of the shaft and reversed direction
+        assert max(feet) - min(feet) > ts * 3
+        assert min(feet) <= 5 * ts  # rode up near the top
+        assert max(feet) >= 10 * ts - ts  # and back down near the bottom
 
 
 class TestCrystalCavesCombatAndDanger:

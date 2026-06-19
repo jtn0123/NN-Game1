@@ -26,6 +26,7 @@ from .crystal_caves_entities import (
     Bullet,
     CaveSpec,
     DressingPiece,
+    Elevator,
     Enemy,
     VisualEvent,
 )
@@ -181,6 +182,8 @@ class CrystalCaves(
 
     ACID = "~"
 
+    ELEVATOR = "="
+
     PLAYER = "P"
 
     CAVES: Tuple[CaveSpec, ...] = _CAVES
@@ -202,10 +205,14 @@ class CrystalCaves(
         AIR_TANK: 0.72,
         SPIKE: 0.96,
         ACID: 0.98,
+        ELEVATOR: 0.52,
         CRAWLER: 0.62,
         FLYER: 0.66,
         PLAYER: 1.0,
     }
+
+    # Elevator platform speed (tiles per physics step).
+    ELEVATOR_SPEED = 0.06
 
     GEM_COLORS: Tuple[Tuple[int, int, int], ...] = (
         (82, 170, 255),
@@ -296,6 +303,8 @@ class CrystalCaves(
         self.powerups: Dict[Tuple[int, int], str] = {}
         self.air_tanks: Set[Tuple[int, int]] = set()
         self.enemies: List[Enemy] = []
+        self.elevators: List[Elevator] = []
+        self._elevator_solid: List[pygame.Rect] = []  # platform collision rects
         self.bullets: List[Bullet] = []
         self.visual_events: List[VisualEvent] = []
 
@@ -389,6 +398,8 @@ class CrystalCaves(
             self.gravity_timer -= 1
             if self.gravity_timer == 0:
                 self.gravity_dir = 1
+
+        self._update_elevators()
 
         move_dir, wants_jump, wants_shoot, wants_interact = self._decode_action(action)
         self._apply_player_input(move_dir, wants_jump)
@@ -566,6 +577,7 @@ class CrystalCaves(
         self.powerups.clear()
         self.air_tanks.clear()
         self.enemies.clear()
+        self.elevators.clear()
 
         for row, line in enumerate(rows):
             for col, char in enumerate(line):
@@ -585,6 +597,8 @@ class CrystalCaves(
                 elif char in (self.SPIKE, self.ACID):
                     self.hazards.add((col, row))
                     self.hazard_kinds[(col, row)] = char
+                elif char == self.ELEVATOR:
+                    self.grid[row][col] = self.ELEVATOR
                 elif char == self.AMMO:
                     self.ammo_pickups.add((col, row))
                 elif char == self.TREASURE:
@@ -608,6 +622,22 @@ class CrystalCaves(
                     )
 
         self.initial_crystals = len(self.crystals)
+
+        # group ELEVATOR cells into vertical-shaft lifts; the platform starts at
+        # the top and oscillates down to the bottom of each run
+        for col in range(self.level_cols):
+            row = 0
+            while row < self.level_rows:
+                if self.grid[row][col] == self.ELEVATOR:
+                    top = row
+                    while row < self.level_rows and self.grid[row][col] == self.ELEVATOR:
+                        row += 1
+                    self.elevators.append(
+                        Elevator(col=col, top=top, bottom=row - 1, pos=float(top))
+                    )
+                else:
+                    row += 1
+        self._refresh_elevator_rects()
 
     def _info(self) -> dict:
         return {
@@ -669,7 +699,9 @@ class CrystalCaves(
         return {(col, row) for row in range(top, bottom + 1) for col in range(left, right + 1)}
 
     def _rect_collides_solid(self, rect: pygame.Rect) -> bool:
-        return any(self._solid_at(col, row) for col, row in self._tiles_for_rect(rect))
+        if any(self._solid_at(col, row) for col, row in self._tiles_for_rect(rect)):
+            return True
+        return any(rect.colliderect(er) for er in self._elevator_solid)
 
     def _solid_at(self, col: int, row: int) -> bool:
         if col < 0 or row < 0 or col >= self.level_cols or row >= self.level_rows:
@@ -683,6 +715,37 @@ class CrystalCaves(
         rect.y += self.gravity_dir
         return self._rect_collides_solid(rect)
 
+    def _refresh_elevator_rects(self) -> None:
+        ts = self.TILE_SIZE
+        self._elevator_solid = [
+            pygame.Rect(e.col * ts, int(e.pos * ts), ts, ts) for e in self.elevators
+        ]
+
+    def _update_elevators(self) -> None:
+        """Advance each lift platform (oscillating between its run's top and
+        bottom). A *rising* platform is pushed up under the player who's standing
+        on it; descent needs no special handling — gravity keeps the player glued
+        to the platform top each frame. Called before the player's own physics."""
+        if not self.elevators:
+            return
+        for e in self.elevators:
+            e.pos += self.ELEVATOR_SPEED * e.direction
+            if e.pos >= e.bottom:
+                e.pos = float(e.bottom)
+                e.direction = -1
+            elif e.pos <= e.top:
+                e.pos = float(e.top)
+                e.direction = 1
+        self._refresh_elevator_rects()
+        prect = self._player_rect()
+        for er in self._elevator_solid:
+            # if a platform rose into the player from below their middle, lift
+            # them so they rest on its top (carry-up)
+            if prect.colliderect(er) and prect.centery < er.centery:
+                self.player_y = er.top - self.PLAYER_HEIGHT
+                self.vy = 0.0
+                prect = self._player_rect()
+
     def _tile_code(self, col: int, row: int) -> float:
         if col < 0 or row < 0 or col >= self.level_cols or row >= self.level_rows:
             return self.TILE_CODES[self.SOLID]
@@ -694,6 +757,8 @@ class CrystalCaves(
 
         if self._solid_at(col, row):
             return self.TILE_CODES[self.DOOR] if tile in self.doors else self.TILE_CODES[self.SOLID]
+        if self.grid[row][col] == self.ELEVATOR:
+            return self.TILE_CODES[self.ELEVATOR]
         if tile in self.hazards:
             return self.TILE_CODES[self.hazard_kinds.get(tile, self.SPIKE)]
         if tile in self.crystals:

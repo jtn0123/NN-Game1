@@ -59,6 +59,22 @@ class Enemy:
         return pygame.Rect(int(self.x), int(self.y), self.width, self.height)
 
 
+@dataclass
+class Elevator:
+    """A vertical lift platform that oscillates between two rows, carrying the
+    player. ``pos`` is the platform's current row (float, in tiles)."""
+
+    col: int
+    top: int
+    bottom: int
+    pos: float
+    direction: int = 1  # +1 moving down, -1 moving up
+
+    @property
+    def row(self) -> int:
+        return int(round(self.pos))
+
+
 @dataclass(frozen=True)
 class DressingPiece:
     """Authored visual-only prop placed in a cave room."""

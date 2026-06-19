@@ -30,6 +30,7 @@ PLAYER, EXIT, DOOR, SWITCH = "P", "E", "D", "s"
 CRYSTAL, AMMO, TREASURE = "*", "A", "$"
 POWER, GRAV, FREEZE = "p", "g", "z"
 SPIKE, ACID, CRAWLER, FLYER = "^", "~", "M", "F"
+ELEVATOR = "="  # a vertical-shaft lift platform; rideable up/down within its run
 
 Grid = List[List[str]]
 Cell = Tuple[int, int]
@@ -81,10 +82,25 @@ def cave_reachable(rows, start: Cell, doors_open: bool, jump: int = JUMP) -> Set
         return True
 
     def grounded(c: int, r: int) -> bool:
+        # standing inside an elevator shaft => the platform supports you (it rides
+        # the full run, so any shaft cell is a valid footing)
+        if rows[r][c] == ELEVATOR:
+            return True
         if r + 1 >= rows_n:
             return True
         below = rows[r + 1][c]
         return below == SOLID or (below == DOOR and not doors_open)
+
+    def elevator_run(c: int, r: int):
+        """Yield every cell of the contiguous elevator shaft through (c, r)."""
+        top = r
+        while top - 1 >= 0 and rows[top - 1][c] == ELEVATOR:
+            top -= 1
+        bot = r
+        while bot + 1 < rows_n and rows[bot + 1][c] == ELEVATOR:
+            bot += 1
+        for rr in range(top, bot + 1):
+            yield c, rr
 
     sc, sr = start
     f0 = jump if grounded(sc, sr) else 0
@@ -99,6 +115,10 @@ def cave_reachable(rows, start: Cell, doors_open: bool, jump: int = JUMP) -> Set
         tiles.add((c, r))
         if grounded(c, r):
             f = jump
+        # riding an elevator: free vertical travel to any cell in its shaft
+        if rows[r][c] == ELEVATOR:
+            for ec, er in elevator_run(c, r):
+                queue.append((ec, er, jump))
         if is_open(c, r + 1):
             queue.append((c, r + 1, 0))
         for dc in (-1, 1):
@@ -383,6 +403,43 @@ def _place_threats(
             enemy_budget -= 1
 
 
+def _place_elevators(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
+    """Convert one or two tall, wall-flanked vertical shafts into elevator lifts.
+    The flood already treats an ELEVATOR run as rideable (a superset of jumpable),
+    so this never breaks solvability — it adds authentic switch-free vertical
+    transport and an easier ascent than a precise jump (good for the agent too)."""
+    runs: List[Tuple[int, int, int]] = []
+    for c in range(2, COLS - 2):
+        if c == shaft:
+            continue
+        r = surface + 1
+        while r < ROWS - 1:
+            shaft_cell = (
+                grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID
+            )
+            if shaft_cell:
+                top = r
+                while r < ROWS - 1 and grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID:
+                    r += 1
+                if r - top >= 3:
+                    runs.append((c, top, r - 1))
+            else:
+                r += 1
+    rng.shuffle(runs)
+    used_cols: Set[int] = set()
+    placed = 0
+    target = rng.randint(1, 2)
+    for c, top, bot in runs:
+        if placed >= target:
+            break
+        if any(abs(c - uc) < 3 for uc in used_cols):
+            continue
+        for rr in range(top, bot + 1):
+            grid[rr][c] = ELEVATOR
+        used_cols.add(c)
+        placed += 1
+
+
 # Difficulty presets scale the objective/threat budget so a curriculum can start
 # on a learnable floor (few crystals, no threats) and ramp to the full game. The
 # terrain family is unchanged; only what gets placed on it changes.
@@ -513,6 +570,9 @@ def _attempt(
     # tiles right beside a crystal — so threats are part of the route puzzle (as
     # in the original) rather than pure ambient scatter; the rest spreads deep.
     _place_threats(grid, rng, standing, (px, py), surface, spec, diff, crystal_cells)
+
+    # authentic vertical transport: convert a tall shaft or two into elevators
+    _place_elevators(grid, rng, surface, shaft)
 
     rows = ["".join(row) for row in grid]
     if not _solvable(rows):

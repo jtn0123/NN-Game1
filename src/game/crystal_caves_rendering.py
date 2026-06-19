@@ -18,6 +18,7 @@ class CrystalCavesRenderingMixin:
         self._draw_background(screen, camera_x, camera_y)
         self._draw_tiles(screen, camera_x, camera_y)
         self._draw_ladders(screen, camera_x, camera_y)
+        self._draw_elevators(screen, camera_x, camera_y)
         self._draw_switch_wires(screen, camera_x, camera_y)
         self._draw_level_dressing(screen, camera_x, camera_y)
         self._draw_pickups(screen, camera_x, camera_y)
@@ -656,6 +657,29 @@ class CrystalCavesRenderingMixin:
                 pygame.draw.line(screen, rail, (rx, y), (rx, y + ts), 2)
                 for ry in (y + 6, y + 16, y + 26):
                     pygame.draw.line(screen, rung, (lx, ry), (rx, ry), 2)
+
+    def _draw_elevators(self: Any, screen, camera_x: int, camera_y: int) -> None:
+        """Draw each elevator's vertical guide track and its moving metal platform
+        at the platform's current position (CCV: switch-free lift transport)."""
+        ts = self.TILE_SIZE
+        for e in self.elevators:
+            tx = e.col * ts
+            track_x = tx + ts // 2
+            top_y = e.top * ts
+            bot_y = (e.bottom + 1) * ts
+            sx, sy_top = self._world_to_screen(track_x, top_y, camera_x, camera_y)
+            _, sy_bot = self._world_to_screen(track_x, bot_y, camera_x, camera_y)
+            # twin guide rails framing the shaft
+            for rail_dx in (-ts // 2 + 3, ts // 2 - 3):
+                pygame.draw.line(
+                    screen, EGA["m"], (sx + rail_dx, sy_top), (sx + rail_dx, sy_bot), 2
+                )
+            # the platform: a chunky metal bar the player rides
+            px, py = self._world_to_screen(tx, int(e.pos * ts), camera_x, camera_y)
+            plate = pygame.Rect(px + 1, py + ts - 9, ts - 2, 9)
+            pygame.draw.rect(screen, EGA["M"], plate)
+            pygame.draw.rect(screen, EGA["w"], (plate.x, plate.y, plate.width, 3))
+            pygame.draw.rect(screen, EGA["m"], plate, 1)
 
     def _draw_switch_wires(self: Any, screen, camera_x: int, camera_y: int) -> None:
         """Draw a taut cable from each switch to the nearest door it controls
