@@ -86,11 +86,14 @@ class Config:
     # Options: registered game IDs from src.game, e.g. 'breakout', 'crystal_caves'
     GAME_NAME: str = "breakout"
 
-    # Crystal Caves: when True, the three caves are procedurally generated
-    # (platform-network model) instead of the authored layouts. CRYSTAL_CAVES_SEED
-    # makes a procedural run reproducible.
+    # Crystal Caves: when True, the caves are procedurally generated instead of
+    # the authored layouts. CRYSTAL_CAVES_SEED makes a procedural run reproducible.
+    # CRYSTAL_CAVES_FAMILIES restricts which level families are used (comma-
+    # separated, e.g. "platform_network,snake_bands"); empty = all families. This
+    # is the knob for curriculum training (start easy, add families over stages).
     CRYSTAL_CAVES_PROCEDURAL: bool = False
     CRYSTAL_CAVES_SEED: int = 0
+    CRYSTAL_CAVES_FAMILIES: str = ""
 
     # =========================================================================
     # SCREEN SETTINGS

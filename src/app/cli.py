@@ -90,6 +90,13 @@ TIPS
         action="store_true",
         help="Crystal Caves: play procedurally generated caves instead of the authored ones",
     )
+    parser.add_argument(
+        "--cave-families",
+        type=str,
+        default=None,
+        help="Crystal Caves: restrict generated level families (comma-separated, "
+        "e.g. platform_network,snake_bands). Used for curriculum training.",
+    )
 
     parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
 

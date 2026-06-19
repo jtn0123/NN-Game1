@@ -215,6 +215,9 @@ def main():
     if getattr(args, "random_caves", False):
         config.CRYSTAL_CAVES_PROCEDURAL = True
         print("🎲 Crystal Caves: procedurally generated caves")
+    if getattr(args, "cave_families", None):
+        config.CRYSTAL_CAVES_FAMILIES = args.cave_families
+        print(f"🎓 Crystal Caves families: {args.cave_families}")
 
     # Force CPU if specified (faster for small models on M4)
     if hasattr(args, "cpu") and args.cpu:

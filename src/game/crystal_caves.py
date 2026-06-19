@@ -213,11 +213,22 @@ class CrystalCaves(
             from .crystal_caves_gen import FAMILY_NAMES, THEME_NAMES, generate_cave
 
             base = getattr(self.config, "CRYSTAL_CAVES_SEED", 0)
-            # One cave per level family for maximum variety; themes cycle so the
-            # renderer palette (driven by level_index) stays consistent.
+            wanted = [
+                f.strip()
+                for f in getattr(self.config, "CRYSTAL_CAVES_FAMILIES", "").split(",")
+                if f.strip() in FAMILY_NAMES
+            ]
+            families = wanted or list(FAMILY_NAMES)
+            # Always four caves (themes cycle so the renderer palette stays
+            # consistent); the families are drawn from the requested set, which a
+            # curriculum widens stage by stage.
             self.CAVES = tuple(
-                generate_cave(base * 10 + i, THEME_NAMES[i % len(THEME_NAMES)], family)
-                for i, family in enumerate(FAMILY_NAMES)
+                generate_cave(
+                    base * 10 + i,
+                    THEME_NAMES[i % len(THEME_NAMES)],
+                    families[i % len(families)],
+                )
+                for i in range(len(FAMILY_NAMES))
             )
             self.CAVE_DRESSING = {i: () for i in range(len(FAMILY_NAMES))}
         self.level: CaveSpec = self.CAVES[0]

@@ -401,7 +401,7 @@ def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
     if not _solvable(rows):
         return None
     return CaveSpec(
-        name=f"Generated {theme}",
+        name=f"Generated {family} {theme}",
         layout=tuple(rows),
         background=spec["background"],
         accent=spec["accent"],
