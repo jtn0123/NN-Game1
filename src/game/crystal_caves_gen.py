@@ -259,6 +259,40 @@ def _standing_tiles(grid: Grid, reach: Set[Cell], surface: int) -> List[Cell]:
     )
 
 
+def _place_gated_exit(grid: Grid, start: Cell, standing: List[Cell], surface: int) -> Optional[Cell]:
+    """Place the exit in a walled drop-slot capped by a DOOR, so the switch is
+    ALWAYS required (the exit's only access is dropping through the door). Tries
+    the deepest standing tiles that have reachable open space above; mutates the
+    grid and returns the exit cell, or None if no candidate gates cleanly."""
+    reach = cave_reachable(grid, start, doors_open=True)
+    for ex, ey in sorted(standing, key=lambda t: (-t[1], t[0])):
+        if ey < ROWS - 7:  # deepest-first -> once too shallow, give up
+            break
+        if ey - 2 <= surface or not (1 < ex < COLS - 2):
+            continue
+        if grid[ey - 1][ex] != EMPTY or grid[ey - 2][ex] != EMPTY:
+            continue
+        if (ex, ey - 2) not in reach:  # need a landing to drop in from
+            continue
+        walls = ((ex - 1, ey), (ex + 1, ey), (ex - 1, ey - 1), (ex + 1, ey - 1))
+        snap = [(c, r, grid[r][c]) for c, r in (*walls, (ex, ey - 1), (ex, ey))]
+        for c, r in walls:
+            grid[r][c] = SOLID
+        grid[ey - 1][ex] = DOOR
+        grid[ey][ex] = EXIT
+        open_reach = cave_reachable(grid, start, doors_open=True)
+        closed_reach = cave_reachable(grid, start, doors_open=False)
+        if (
+            (ex, ey - 2) in open_reach
+            and (ex, ey) in open_reach
+            and (ex, ey) not in closed_reach
+        ):
+            return ex, ey
+        for c, r, value in snap:
+            grid[r][c] = value
+    return None
+
+
 def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
     rng = random.Random(seed)
     spec = THEMES[theme]
@@ -298,30 +332,16 @@ def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
 
     grid[py][px] = PLAYER
 
-    # exit on the deepest, then right-most reachable ledge (near the bottom)
-    ex, ey = max(standing, key=lambda t: (t[1], t[0]))
-    grid[ey][ex] = EXIT
-
-    # gate the exit: a DOOR on an open approach tile chosen so that closing it
-    # isolates the exit. Works for any family (no sealed chamber needed). Falls
-    # back to a plain door on the route if no isolating tile exists.
-    approaches = ((ex, ey - 1), (ex - 1, ey), (ex + 1, ey), (ex - 1, ey - 1), (ex + 1, ey - 1))
-    door_placed = False
-    for dx, dy in approaches:
-        if 1 <= dx < COLS - 1 and surface < dy < ROWS - 1 and grid[dy][dx] == EMPTY:
-            grid[dy][dx] = DOOR
-            if (ex, ey) not in cave_reachable(grid, (px, py), doors_open=False):
-                door_placed = True
-                break
-            grid[dy][dx] = EMPTY
-    if not door_placed:
-        for dx, dy in approaches:
-            if 1 <= dx < COLS - 1 and surface < dy < ROWS - 1 and grid[dy][dx] == EMPTY:
-                grid[dy][dx] = DOOR
-                door_placed = True
-                break
-    if not door_placed:
+    # exit in a switch-gated drop-slot (the door always genuinely gates it)
+    exit_tile = _place_gated_exit(grid, (px, py), standing, surface)
+    if exit_tile is None:
         return None
+    ex, ey = exit_tile
+
+    # the slot walls may have orphaned tiny pockets -> re-seal and recompute
+    _seal_unreachable_open(grid, (px, py), surface)
+    reach_open = cave_reachable(grid, (px, py), doors_open=True)
+    standing = _standing_tiles(grid, reach_open, surface)
 
     # switch must be reachable with the door CLOSED (it opens the door)
     reach_closed = cave_reachable(grid, (px, py), doors_open=False)
@@ -330,7 +350,7 @@ def _attempt(seed: int, theme: str, family: str) -> Optional[CaveSpec]:
         for t in standing
         if t in reach_closed
         and SKY + 2 < t[1]
-        and (t[0], t[1]) != (ex, ey)
+        and t != (ex, ey)
         and abs(t[0] - px) + abs(t[1] - py) > 5
     ]
     if not switch_cands:
