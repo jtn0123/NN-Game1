@@ -116,6 +116,15 @@ class CrystalCaves(
 
     MAX_POWER_TIMER = 420
 
+    # Completion-progress potential (0..1) for reward shaping + info["progress"].
+    # Monotonic components so the potential-based reward is always >= 0 (it never
+    # penalises exploration). Weights sum to 1.0.
+    PROGRESS_W_CRYSTAL = 0.50  # fraction of crystals collected
+    PROGRESS_W_SWITCH = 0.15  # every required switch thrown
+    PROGRESS_W_DEPTH = 0.15  # deepest row reached (how far into the cave)
+    PROGRESS_W_WIN = 0.20  # reached the exit
+    PROGRESS_REWARD_SCALE = 6.0  # total shaping reward earned across a full clear
+
     MOVE_SPEED = 4.2
 
     AIR_SPEED = 3.3
@@ -341,6 +350,10 @@ class CrystalCaves(
         self.bullets.clear()
         self.visual_events.clear()
 
+        # Completion-progress tracker (deepest row reached + last potential).
+        self._max_depth_row = self._player_tile()[1]
+        self._progress = self._progress_potential()[0]
+
         return self.get_state()
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, dict]:
@@ -383,6 +396,17 @@ class CrystalCaves(
         reward += self._check_exit()
         reward += self._target_progress_reward(previous_target, previous_distance)
 
+        # Completion-progress shaping (PT-01/PT-02): reward any increase in the
+        # monotonic progress potential — deeper into the cave, more crystals, the
+        # switch thrown, or the exit reached. Potential-based, so it stays >= 0
+        # and gives the agent dense credit on the long path to a full clear.
+        self._max_depth_row = max(self._max_depth_row, self._player_tile()[1])
+        new_progress = self._progress_potential()[0]
+        if new_progress > self._progress:
+            reward += self.PROGRESS_REWARD_SCALE * (new_progress - self._progress)
+            self._progress = new_progress
+            self._mark_progress()
+
         if self.steps >= self.MAX_STEPS and not self.game_over:
             self.game_over = True
             reward -= 8.0
@@ -391,6 +415,31 @@ class CrystalCaves(
             reward -= 6.0
 
         return self.get_state(), float(reward), self.game_over, self._info()
+
+    def _progress_potential(self) -> Tuple[float, Dict[str, float]]:
+        """Monotonic 0..1 completion potential and its components — how close the
+        player is to clearing the cave (collect all crystals, throw the switch,
+        reach the exit). Drives progress reward shaping and info['progress']."""
+        total = max(1, self.initial_crystals)
+        crystal_frac = (self.initial_crystals - len(self.crystals)) / total
+        switch_done = 0.0 if (self.switches - self.used_switches) else 1.0
+        span = max(1, self.level_rows - self.sky_rows - 1)
+        depth_frac = float(
+            np.clip((self._max_depth_row - self.sky_rows) / span, 0.0, 1.0)
+        )
+        won = 1.0 if self.won else 0.0
+        phi = (
+            self.PROGRESS_W_CRYSTAL * crystal_frac
+            + self.PROGRESS_W_SWITCH * switch_done
+            + self.PROGRESS_W_DEPTH * depth_frac
+            + self.PROGRESS_W_WIN * won
+        )
+        return phi, {
+            "crystal_frac": round(crystal_frac, 3),
+            "switch_done": switch_done,
+            "depth_frac": round(depth_frac, 3),
+            "won": won,
+        }
 
     def get_state(self) -> np.ndarray:
         """Return a normalized local state vector for DQN training."""
@@ -560,6 +609,7 @@ class CrystalCaves(
             "won": self.won,
             "steps": self.steps,
             "steps_since_progress": self.steps_since_progress,
+            "progress": round(self._progress, 3),
         }
 
     def _player_rect(self, x: Optional[float] = None, y: Optional[float] = None) -> pygame.Rect:
