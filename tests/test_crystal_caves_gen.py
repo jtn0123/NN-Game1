@@ -37,7 +37,7 @@ def test_generated_cave_is_solvable_and_well_formed(seed, theme):
     assert report["fully_connected"], "some open space is unreachable"
     assert report["top_entrance"], "player must spawn at the top"
     assert report["exit_near_bottom"], "exit must be near the bottom"
-    assert report["door_gates_exit"], "the switch-gated door must isolate the exit"
+    assert report["switch_gates_crystal"], "the switch-gated door must isolate a crystal"
     assert 0.22 <= report["density"] <= 0.82, f"density {report['density']} off-model"
     assert report["score"] >= 85
     assert report["crystals"] >= 8

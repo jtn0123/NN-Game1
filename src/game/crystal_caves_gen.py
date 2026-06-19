@@ -267,11 +267,15 @@ def _standing_tiles(grid: Grid, reach: Set[Cell], surface: int) -> List[Cell]:
     )
 
 
-def _place_gated_exit(grid: Grid, start: Cell, standing: List[Cell], surface: int) -> Optional[Cell]:
-    """Place the exit in a walled drop-slot capped by a DOOR, so the switch is
-    ALWAYS required (the exit's only access is dropping through the door). Tries
-    the deepest standing tiles that have reachable open space above; mutates the
-    grid and returns the exit cell, or None if no candidate gates cleanly."""
+def _place_gated_pocket(
+    grid: Grid, start: Cell, standing: List[Cell], surface: int
+) -> Optional[Tuple[Cell, Cell]]:
+    """Wall off a small drop-slot capped by a DOOR and leave its floor EMPTY for
+    a crystal. In the real game the switch opens an *obstacle* (a colour-keyed
+    door), not the exit; gating one crystal behind the door makes the switch
+    mandatory (you need every crystal) while the exit opens simply by collecting
+    them all. Returns (pocket_cell, door_cell), or None if nothing gates cleanly.
+    Tries the deepest candidates first for a satisfying tucked-away pocket."""
     reach = cave_reachable(grid, start, doors_open=True)
     for ex, ey in sorted(standing, key=lambda t: (-t[1], t[0])):
         if ey < ROWS - 7:  # deepest-first -> once too shallow, give up
@@ -287,18 +291,96 @@ def _place_gated_exit(grid: Grid, start: Cell, standing: List[Cell], surface: in
         for c, r in walls:
             grid[r][c] = SOLID
         grid[ey - 1][ex] = DOOR
-        grid[ey][ex] = EXIT
         open_reach = cave_reachable(grid, start, doors_open=True)
         closed_reach = cave_reachable(grid, start, doors_open=False)
-        if (
-            (ex, ey - 2) in open_reach
-            and (ex, ey) in open_reach
-            and (ex, ey) not in closed_reach
-        ):
-            return ex, ey
+        # pocket floor reachable only with the door open => switch required
+        if (ex, ey) in open_reach and (ex, ey) not in closed_reach and (ex, ey - 2) in open_reach:
+            return (ex, ey), (ex, ey - 1)
         for c, r, value in snap:
             grid[r][c] = value
     return None
+
+
+def _place_open_exit(
+    grid: Grid, start: Cell, standing: List[Cell], surface: int, avoid: Cell
+) -> Optional[Cell]:
+    """Place the exit on an open, reachable standing tile deep in the cave. The
+    exit is NOT walled — collecting every crystal is what unlocks it (the border
+    flips green in the original), so it just needs to be reachable once the door
+    is open. Prefers deep, central tiles for top-to-bottom route flow."""
+    px, py = start
+    reach = cave_reachable(grid, start, doors_open=True)
+    cands = [
+        (c, r)
+        for (c, r) in sorted(standing, key=lambda t: (-t[1], abs(t[0] - COLS // 2)))
+        if (c, r) in reach
+        and (c, r) != avoid
+        and r >= ROWS - 8
+        and grid[r][c] == EMPTY
+        and abs(c - px) + abs(r - py) > 6
+    ]
+    if not cands:
+        return None
+    ex, ey = cands[0]
+    grid[ey][ex] = EXIT
+    return ex, ey
+
+
+def _place_threats(
+    grid: Grid,
+    rng: random.Random,
+    standing: List[Cell],
+    start: Cell,
+    surface: int,
+    spec: Dict[str, Any],
+    diff: Dict[str, Any],
+    crystal_cells: List[Cell],
+) -> None:
+    """Place hazards and enemies. About half the hazard budget guards chokepoints
+    — the floor tiles flanking a crystal, the approach you must cross to grab it —
+    so threats are part of the route puzzle as in the original, not pure ambient
+    scatter. The rest (and all enemies) spread through the deeper, harder bands.
+    Reachability ignores hazards, so a guarded crystal stays winnable (you cross
+    or jump the hazard); this only raises the stakes of the approach."""
+    px, py = start
+    hazards, enemies = spec["hazards"], spec["enemies"]
+    hazard_budget = rng.randint(*diff["hazards"])
+    enemy_budget = rng.randint(*diff["enemies"])
+    floors = [
+        (c, r)
+        for (c, r) in standing
+        if grid[r][c] == EMPTY and r >= surface + 4 and abs(c - px) + abs(r - py) > 4
+    ]
+    rng.shuffle(floors)
+    floor_set = set(floors)
+
+    if hazard_budget > 0:
+        guard_spots = [
+            (cc + dc, cr)
+            for (cc, cr) in crystal_cells
+            for dc in (-1, 1)
+            if (cc + dc, cr) in floor_set
+        ]
+        rng.shuffle(guard_spots)
+        for c, r in guard_spots[: hazard_budget // 2 + 1]:
+            if hazard_budget <= 0:
+                break
+            if grid[r][c] != EMPTY:
+                continue
+            grid[r][c] = rng.choice(hazards)
+            hazard_budget -= 1
+            floor_set.discard((c, r))
+
+    for c, r in floors:
+        if grid[r][c] != EMPTY:
+            continue
+        band = _band(r, surface)
+        if hazard_budget > 0 and rng.random() < 0.05 + 0.05 * band:
+            grid[r][c] = rng.choice(hazards)
+            hazard_budget -= 1
+        elif enemy_budget > 0 and rng.random() < 0.05 + 0.03 * band:
+            grid[r][c] = rng.choice(enemies)
+            enemy_budget -= 1
 
 
 # Difficulty presets scale the objective/threat budget so a curriculum can start
@@ -353,13 +435,23 @@ def _attempt(
 
     grid[py][px] = PLAYER
 
-    # exit in a switch-gated drop-slot (the door always genuinely gates it)
-    exit_tile = _place_gated_exit(grid, (px, py), standing, surface)
-    if exit_tile is None:
+    # gate one crystal behind a switch-controlled door (the switch opens an
+    # obstacle, as in the original, not the exit). One gated crystal makes the
+    # switch mandatory because every crystal is needed to unlock the exit.
+    gated = _place_gated_pocket(grid, (px, py), standing, surface)
+    if gated is None:
         return None
-    ex, ey = exit_tile
+    pocket_cell, door_cell = gated
 
-    # the slot walls may have orphaned tiny pockets -> re-seal and recompute
+    # the exit sits openly in the cave; collecting all crystals unlocks it
+    _seal_unreachable_open(grid, (px, py), surface)
+    reach_open = cave_reachable(grid, (px, py), doors_open=True)
+    standing = _standing_tiles(grid, reach_open, surface)
+    exit_cell = _place_open_exit(grid, (px, py), standing, surface, avoid=pocket_cell)
+    if exit_cell is None:
+        return None
+    ex, ey = exit_cell
+
     _seal_unreachable_open(grid, (px, py), surface)
     reach_open = cave_reachable(grid, (px, py), doors_open=True)
     standing = _standing_tiles(grid, reach_open, surface)
@@ -374,26 +466,27 @@ def _attempt(
         if len(standing) < 24 or col_span < int(COLS * 0.6) or row_span < (ROWS - SKY) // 2:
             return None
 
-    # switch must be reachable with the door CLOSED (it opens the door)
+    # switch must be reachable with the door CLOSED (it opens the door); place it
+    # near the door it controls so the cable is a short, readable conduit.
     reach_closed = cave_reachable(grid, (px, py), doors_open=False)
+    dx, dy = door_cell
     switch_cands = [
         t
         for t in standing
         if t in reach_closed
         and SKY + 2 < t[1]
-        and t != (ex, ey)
+        and t not in (pocket_cell, (ex, ey))
         and abs(t[0] - px) + abs(t[1] - py) > 5
     ]
     if not switch_cands:
         return None
-    # Place the switch near the exit it gates: a short, coherent switch->door
-    # link reads far better than a wire strung across the whole map, and keeps
-    # the puzzle local. Pick from the candidates closest to the exit (with a
-    # little variety) rather than a random tile anywhere in the cave.
-    switch_cands.sort(key=lambda t: (t[0] - ex) ** 2 + (t[1] - ey) ** 2)
-    near_exit = switch_cands[: max(1, len(switch_cands) // 4)]
-    sx, sy = rng.choice(near_exit)
+    switch_cands.sort(key=lambda t: (t[0] - dx) ** 2 + (t[1] - dy) ** 2)
+    near_door = switch_cands[: max(1, len(switch_cands) // 4)]
+    sx, sy = rng.choice(near_door)
     grid[sy][sx] = SWITCH
+
+    # the gated crystal occupies the pocket; the rest are placed below
+    grid[pocket_cell[1]][pocket_cell[0]] = CRYSTAL
 
     free = [
         t
@@ -405,8 +498,10 @@ def _attempt(
     def take(n: int) -> List[Cell]:
         return [free.pop() for _ in range(min(n, len(free)))]
 
-    for c, r in take(rng.randint(*diff["crystals"])):
+    crystal_cells = [pocket_cell]
+    for c, r in take(max(1, rng.randint(*diff["crystals"]) - 1)):
         grid[r][c] = CRYSTAL
+        crystal_cells.append((c, r))
     for c, r in take(diff["ammo"]):
         grid[r][c] = AMMO
     for c, r in take(1):
@@ -414,25 +509,10 @@ def _attempt(
     for c, r in take(1):
         grid[r][c] = TREASURE
 
-    # hazards + enemies, weighted toward the deeper (harder) bands
-    floors = [
-        t
-        for t in standing
-        if grid[t[1]][t[0]] == EMPTY and t[1] >= surface + 4 and abs(t[0] - px) + abs(t[1] - py) > 4
-    ]
-    rng.shuffle(floors)
-    hazard_budget = rng.randint(*diff["hazards"])
-    enemy_budget = rng.randint(*diff["enemies"])
-    for c, r in floors:
-        if grid[r][c] != EMPTY:
-            continue
-        band = _band(r, surface)
-        if hazard_budget > 0 and rng.random() < 0.05 + 0.05 * band:
-            grid[r][c] = rng.choice(spec["hazards"])
-            hazard_budget -= 1
-        elif enemy_budget > 0 and rng.random() < 0.05 + 0.03 * band:
-            grid[r][c] = rng.choice(spec["enemies"])
-            enemy_budget -= 1
+    # Hazards + enemies. A share of the hazard budget guards chokepoints — the
+    # tiles right beside a crystal — so threats are part of the route puzzle (as
+    # in the original) rather than pure ambient scatter; the rest spreads deep.
+    _place_threats(grid, rng, standing, (px, py), surface, spec, diff, crystal_cells)
 
     rows = ["".join(row) for row in grid]
     if not _solvable(rows):
@@ -519,6 +599,11 @@ def grade_cave(spec: CaveSpec) -> dict:
         and exit_ in reach_open
     )
     crystal_bands = {_band(r, SKY) for (_, r) in crystals}
+    # The switch must matter: at least one crystal sits behind the door (reachable
+    # only once it's open), so collecting every crystal genuinely requires the
+    # switch — the exit itself opens by collecting them all, as in the original.
+    gated_crystals = [c for c in crystals if c in reach_open and c not in reach_closed]
+    switch_gates_crystal = len(switches) >= 1 and len(gated_crystals) >= 1
 
     checks = {
         "solvable": solvable,
@@ -532,7 +617,7 @@ def grade_cave(spec: CaveSpec) -> dict:
         "crystal_bands": len(crystal_bands),
         "switches": len(switches),
         "hazards": len(hazards),
-        "door_gates_exit": exit_ not in reach_closed,
+        "switch_gates_crystal": switch_gates_crystal,
     }
 
     score = 0
@@ -543,7 +628,7 @@ def grade_cave(spec: CaveSpec) -> dict:
     score += int(12 * standing_conn)
     score += 10 if (8 <= len(crystals) <= 16 and len(switches) >= 1) else 0
     score += 8 if (len(hazards) >= 3) else 0
-    score += 6 if checks["door_gates_exit"] else 0
+    score += 6 if checks["switch_gates_crystal"] else 0
     score += 7 if (len(switches) >= 1 and exit_[1] >= ROWS - 5 and len(crystals) >= 8) else 0
     checks["score"] = score
     return checks
