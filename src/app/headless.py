@@ -149,6 +149,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         self.losses: list[float] = []  # Track losses for chart persistence
         self.epsilons: list[float] = []  # Track epsilon for chart persistence
         self.rewards: list[float] = []  # Track rewards for chart persistence
+        self.progresses: list[float] = []  # Track completion-progress (Crystal Caves)
         self.total_steps = 0
         self.training_start_time = time.time()
 
@@ -553,6 +554,8 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     level = infos[i].get("level", 1)
                     self.levels.append(level)
 
+                    self.progresses.append(float(infos[i].get("progress", 0.0)))
+
                     # Track metrics for persistence (used by save)
                     avg_loss = self.agent.get_average_loss(100)
                     q_values_arr = self.agent.get_q_values(states[i])
@@ -737,10 +740,20 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
 
+                # Completion-progress (Crystal Caves): rolling mean and best-so-far
+                # of info["progress"]. This is the signal that should climb before
+                # win-rate does, so surface it directly in the training log.
+                progress_str = ""
+                if self.progresses:
+                    avg_prog = float(np.mean(self.progresses[-100:]))
+                    best_prog = float(np.max(self.progresses))
+                    progress_str = f"🪨 prog: {avg_prog:.3f} (best {best_prog:.3f}) | "
+
                 progress_msg = (
                     f"Ep {self.current_episode:5d} | "
                     f"Score: {last_score:4d} | "
                     f"Avg: {avg_score:6.1f} | "
+                    f"{progress_str}"
                     f"Loss: {avg_loss:.4f} | "
                     f"Q: {avg_q:.1f} | "
                     f"ε: {self.agent.epsilon:.3f} | "
@@ -775,6 +788,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         recent_wins = self.wins[-100:]
         win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0
         print(f"   Win rate (100):   {win_rate*100:.1f}%")
+        if self.progresses:
+            print(f"   Final avg prog:   {np.mean(self.progresses[-100:]):.3f}")
+            print(f"   Best progress:    {np.max(self.progresses):.3f}")
         print("=" * 70)
 
         if self.web_dashboard:
