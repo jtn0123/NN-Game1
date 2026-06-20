@@ -35,7 +35,7 @@ run_stage () {
   echo "================ DIFFICULTY STAGE: ${diff} (${eps} episodes) ================"
   python main.py --headless --game crystal_caves --random-caves \
     --cave-difficulty "$diff" --cave-families "$FAM" \
-    --turbo --vec-envs 8 --lr-decay --episodes "$eps"
+    --turbo --vec-envs 8 --episodes "$eps"
 }
 
 run_stage tutorial "${TUT_EPS:-600}"
