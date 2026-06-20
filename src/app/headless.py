@@ -97,8 +97,17 @@ class HeadlessTrainer(HeadlessDashboardMixin):
             config.BATCH_SIZE = 128
             config.GRADIENT_STEPS = 2
             config.USE_TORCH_COMPILE = False  # No benefit for small models on CPU
-            config.FORCE_CPU = True  # CPU is faster for this model size
+            config.FORCE_CPU = True  # CPU is faster for this (small MLP) model size
             print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
+
+        # The convolutional net is a different, conv-heavy workload — the M4 GPU is
+        # ~25% faster on it (the B=128 learn step ~30% faster), so don't force CPU.
+        import torch as _torch
+
+        gpu_available = _torch.cuda.is_available() or _torch.backends.mps.is_available()
+        if getattr(config, "USE_CNN_STATE", False) and gpu_available:
+            config.FORCE_CPU = False
+            print(f"⚙️  CNN: using {config.DEVICE} (conv is faster on the GPU than CPU)")
 
         # Vectorized environment support
         self.num_envs = getattr(args, "vec_envs", 1)
