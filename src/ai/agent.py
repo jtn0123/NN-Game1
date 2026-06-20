@@ -221,6 +221,10 @@ class Agent(AgentPersistenceMixin):
 
         # Pre-allocated tensors for action selection (avoids tensor creation per step)
         self._state_tensor = torch.empty((1, state_size), dtype=torch.float32, device=self.device)
+        self._action_batch_tensor = torch.empty(
+            (1, state_size), dtype=torch.float32, device=self.device
+        )
+        self._cached_action_batch_size = 1
 
         # Pre-allocated batch tensors for learning (avoids allocation per learning step)
         batch_size = self.config.BATCH_SIZE
@@ -349,23 +353,34 @@ class Agent(AgentPersistenceMixin):
                 # Exploitation: best Q-value actions for non-exploring states
                 # NoisyNets provide additional exploration within network forward pass
                 exploit_mask = ~explore_mask
-                exploit_states = states[exploit_mask]
-
-                with torch.inference_mode():
-                    states_tensor = torch.from_numpy(exploit_states).to(self.device)
-                    q_values = self.policy_net(states_tensor)
-                    best_actions = q_values.argmax(dim=1).cpu().numpy()
-                    actions[exploit_mask] = best_actions
+                actions[exploit_mask] = self._greedy_actions_for_states(states[exploit_mask])
         else:
             # Pure NoisyNets or evaluation mode: all actions from network
             # NoisyNets handle exploration via learned noise parameters
             num_exploited = batch_size
-            with torch.inference_mode():
-                states_tensor = torch.from_numpy(states).to(self.device)
-                q_values = self.policy_net(states_tensor)
-                actions = q_values.argmax(dim=1).cpu().numpy()
+            actions = self._greedy_actions_for_states(states)
 
         return actions, num_explored, num_exploited
+
+    def _greedy_actions_for_states(self, states: np.ndarray) -> np.ndarray:
+        """Return greedy actions for a state batch using cached device storage."""
+        if states.ndim == 1:
+            states = states.reshape(1, -1)
+        batch_size = states.shape[0]
+        if (
+            batch_size != self._cached_action_batch_size
+            or self._action_batch_tensor.device != self.device
+        ):
+            self._action_batch_tensor = torch.empty(
+                (batch_size, self.state_size), dtype=torch.float32, device=self.device
+            )
+            self._cached_action_batch_size = batch_size
+
+        with torch.inference_mode():
+            view = self._action_batch_tensor[:batch_size]
+            view.copy_(torch.from_numpy(states))
+            q_values = self.policy_net(view)
+            return q_values.argmax(dim=1).cpu().numpy()
 
     def remember_batch(
         self,

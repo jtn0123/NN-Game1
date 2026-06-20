@@ -117,6 +117,19 @@ class TrainingState:
     eval_is_baseline: bool = False  # true when showing a restored saved best before live eval
     eval_num_games: int = 0
     eval_history: List[float] = field(default_factory=list)  # eval-mean trajectory (sparkline)
+    # --- Crystal Caves curriculum state ---
+    curriculum_active: bool = False
+    curriculum_stage_index: int = 0
+    curriculum_stage_total: int = 0
+    curriculum_stage_id: str = ""
+    curriculum_stage_name: str = ""
+    curriculum_stage_difficulty: str = ""
+    curriculum_stage_families: str = ""
+    curriculum_stage_start_episode: int = 0
+    curriculum_stage_target_episode: int = 0
+    curriculum_stage_status: str = ""
+    curriculum_stage_gate: str = ""
+    curriculum_next_stage_name: str = ""
 
 
 @dataclass

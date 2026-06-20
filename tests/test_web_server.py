@@ -337,6 +337,42 @@ class TestMetricsPublisher:
         assert st.eval_best_mean == 90.0
         assert st.eval_delta_from_best == -20.0
 
+    def test_record_curriculum_stage_drives_dashboard_state(self):
+        """Curriculum telemetry should be a first-class dashboard contract."""
+        publisher = MetricsPublisher(history_length=100)
+        received = []
+        publisher.on_update(lambda snapshot: received.append(snapshot))
+
+        publisher.record_curriculum_stage(
+            active=True,
+            stage_index=2,
+            stage_total=5,
+            stage_id="easy_platform",
+            stage_name="Easy platform networks",
+            difficulty="easy",
+            families="platform_network",
+            start_episode=300,
+            target_episode=900,
+            status="running",
+            gate="stable switch/crystal collection",
+            next_stage_name="Easy mixed families",
+        )
+
+        st = publisher.state
+        assert st.curriculum_active is True
+        assert st.curriculum_stage_index == 2
+        assert st.curriculum_stage_total == 5
+        assert st.curriculum_stage_id == "easy_platform"
+        assert st.curriculum_stage_name == "Easy platform networks"
+        assert st.curriculum_stage_difficulty == "easy"
+        assert st.curriculum_stage_families == "platform_network"
+        assert st.curriculum_stage_start_episode == 300
+        assert st.curriculum_stage_target_episode == 900
+        assert st.curriculum_stage_status == "running"
+        assert st.curriculum_stage_gate == "stable switch/crystal collection"
+        assert st.curriculum_next_stage_name == "Easy mixed families"
+        assert received[-1]["state"]["curriculum_stage_id"] == "easy_platform"
+
     def test_crystal_caves_outcome_counts_are_recent_window(self):
         publisher = MetricsPublisher(history_length=100)
 

@@ -246,6 +246,40 @@
                     </div>
                 </div>
 
+                <!-- Crystal Caves curriculum stage (shown only for staged runs) -->
+                <div class="info-card curriculum-panel" id="curriculum-panel" style="display: none;">
+                    <div class="card-header">
+                        <h3 data-tooltip="The active Crystal Caves curriculum stage. A staged run starts simple, saves the best checkpoint, then warm-starts the next harder/diverse stage." data-tooltip-position="right">🎓 Curriculum</h3>
+                        <span class="info-value status-badge curriculum-badge" id="curriculum-stage-count" data-tooltip="Current stage number out of the full staged training plan." data-tooltip-position="right">— / —</span>
+                    </div>
+
+                    <div class="curriculum-title-row">
+                        <div>
+                            <div class="curriculum-stage-name" id="curriculum-stage-name">waiting for stage</div>
+                            <div class="curriculum-stage-meta" id="curriculum-stage-meta">—</div>
+                        </div>
+                        <span class="curriculum-status" id="curriculum-status">idle</span>
+                    </div>
+
+                    <div class="cc-bar-row" data-tooltip="How much of this curriculum stage's episode budget has been consumed. This is stage-local progress, not total training progress." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>Stage budget</span><span id="curriculum-episode-text">—</span></div>
+                        <div class="gauge-bar cc-gauge">
+                            <div class="gauge-fill curriculum-fill" id="curriculum-stage-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="curriculum-notes">
+                        <div class="curriculum-note" data-tooltip="The behavioral reason this stage exists. Do not promote just because training score spikes; use held-out eval plus the Crystal Caves panel." data-tooltip-position="right">
+                            <span class="curriculum-note-label">Gate</span>
+                            <span id="curriculum-gate">—</span>
+                        </div>
+                        <div class="curriculum-note" data-tooltip="The next stage that will warm-start from this stage's eval-best checkpoint." data-tooltip-position="right">
+                            <span class="curriculum-note-label">Next</span>
+                            <span id="curriculum-next">—</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Crystal Caves live progress (shown only when training Crystal Caves) -->
                 <div class="info-card cc-panel" id="crystal-caves-panel" style="display: none;">
                     <div class="card-header">
