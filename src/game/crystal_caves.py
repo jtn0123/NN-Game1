@@ -157,6 +157,12 @@ class CrystalCaves(
     # continuous progress shaping.
     SWITCH_THROW_BONUS = 8.0
 
+    # Monotonic dense reward for getting closer than ever to the current
+    # objective. This gives the agent a clearer gradient toward the first
+    # tutorial crystal without rewarding back-and-forth dithering.
+    TARGET_BEST_APPROACH_SCALE = 0.18
+    TARGET_BEST_APPROACH_CAP = 0.18
+
     MOVE_SPEED = 4.2
 
     AIR_SPEED = 3.3
@@ -502,6 +508,7 @@ class CrystalCaves(
         self._end_reason = "running"
         self._visited_obj_cells = set()
         self._obj_region_total = 0.0
+        self._target_best_distances: Dict[Tuple[str, int, int], float] = {}
 
         return self.get_state()
 
