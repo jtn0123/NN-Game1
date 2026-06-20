@@ -370,6 +370,61 @@ class TestCrystalCavesCombatAndDanger:
         assert total_reward < -1.0
 
 
+class TestCrystalCavesPowerupsAndTreasure:
+    """Power-ups (super shot, gravity flip, freeze) and treasure pickups."""
+
+    @staticmethod
+    def _put_pickup_under_player(game):
+        """Return the player's current tile (an open, touchable tile)."""
+        return game._player_tile()
+
+    def test_power_shot_sets_super_timer(self, game):
+        tile = self._put_pickup_under_player(game)
+        game.powerups = {tile: game.POWER_SHOT}
+        game.super_timer = 0
+        reward = game._collect_pickups()
+        assert game.super_timer == game.MAX_POWER_TIMER
+        assert reward > 0
+        assert tile not in game.powerups
+
+    def test_gravity_power_flips_gravity(self, game):
+        tile = self._put_pickup_under_player(game)
+        game.powerups = {tile: game.GRAVITY_POWER}
+        before = game.gravity_dir
+        game._collect_pickups()
+        assert game.gravity_dir == -before
+        assert game.gravity_timer > 0
+
+    def test_gravity_field_restores_after_timer(self, game):
+        game.gravity_dir = -1
+        game.gravity_timer = 1
+        game.step(CrystalCaves.IDLE)  # ticks the gravity timer to 0
+        assert game.gravity_dir == 1  # field restored to normal
+
+    def test_freeze_power_sets_timer_and_holds_enemies(self, game):
+        from src.game.crystal_caves_entities import Enemy
+
+        tile = self._put_pickup_under_player(game)
+        game.powerups = {tile: game.FREEZE_POWER}
+        game._collect_pickups()
+        assert game.freeze_timer > 0
+        # a frozen enemy does not move
+        enemy = Enemy(game.player_x + 120, game.player_y, 1.2)
+        game.enemies = [enemy]
+        x0 = enemy.x
+        game._update_enemies()
+        assert enemy.x == x0  # frozen in place
+
+    def test_treasure_pickup_rewards_and_scores(self, game):
+        tile = self._put_pickup_under_player(game)
+        game.treasures = {tile}
+        score0 = game.score
+        reward = game._collect_pickups()
+        assert reward > 0
+        assert game.score == score0 + 300
+        assert tile not in game.treasures
+
+
 class TestCrystalCavesRenderAndVectorized:
     """Test render and vectorized training surfaces."""
 
