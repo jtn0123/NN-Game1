@@ -145,8 +145,7 @@ class TestCrystalCavesState:
 
         state = game.get_state()
         metadata_start = (
-            game.WINDOW_COLS * game.WINDOW_ROWS
-            + game.GLOBAL_MAP_COLS * game.GLOBAL_MAP_ROWS
+            game.WINDOW_COLS * game.WINDOW_ROWS + game.GLOBAL_MAP_COLS * game.GLOBAL_MAP_ROWS
         )
         target_dx = state[metadata_start + 15]
         target_distance = state[metadata_start + 17]
@@ -462,12 +461,8 @@ class TestCrystalCavesRenderAndVectorized:
 
         pixels = pygame.surfarray.array3d(surface)
         non_black_pixels = np.count_nonzero(np.any(pixels > 0, axis=2))
-        bright_green_pixels = np.count_nonzero(
-            (pixels[:, :, 1] > 220) & (pixels[:, :, 0] < 140)
-        )
-        bright_blue_pixels = np.count_nonzero(
-            (pixels[:, :, 2] > 180) & (pixels[:, :, 0] < 150)
-        )
+        bright_green_pixels = np.count_nonzero((pixels[:, :, 1] > 220) & (pixels[:, :, 0] < 140))
+        bright_blue_pixels = np.count_nonzero((pixels[:, :, 2] > 180) & (pixels[:, :, 0] < 150))
         warm_prop_pixels = np.count_nonzero(
             (pixels[:, :, 0] > 150) & (pixels[:, :, 1] > 80) & (pixels[:, :, 2] < 90)
         )
@@ -494,14 +489,10 @@ class TestCrystalCavesRenderAndVectorized:
             (hud[:, :, 0] > 220) & (hud[:, :, 1] > 180) & (hud[:, :, 2] < 120)
         )
         player_pink = np.count_nonzero(
-            (playfield[:, :, 0] > 220)
-            & (playfield[:, :, 1] < 120)
-            & (playfield[:, :, 2] > 120)
+            (playfield[:, :, 0] > 220) & (playfield[:, :, 1] < 120) & (playfield[:, :, 2] > 120)
         )
         player_yellow = np.count_nonzero(
-            (playfield[:, :, 0] > 220)
-            & (playfield[:, :, 1] > 180)
-            & (playfield[:, :, 2] < 120)
+            (playfield[:, :, 0] > 220) & (playfield[:, :, 1] > 180) & (playfield[:, :, 2] < 120)
         )
 
         assert hud_green > 300
@@ -528,9 +519,7 @@ class TestCrystalCavesRenderAndVectorized:
         game.render_title_screen(surface)
 
         pixels = pygame.surfarray.array3d(surface)
-        cyan_title_pixels = np.count_nonzero(
-            (pixels[:, :, 2] > 180) & (pixels[:, :, 1] > 160)
-        )
+        cyan_title_pixels = np.count_nonzero((pixels[:, :, 2] > 180) & (pixels[:, :, 1] > 160))
         yellow_instruction_pixels = np.count_nonzero(
             (pixels[:, :, 0] > 220) & (pixels[:, :, 1] > 170) & (pixels[:, :, 2] < 120)
         )
@@ -549,9 +538,7 @@ class TestCrystalCavesRenderAndVectorized:
 
         pixels = pygame.surfarray.array3d(surface)
         non_black_pixels = np.count_nonzero(np.any(pixels > 0, axis=2))
-        cyan_title_pixels = np.count_nonzero(
-            (pixels[:, :, 2] > 180) & (pixels[:, :, 1] > 160)
-        )
+        cyan_title_pixels = np.count_nonzero((pixels[:, :, 2] > 180) & (pixels[:, :, 1] > 160))
 
         assert non_black_pixels > config.SCREEN_WIDTH * config.SCREEN_HEIGHT * 0.12
         assert cyan_title_pixels > 1200
@@ -584,10 +571,7 @@ class TestCrystalCavesRenderAndVectorized:
 
         game.step(CrystalCaves.IDLE)
 
-        assert any(
-            event.kind == "sparkle" and event.text == "+100"
-            for event in game.visual_events
-        )
+        assert any(event.kind == "sparkle" and event.text == "+100" for event in game.visual_events)
 
     def test_visual_events_expire_deterministically(self, config):
         game = CrystalCaves(config, headless=False)
@@ -612,14 +596,10 @@ class TestCrystalCavesRenderAndVectorized:
         pixels = pygame.surfarray.array3d(surface)
         playfield = pixels[:, : config.SCREEN_HEIGHT - game.HUD_HEIGHT, :]
         red_warning_pixels = np.count_nonzero(
-            (playfield[:, :, 0] > 180)
-            & (playfield[:, :, 1] < 110)
-            & (playfield[:, :, 2] < 130)
+            (playfield[:, :, 0] > 180) & (playfield[:, :, 1] < 110) & (playfield[:, :, 2] < 130)
         )
         yellow_alert_pixels = np.count_nonzero(
-            (playfield[:, :, 0] > 220)
-            & (playfield[:, :, 1] > 170)
-            & (playfield[:, :, 2] < 130)
+            (playfield[:, :, 0] > 220) & (playfield[:, :, 1] > 170) & (playfield[:, :, 2] < 130)
         )
         white_spike_pixels = np.count_nonzero(np.all(playfield > 190, axis=2))
 
@@ -735,14 +715,10 @@ class TestCrystalCavesRenderAndVectorized:
         pixels = pygame.surfarray.array3d(surface)
         playfield = pixels[:, : config.SCREEN_HEIGHT - game.HUD_HEIGHT, :]
         bright_green_pixels = np.count_nonzero(
-            (playfield[:, :, 1] > 220)
-            & (playfield[:, :, 0] < 130)
-            & (playfield[:, :, 2] < 170)
+            (playfield[:, :, 1] > 220) & (playfield[:, :, 0] < 130) & (playfield[:, :, 2] < 170)
         )
         blue_metal_pixels = np.count_nonzero(
-            (playfield[:, :, 2] > 100)
-            & (playfield[:, :, 0] < 130)
-            & (playfield[:, :, 1] > 60)
+            (playfield[:, :, 2] > 100) & (playfield[:, :, 0] < 130) & (playfield[:, :, 1] > 60)
         )
 
         assert bright_green_pixels < blue_metal_pixels
@@ -784,12 +760,7 @@ class TestCrystalCavesRenderAndVectorized:
 
 
 def _find(layout, ch):
-    return [
-        (c, r)
-        for r, row in enumerate(layout)
-        for c, x in enumerate(row)
-        if x == ch
-    ]
+    return [(c, r) for r, row in enumerate(layout) for c, x in enumerate(row) if x == ch]
 
 
 @pytest.mark.parametrize("cave_index", range(len(CAVES)))
@@ -819,3 +790,39 @@ def test_every_cave_is_dense(cave_index):
     total = sum(len(row) for row in layout)
     solid = sum(row.count("#") for row in layout)
     assert 0.45 <= solid / total <= 0.85
+
+
+def _loop_window(game, player_col, player_row):
+    """Reference window built the slow per-cell way, for equivalence testing."""
+    half_c, half_r = game.WINDOW_COLS // 2, game.WINDOW_ROWS // 2
+    win = np.empty((game.WINDOW_ROWS, game.WINDOW_COLS), dtype=np.float32)
+    i = 0
+    for row in range(player_row - half_r, player_row + half_r + 1):
+        for col in range(player_col - half_c, player_col + half_c + 1):
+            win.flat[i] = game._tile_code(col, row)
+            i += 1
+    return win
+
+
+@pytest.mark.parametrize("difficulty", ["easy", "normal"])
+def test_vectorized_window_matches_tile_code_loop(difficulty):
+    """The fast vectorized perception window must stay bit-identical to the
+    per-cell _tile_code loop it replaced — across collected crystals, thrown
+    switches, moving enemies, and opened doors."""
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_PROCEDURAL = True
+    cfg.CRYSTAL_CAVES_DIFFICULTY = difficulty
+    cfg.CRYSTAL_CAVES_FAMILIES = "platform_network"
+    np.random.seed(7)
+    game = CrystalCaves(cfg, headless=True)
+    game.reset()
+
+    for _ in range(400):
+        pc = int((game.player_x + game.PLAYER_WIDTH / 2) // game.TILE_SIZE)
+        pr = int((game.player_y + game.PLAYER_HEIGHT / 2) // game.TILE_SIZE)
+        expected = _loop_window(game, pc, pr)
+        actual = game._fill_window(pc, pr)
+        assert np.array_equal(expected, actual)
+        _, _, done, _ = game.step(np.random.randint(0, game.action_size))
+        if done:
+            game.reset()

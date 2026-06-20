@@ -550,13 +550,9 @@ class CrystalCaves(
         idx = 0
         player_col = int((self.player_x + self.PLAYER_WIDTH / 2) // self.TILE_SIZE)
         player_row = int((self.player_y + self.PLAYER_HEIGHT / 2) // self.TILE_SIZE)
-        half_cols = self.WINDOW_COLS // 2
-        half_rows = self.WINDOW_ROWS // 2
-
-        for row in range(player_row - half_rows, player_row + half_rows + 1):
-            for col in range(player_col - half_cols, player_col + half_cols + 1):
-                self._state_array[idx] = self._tile_code(col, row)
-                idx += 1
+        n_window = self.WINDOW_ROWS * self.WINDOW_COLS
+        self._state_array[:n_window] = self._fill_window(player_col, player_row).reshape(-1)
+        idx = n_window
 
         center_idx = (self.WINDOW_ROWS * self.WINDOW_COLS) // 2
         self._state_array[center_idx] = self.TILE_CODES[self.PLAYER]
@@ -784,6 +780,13 @@ class CrystalCaves(
                     row += 1
         self._refresh_elevator_rects()
 
+        # Cache static terrain masks for the vectorized state window. After load,
+        # self.grid only ever holds SOLID / ELEVATOR chars, and both are static for
+        # the level's lifetime — so these masks never need rebuilding mid-episode.
+        grid_arr = np.array(self.grid, dtype="<U1")
+        self._wall_mask = grid_arr == self.SOLID
+        self._elevator_mask = grid_arr == self.ELEVATOR
+
     def _info(self) -> dict:
         return {
             "score": self.score,
@@ -902,6 +905,66 @@ class CrystalCaves(
                 self.player_y = er.top - self.PLAYER_HEIGHT
                 self.vy = 0.0
                 prect = self._player_rect()
+
+    def _code_grid(self) -> np.ndarray:
+        """Vectorized whole-level tile-code grid — the numpy equivalent of calling
+        ``_tile_code`` on every cell, built by painting entity layers in reverse
+        priority order (lowest first, so higher-priority layers overwrite). Slicing
+        a window out of this is ~10x faster than the per-cell Python loop, and a
+        bit-equivalence test pins it to ``_tile_code``. Indexing is grid[row, col]
+        while the entity sets store (col, row)."""
+        tc = self.TILE_CODES
+        grid = np.full((self.level_rows, self.level_cols), tc[self.EMPTY], dtype=np.float32)
+
+        for c, r in self.air_tanks:
+            grid[r, c] = tc[self.AIR_TANK]
+        for (c, r), power in self.powerups.items():
+            grid[r, c] = tc[power]
+        for c, r in self.treasures:
+            grid[r, c] = tc[self.TREASURE]
+        for c, r in self.ammo_pickups:
+            grid[r, c] = tc[self.AMMO]
+        for c, r in self.switches:
+            grid[r, c] = tc[self.SWITCH]
+        ec, er = self.exit_pos
+        grid[er, ec] = tc[self.EXIT] if self.exit_unlocked else 0.38
+        for c, r in self.crystals:
+            grid[r, c] = tc[self.CRYSTAL]
+        for c, r in self.hazards:
+            grid[r, c] = tc[self.hazard_kinds.get((c, r), self.SPIKE)]
+        grid[self._elevator_mask] = tc[self.ELEVATOR]
+        grid[self._wall_mask] = tc[self.SOLID]
+        # Closed doors are solid (show DOOR); open doors fall through to whatever
+        # is underneath, so they are left unpainted here.
+        for c, r in self.doors:
+            if not self._door_open((c, r)):
+                grid[r, c] = tc[self.DOOR]
+        for enemy in self.enemies:
+            if enemy.alive:
+                c, r = self._tile_for_enemy(enemy)
+                if 0 <= r < self.level_rows and 0 <= c < self.level_cols:
+                    grid[r, c] = tc[self.FLYER if enemy.kind == "flyer" else self.CRAWLER]
+        return grid
+
+    def _fill_window(self, player_col: int, player_row: int) -> np.ndarray:
+        """The WINDOW_ROWS x WINDOW_COLS perception window centered on the player,
+        sliced from the vectorized code grid with out-of-bounds cells = SOLID
+        (matching ``_tile_code``'s out-of-bounds rule)."""
+        half_c = self.WINDOW_COLS // 2
+        half_r = self.WINDOW_ROWS // 2
+        code_grid = self._code_grid()
+        window = np.full(
+            (self.WINDOW_ROWS, self.WINDOW_COLS),
+            self.TILE_CODES[self.SOLID],
+            dtype=np.float32,
+        )
+        r0, r1 = player_row - half_r, player_row + half_r + 1
+        c0, c1 = player_col - half_c, player_col + half_c + 1
+        sr0, sr1 = max(0, r0), min(self.level_rows, r1)
+        sc0, sc1 = max(0, c0), min(self.level_cols, c1)
+        if sr0 < sr1 and sc0 < sc1:
+            window[sr0 - r0 : sr1 - r0, sc0 - c0 : sc1 - c0] = code_grid[sr0:sr1, sc0:sc1]
+        return window
 
     def _tile_code(self, col: int, row: int) -> float:
         if col < 0 or row < 0 or col >= self.level_cols or row >= self.level_rows:
