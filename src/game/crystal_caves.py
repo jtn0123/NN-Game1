@@ -131,9 +131,9 @@ class CrystalCaves(
     # Completion-progress potential (0..1) for reward shaping + info["progress"].
     # Monotonic components so the potential-based reward is always >= 0 (it never
     # penalises exploration). Weights sum to 1.0.
-    PROGRESS_W_CRYSTAL = 0.50  # fraction of crystals collected
+    PROGRESS_W_CRYSTAL = 0.56  # fraction of crystals collected
     PROGRESS_W_SWITCH = 0.15  # every required switch thrown
-    PROGRESS_W_DEPTH = 0.15  # deepest row reached (how far into the cave)
+    PROGRESS_W_DEPTH = 0.09  # deepest row reached (how far into the cave)
     PROGRESS_W_WIN = 0.20  # reached the exit
     # Total dense shaping reward earned across a full clear. Raised from 6.0:
     # policies plateaued at ~61% completion (2/3 crystals + switch) because the
@@ -156,6 +156,7 @@ class CrystalCaves(
     # less than a single crystal (+3 vs +5); reward it sharply on top of the
     # continuous progress shaping.
     SWITCH_THROW_BONUS = 8.0
+    ALL_CRYSTALS_COLLECTED_BONUS = 16.0
 
     # Monotonic dense reward for getting closer than ever to the current
     # objective. This gives the agent a clearer gradient toward the first

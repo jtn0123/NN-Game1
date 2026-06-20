@@ -87,7 +87,9 @@ class MetricsPublisher:
 
         # Held-out eval mean-score trajectory (for the dashboard eval sparkline)
         self._eval_history: Deque[float] = deque(maxlen=200)
+        self._eval_stage_histories: Dict[str, Deque[float]] = {}
         self._cc_outcome_window: Deque[str] = deque(maxlen=100)
+        self._cc_crystal_window: Deque[float] = deque(maxlen=100)
 
         # Thread safety for callbacks
         self._callback_lock = threading.Lock()
@@ -326,6 +328,13 @@ class MetricsPublisher:
             self.state.cc_end_reason = reason
             self._cc_outcome_window.append(reason)
             self.state.cc_end_reason_counts = dict(Counter(self._cc_outcome_window))
+            self._cc_crystal_window.append(self.state.cc_crystal_frac)
+            self.state.cc_recent_crystal_frac = (
+                sum(self._cc_crystal_window) / len(self._cc_crystal_window)
+                if self._cc_crystal_window
+                else 0.0
+            )
+            self.state.cc_crystal_history = list(self._cc_crystal_window)
 
     def record_eval(
         self,
@@ -335,6 +344,11 @@ class MetricsPublisher:
         median_score: float,
         win_rate: float,
         num_games: int,
+        crystal_frac: float = 0.0,
+        switch_rate: float = 0.0,
+        depth_frac: float = 0.0,
+        end_reason_counts: Optional[Dict[str, int]] = None,
+        stage_id: Optional[str] = None,
     ) -> None:
         """Record a held-out evaluation result and push it to the dashboard.
 
@@ -350,12 +364,24 @@ class MetricsPublisher:
         self.state.eval_median_score = float(median_score)
         self.state.eval_win_rate = float(win_rate)
         self.state.eval_num_games = int(num_games)
+        self.state.eval_crystal_frac = float(crystal_frac)
+        self.state.eval_switch_rate = float(switch_rate)
+        self.state.eval_depth_frac = float(depth_frac)
+        self.state.eval_end_reason_counts = dict(end_reason_counts or {})
         previous_best = self.state.eval_best_mean
         self.state.eval_is_new_best = (not had_prior_eval) or float(mean_score) > previous_best
         self.state.eval_best_mean = max(previous_best, float(mean_score))
         self.state.eval_delta_from_best = float(mean_score) - self.state.eval_best_mean
         self._eval_history.append(float(mean_score))
         self.state.eval_history = list(self._eval_history)
+        active_stage_id = stage_id or self.state.curriculum_stage_id
+        if active_stage_id:
+            history = self._eval_stage_histories.setdefault(
+                active_stage_id,
+                deque(maxlen=100),
+            )
+            history.append(float(mean_score))
+            self.state.eval_stage_history = list(history)
 
         # Push immediately so the panel updates the moment an eval completes,
         # rather than waiting for the next per-episode metric emit.
@@ -383,9 +409,14 @@ class MetricsPublisher:
         self.state.eval_delta_from_best = 0.0
         self.state.eval_is_new_best = False
         self.state.eval_num_games = int(num_games)
+        self.state.eval_crystal_frac = 0.0
+        self.state.eval_switch_rate = 0.0
+        self.state.eval_depth_frac = 0.0
+        self.state.eval_end_reason_counts = {}
         self._eval_history.clear()
         self._eval_history.append(float(mean_score))
         self.state.eval_history = list(self._eval_history)
+        self.state.eval_stage_history = []
 
         with self._callback_lock:
             callbacks = self._on_update_callbacks.copy()
@@ -407,6 +438,10 @@ class MetricsPublisher:
         status: str,
         gate: str,
         next_stage_name: str,
+        gate_ready: bool = False,
+        gate_status: str = "",
+        gate_detail: str = "",
+        checkpoint_mode: str = "",
     ) -> None:
         """Publish the active Crystal Caves curriculum stage to the dashboard."""
         self.state.curriculum_active = active
@@ -420,7 +455,13 @@ class MetricsPublisher:
         self.state.curriculum_stage_target_episode = target_episode
         self.state.curriculum_stage_status = status
         self.state.curriculum_stage_gate = gate
+        self.state.curriculum_gate_ready = gate_ready
+        self.state.curriculum_gate_status = gate_status
+        self.state.curriculum_gate_detail = gate_detail
         self.state.curriculum_next_stage_name = next_stage_name
+        self.state.curriculum_checkpoint_mode = checkpoint_mode
+        history = self._eval_stage_histories.get(stage_id)
+        self.state.eval_stage_history = list(history) if history is not None else []
 
         with self._callback_lock:
             callbacks = self._on_update_callbacks.copy()

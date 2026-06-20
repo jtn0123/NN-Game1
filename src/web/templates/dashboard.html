@@ -237,8 +237,15 @@
                         <span class="eval-verdict-detail" id="eval-verdict-detail">held-out status</span>
                     </div>
 
+                    <div class="eval-subgoals" data-tooltip="Why the held-out eval passed or failed. Crystals is the leading indicator; outcomes explain whether failure is timeout, stall, death, or missing the exit." data-tooltip-position="right">
+                        <div class="eval-subgoal"><span>Crystals</span><strong id="eval-crystals">0%</strong></div>
+                        <div class="eval-subgoal"><span>Switch</span><strong id="eval-switch">0%</strong></div>
+                        <div class="eval-subgoal"><span>Depth</span><strong id="eval-depth">0%</strong></div>
+                    </div>
+                    <div class="eval-outcomes" id="eval-outcomes"><span class="cc-outcome-empty">waiting for eval outcomes…</span></div>
+
                     <div class="eval-spark-wrap" data-tooltip="The held-out mean score over training. UP = learning to generalize. FLAT = genuinely stuck (now a real signal, no longer an eval artifact)." data-tooltip-position="right">
-                        <div class="cc-bar-label"><span>📈 Held-out trend</span><span id="eval-last-ep" class="cc-bar-hint-inline">—</span></div>
+                        <div class="cc-bar-label"><span>📈 Stage held-out trend</span><span id="eval-last-ep" class="cc-bar-hint-inline">—</span></div>
                         <svg class="eval-spark" id="eval-spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true">
                             <polyline id="eval-spark-line" fill="none" stroke="var(--accent-success)" stroke-width="2" vector-effect="non-scaling-stroke" points=""></polyline>
                             <circle id="eval-spark-dot" cx="150" cy="22" r="3" fill="var(--accent-success)" style="display: none;"></circle>
@@ -273,6 +280,14 @@
                             <span class="curriculum-note-label">Gate</span>
                             <span id="curriculum-gate">—</span>
                         </div>
+                        <div class="curriculum-note curriculum-gate-readiness" data-tooltip="Whether the current stage should promote. This is based on held-out crystal pickup, wins, and timeout/stall breakdown, not raw training score." data-tooltip-position="right">
+                            <span class="curriculum-note-label">Readiness</span>
+                            <span id="curriculum-gate-readiness">waiting for eval</span>
+                        </div>
+                        <div class="curriculum-note" data-tooltip="How this stage was started. Fresh means no stale replay/checkpoint state; eval-best rollback means the next stage uses the best held-out checkpoint, not the latest regressed policy." data-tooltip-position="right">
+                            <span class="curriculum-note-label">Checkpoint</span>
+                            <span id="curriculum-checkpoint">—</span>
+                        </div>
                         <div class="curriculum-note" data-tooltip="The next stage that will warm-start from this stage's eval-best checkpoint." data-tooltip-position="right">
                             <span class="curriculum-note-label">Next</span>
                             <span id="curriculum-next">—</span>
@@ -304,6 +319,13 @@
                             <div class="gauge-fill cc-fill-crystal" id="cc-crystal-fill" style="width: 0%;"></div>
                         </div>
                         <div class="cc-bar-hint">the key sub-goal — the exit stays locked until this is full, so no win is possible until then</div>
+                    </div>
+
+                    <div class="cc-bar-row" data-tooltip="Average crystal pickup over recent completed training episodes. This smooths noisy single episodes and tells you whether the stage is becoming reliable." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>💎 Recent crystal pickup</span><span id="cc-crystal-trend-text">0%</span></div>
+                        <div class="gauge-bar cc-gauge">
+                            <div class="gauge-fill cc-fill-crystal-trend" id="cc-crystal-trend-fill" style="width: 0%;"></div>
+                        </div>
                     </div>
 
                     <div class="cc-subrows">

@@ -233,6 +233,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         self.evaluator: Optional[Evaluator] = None
         self._exploration_boost_active: bool = False
         self._exploration_boost_end_episode: int = 0
+        self.epsilon_episode_offset: int = 0
         if config.EVAL_EVERY > 0:
             eval_game = GameClass(config, headless=True)  # type: ignore[call-arg]
             self.evaluator = Evaluator(
@@ -367,7 +368,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 steps_since_report += 1
 
             # Episode complete
-            self.agent.decay_epsilon(episode)
+            self.agent.decay_epsilon(max(0, episode - self.epsilon_episode_offset))
             self.agent.step_scheduler()  # Step learning rate scheduler
             self._apply_lr_decay(start_episode, episode)
             self.scores.append(info["score"])
@@ -744,6 +745,10 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                                 median_score=eval_results.median_score,
                                 win_rate=eval_results.win_rate,
                                 num_games=eval_results.num_games,
+                                crystal_frac=eval_results.mean_crystal_frac,
+                                switch_rate=eval_results.mean_switch_rate,
+                                depth_frac=eval_results.mean_depth_frac,
+                                end_reason_counts=eval_results.end_reason_counts,
                             )
 
                         # Early-stop: end the stage once eval has plateaued, instead
@@ -791,7 +796,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                             self.web_dashboard.log(
                                 f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
                                 f"max level {eval_results.max_level}, "
-                                f"{eval_results.win_rate*100:.0f}% wins{plateau_str}",
+                                f"{eval_results.win_rate*100:.0f}% wins, "
+                                f"{eval_results.mean_crystal_frac*100:.0f}% crystals"
+                                f"{plateau_str}",
                                 ("info" if not self.evaluator.is_plateau() else "warning"),
                             )
 
@@ -820,7 +827,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
                 # Only decay epsilon if not in boost mode
                 if not self._exploration_boost_active:
-                    self.agent.decay_epsilon(self.current_episode)
+                    self.agent.decay_epsilon(
+                        max(0, self.current_episode - self.epsilon_episode_offset)
+                    )
                 self.agent.step_scheduler()  # Step learning rate scheduler
                 self._apply_lr_decay(start_episode, self.current_episode)
 

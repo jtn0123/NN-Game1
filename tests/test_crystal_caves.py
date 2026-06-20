@@ -241,7 +241,7 @@ class TestCrystalCavesObjectives:
         _, reward, _, info = game.step(CrystalCaves.IDLE)
         assert game.exit_unlocked
         assert info["exit_unlocked"]
-        assert reward >= 9.0
+        assert reward >= game.ALL_CRYSTALS_COLLECTED_BONUS - 1.0
 
     def test_exit_unlock_emits_visual_feedback(self, config):
         game = CrystalCaves(config, headless=False)
