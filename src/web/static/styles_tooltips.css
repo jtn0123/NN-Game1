@@ -18,6 +18,7 @@
 /* Tooltip bubble */
 [data-tooltip]::before {
     content: attr(data-tooltip);
+    display: none;
     position: absolute;
     bottom: calc(100% + 10px);
     left: 50%;
@@ -45,6 +46,7 @@
 /* Tooltip arrow */
 [data-tooltip]::after {
     content: '';
+    display: none;
     position: absolute;
     bottom: calc(100% + 2px);
     left: 50%;
@@ -65,6 +67,7 @@
 [data-tooltip]:focus-visible::after,
 [data-tooltip]:focus-within::before,
 [data-tooltip]:focus-within::after {
+    display: block;
     opacity: 1;
     visibility: visible;
 }
@@ -106,9 +109,8 @@
     border-bottom-color: var(--accent-primary);
 }
 
-/* The right column is a fixed 360px scroll box (overflow clipped), so tooltips
-   inside it must stay within that width and the corner metric cards must anchor
-   to their own edge instead of centering (which would spill past the column). */
+/* Keep right-rail tooltips inside the narrow desktop column. Corner metric cards
+   anchor to their own edge instead of centering past the rail. */
 .stats-column [data-tooltip]::before {
     max-width: 300px;
 }
@@ -123,6 +125,20 @@
     left: auto;
     right: 0;
     transform: translateX(0);
+}
+
+.eval-panel .eval-block[data-tooltip]::before,
+.eval-panel .eval-games-badge[data-tooltip]::before {
+    bottom: auto;
+    top: calc(100% + 10px);
+}
+
+.eval-panel .eval-block[data-tooltip]::after,
+.eval-panel .eval-games-badge[data-tooltip]::after {
+    bottom: auto;
+    top: calc(100% + 2px);
+    border-top-color: transparent;
+    border-bottom-color: var(--accent-primary);
 }
 
 /* Info row with tooltip styling */

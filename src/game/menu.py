@@ -180,7 +180,9 @@ def draw_asteroids_icon(
     pygame.draw.circle(surface, (100, 200, 255), (cx + 5, cy + 5), 3)
 
 
-def draw_crystal_caves_icon(surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]) -> None:
+def draw_crystal_caves_icon(
+    surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]
+) -> None:
     """Draw a Crystal Caves-style cave icon."""
     cx, cy = rect.centerx, rect.centery
 
@@ -316,7 +318,7 @@ class GameCard:
             draw_snake_icon(screen, icon_rect, self.base_color)
         elif self.game_id == "asteroids":
             draw_asteroids_icon(screen, icon_rect, self.base_color)
-        elif self.game_id == 'crystal_caves':
+        elif self.game_id == "crystal_caves":
             draw_crystal_caves_icon(screen, icon_rect, self.base_color)
         else:
             # Generic game icon (fallback)

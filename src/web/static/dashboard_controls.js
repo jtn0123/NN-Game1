@@ -220,7 +220,14 @@ function refreshScreenshot() {
             // Check if headless mode - stop polling and show headless placeholder
             if (data.headless) {
                 if (placeholder) {
-                    placeholder.innerHTML = '🚀 Headless Mode<br><span style="font-size: 0.8em; opacity: 0.7;">No preview available</span>';
+                    const detail = document.createElement('span');
+                    detail.className = 'preview-placeholder-detail';
+                    detail.textContent = 'No preview available';
+                    placeholder.replaceChildren(
+                        document.createTextNode('🚀 Headless Mode'),
+                        document.createElement('br'),
+                        detail
+                    );
                     placeholder.classList.remove('hidden');
                 }
                 if (img) img.classList.remove('visible');
@@ -245,7 +252,7 @@ function refreshScreenshot() {
             } else {
                 // No image data
                 if (placeholder) {
-                    placeholder.innerHTML = '🎮 Game Preview';
+                    placeholder.textContent = '🎮 Game Preview';
                     placeholder.classList.remove('hidden');
                 }
                 if (img) img.classList.remove('visible');
@@ -358,12 +365,63 @@ function toggleSettings() {
 // MODEL LOADING
 // ============================================================
 
+let loadModalPreviouslyFocused = null;
+
+function getLoadModalFocusable() {
+    const modal = document.getElementById('load-modal');
+    if (!modal) return [];
+    return Array.from(modal.querySelectorAll(
+        'button:not([disabled]), [data-action="load-model"], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => element.offsetParent !== null || element === document.activeElement);
+}
+
+function focusLoadModal() {
+    const modal = document.getElementById('load-modal');
+    const focusTarget = modal?.querySelector('.close-btn') || modal;
+    if (focusTarget && typeof focusTarget.focus === 'function') {
+        focusTarget.focus();
+    }
+}
+
+function handleLoadModalKeydown(event) {
+    const modal = document.getElementById('load-modal');
+    if (!modal || !modal.classList.contains('visible')) return;
+
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        hideLoadModal();
+        return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    const focusable = getLoadModalFocusable();
+    if (focusable.length === 0) {
+        event.preventDefault();
+        focusLoadModal();
+        return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
 /**
  * Show load model modal with enhanced metadata
  */
 function showLoadModal() {
     const modal = document.getElementById('load-modal');
+    loadModalPreviouslyFocused = document.activeElement;
     modal.classList.add('visible');
+    document.addEventListener('keydown', handleLoadModalKeydown);
+    focusLoadModal();
 
     // Fetch available models
     fetchWithTimeout('/api/models')
@@ -387,6 +445,15 @@ function showLoadModal() {
 function hideLoadModal() {
     const modal = document.getElementById('load-modal');
     modal.classList.remove('visible');
+    document.removeEventListener('keydown', handleLoadModalKeydown);
+    if (
+        loadModalPreviouslyFocused
+        && typeof loadModalPreviouslyFocused.focus === 'function'
+        && document.contains(loadModalPreviouslyFocused)
+    ) {
+        loadModalPreviouslyFocused.focus();
+    }
+    loadModalPreviouslyFocused = null;
 }
 
 /**

@@ -323,15 +323,11 @@ class CrystalCavesRenderingMixin:
         offset = (px + py) % step
         for k in range(-play_bottom - step, self.width + step, step):
             x0 = k - offset
-            pygame.draw.line(
-                screen, lattice, (x0, 0), (x0 + play_bottom, play_bottom), 1
-            )
+            pygame.draw.line(screen, lattice, (x0, 0), (x0 + play_bottom, play_bottom), 1)
         offset2 = (px - py) % step
         for k in range(0, self.width + play_bottom + step, step):
             x0 = k - offset2
-            pygame.draw.line(
-                screen, lattice, (x0, 0), (x0 - play_bottom, play_bottom), 1
-            )
+            pygame.draw.line(screen, lattice, (x0, 0), (x0 - play_bottom, play_bottom), 1)
 
     def _draw_cave_depth(
         self: Any,
@@ -721,9 +717,7 @@ class CrystalCavesRenderingMixin:
             sx, sy = self._world_to_screen(px, py, camera_x, camera_y)
             tx, ty = self._tile_center((tcol, trow))
             ex, ey = self._world_to_screen(tx, ty, camera_x, camera_y)
-            color = {"crystal": EGA["G"], "switch": EGA["A"], "exit": EGA["C"]}.get(
-                kind, EGA["W"]
-            )
+            color = {"crystal": EGA["G"], "switch": EGA["A"], "exit": EGA["C"]}.get(kind, EGA["W"])
             pygame.draw.line(screen, color, (sx, sy), (ex, ey), 2)
             pygame.draw.circle(screen, color, (ex, ey), 6, 2)
             if self._tiny_font:

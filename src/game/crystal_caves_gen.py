@@ -454,12 +454,15 @@ def _place_elevators(grid: Grid, rng: random.Random, surface: int, shaft: int) -
             continue
         r = surface + 1
         while r < ROWS - 1:
-            shaft_cell = (
-                grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID
-            )
+            shaft_cell = grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID
             if shaft_cell:
                 top = r
-                while r < ROWS - 1 and grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID:
+                while (
+                    r < ROWS - 1
+                    and grid[r][c] == EMPTY
+                    and grid[r][c - 1] == SOLID
+                    and grid[r][c + 1] == SOLID
+                ):
                     r += 1
                 if r - top >= 3:
                     runs.append((c, top, r - 1))
@@ -494,9 +497,7 @@ DIFFICULTY: Dict[str, Dict[str, Any]] = {
 DIFFICULTY_NAMES = tuple(DIFFICULTY.keys())
 
 
-def _attempt(
-    seed: int, theme: str, family: str, difficulty: str = "normal"
-) -> Optional[CaveSpec]:
+def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> Optional[CaveSpec]:
     rng = random.Random(seed)
     spec = THEMES[theme]
     diff = DIFFICULTY.get(difficulty, DIFFICULTY["normal"])
@@ -610,9 +611,7 @@ def _attempt(
         grid[pc[1]][pc[0]] = CRYSTAL
 
     free = [
-        t
-        for t in standing
-        if grid[t[1]][t[0]] == EMPTY and abs(t[0] - px) + abs(t[1] - py) > 3
+        t for t in standing if grid[t[1]][t[0]] == EMPTY and abs(t[0] - px) + abs(t[1] - py) > 3
     ]
     rng.shuffle(free)
 
@@ -721,9 +720,7 @@ def grade_cave(spec: CaveSpec) -> dict:
     reach_keyed = cave_reachable_keyed(rows, player)
     grid = [list(r) for r in rows]
     standing = _standing_tiles(grid, reach_open, SKY)
-    standing_conn = (
-        sum(1 for t in standing if t in reach_open) / len(standing) if standing else 0.0
-    )
+    standing_conn = sum(1 for t in standing if t in reach_open) / len(standing) if standing else 0.0
 
     solvable = (
         all(s in reach_closed for s in switches)

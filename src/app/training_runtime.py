@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -114,6 +115,77 @@ def request_save_and_stop(
 def is_new_best_score(score: int, best_score: int) -> bool:
     """Return whether an episode score should be treated as a new best."""
     return score > best_score
+
+
+def is_new_best_eval(evaluator: Any, mean_score: float) -> bool:
+    """Return whether the latest evaluator result should become the eval-best checkpoint."""
+    return (
+        evaluator is not None
+        and evaluator.evals_since_improvement == 0
+        and (mean_score == evaluator.best_eval_score)
+    )
+
+
+def eval_best_sidecar_path(model_dir: str, game_name: str) -> str:
+    """Return the sidecar path that stores the held-out eval-best score."""
+    return os.path.join(model_dir, f"{game_name}_eval_best.json")
+
+
+def read_eval_best_record(model_dir: str, game_name: str) -> Optional[Dict[str, Any]]:
+    """Read the previous held-out eval-best sidecar, if it exists and is valid."""
+    path = eval_best_sidecar_path(model_dir, game_name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(raw, dict):
+        return None
+    try:
+        mean_score = float(raw["mean_score"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    episode = 0
+    try:
+        episode = int(raw.get("episode", 0) or 0)
+    except (TypeError, ValueError):
+        episode = 0
+
+    return {
+        "episode": episode,
+        "mean_score": mean_score,
+        "checkpoint": str(raw.get("checkpoint", "") or ""),
+    }
+
+
+def read_eval_best_baseline(model_dir: str, game_name: str) -> Optional[float]:
+    """Read the previous held-out eval-best score, if a sidecar exists."""
+    record = read_eval_best_record(model_dir, game_name)
+    return None if record is None else float(record["mean_score"])
+
+
+def write_eval_best_baseline(
+    model_dir: str,
+    game_name: str,
+    *,
+    episode: int,
+    mean_score: float,
+    checkpoint: str,
+) -> None:
+    """Persist the current held-out eval-best score next to its checkpoint."""
+    path = eval_best_sidecar_path(model_dir, game_name)
+    payload = {
+        "episode": int(episode),
+        "mean_score": float(mean_score),
+        "checkpoint": checkpoint,
+    }
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
 
 
 def should_emit_episode_metrics(

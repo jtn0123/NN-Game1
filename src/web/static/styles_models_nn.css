@@ -213,25 +213,36 @@
 .model-item-content {
     flex: 1;
     cursor: pointer;
+    border-radius: 6px;
+    outline: none;
+}
+
+.model-item-content:focus-visible {
+    box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.6);
 }
 
 .model-delete-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(239, 83, 80, 0.08);
+    border: 1px solid rgba(239, 83, 80, 0.35);
+    color: #ff8a80;
+    font-size: 0.75rem;
+    font-weight: 600;
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 6px 9px;
+    border-radius: 6px;
     transition: all 0.2s;
-    opacity: 0.6;
+    opacity: 0.88;
     flex-shrink: 0;
     margin-top: -2px;
 }
 
 .model-delete-btn:hover {
-    background: rgba(244, 67, 54, 0.1);
-    color: #f44336;
+    background: rgba(239, 83, 80, 0.16);
+    border-color: var(--accent-danger);
+    color: #ffb3ad;
     opacity: 1;
 }
 
@@ -260,6 +271,7 @@
     border-radius: 3px;
     text-transform: uppercase;
     font-weight: 600;
+    border: 1px solid transparent;
 }
 
 .model-name .reason-badge.best {
@@ -284,6 +296,12 @@
 
 .model-name .reason-badge.loaded {
     background: rgba(0, 188, 212, 0.2);
+    color: var(--accent-cyan);
+}
+
+.model-name .reason-badge.legacy {
+    background: rgba(0, 188, 212, 0.12);
+    border-color: rgba(0, 188, 212, 0.25);
     color: var(--accent-cyan);
 }
 
@@ -427,6 +445,12 @@
     border-color: var(--accent-warning);
     color: var(--accent-warning);
     background: rgba(255, 193, 7, 0.1);
+}
+
+.nn-viz-toggle.active {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    background: rgba(0, 188, 212, 0.14);
 }
 
 .nn-viz-content {

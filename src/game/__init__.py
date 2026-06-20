@@ -130,8 +130,16 @@ GAME_REGISTRY: Dict[str, GameRegistryEntry] = {
         "name": "Crystal Caves",
         "description": "Explore caves, collect crystals, and escape",
         "actions": [
-            "IDLE", "LEFT", "RIGHT", "JUMP", "LEFT_JUMP",
-            "RIGHT_JUMP", "SHOOT", "LEFT_SHOOT", "RIGHT_SHOOT", "INTERACT",
+            "IDLE",
+            "LEFT",
+            "RIGHT",
+            "JUMP",
+            "LEFT_JUMP",
+            "RIGHT_JUMP",
+            "SHOOT",
+            "LEFT_SHOOT",
+            "RIGHT_SHOOT",
+            "INTERACT",
         ],
         "controls": [
             "LEFT/RIGHT arrows (or A/D): Move",

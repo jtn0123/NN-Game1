@@ -112,6 +112,9 @@ class TrainingState:
     eval_median_score: float = 0.0
     eval_win_rate: float = 0.0
     eval_best_mean: float = 0.0  # best eval mean so far (monotonic)
+    eval_delta_from_best: float = 0.0  # latest mean minus best mean; 0 means tied/new best
+    eval_is_new_best: bool = False
+    eval_is_baseline: bool = False  # true when showing a restored saved best before live eval
     eval_num_games: int = 0
     eval_history: List[float] = field(default_factory=list)  # eval-mean trajectory (sparkline)
 

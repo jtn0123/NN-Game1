@@ -6,7 +6,7 @@ import base64
 import io
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
@@ -87,6 +87,7 @@ class MetricsPublisher:
 
         # Held-out eval mean-score trajectory (for the dashboard eval sparkline)
         self._eval_history: Deque[float] = deque(maxlen=200)
+        self._cc_outcome_window: Deque[str] = deque(maxlen=100)
 
         # Thread safety for callbacks
         self._callback_lock = threading.Lock()
@@ -323,8 +324,8 @@ class MetricsPublisher:
         reason = str(info.get("end_reason", "") or "")
         if reason and reason != "running":
             self.state.cc_end_reason = reason
-            counts = self.state.cc_end_reason_counts
-            counts[reason] = counts.get(reason, 0) + 1
+            self._cc_outcome_window.append(reason)
+            self.state.cc_end_reason_counts = dict(Counter(self._cc_outcome_window))
 
     def record_eval(
         self,
@@ -340,19 +341,52 @@ class MetricsPublisher:
         This is the trustworthy generalisation measure (distinct from the rolling
         training win_rate) — periodic deterministic eval on unseen held-out levels.
         """
+        had_prior_eval = self.state.eval_ran
         self.state.eval_ran = True
+        self.state.eval_is_baseline = False
         self.state.eval_episode = int(episode)
         self.state.eval_mean_score = float(mean_score)
         self.state.eval_std_score = float(std_score)
         self.state.eval_median_score = float(median_score)
         self.state.eval_win_rate = float(win_rate)
         self.state.eval_num_games = int(num_games)
-        self.state.eval_best_mean = max(self.state.eval_best_mean, float(mean_score))
+        previous_best = self.state.eval_best_mean
+        self.state.eval_is_new_best = (not had_prior_eval) or float(mean_score) > previous_best
+        self.state.eval_best_mean = max(previous_best, float(mean_score))
+        self.state.eval_delta_from_best = float(mean_score) - self.state.eval_best_mean
         self._eval_history.append(float(mean_score))
         self.state.eval_history = list(self._eval_history)
 
         # Push immediately so the panel updates the moment an eval completes,
         # rather than waiting for the next per-episode metric emit.
+        with self._callback_lock:
+            callbacks = self._on_update_callbacks.copy()
+        for callback in callbacks:
+            callback(self.get_snapshot())
+
+    def record_eval_baseline(
+        self,
+        *,
+        episode: int,
+        mean_score: float,
+        num_games: int,
+    ) -> None:
+        """Surface a saved eval-best checkpoint before the next live eval runs."""
+        self.state.eval_ran = True
+        self.state.eval_is_baseline = True
+        self.state.eval_episode = int(episode)
+        self.state.eval_mean_score = float(mean_score)
+        self.state.eval_std_score = 0.0
+        self.state.eval_median_score = float(mean_score)
+        self.state.eval_win_rate = 0.0
+        self.state.eval_best_mean = float(mean_score)
+        self.state.eval_delta_from_best = 0.0
+        self.state.eval_is_new_best = False
+        self.state.eval_num_games = int(num_games)
+        self._eval_history.clear()
+        self._eval_history.append(float(mean_score))
+        self.state.eval_history = list(self._eval_history)
+
         with self._callback_lock:
             callbacks = self._on_update_callbacks.copy()
         for callback in callbacks:
@@ -851,6 +885,7 @@ class MetricsPublisher:
         self.state.cc_crystals_remaining = 0
         self.state.cc_end_reason = ""
         self.state.cc_end_reason_counts = {}
+        self._cc_outcome_window.clear()
 
         # Reset held-out eval telemetry
         self._eval_history.clear()
@@ -861,6 +896,9 @@ class MetricsPublisher:
         self.state.eval_median_score = 0.0
         self.state.eval_win_rate = 0.0
         self.state.eval_best_mean = 0.0
+        self.state.eval_delta_from_best = 0.0
+        self.state.eval_is_new_best = False
+        self.state.eval_is_baseline = False
         self.state.eval_num_games = 0
         self.state.eval_history = []
 

@@ -676,7 +676,9 @@ class SpatialDQN(nn.Module):
         def matrix(layer: nn.Module) -> np.ndarray:
             if isinstance(layer, NoisyLinear):
                 return layer.visualization_weight()
-            return layer.weight.detach().cpu().numpy()  # type: ignore[union-attr]
+            if isinstance(layer, nn.Linear):
+                return layer.weight.detach().cpu().numpy()
+            raise TypeError(f"Unsupported layer type for visualization: {type(layer)!r}")
 
         conv_w = self.conv2.weight.detach().cpu().numpy()
         conv_w = conv_w.reshape(conv_w.shape[0], -1)

@@ -175,6 +175,7 @@ function copyLogsSimple() {
         }, 1500);
     }).catch(err => {
         console.error('Failed to copy logs:', err);
+        addConsoleLog('Copy logs failed; browser clipboard permission was denied', 'error');
     });
 }
 

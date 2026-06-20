@@ -21,8 +21,12 @@ from src.app.model_service import ModelService as AppModelService
 from src.app.training_runtime import (
     build_nn_snapshot,
     emit_nn_snapshot_to_dashboard,
+    is_new_best_eval,
     is_new_best_score,
+    read_eval_best_baseline,
+    read_eval_best_record,
     should_emit_episode_metrics,
+    write_eval_best_baseline,
 )
 from src.game import BaseGame, BaseVecGame, list_games
 
@@ -238,6 +242,31 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 log_dir=os.path.join(config.LOG_DIR, "eval"),
                 plateau_threshold=config.EVAL_PLATEAU_THRESHOLD,
             )
+            eval_best_baseline = read_eval_best_baseline(
+                config.GAME_MODEL_DIR,
+                config.GAME_NAME,
+            )
+            if eval_best_baseline is not None:
+                self.evaluator.best_eval_score = eval_best_baseline
+                if self.web_dashboard:
+                    eval_best_record = read_eval_best_record(
+                        config.GAME_MODEL_DIR,
+                        config.GAME_NAME,
+                    )
+                    baseline_episode = (
+                        int(eval_best_record.get("episode", 0))
+                        if eval_best_record is not None
+                        else 0
+                    )
+                    self.web_dashboard.publisher.record_eval_baseline(
+                        episode=baseline_episode,
+                        mean_score=eval_best_baseline,
+                        num_games=int(getattr(config, "EVAL_EPISODES", 0) or 0),
+                    )
+                    self.web_dashboard.log(
+                        f"🎯 Restored held-out best: mean {eval_best_baseline:.0f}",
+                        "info",
+                    )
 
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
@@ -684,6 +713,27 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                         )
                         self.evaluator.log_results(eval_results)
 
+                        if is_new_best_eval(self.evaluator, eval_results.mean_score):
+                            eval_best_filename = f"{self.config.GAME_NAME}_eval_best.pth"
+                            self._save_model(
+                                eval_best_filename,
+                                save_reason="eval_best",
+                                quiet=True,
+                                save_replay_buffer=False,
+                            )
+                            write_eval_best_baseline(
+                                self.config.GAME_MODEL_DIR,
+                                self.config.GAME_NAME,
+                                episode=self.current_episode,
+                                mean_score=eval_results.mean_score,
+                                checkpoint=eval_best_filename,
+                            )
+                            if self.web_dashboard:
+                                self.web_dashboard.log(
+                                    f"🎯 New held-out eval best: {eval_results.mean_score:.0f}",
+                                    "success",
+                                )
+
                         # Surface the held-out eval on the dashboard (the trustworthy
                         # generalisation number, distinct from the training win rate).
                         if self.web_dashboard:
@@ -799,14 +849,6 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
-                # ETA to the run's episode target, from the recent episode rate.
-                eta_str = ""
-                eps_window = self.current_episode - last_logged_episode
-                if config.MAX_EPISODES > 0 and elapsed_since_report > 0 and eps_window > 0:
-                    eps_per_sec = eps_window / elapsed_since_report
-                    remaining = max(0, config.MAX_EPISODES - self.current_episode)
-                    eta_s = remaining / eps_per_sec if eps_per_sec > 0 else 0
-                    eta_str = f" | ETA ~{self._fmt_eta(eta_s)}"
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
@@ -818,7 +860,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 if self.progresses:
                     avg_prog = float(np.mean(self.progresses[-100:]))
                     best_prog = float(np.max(self.progresses))
-                    progress_str = f"🪨 prog: {avg_prog:.3f} (best {best_prog:.3f}) | "
+                    progress_str = f"Φ completion: {avg_prog:.3f} (best {best_prog:.3f}) | "
 
                 lr_str = ""
                 if getattr(self.config, "LR_DECAY", False):
@@ -830,11 +872,10 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     f"Avg: {avg_score:6.1f} | "
                     f"{progress_str}"
                     f"Loss: {avg_loss:.4f} | "
-                    f"Q: {avg_q:.1f} | "
+                    f"Q: {avg_q:.2f} | "
                     f"{lr_str}"
                     f"ε: {self.agent.epsilon:.3f} | "
                     f"⚡ {steps_per_sec:,.0f} steps/s"
-                    f"{eta_str}"
                 )
 
                 print(progress_msg)

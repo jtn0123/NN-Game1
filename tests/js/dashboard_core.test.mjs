@@ -225,7 +225,24 @@ test('modelListHtml escapes unsafe model fields and preserves opaque ids', () =>
   assert.match(html, />1,234</);
   assert.match(html, />12\.3</);
   assert.match(html, />0\.123</);
+  assert.match(html, /<span>Delete<\/span>/);
   assert.doesNotMatch(html, /<script>alert/);
+});
+
+test('modelListHtml marks loadable checkpoints without rich metadata as legacy, not unreadable', () => {
+  const html = DashboardCore.modelListHtml([{
+    id: 'crystal_caves:crystal_caves_best.pth',
+    name: 'crystal_caves_best.pth',
+    size: 1024,
+    is_loadable: true,
+    has_metadata: false,
+    steps: 500,
+    epsilon: 0.02,
+  }]);
+
+  assert.match(html, /data-action="load-model"/);
+  assert.match(html, />legacy</);
+  assert.doesNotMatch(html, />unreadable</);
 });
 
 test('modelListHtml marks unreadable checkpoints without load action', () => {

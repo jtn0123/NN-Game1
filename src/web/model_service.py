@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -52,12 +53,14 @@ class ModelService:
             }
 
             try:
-                checkpoint = load_checkpoint(
-                    candidate.path,
-                    map_location="cpu",
-                    trusted_dirs=[candidate.directory],
-                    allow_unsafe_fallback=False,
-                )
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    checkpoint = load_checkpoint(
+                        candidate.path,
+                        map_location="cpu",
+                        trusted_dirs=[candidate.directory],
+                        allow_unsafe_fallback=True,
+                    )
                 model_info["steps"] = checkpoint.get("steps", None)
                 model_info["epsilon"] = checkpoint.get("epsilon", None)
                 if "metadata" in checkpoint:

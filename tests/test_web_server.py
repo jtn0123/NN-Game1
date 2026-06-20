@@ -266,8 +266,34 @@ class TestMetricsPublisher:
         assert st.eval_num_games == 20
         # Best is monotonic even though the mean dipped 31 -> 28 along the way.
         assert st.eval_best_mean == 66.0
+        assert st.eval_delta_from_best == 0.0
+        assert st.eval_is_new_best is True
         # History feeds the sparkline in trajectory order.
         assert st.eval_history == [31.0, 28.0, 42.0, 66.0]
+
+        publisher.record_eval(
+            episode=750,
+            mean_score=40,
+            std_score=100.0,
+            median_score=0.0,
+            win_rate=0.0,
+            num_games=20,
+        )
+        assert st.eval_best_mean == 66.0
+        assert st.eval_delta_from_best == -26.0
+        assert st.eval_is_new_best is False
+
+        publisher.record_eval(
+            episode=900,
+            mean_score=66,
+            std_score=100.0,
+            median_score=0.0,
+            win_rate=0.0,
+            num_games=20,
+        )
+        assert st.eval_best_mean == 66.0
+        assert st.eval_delta_from_best == 0.0
+        assert st.eval_is_new_best is False
 
     def test_record_eval_pushes_an_update(self):
         """An eval must push to the dashboard immediately, not wait for the next
@@ -282,6 +308,58 @@ class TestMetricsPublisher:
 
         assert len(received) == 1
         assert received[0]["state"]["eval_mean_score"] == 31.0
+
+    def test_record_eval_baseline_surfaces_saved_best_before_live_eval(self):
+        publisher = MetricsPublisher(history_length=100)
+        received = []
+        publisher.on_update(lambda snapshot: received.append(snapshot))
+
+        publisher.record_eval_baseline(episode=600, mean_score=90.0, num_games=20)
+
+        st = publisher.state
+        assert st.eval_ran is True
+        assert st.eval_is_baseline is True
+        assert st.eval_episode == 600
+        assert st.eval_mean_score == 90.0
+        assert st.eval_best_mean == 90.0
+        assert st.eval_history == [90.0]
+        assert received[-1]["state"]["eval_is_baseline"] is True
+
+        publisher.record_eval(
+            episode=750,
+            mean_score=70,
+            std_score=5,
+            median_score=68,
+            win_rate=0.0,
+            num_games=20,
+        )
+        assert st.eval_is_baseline is False
+        assert st.eval_best_mean == 90.0
+        assert st.eval_delta_from_best == -20.0
+
+    def test_crystal_caves_outcome_counts_are_recent_window(self):
+        publisher = MetricsPublisher(history_length=100)
+
+        for _ in range(100):
+            publisher.update(
+                episode=1,
+                score=0,
+                epsilon=0.1,
+                loss=0.0,
+                game_name="crystal_caves",
+                cc_info={"end_reason": "timeout"},
+            )
+        publisher.update(
+            episode=101,
+            score=100,
+            epsilon=0.1,
+            loss=0.0,
+            game_name="crystal_caves",
+            cc_info={"end_reason": "won"},
+            won=True,
+        )
+
+        assert publisher.state.cc_end_reason_counts == {"timeout": 99, "won": 1}
 
     def test_history_tracking(self):
         """MetricsPublisher should track history."""

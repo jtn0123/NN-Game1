@@ -76,9 +76,7 @@ class CrystalCavesAudio:
 
         try:
             if not pygame.mixer.get_init():
-                pygame.mixer.init(
-                    frequency=_SAMPLE_RATE, size=-16, channels=1, buffer=512
-                )
+                pygame.mixer.init(frequency=_SAMPLE_RATE, size=-16, channels=1, buffer=512)
             init = pygame.mixer.get_init()
             if not init:
                 return
@@ -208,9 +206,7 @@ class CrystalCavesAudio:
         """Heavier clunk/whoosh for a door opening."""
         clunk = self._square(180.0, 0.06, volume=0.36)
         whoosh = self._sweep(160.0, 300.0, 0.16, volume=0.28, wave="triangle")
-        return self._envelope(
-            np.concatenate([clunk, whoosh]), attack=0.002, release=0.10
-        )
+        return self._envelope(np.concatenate([clunk, whoosh]), attack=0.002, release=0.10)
 
     def _sfx_damage(self) -> np.ndarray:
         """Harsh descending buzz for taking damage."""
@@ -331,9 +327,7 @@ class CrystalCavesAudio:
         """Return a block of silence."""
         return np.zeros(self._times(duration).shape[0], dtype=np.float64)
 
-    def _envelope(
-        self, wave: np.ndarray, attack: float, release: float
-    ) -> np.ndarray:
+    def _envelope(self, wave: np.ndarray, attack: float, release: float) -> np.ndarray:
         """Apply a linear attack/release envelope to avoid clicks."""
         n = wave.shape[0]
         if n == 0:
@@ -344,9 +338,7 @@ class CrystalCavesAudio:
         if attack_n > 0:
             env[:attack_n] = np.linspace(0.0, 1.0, attack_n)
         if release_n > 0:
-            env[-release_n:] = np.minimum(
-                env[-release_n:], np.linspace(1.0, 0.0, release_n)
-            )
+            env[-release_n:] = np.minimum(env[-release_n:], np.linspace(1.0, 0.0, release_n))
         return wave * env
 
     def _make_sound(self, wave: np.ndarray) -> "pygame.mixer.Sound":

@@ -121,6 +121,7 @@
                             <span class="nn-viz-status" id="nn-viz-status">● LIVE</span>
                         </div>
                         <div class="nn-viz-header-right">
+                            <button class="nn-viz-toggle" id="nn-connections-toggle" data-action="toggle-nn-connections" aria-pressed="false" aria-label="Show neural network connections">Connections</button>
                             <button class="nn-viz-toggle" data-action="toggle-nn-visualization" aria-label="Pause neural network visualization">⏸️</button>
                             <span class="collapse-icon" id="nn-viz-icon">▲</span>
                         </div>
@@ -231,10 +232,16 @@
                         </div>
                     </div>
 
+                    <div class="eval-verdict" id="eval-verdict" data-tooltip="Quick read on the latest held-out evaluation. New best means the model improved on unseen caves. Below best means the latest policy is weaker than a previous checkpoint, so keep the eval-best save." data-tooltip-position="right">
+                        <span class="eval-verdict-label" id="eval-verdict-label">waiting for eval</span>
+                        <span class="eval-verdict-detail" id="eval-verdict-detail">held-out status</span>
+                    </div>
+
                     <div class="eval-spark-wrap" data-tooltip="The held-out mean score over training. UP = learning to generalize. FLAT = genuinely stuck (now a real signal, no longer an eval artifact)." data-tooltip-position="right">
                         <div class="cc-bar-label"><span>📈 Held-out trend</span><span id="eval-last-ep" class="cc-bar-hint-inline">—</span></div>
                         <svg class="eval-spark" id="eval-spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true">
                             <polyline id="eval-spark-line" fill="none" stroke="var(--accent-success)" stroke-width="2" vector-effect="non-scaling-stroke" points=""></polyline>
+                            <circle id="eval-spark-dot" cx="150" cy="22" r="3" fill="var(--accent-success)" style="display: none;"></circle>
                         </svg>
                     </div>
                 </div>
@@ -469,12 +476,12 @@
                 <!-- Save Management Panel -->
                 <div class="save-card" id="save-card">
                     <div class="card-header">
-                        <h3>💾 Model Saves</h3>
+                        <h3>💾 Model Checkpoint</h3>
                         <span class="save-indicator" id="save-indicator"></span>
                     </div>
                     <div class="save-status" id="save-status">
                         <div class="save-status-row">
-                            <span class="save-label">Last Save:</span>
+                            <span class="save-label">Last Event:</span>
                             <span class="save-value" id="last-save-time">Never</span>
                         </div>
                         <div class="save-status-row">
@@ -486,7 +493,7 @@
                             <span class="save-value save-reason" id="last-save-reason">-</span>
                         </div>
                         <div class="save-status-row">
-                            <span class="save-label">Saves:</span>
+                            <span class="save-label">Events:</span>
                             <span class="save-value" id="saves-count">0</span>
                         </div>
                     </div>
@@ -588,7 +595,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <span data-tooltip="A neural network learns to play Breakout by trial and error, improving its strategy over thousands of games.">Neural Network Game AI</span>
+            <span data-tooltip="A neural network learns to play the selected game by trial and error, improving its strategy over thousands of episodes.">Neural Network Game AI</span>
             <span class="separator">|</span>
             <span data-tooltip="Double DQN: Uses two networks to prevent overestimating action values. Prioritized Replay: Learns more from important experiences (surprising outcomes). These techniques make learning faster and more stable.">Double DQN + Prioritized Replay</span>
             <span class="separator">|</span>

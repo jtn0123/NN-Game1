@@ -32,6 +32,7 @@ const DASHBOARD_ACTIONS = Object.freeze({
     'reset-chart': (target) => resetChartView(target.dataset.chart || 'all'),
     'toggle-nn-panel': () => toggleNNPanel(),
     'toggle-nn-visualization': () => toggleNNVisualization(),
+    'toggle-nn-connections': () => toggleNNConnections(),
     'set-log-filter': (target) => setLogFilter(target.dataset.filter || 'all'),
     'copy-logs': () => copyLogsToClipboard(),
     'clear-logs': () => clearLogs(),
@@ -374,6 +375,24 @@ const CC_OUTCOMES = {
     stalled: { icon: '🛑', label: 'stalled', cls: 'warn' },
 };
 
+function updateHeadlessUi(isHeadless) {
+    if (document.body) {
+        document.body.classList.toggle('is-headless-mode', isHeadless);
+    }
+    ['.preview-card', '.speed-control'].forEach((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return;
+        element.hidden = isHeadless;
+        if (isHeadless) {
+            element.setAttribute('inert', '');
+            element.setAttribute('aria-hidden', 'true');
+        } else {
+            element.removeAttribute('inert');
+            element.removeAttribute('aria-hidden');
+        }
+    });
+}
+
 /**
  * Update the held-out Evaluation panel — the trustworthy generalization measure.
  * Hidden until the first periodic eval runs; draws a sparkline of the eval-mean
@@ -393,30 +412,79 @@ function updateEval(state) {
         if (el) el.textContent = text;
     };
     const round0 = (v) => Math.round(Number(v) || 0);
+    const isBaseline = Boolean(state.eval_is_baseline);
 
     setText('eval-mean', round0(state.eval_mean_score).toLocaleString());
-    setText('eval-std', `± ${round0(state.eval_std_score)}`);
-    setText('eval-median', round0(state.eval_median_score).toLocaleString());
+    setText('eval-std', isBaseline ? 'saved best' : `± ${round0(state.eval_std_score)}`);
+    setText('eval-median', isBaseline ? '—' : round0(state.eval_median_score).toLocaleString());
     setText('eval-best', round0(state.eval_best_mean).toLocaleString());
     setText('eval-games', `${Number(state.eval_num_games) || 0} levels`);
-    setText('eval-last-ep', `last @ ep ${(Number(state.eval_episode) || 0).toLocaleString()}`);
+    setText(
+        'eval-last-ep',
+        isBaseline
+            ? `saved best @ ep ${(Number(state.eval_episode) || 0).toLocaleString()}`
+            : `last @ ep ${(Number(state.eval_episode) || 0).toLocaleString()}`
+    );
+
+    const verdict = document.getElementById('eval-verdict');
+    const verdictLabel = document.getElementById('eval-verdict-label');
+    const verdictDetail = document.getElementById('eval-verdict-detail');
+    if (verdict && verdictLabel && verdictDetail) {
+        const mean = Number(state.eval_mean_score) || 0;
+        const best = Number(state.eval_best_mean) || 0;
+        const delta = Number.isFinite(Number(state.eval_delta_from_best))
+            ? Number(state.eval_delta_from_best)
+            : mean - best;
+        const isNewBest = !isBaseline && typeof state.eval_is_new_best === 'boolean'
+            ? state.eval_is_new_best
+            : mean > best;
+        const isTiedBest = !isNewBest && delta === 0;
+        verdict.classList.toggle('best', isNewBest);
+        verdict.classList.toggle('tied', isTiedBest || isBaseline);
+        verdict.classList.toggle('regressed', !isBaseline && !isNewBest && !isTiedBest);
+        if (isBaseline) {
+            verdictLabel.textContent = 'Saved held-out best';
+            verdictDetail.textContent = 'training wins update this after eval';
+        } else if (isNewBest) {
+            verdictLabel.textContent = 'New held-out best';
+            verdictDetail.textContent = 'save eval-best checkpoint';
+        } else if (isTiedBest) {
+            verdictLabel.textContent = 'Matches held-out best';
+            verdictDetail.textContent = 'no weaker than best checkpoint';
+        } else {
+            verdictLabel.textContent = 'Below held-out best';
+            verdictDetail.textContent = `${round0(Math.abs(delta)).toLocaleString()} below best checkpoint`;
+        }
+    }
 
     const winrateEl = document.getElementById('eval-winrate');
     if (winrateEl) {
-        const wr = Number(state.eval_win_rate) || 0;
-        winrateEl.textContent = `${(wr * 100).toFixed(1)}%`;
-        winrateEl.style.color = wr > 0 ? 'var(--accent-success)' : '';
+        if (isBaseline) {
+            winrateEl.textContent = '—';
+            winrateEl.style.color = '';
+        } else {
+            const wr = Number(state.eval_win_rate) || 0;
+            winrateEl.textContent = `${(wr * 100).toFixed(1)}%`;
+            winrateEl.style.color = wr > 0 ? 'var(--accent-success)' : '';
+        }
     }
 
     // Sparkline of the eval-mean trajectory.
     const line = document.getElementById('eval-spark-line');
+    const dot = document.getElementById('eval-spark-dot');
     if (line) {
         const hist = Array.isArray(state.eval_history)
             ? state.eval_history.map(Number).filter(Number.isFinite)
             : [];
         if (hist.length < 2) {
             line.setAttribute('points', '');
+            if (dot) {
+                dot.style.display = hist.length === 1 ? '' : 'none';
+                dot.setAttribute('cx', '150');
+                dot.setAttribute('cy', '22');
+            }
         } else {
+            if (dot) dot.style.display = 'none';
             const W = 300;
             const H = 44;
             const pad = 3;
@@ -502,21 +570,26 @@ function updateCrystalCaves(state) {
         const counts = state.cc_end_reason_counts || {};
         const total = Object.values(counts).reduce((sum, n) => sum + (Number(n) || 0), 0);
         if (total <= 0) {
-            outcomesEl.innerHTML = '<span class="cc-outcome-empty">waiting for episodes…</span>';
+            const empty = document.createElement('span');
+            empty.className = 'cc-outcome-empty';
+            empty.textContent = 'waiting for episodes…';
+            outcomesEl.replaceChildren(empty);
         } else {
             const order = ['won', 'killed', 'timeout', 'stalled'];
             const keys = order
                 .filter((k) => counts[k])
                 .concat(Object.keys(counts).filter((k) => !order.includes(k)));
-            outcomesEl.innerHTML = keys
-                .map((k) => {
-                    const o = CC_OUTCOMES[k] || { icon: '•', label: k, cls: '' };
-                    const n = Number(counts[k]) || 0;
-                    const share = Math.round((n / total) * 100);
-                    const title = `${o.label}: ${n} of ${total} (${share}%)`;
-                    return `<span class="cc-outcome-chip ${o.cls}" title="${title}">${o.icon} ${share}%</span>`;
-                })
-                .join('');
+            const chips = keys.map((k) => {
+                const o = CC_OUTCOMES[k] || { icon: '•', label: k, cls: '' };
+                const n = Number(counts[k]) || 0;
+                const share = Math.round((n / total) * 100);
+                const chip = document.createElement('span');
+                chip.className = `cc-outcome-chip ${o.cls || ''}`.trim();
+                chip.title = `${o.label}: ${n} of ${total} (${share}%)`;
+                chip.textContent = `${o.icon} ${n} (${share}%)`;
+                return chip;
+            });
+            outcomesEl.replaceChildren(...chips);
         }
     }
 }
@@ -527,6 +600,7 @@ function updateCrystalCaves(state) {
 function updateDashboard(data) {
     const state = data.state;
     const history = data.history;
+    updateHeadlessUi(Boolean(state.headless));
 
     // Update metrics
     document.getElementById('metric-episode').textContent = state.episode.toLocaleString();
@@ -651,4 +725,7 @@ function updateDashboard(data) {
 
     // Update charts - pass current episode for accurate labels
     updateCharts(history, state.episode);
+    if (typeof DashboardCharts !== 'undefined' && DashboardCharts.resizeCharts) {
+        DashboardCharts.resizeCharts();
+    }
 }
