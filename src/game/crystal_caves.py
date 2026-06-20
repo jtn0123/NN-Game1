@@ -136,6 +136,14 @@ class CrystalCaves(
     PROGRESS_W_WIN = 0.20  # reached the exit
     PROGRESS_REWARD_SCALE = 6.0  # total shaping reward earned across a full clear
 
+    # AI-2: a small, one-time, capped bonus for first reaching a coarse global-map
+    # region that holds an uncollected objective. Turns the AI-1 objective map from
+    # passive knowledge into action — rewards actually navigating toward the
+    # crystals/switches it can "see" globally. Per-region and capped, so it can't
+    # be farmed and never out-weighs collecting the objective itself.
+    OBJECTIVE_REGION_BONUS = 0.4
+    OBJECTIVE_REGION_CAP = 4.0
+
     # TS-01: discrete one-time bonus the step the gating switch is thrown
     # (closed->open). The switch is the causal crux of a clear yet was rewarded
     # less than a single crystal (+3 vs +5); reward it sharply on top of the
@@ -310,6 +318,8 @@ class CrystalCaves(
         self._end_reason = "running"
         self._max_depth_row = 0
         self._progress = 0.0
+        self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
+        self._obj_region_total = 0.0  # AI-2
 
         self.crystals: Set[Tuple[int, int]] = set()
         self.initial_crystals = 0
@@ -401,6 +411,8 @@ class CrystalCaves(
         self._max_depth_row = self._player_tile()[1]
         self._progress = self._progress_potential()[0]
         self._end_reason = "running"
+        self._visited_obj_cells = set()
+        self._obj_region_total = 0.0
 
         return self.get_state()
 
@@ -455,6 +467,12 @@ class CrystalCaves(
         if new_progress > self._progress:
             reward += self.PROGRESS_REWARD_SCALE * (new_progress - self._progress)
             self._progress = new_progress
+            self._mark_progress()
+
+        # AI-2: reward reaching a new region that holds a known uncollected objective
+        region_bonus = self._objective_region_reward()
+        if region_bonus:
+            reward += region_bonus
             self._mark_progress()
 
         if self.steps >= self.MAX_STEPS and not self.game_over:
@@ -570,6 +588,33 @@ class CrystalCaves(
             mark(self.exit_pos[0], self.exit_pos[1], 0.9)
 
         self._state_array[start : start + gc * gr] = np.array(cells, dtype=np.float32)
+
+    def _objective_region_reward(self) -> float:
+        """AI-2: a small one-time bonus the first time the player reaches a coarse
+        global-map region that still holds an uncollected objective. Densifies the
+        navigate-toward-known-objectives signal; per-region + capped so it can't be
+        farmed and never rivals collecting the objective."""
+        if self._obj_region_total >= self.OBJECTIVE_REGION_CAP:
+            return 0.0
+        gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
+        cw = max(1.0, self.level_cols / gc)
+        ch = max(1.0, self.level_rows / gr)
+        pcol, prow = self._player_tile()
+        cell = (min(gc - 1, int(pcol / cw)), min(gr - 1, int(prow / ch)))
+        if cell in self._visited_obj_cells:
+            return 0.0
+
+        def in_cell(c: int, r: int) -> bool:
+            return (min(gc - 1, int(c / cw)), min(gr - 1, int(r / ch))) == cell
+
+        has_obj = any(in_cell(c, r) for c, r in self.crystals) or any(
+            in_cell(c, r) for c, r in (self.switches - self.used_switches)
+        )
+        if not has_obj:
+            return 0.0
+        self._visited_obj_cells.add(cell)
+        self._obj_region_total += self.OBJECTIVE_REGION_BONUS
+        return self.OBJECTIVE_REGION_BONUS
 
     def close(self) -> None:
         """Clean up resources."""
