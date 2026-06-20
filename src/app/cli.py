@@ -105,6 +105,12 @@ TIPS
         "For head-to-head state-representation comparisons.",
     )
     parser.add_argument(
+        "--cnn",
+        action="store_true",
+        help="Use a convolutional Q-network that reads the perception window as a "
+        "2D grid (exploits spatial structure; recommended for the rich state).",
+    )
+    parser.add_argument(
         "--cave-difficulty",
         type=str,
         choices=["tutorial", "easy", "normal"],

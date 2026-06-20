@@ -266,6 +266,14 @@ class CrystalCaves(
             self.GLOBAL_MAP_COLS = 0
             self.GLOBAL_MAP_ROWS = 0
 
+        # Publish the spatial layout so a convolutional network (USE_CNN_STATE) can
+        # reshape the flat state into the perception window + global map + metadata.
+        self.config.STATE_LAYOUT = {
+            "window": (self.WINDOW_ROWS, self.WINDOW_COLS),
+            "gmap": (self.GLOBAL_MAP_ROWS, self.GLOBAL_MAP_COLS),
+            "meta": self.METADATA_SIZE,
+        }
+
         self.level_index = 0
         # Procedural mode: replace the three authored caves with freshly generated
         # ones (one per theme, in palette order) so level_index keeps theming them

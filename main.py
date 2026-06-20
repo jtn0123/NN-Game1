@@ -224,6 +224,9 @@ def main():
     if getattr(args, "legacy_state", False):
         config.CRYSTAL_CAVES_RICH_STATE = False
         print("🔭 Crystal Caves: legacy 11x9 state (rich state OFF)")
+    if getattr(args, "cnn", False):
+        config.USE_CNN_STATE = True
+        print("🧠 CNN Q-network: reading the perception window as a 2D grid")
     if getattr(args, "lr_decay", False):
         config.LR_DECAY = True
         print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")

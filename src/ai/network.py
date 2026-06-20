@@ -554,6 +554,84 @@ class DuelingDQN(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
+class SpatialDQN(nn.Module):
+    """Convolutional Q-network for grid-structured observations. The flat state is
+    split into a 2D perception window (convolved), an optional coarse 2D global
+    map, and metadata scalars; conv features are concatenated with the map +
+    metadata and fed to a (dueling) value/advantage head. This exploits the
+    spatial locality a plain MLP discards — the right architecture for the rich
+    Crystal Caves state (a 19x11 window + an objective map). Exploration is
+    epsilon-greedy (no NoisyNets in the conv head)."""
+
+    def __init__(
+        self,
+        state_size: int,
+        action_size: int,
+        config: Optional[Config] = None,
+        layout: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__()
+        self.config = config or Config()
+        self.state_size = state_size
+        self.action_size = action_size
+        self.activations: Dict[str, torch.Tensor] = {}
+        self.capture_activations = False
+
+        layout = layout or getattr(self.config, "STATE_LAYOUT", None)
+        if layout is None:
+            raise ValueError("SpatialDQN requires a STATE_LAYOUT (window/gmap/meta dims)")
+        wr, wc = layout["window"]
+        gr, gc = layout.get("gmap", (0, 0))
+        self.win_rows, self.win_cols = wr, wc
+        self.win_size = wr * wc
+        self.gmap_size = gr * gc
+        self.meta_size = layout["meta"]
+        self.dueling = bool(getattr(self.config, "USE_DUELING", True))
+
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2)
+        conv_out = 32 * max(1, wr // 2) * max(1, wc // 2)
+        hidden = (self.config.HIDDEN_LAYERS or [256, 128])[0]
+        merged = conv_out + self.gmap_size + self.meta_size
+        self.fc = nn.Linear(merged, hidden)
+        if self.dueling:
+            self.value = nn.Linear(hidden, 1)
+            self.adv = nn.Linear(hidden, action_size)
+        else:
+            self.head = nn.Linear(hidden, action_size)
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        win = state[:, : self.win_size].view(-1, 1, self.win_rows, self.win_cols)
+        rest = state[:, self.win_size :]
+        gmap = rest[:, : self.gmap_size]
+        meta = rest[:, self.gmap_size :]
+        x = F.relu(self.conv1(win))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = torch.flatten(x, 1)
+        x = torch.cat([x, gmap, meta], dim=1)
+        x = F.relu(self.fc(x))
+        if self.dueling:
+            v = self.value(x)
+            a = self.adv(x)
+            return v + (a - a.mean(dim=1, keepdim=True))
+        return self.head(x)
+
+    def reset_noise(self) -> None:
+        """No NoisyNets in the conv head; exploration is epsilon-greedy."""
+
+    def get_activations(self) -> Dict[str, np.ndarray]:
+        return {name: act.cpu().numpy() for name, act in self.activations.items()}
+
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
 # Testing
 if __name__ == "__main__":
     config = Config()

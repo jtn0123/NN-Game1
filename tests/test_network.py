@@ -17,7 +17,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.network import DQN, DuelingDQN, NoisyLinear
+from src.ai.network import DQN, DuelingDQN, NoisyLinear, SpatialDQN
 
 
 @pytest.fixture
@@ -419,6 +419,38 @@ class TestNoisyLinear:
         assert torch.allclose(
             layer.weight_sigma, torch.full_like(layer.weight_sigma, expected_sigma)
         )
+
+
+class TestSpatialDQN:
+    """The convolutional Q-network for grid-structured (spatial) observations."""
+
+    def _layout(self):
+        # window 11x19 (=209) + gmap 6x11 (=66) + meta 20 = 295 (the rich state)
+        return {"window": (11, 19), "gmap": (6, 11), "meta": 20}
+
+    def test_forward_shape_and_split(self):
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        net = SpatialDQN(size, 10, Config(), layout)
+        out = net(torch.zeros(4, size))
+        assert out.shape == (4, 10)
+
+    def test_handles_legacy_layout_without_gmap(self):
+        layout = {"window": (9, 11), "gmap": (0, 0), "meta": 20}
+        size = 9 * 11 + 0 + 20
+        net = SpatialDQN(size, 10, Config(), layout)
+        out = net(torch.zeros(2, size))
+        assert out.shape == (2, 10)
+
+    def test_agent_uses_cnn_when_enabled(self):
+        from src.ai.agent import Agent
+
+        cfg = Config()
+        cfg.USE_CNN_STATE = True
+        cfg.STATE_LAYOUT = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        agent = Agent(state_size=size, action_size=10, config=cfg)
+        assert isinstance(agent.policy_net, SpatialDQN)
 
 
 if __name__ == "__main__":

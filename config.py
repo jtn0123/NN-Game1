@@ -98,6 +98,10 @@ class Config:
     # global objective map. When False, the legacy 11x9 window (119-feature state)
     # that reached ~8% wins. Toggleable so the two can be compared head-to-head.
     CRYSTAL_CAVES_RICH_STATE: bool = True
+    # Use a convolutional Q-network that reads the perception window as a 2D grid
+    # (the right architecture for the spatial rich state). Requires the game to set
+    # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.
+    USE_CNN_STATE: bool = False
     # Objective/threat budget for generated caves: "easy" is a learnable
     # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
     # game (10-14 crystals + hazards + enemies).
