@@ -1,11 +1,14 @@
 """Tests for the Crystal Caves staged curriculum runner."""
 
+import pytest
+
 from src.ai.evaluator import EvalResults
 from src.app.crystal_curriculum import (
     DEFAULT_CRYSTAL_CURRICULUM,
     StageGateResult,
     evaluate_stage_gate,
     planned_stage_episodes,
+    stage_epsilon_decay,
 )
 
 
@@ -103,3 +106,19 @@ def test_easy_platform_gate_requires_switch_and_wins():
     assert result.ready is False
     assert "eval switch" in result.detail
     assert "eval wins" in result.detail
+
+
+def test_stage_epsilon_decay_anneals_floor_to_end_over_budget():
+    decay = stage_epsilon_decay(0.35, 300, 0.105)
+    assert 0.0 < decay < 1.0
+
+    epsilon = 0.35
+    for _ in range(300):
+        epsilon *= decay
+    assert epsilon == pytest.approx(0.105, rel=1e-6)
+
+
+def test_stage_epsilon_decay_returns_no_decay_for_degenerate_inputs():
+    assert stage_epsilon_decay(0.35, 0, 0.1) == 1.0  # no budget
+    assert stage_epsilon_decay(0.1, 300, 0.2) == 1.0  # end >= start
+    assert stage_epsilon_decay(0.0, 300, 0.1) == 1.0  # non-positive start

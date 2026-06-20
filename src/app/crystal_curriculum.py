@@ -115,6 +115,21 @@ def planned_stage_episodes(
     return raw
 
 
+# Each stage anneals exploration from its min_epsilon floor down to roughly this
+# fraction of it over the stage budget, instead of sitting near the floor the whole
+# stage (the global EPSILON_DECAY=0.9995 only moves epsilon ~0.35->0.30 over 300
+# episodes). Gives the policy a real explore->exploit schedule within each stage.
+STAGE_EPSILON_END_FRACTION = 0.3
+
+
+def stage_epsilon_decay(start_epsilon: float, budget: int, end_epsilon: float) -> float:
+    """Per-episode multiplicative decay that anneals start_epsilon to end_epsilon
+    over ``budget`` episodes. Returns 1.0 (no decay) for degenerate inputs."""
+    if budget <= 0 or start_epsilon <= 0 or end_epsilon <= 0 or end_epsilon >= start_epsilon:
+        return 1.0
+    return float((end_epsilon / start_epsilon) ** (1.0 / budget))
+
+
 def run_crystal_curriculum(
     config: Config,
     args: argparse.Namespace,
@@ -131,6 +146,13 @@ def run_crystal_curriculum(
     config.EVAL_EVERY = min(config.EVAL_EVERY, 150)
     full_gate_eval_episodes = config.EVAL_EPISODES
     config.EVAL_EPISODES = min(config.EVAL_EPISODES, 12)
+
+    # decay_epsilon() gates on (episode - per-stage offset), so a non-zero
+    # EPSILON_WARMUP froze epsilon for the first EPSILON_WARMUP episodes of EVERY
+    # stage (the offset resets each stage). Disable the warmup so each stage anneals
+    # exploration from episode 0; the per-stage EPSILON_DECAY set below drives the
+    # actual explore->exploit schedule.
+    config.EPSILON_WARMUP = 0
 
     # The periodic held-out eval, eval-best checkpointing, plateau detection, and
     # EARLY_STOP_ON_PLATEAU live ONLY in HeadlessTrainer.train_vectorized(); the
@@ -201,6 +223,11 @@ def run_crystal_curriculum(
         trainer.epsilon_episode_offset = stage_start
         stage_target = stage_start + budget
         config.MAX_EPISODES = stage_target
+        # Anneal exploration from this stage's floor toward EPSILON_END over its
+        # budget so the policy can consolidate as epsilon falls, instead of training
+        # the whole stage at the (high) floor under the global slow decay.
+        stage_eps_end = max(config.EPSILON_END, stage.min_epsilon * STAGE_EPSILON_END_FRACTION)
+        config.EPSILON_DECAY = stage_epsilon_decay(stage.min_epsilon, budget, stage_eps_end)
         if dashboard:
             dashboard.publisher.state.target_episodes = stage_target
             dashboard.publisher.state.training_start_time = trainer.training_start_time
