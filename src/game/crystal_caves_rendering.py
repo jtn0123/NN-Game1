@@ -26,6 +26,8 @@ class CrystalCavesRenderingMixin:
         self._draw_bullets(screen, camera_x, camera_y)
         self._draw_player(screen, camera_x, camera_y)
         self._draw_visual_events(screen, camera_x, camera_y)
+        if getattr(self, "show_agent_overlay", False):
+            self._draw_agent_overlay(screen, camera_x, camera_y)
         self._draw_gravity_overlay(screen)
         self._draw_hud(screen)
 
@@ -680,6 +682,52 @@ class CrystalCavesRenderingMixin:
             pygame.draw.rect(screen, EGA["M"], plate)
             pygame.draw.rect(screen, EGA["w"], (plate.x, plate.y, plate.width, 3))
             pygame.draw.rect(screen, EGA["m"], plate, 1)
+
+    def _draw_agent_overlay(self: Any, screen, camera_x: int, camera_y: int) -> None:
+        """Educational overlay (toggle with 'O' in play/human mode): outlines the
+        exact tile window the DQN agent perceives (WINDOW_COLS x WINDOW_ROWS,
+        centred on the player) and draws a compass to its current target. Makes
+        the agent's narrow field of view and its goal legible — when the goal
+        line runs off the perception box, you can SEE it's chasing something it
+        cannot currently observe."""
+        ts = self.TILE_SIZE
+        pcol, prow = self._player_tile()
+        wx = (pcol - self.WINDOW_COLS // 2) * ts - camera_x
+        wy = (prow - self.WINDOW_ROWS // 2) * ts - camera_y
+        ww, wh = self.WINDOW_COLS * ts, self.WINDOW_ROWS * ts
+        tint = pygame.Surface((ww, wh), pygame.SRCALPHA)
+        tint.fill((90, 200, 255, 26))
+        screen.blit(tint, (wx, wy))
+        pygame.draw.rect(screen, (120, 220, 255), (wx, wy, ww, wh), 2)
+        if self._tiny_font:
+            lbl = self._tiny_font.render(
+                f"AGENT VIEW {self.WINDOW_COLS}x{self.WINDOW_ROWS}", True, (150, 230, 255)
+            )
+            screen.blit(lbl, (wx + 3, max(2, wy - 11)))
+
+        target, _ = self._current_target()
+        if target is not None:
+            kind, tcol, trow = target
+            px, py = self._player_center()
+            sx, sy = self._world_to_screen(px, py, camera_x, camera_y)
+            tx, ty = self._tile_center((tcol, trow))
+            ex, ey = self._world_to_screen(tx, ty, camera_x, camera_y)
+            color = {"crystal": EGA["G"], "switch": EGA["A"], "exit": EGA["C"]}.get(
+                kind, EGA["W"]
+            )
+            pygame.draw.line(screen, color, (sx, sy), (ex, ey), 2)
+            pygame.draw.circle(screen, color, (ex, ey), 6, 2)
+            if self._tiny_font:
+                screen.blit(self._tiny_font.render(f"goal:{kind}", True, color), (ex + 7, ey - 6))
+
+        if self._tiny_font:
+            prog = getattr(self, "_progress", 0.0)
+            read = self._tiny_font.render(
+                f"progress {prog:.2f}  crystals left {len(self.crystals)}",
+                True,
+                (220, 220, 235),
+            )
+            screen.blit(read, (6, self.height - self.HUD_HEIGHT - 14))
 
     def _draw_switch_wires(self: Any, screen, camera_x: int, camera_y: int) -> None:
         """Draw a taut cable from each switch to the nearest door it controls

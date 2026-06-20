@@ -249,6 +249,15 @@ class InteractiveRenderingMixin:
                     self._reset_episode()
                     self._show_notification("Episode Reset", (255, 200, 100), 1.0)
 
+                elif event.key == pygame.K_o and hasattr(self.game, "show_agent_overlay"):
+                    self.game.show_agent_overlay = not self.game.show_agent_overlay
+                    on = self.game.show_agent_overlay
+                    self._show_notification(
+                        "Agent View: ON" if on else "Agent View: OFF",
+                        (120, 220, 255),
+                        1.0,
+                    )
+
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                     self._speed_up()
                     self._show_notification(f"Speed: {self.game_speed:.0f}x", (100, 200, 255), 1.0)

@@ -296,6 +296,7 @@ class CrystalCaves(
         self.open_colors: Set[str] = set()
         self.exit_unlocked = False
         self.show_controls = False
+        self.show_agent_overlay = False  # educational: draw the agent's view + goal
         self._end_reason = "running"
         self._max_depth_row = 0
         self._progress = 0.0

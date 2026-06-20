@@ -435,9 +435,12 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         """Run trained agent without training (demonstration mode)."""
         print("\n🤖 AI Play Mode (No Training)")
         print("   Watching trained agent play...")
-        print("   Press Q to quit\n")
+        print("   Press O to toggle the agent-view overlay, Q to quit\n")
 
         self.agent.epsilon = 0  # No exploration
+        # show what the agent perceives + its goal by default while watching it
+        if hasattr(self.game, "show_agent_overlay"):
+            self.game.show_agent_overlay = True
         state = self.game.reset()
         episode_reward = 0.0
         total_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS

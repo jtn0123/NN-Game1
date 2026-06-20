@@ -372,6 +372,16 @@ class TestCrystalCavesRenderAndVectorized:
         surface = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
         game.render(surface)
 
+    def test_agent_view_overlay_renders(self, config):
+        """The educational agent-view overlay (perception window + goal compass)
+        renders without error when enabled."""
+        pygame.init()
+        game = CrystalCaves(config, headless=False)
+        game.reset()
+        game.show_agent_overlay = True
+        surface = pygame.Surface((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
+        game.render(surface)  # must not raise
+
     def test_render_outputs_high_contrast_pixel_art(self, config):
         pygame.init()
         game = CrystalCaves(config, headless=False)
