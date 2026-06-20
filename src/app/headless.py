@@ -660,8 +660,28 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                         )
                         self.evaluator.log_results(eval_results)
 
+                        # Early-stop: end the stage once eval has plateaued, instead
+                        # of training the live policy past its peak into collapse
+                        # (the best checkpoint already holds the peak). Uses its own
+                        # patience and pre-empts the exploration boost below.
+                        early_patience = getattr(config, "EARLY_STOP_PATIENCE", 4)
+                        if (
+                            getattr(config, "EARLY_STOP_ON_PLATEAU", False)
+                            and self.evaluator.evals_since_improvement >= early_patience
+                        ):
+                            print(
+                                f"\n⏹️  Early stop: eval plateaued "
+                                f"({self.evaluator.evals_since_improvement} evals without "
+                                f"improvement). Best checkpoint holds the peak.\n"
+                            )
+                            if self.web_dashboard:
+                                self.web_dashboard.log(
+                                    "⏹️ Early stop: eval plateaued", "warning"
+                                )
+                            self.running = False
+
                         # Auto-exploration boost: when plateau detected, increase epsilon
-                        if self.evaluator.is_plateau() and not self._exploration_boost_active:
+                        elif self.evaluator.is_plateau() and not self._exploration_boost_active:
                             self._exploration_boost_active = True
                             self._exploration_boost_end_episode = (
                                 self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES

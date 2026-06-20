@@ -102,6 +102,9 @@ class Config:
     # (the right architecture for the spatial rich state). Requires the game to set
     # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.
     USE_CNN_STATE: bool = False
+    # Spatial layout of the state vector (window/gmap/meta dims), published by the
+    # game at runtime so a CNN can reshape the flat state. None for non-spatial games.
+    STATE_LAYOUT: Optional[dict] = None
     # Objective/threat budget for generated caves: "easy" is a learnable
     # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
     # game (10-14 crystals + hazards + enemies).
@@ -542,6 +545,12 @@ class Config:
 
     # Plateau detection: warn if no improvement after N evals
     EVAL_PLATEAU_THRESHOLD: int = 5
+
+    # Early-stop: end a training run once eval has plateaued for this many evals,
+    # instead of training the live policy past its peak into collapse (the best
+    # checkpoint already holds the peak). Opt-in via --early-stop. Off by default.
+    EARLY_STOP_ON_PLATEAU: bool = False
+    EARLY_STOP_PATIENCE: int = 4
 
     # Auto-exploration boost: when plateau detected, reset epsilon to explore new strategies
     # This helps escape local optima by forcing the agent to try new behaviors

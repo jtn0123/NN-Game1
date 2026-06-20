@@ -111,6 +111,12 @@ TIPS
         "2D grid (exploits spatial structure; recommended for the rich state).",
     )
     parser.add_argument(
+        "--early-stop",
+        action="store_true",
+        help="End a run once eval win rate/score plateaus, instead of training the "
+        "live policy past its peak into collapse (keeps frequent evals).",
+    )
+    parser.add_argument(
         "--cave-difficulty",
         type=str,
         choices=["tutorial", "easy", "normal"],

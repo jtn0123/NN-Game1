@@ -227,6 +227,14 @@ def main():
     if getattr(args, "cnn", False):
         config.USE_CNN_STATE = True
         print("🧠 CNN Q-network: reading the perception window as a 2D grid")
+    if getattr(args, "early_stop", False):
+        config.EARLY_STOP_ON_PLATEAU = True
+        # evals must be frequent enough to detect a plateau within a stage
+        config.EVAL_EVERY = min(config.EVAL_EVERY, 150)
+        print(
+            f"⏹️  Early-stop on eval plateau (patience {config.EARLY_STOP_PATIENCE}, "
+            f"eval every {config.EVAL_EVERY})"
+        )
     if getattr(args, "lr_decay", False):
         config.LR_DECAY = True
         print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")
