@@ -765,6 +765,14 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 steps_per_sec = (
                     steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
                 )
+                # ETA to the run's episode target, from the recent episode rate.
+                eta_str = ""
+                eps_window = self.current_episode - last_logged_episode
+                if config.MAX_EPISODES > 0 and elapsed_since_report > 0 and eps_window > 0:
+                    eps_per_sec = eps_window / elapsed_since_report
+                    remaining = max(0, config.MAX_EPISODES - self.current_episode)
+                    eta_s = remaining / eps_per_sec if eps_per_sec > 0 else 0
+                    eta_str = f" | ETA ~{self._fmt_eta(eta_s)}"
                 avg_score = np.mean(self.scores[-100:]) if self.scores else 0
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
@@ -792,6 +800,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     f"{lr_str}"
                     f"ε: {self.agent.epsilon:.3f} | "
                     f"⚡ {steps_per_sec:,.0f} steps/s"
+                    f"{eta_str}"
                 )
 
                 print(progress_msg)
@@ -848,6 +857,16 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         frac = min(1.0, max(0.0, (current_episode - start_episode) / span))
         lr = lr_min + 0.5 * (lr0 - lr_min) * (1.0 + math.cos(math.pi * frac))
         self.agent.set_learning_rate(lr)
+
+    @staticmethod
+    def _fmt_eta(seconds: float) -> str:
+        """Human-friendly time-remaining, e.g. '3m', '1h12m', '45s'."""
+        s = int(max(0, seconds))
+        if s >= 3600:
+            return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+        if s >= 60:
+            return f"{s // 60}m"
+        return f"{s}s"
 
     def _print_progress_breakdown(self, window: int = 100) -> None:
         """CA-03: print where the agent stalls — the end-reason mix and the mean
