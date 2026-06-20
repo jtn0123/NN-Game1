@@ -121,6 +121,7 @@
                             <span class="nn-viz-status" id="nn-viz-status">● LIVE</span>
                         </div>
                         <div class="nn-viz-header-right">
+                            <button class="nn-viz-toggle" id="nn-connections-toggle" data-action="toggle-nn-connections" aria-pressed="false" aria-label="Show neural network connections">Connections</button>
                             <button class="nn-viz-toggle" data-action="toggle-nn-visualization" aria-label="Pause neural network visualization">⏸️</button>
                             <span class="collapse-icon" id="nn-viz-icon">▲</span>
                         </div>
@@ -193,22 +194,114 @@
             <div class="stats-column">
                 <!-- Metrics Grid -->
                 <div class="metrics-grid">
-                    <div class="metric-card" data-tooltip="One complete game from start to finish. Each episode ends when all bricks are cleared (win) or the ball is lost (lose)." data-tooltip-position="bottom">
+                    <div class="metric-card" data-tooltip="One complete game: from a fresh start (reset) until the agent wins or fails. Training is measured in episodes." data-tooltip-position="bottom">
                         <div class="metric-label">Episode</div>
                         <div class="metric-value" id="metric-episode">0</div>
                     </div>
-                    <div class="metric-card highlight" data-tooltip="Points earned in the current episode. The AI gets +10 points for each brick destroyed." data-tooltip-position="bottom">
+                    <div class="metric-card highlight" data-tooltip="Points earned in the current episode. Goes up as the agent does useful things (collecting crystals, making progress) and down when it fails." data-tooltip-position="bottom">
                         <div class="metric-label">Current Score</div>
                         <div class="metric-value" id="metric-score">0</div>
                     </div>
-                    <div class="metric-card best" data-tooltip="The highest score achieved in any single episode. This shows the AI's peak performance so far." data-tooltip-position="bottom">
+                    <div class="metric-card best" data-tooltip="The highest single-episode score so far — the agent's peak performance. This can only go up." data-tooltip-position="bottom">
                         <div class="metric-label">Best Score</div>
                         <div class="metric-value" id="metric-best">0</div>
                     </div>
-                    <div class="metric-card" data-tooltip="Percentage of recent episodes where the AI cleared all bricks. Higher = better. Calculated over a rolling window." data-tooltip-position="bottom">
+                    <div class="metric-card" data-tooltip="THE headline number: % of the last 100 episodes the agent FULLY completed. For Crystal Caves a win = every crystal collected AND the exit reached. Higher is better — on these procedural levels even 10–20% is a strong result. 0% early on is normal." data-tooltip-position="bottom">
                         <div class="metric-label">Win Rate</div>
                         <div class="metric-value" id="metric-winrate">0%</div>
                     </div>
+                </div>
+
+                <!-- Held-out evaluation: the trustworthy generalization measure (shown once eval runs) -->
+                <div class="info-card eval-panel" id="eval-panel" style="display: none;">
+                    <div class="card-header">
+                        <h3 data-tooltip="THE trustworthy number: deterministic (greedy) performance on a FIXED set of UNSEEN held-out levels — not the training levels. This is the real generalization measure. It is distinct from the top 'Win Rate' card, which is the exploration policy on training levels and can look very different." data-tooltip-position="right">🎯 Evaluation <span class="eval-subtle">· held-out</span></h3>
+                        <span class="info-value status-badge eval-games-badge" id="eval-games" data-tooltip="How many distinct unseen levels are scored each evaluation." data-tooltip-position="right">— levels</span>
+                    </div>
+
+                    <div class="eval-headline">
+                        <div class="eval-block" data-tooltip="Average score across the unseen held-out levels (± spread, and the median). Watch the TREND: a rising mean = genuinely learning to generalize to new caves, not memorizing one. A wide spread with median 0 means it solves a subset and fails the rest." data-tooltip-position="right">
+                            <div class="eval-big" id="eval-mean">0</div>
+                            <div class="eval-sub"><span id="eval-std">± 0</span> · median <span id="eval-median">0</span></div>
+                            <div class="eval-label">mean score</div>
+                        </div>
+                        <div class="eval-block" data-tooltip="Win rate on the unseen held-out levels (greedy policy). THIS is the real win rate — the top 'Win Rate' card is the training/exploration win rate and is usually higher." data-tooltip-position="right">
+                            <div class="eval-big" id="eval-winrate">0%</div>
+                            <div class="eval-sub">best mean <span id="eval-best">0</span></div>
+                            <div class="eval-label">held-out wins</div>
+                        </div>
+                    </div>
+
+                    <div class="eval-verdict" id="eval-verdict" data-tooltip="Quick read on the latest held-out evaluation. New best means the model improved on unseen caves. Below best means the latest policy is weaker than a previous checkpoint, so keep the eval-best save." data-tooltip-position="right">
+                        <span class="eval-verdict-label" id="eval-verdict-label">waiting for eval</span>
+                        <span class="eval-verdict-detail" id="eval-verdict-detail">held-out status</span>
+                    </div>
+
+                    <div class="eval-spark-wrap" data-tooltip="The held-out mean score over training. UP = learning to generalize. FLAT = genuinely stuck (now a real signal, no longer an eval artifact)." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>📈 Held-out trend</span><span id="eval-last-ep" class="cc-bar-hint-inline">—</span></div>
+                        <svg class="eval-spark" id="eval-spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true">
+                            <polyline id="eval-spark-line" fill="none" stroke="var(--accent-success)" stroke-width="2" vector-effect="non-scaling-stroke" points=""></polyline>
+                            <circle id="eval-spark-dot" cx="150" cy="22" r="3" fill="var(--accent-success)" style="display: none;"></circle>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Crystal Caves live progress (shown only when training Crystal Caves) -->
+                <div class="info-card cc-panel" id="crystal-caves-panel" style="display: none;">
+                    <div class="card-header">
+                        <h3 data-tooltip="Live progress through the current cave. The exit only unlocks once EVERY crystal is collected, so 'Crystals' is the sub-goal to watch — without it a win is impossible." data-tooltip-position="right">💎 Crystal Caves Progress</h3>
+                        <span class="info-value status-badge cc-difficulty-badge" id="cc-difficulty" data-tooltip="Training difficulty for the generated caves. tutorial = 1 open crystal, no threats (a winnable floor); easy = a few crystals; normal = the full game." data-tooltip-position="right">—</span>
+                    </div>
+
+                    <!-- Overall completion Φ -->
+                    <div class="cc-bar-row" data-tooltip="How close the agent got to clearing the level (0–100%), blending crystals + switch + depth into one number. The faint marker is the best it has ever reached this run. GOOD: the marker creeping toward 100%. STUCK: the marker flat for a long time." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>🧭 Level completion</span><span id="cc-progress-text">0%</span></div>
+                        <div class="gauge-bar cc-gauge">
+                            <div class="gauge-fill cc-fill-progress" id="cc-progress-fill" style="width: 0%;"></div>
+                            <div class="cc-best-marker" id="cc-progress-best" style="left: 0%;"></div>
+                        </div>
+                        <div class="cc-bar-hint">blends crystals + switch + depth · the line marks the best so far — you want it creeping right</div>
+                    </div>
+
+                    <!-- Crystals: the key sub-goal -->
+                    <div class="cc-bar-row" data-tooltip="THE key sub-goal. The exit stays locked until every crystal is gathered, so a win is impossible until this bar is full. Early in training this sits near 0 — watch it climb. This is the single best predictor of whether wins are coming." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>💎 Crystals collected</span><span id="cc-crystals-text">0 / 0</span></div>
+                        <div class="gauge-bar cc-gauge">
+                            <div class="gauge-fill cc-fill-crystal" id="cc-crystal-fill" style="width: 0%;"></div>
+                        </div>
+                        <div class="cc-bar-hint">the key sub-goal — the exit stays locked until this is full, so no win is possible until then</div>
+                    </div>
+
+                    <div class="cc-subrows">
+                        <div class="info-row" data-tooltip="Some levels hide a crystal behind a lever/switch. The count shows how many of this level's switches the agent has thrown; 'none' means the level has no switch to throw." data-tooltip-position="right">
+                            <span class="info-label">🔑 Switch thrown</span>
+                            <span class="info-value" id="cc-switch">—</span>
+                        </div>
+                        <div class="info-row" data-tooltip="How far down into the cave the agent explored (0–100%). High depth but few crystals = it's wandering/falling, not collecting. They should rise together." data-tooltip-position="right">
+                            <span class="info-label">⛏️ Depth reached</span>
+                            <span class="info-value" id="cc-depth">0%</span>
+                        </div>
+                        <div class="info-row" data-tooltip="How the most recent episode ended. 🏆 won = cleared it (the goal). ☠️ killed = ran out of health (hazard/enemy). ⏱️ timeout = ran out of time. 🛑 stalled = stopped making progress and gave up." data-tooltip-position="right">
+                            <span class="info-label">🏁 Last outcome</span>
+                            <span class="info-value cc-outcome" id="cc-outcome">—</span>
+                        </div>
+                    </div>
+
+                    <!-- Recent outcome breakdown: where episodes are ending -->
+                    <div class="cc-outcomes-wrap" data-tooltip="Where recent episodes are ending. This tells you WHAT the agent still needs to learn: mostly ☠️ killed → it dies to hazards/enemies; mostly 🛑 stalled → it gets stuck; mostly ⏱️ timeout → too slow/aimless; 🏆 won climbing → it's solving levels." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>📊 Recent outcomes</span><span class="cc-bar-hint-inline">where episodes end</span></div>
+                        <div class="cc-outcomes" id="cc-outcomes"><span class="cc-outcome-empty">waiting for episodes…</span></div>
+                    </div>
+
+                    <details class="cc-help" open>
+                        <summary>ℹ️ How to read this</summary>
+                        <ul>
+                            <li><b>Win Rate</b> is the goal. It stays at <b>0%</b> for a while — the agent has to learn to collect every crystal before a single win is possible.</li>
+                            <li><b>Crystals collected</b> is the leading indicator. It climbs <i>before</i> win rate does. If it's stuck near 0, no wins are coming yet.</li>
+                            <li><b>Level completion</b> blends crystals + switch + depth. A rising "best" marker = the agent is genuinely getting further.</li>
+                            <li><b>Recent outcomes</b> tells you the current failure mode — that's the thing to fix next.</li>
+                        </ul>
+                    </details>
                 </div>
 
                 <!-- Epsilon Gauge -->
@@ -383,12 +476,12 @@
                 <!-- Save Management Panel -->
                 <div class="save-card" id="save-card">
                     <div class="card-header">
-                        <h3>💾 Model Saves</h3>
+                        <h3>💾 Model Checkpoint</h3>
                         <span class="save-indicator" id="save-indicator"></span>
                     </div>
                     <div class="save-status" id="save-status">
                         <div class="save-status-row">
-                            <span class="save-label">Last Save:</span>
+                            <span class="save-label">Last Event:</span>
                             <span class="save-value" id="last-save-time">Never</span>
                         </div>
                         <div class="save-status-row">
@@ -400,7 +493,7 @@
                             <span class="save-value save-reason" id="last-save-reason">-</span>
                         </div>
                         <div class="save-status-row">
-                            <span class="save-label">Saves:</span>
+                            <span class="save-label">Events:</span>
                             <span class="save-value" id="saves-count">0</span>
                         </div>
                     </div>
@@ -502,7 +595,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <span data-tooltip="A neural network learns to play Breakout by trial and error, improving its strategy over thousands of games.">Neural Network Game AI</span>
+            <span data-tooltip="A neural network learns to play the selected game by trial and error, improving its strategy over thousands of episodes.">Neural Network Game AI</span>
             <span class="separator">|</span>
             <span data-tooltip="Double DQN: Uses two networks to prevent overestimating action values. Prioritized Replay: Learns more from important experiences (surprising outcomes). These techniques make learning faster and more stable.">Double DQN + Prioritized Replay</span>
             <span class="separator">|</span>

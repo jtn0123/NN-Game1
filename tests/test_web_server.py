@@ -175,6 +175,192 @@ class TestMetricsPublisher:
         assert publisher.state.epsilon == 0.5
         assert publisher.state.loss == 0.01
 
+    def test_crystal_caves_info_populates_panel_state(self):
+        """cc_info should drive the Crystal Caves dashboard fields."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update(
+            episode=5,
+            score=350,
+            epsilon=0.1,
+            loss=0.01,
+            won=False,
+            game_name="crystal_caves",
+            cc_info={
+                "progress": 0.45,
+                "progress_parts": {
+                    "crystal_frac": 0.33,
+                    "switch_done": 1.0,
+                    "depth_frac": 0.6,
+                    "won": 0.0,
+                },
+                "crystals_remaining": 2,
+                "initial_crystals": 3,
+                "level_name": "Cave 1",
+                "end_reason": "killed",
+            },
+        )
+
+        state = publisher.state
+        assert state.game_name == "crystal_caves"
+        assert state.cc_active is True
+        assert state.cc_progress == 0.45
+        assert state.cc_best_progress == 0.45
+        assert state.cc_crystal_frac == 0.33
+        assert state.cc_switch_done == 1.0
+        assert state.cc_depth_frac == 0.6
+        assert state.cc_crystals_remaining == 2
+        assert state.cc_initial_crystals == 3
+        assert state.cc_level_name == "Cave 1"
+        assert state.cc_end_reason == "killed"
+        assert state.cc_end_reason_counts == {"killed": 1}
+
+    def test_crystal_caves_best_progress_is_monotonic(self):
+        """cc_best_progress should only ever rise, even as live progress dips."""
+        publisher = MetricsPublisher(history_length=100)
+
+        for prog in (0.30, 0.55, 0.20):
+            publisher.update(
+                episode=1,
+                score=0,
+                epsilon=0.1,
+                loss=0.0,
+                game_name="crystal_caves",
+                cc_info={"progress": prog, "end_reason": "running"},
+            )
+
+        # "running" episodes are in-progress, so they must NOT be counted as outcomes.
+        assert publisher.state.cc_best_progress == 0.55
+        assert publisher.state.cc_progress == 0.20
+        assert publisher.state.cc_end_reason_counts == {}
+
+    def test_non_crystal_game_leaves_panel_inactive(self):
+        """Other games never pass cc_info, so the panel stays hidden."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update(episode=1, score=10, epsilon=0.5, loss=0.1, game_name="breakout")
+
+        assert publisher.state.game_name == "breakout"
+        assert publisher.state.cc_active is False
+
+    def test_record_eval_drives_the_held_out_panel(self):
+        """record_eval should populate the held-out eval state + sparkline history,
+        with a monotonic best — this is the trustworthy generalization measure."""
+        publisher = MetricsPublisher(history_length=100)
+        assert publisher.state.eval_ran is False
+
+        for ep, mean in [(150, 31), (300, 28), (450, 42), (600, 66)]:
+            publisher.record_eval(
+                episode=ep,
+                mean_score=mean,
+                std_score=100.0,
+                median_score=0.0,
+                win_rate=0.0,
+                num_games=20,
+            )
+
+        st = publisher.state
+        assert st.eval_ran is True
+        assert st.eval_episode == 600
+        assert st.eval_mean_score == 66.0
+        assert st.eval_num_games == 20
+        # Best is monotonic even though the mean dipped 31 -> 28 along the way.
+        assert st.eval_best_mean == 66.0
+        assert st.eval_delta_from_best == 0.0
+        assert st.eval_is_new_best is True
+        # History feeds the sparkline in trajectory order.
+        assert st.eval_history == [31.0, 28.0, 42.0, 66.0]
+
+        publisher.record_eval(
+            episode=750,
+            mean_score=40,
+            std_score=100.0,
+            median_score=0.0,
+            win_rate=0.0,
+            num_games=20,
+        )
+        assert st.eval_best_mean == 66.0
+        assert st.eval_delta_from_best == -26.0
+        assert st.eval_is_new_best is False
+
+        publisher.record_eval(
+            episode=900,
+            mean_score=66,
+            std_score=100.0,
+            median_score=0.0,
+            win_rate=0.0,
+            num_games=20,
+        )
+        assert st.eval_best_mean == 66.0
+        assert st.eval_delta_from_best == 0.0
+        assert st.eval_is_new_best is False
+
+    def test_record_eval_pushes_an_update(self):
+        """An eval must push to the dashboard immediately, not wait for the next
+        per-episode metric emit."""
+        publisher = MetricsPublisher(history_length=100)
+        received = []
+        publisher.on_update(lambda snapshot: received.append(snapshot))
+
+        publisher.record_eval(
+            episode=150, mean_score=31, std_score=108, median_score=0, win_rate=0.0, num_games=20
+        )
+
+        assert len(received) == 1
+        assert received[0]["state"]["eval_mean_score"] == 31.0
+
+    def test_record_eval_baseline_surfaces_saved_best_before_live_eval(self):
+        publisher = MetricsPublisher(history_length=100)
+        received = []
+        publisher.on_update(lambda snapshot: received.append(snapshot))
+
+        publisher.record_eval_baseline(episode=600, mean_score=90.0, num_games=20)
+
+        st = publisher.state
+        assert st.eval_ran is True
+        assert st.eval_is_baseline is True
+        assert st.eval_episode == 600
+        assert st.eval_mean_score == 90.0
+        assert st.eval_best_mean == 90.0
+        assert st.eval_history == [90.0]
+        assert received[-1]["state"]["eval_is_baseline"] is True
+
+        publisher.record_eval(
+            episode=750,
+            mean_score=70,
+            std_score=5,
+            median_score=68,
+            win_rate=0.0,
+            num_games=20,
+        )
+        assert st.eval_is_baseline is False
+        assert st.eval_best_mean == 90.0
+        assert st.eval_delta_from_best == -20.0
+
+    def test_crystal_caves_outcome_counts_are_recent_window(self):
+        publisher = MetricsPublisher(history_length=100)
+
+        for _ in range(100):
+            publisher.update(
+                episode=1,
+                score=0,
+                epsilon=0.1,
+                loss=0.0,
+                game_name="crystal_caves",
+                cc_info={"end_reason": "timeout"},
+            )
+        publisher.update(
+            episode=101,
+            score=100,
+            epsilon=0.1,
+            loss=0.0,
+            game_name="crystal_caves",
+            cc_info={"end_reason": "won"},
+            won=True,
+        )
+
+        assert publisher.state.cc_end_reason_counts == {"timeout": 99, "won": 1}
+
     def test_history_tracking(self):
         """MetricsPublisher should track history."""
         publisher = MetricsPublisher(history_length=100)

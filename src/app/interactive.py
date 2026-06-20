@@ -363,10 +363,37 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         if hasattr(self.game, "show_controls"):
             cast(ControlDisplayProvider, self.game).show_controls = True
 
+        # Title screen: render it and wait for a key before dropping into the cave
+        if hasattr(self.game, "render_title_screen"):
+            print("   Press any key to start (Q/ESC to quit)")
+            waiting = True
+            while waiting and self.running:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                        waiting = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                            self.running = False
+                        waiting = False
+                cast(Any, self.game).render_title_screen(self.screen)
+                pygame.display.flip()
+                self.clock.tick(self.config.FPS)
+
         state = self.game.reset()
+        can_advance = hasattr(self.game, "advance_cave")
+        action: int = 0
+        info: dict = {}
 
         while self.running:
             self._handle_events()
+
+            # Respect the pause menu (P key): freeze the sim, keep rendering so the
+            # menu is visible and interactive.
+            if self.paused:
+                self._render_frame(state, action, info)
+                self.clock.tick(self.config.FPS)
+                continue
 
             # Get keyboard input as dict for games that use get_human_action
             pressed = pygame.key.get_pressed()
@@ -402,9 +429,18 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
 
             if done:
                 score = info.get("score", 0)
-                print(f"   Game Over! Score: {score}")
-                pygame.time.wait(1500)  # Brief pause before reset
-                state = self.game.reset()
+                won = bool(info.get("won", False))
+                # let the win/lose banner (rendered by the game) read for a beat
+                self._render_frame(state, action, info)
+                if won and can_advance:
+                    print(f"   Cave cleared! Score: {score} — advancing to the next cave")
+                    pygame.time.wait(2200)
+                    cast(Any, self.game).advance_cave()  # next cave, not a replay
+                    state = self.game.get_state()
+                else:
+                    print(f"   Game Over! Score: {score}")
+                    pygame.time.wait(1800)
+                    state = self.game.reset()
 
             # Render
             self._render_frame(state, action, info)
@@ -416,9 +452,12 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         """Run trained agent without training (demonstration mode)."""
         print("\n🤖 AI Play Mode (No Training)")
         print("   Watching trained agent play...")
-        print("   Press Q to quit\n")
+        print("   Press O to toggle the agent-view overlay, Q to quit\n")
 
         self.agent.epsilon = 0  # No exploration
+        # show what the agent perceives + its goal by default while watching it
+        if hasattr(self.game, "show_agent_overlay"):
+            self.game.show_agent_overlay = True
         state = self.game.reset()
         episode_reward = 0.0
         total_bricks = self.config.BRICK_ROWS * self.config.BRICK_COLS

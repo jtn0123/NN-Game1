@@ -17,7 +17,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from src.ai.network import DQN, DuelingDQN, NoisyLinear
+from src.ai.network import DQN, DuelingDQN, NoisyLinear, SpatialDQN
 
 
 @pytest.fixture
@@ -419,6 +419,90 @@ class TestNoisyLinear:
         assert torch.allclose(
             layer.weight_sigma, torch.full_like(layer.weight_sigma, expected_sigma)
         )
+
+
+class TestSpatialDQN:
+    """The convolutional Q-network for grid-structured (spatial) observations."""
+
+    def _layout(self):
+        # window 11x19 (=209) + gmap 6x11 (=66) + meta 20 = 295 (the rich state)
+        return {"window": (11, 19), "gmap": (6, 11), "meta": 20}
+
+    def test_forward_shape_and_split(self):
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        net = SpatialDQN(size, 10, Config(), layout)
+        out = net(torch.zeros(4, size))
+        assert out.shape == (4, 10)
+
+    def test_handles_legacy_layout_without_gmap(self):
+        layout = {"window": (9, 11), "gmap": (0, 0), "meta": 20}
+        size = 9 * 11 + 0 + 20
+        net = SpatialDQN(size, 10, Config(), layout)
+        out = net(torch.zeros(2, size))
+        assert out.shape == (2, 10)
+
+    def test_agent_uses_cnn_when_enabled(self):
+        from src.ai.agent import Agent
+
+        cfg = Config()
+        cfg.USE_CNN_STATE = True
+        cfg.STATE_LAYOUT = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        agent = Agent(state_size=size, action_size=10, config=cfg)
+        assert isinstance(agent.policy_net, SpatialDQN)
+
+    def test_exposes_visualizer_introspection(self):
+        """The dashboard NN panel needs get_layer_info/get_weights/activations;
+        without them build_nn_snapshot fails and the panel sticks on 'waiting'."""
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        net = SpatialDQN(size, 3, Config(), layout)
+
+        info = net.get_layer_info()
+        assert len(info) >= 3
+        assert info[0]["type"] == "input"
+        assert info[-1]["type"] == "output"
+        assert info[-1]["neurons"] == 3
+
+        weights = net.get_weights()
+        assert len(weights) >= 2
+        assert all(w.ndim == 2 for w in weights)
+
+        # Activations are only captured when the flag is set (skipped in training).
+        assert net.get_activations() == {}
+        net.capture_activations = True
+        net(torch.zeros(1, size))
+        acts = net.get_activations()
+        assert "layer_0" in acts and "layer_1" in acts
+
+    def test_noisy_nets_drive_exploration(self):
+        """With NoisyNets on, the conv head's output layers carry learned noise so
+        resampling changes the Q-values — that IS the exploration (no longer reliant
+        on a low epsilon tuned for the MLP). With them off it must be deterministic."""
+        from src.ai.network import NoisyLinear
+
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        x = torch.zeros(1, size)
+
+        cfg = Config()
+        cfg.USE_NOISY_NETWORKS = True
+        noisy = SpatialDQN(size, 10, cfg, layout)
+        noisy.train()
+        assert isinstance(noisy.adv, NoisyLinear)
+        noisy.reset_noise()
+        a = noisy(x)
+        noisy.reset_noise()
+        b = noisy(x)
+        assert torch.abs(a - b).max().item() > 1e-4  # noise actually perturbs Q-values
+
+        cfg2 = Config()
+        cfg2.USE_NOISY_NETWORKS = False
+        plain = SpatialDQN(size, 10, cfg2, layout)
+        plain.eval()
+        plain.reset_noise()  # no-op
+        assert torch.allclose(plain(x), plain(x))
 
 
 if __name__ == "__main__":

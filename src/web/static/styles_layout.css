@@ -212,10 +212,21 @@ body {
     overflow: hidden;
 }
 
+.metrics-grid { order: 0; }
+.eval-panel { order: 1; }
+.controls-card { order: 2; }
+.cc-panel { order: 3; }
+.gauge-card { order: 4; }
+.stats-column > .info-card:not(.eval-panel):not(.cc-panel) { order: 5; }
+.save-card { order: 6; }
+.settings-card { order: 7; }
+.comparison-card { order: 8; }
+
 .chart-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 20px;
+    min-width: 0;
 }
 
 .chart-card {
@@ -224,6 +235,8 @@ body {
     border: 1px solid var(--border-color);
     padding: 20px;
     box-shadow: var(--shadow-sm);
+    min-width: 0;
+    width: 100%;
 }
 
 .chart-card.half {
@@ -235,6 +248,7 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 12px;
+    min-width: 0;
 }
 
 .card-header.clickable {
@@ -306,10 +320,16 @@ body {
 .chart-container {
     height: 280px;
     position: relative;
+    min-width: 0;
+    width: 100%;
 }
 
 .chart-container.small {
     height: 160px;
+}
+
+.chart-container canvas {
+    max-width: 100% !important;
 }
 
 /* Chart Scrollbar - Enhanced Design */
@@ -318,6 +338,8 @@ body {
     padding: 0 2px;
     position: relative;
     transition: opacity 0.2s ease, height 0.2s ease;
+    min-width: 0;
+    width: 100%;
 }
 
 .chart-scrollbar-container[style*="display: none"] {
@@ -564,7 +586,7 @@ body {
     border-radius: var(--border-radius-sm);
     margin-top: 12px;
     overflow-y: auto;
-    overflow-x: hidden;
+    overflow-x: auto;
     min-height: 0;
 }
 
@@ -581,8 +603,8 @@ body {
     gap: 10px;
     padding: 3px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    flex-wrap: nowrap;
-    overflow: hidden;
+    align-items: flex-start;
+    overflow: visible;
 }
 
 .console-line:last-child {
@@ -593,6 +615,7 @@ body {
     color: var(--text-muted);
     min-width: 70px;
     font-size: 0.75rem;
+    flex-shrink: 0;
 }
 
 .log-level {
@@ -602,6 +625,7 @@ body {
     text-transform: uppercase;
     padding: 1px 6px;
     border-radius: 3px;
+    flex-shrink: 0;
 }
 
 .console-line.debug .log-level {
@@ -643,20 +667,16 @@ body {
     color: var(--text-primary);
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 .log-data {
     color: var(--text-muted);
     font-size: 0.7rem;
     margin-left: 8px;
-    flex-shrink: 0;
-    max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 /* Stats Column */
@@ -664,9 +684,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    max-height: calc(100vh - 120px);
+    overflow: visible;
+    max-height: none;
     padding-right: 4px;
     padding-bottom: 30px;
     min-width: 340px;
@@ -927,6 +946,19 @@ body {
     position: relative;
 }
 
+.is-headless-mode .preview-card {
+    display: none;
+}
+
+.is-headless-mode .speed-control {
+    display: none;
+}
+
+.preview-placeholder-detail {
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
 .refresh-btn {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -979,4 +1011,245 @@ body {
 
 .preview-placeholder.hidden {
     display: none;
+}
+
+/* ===== Crystal Caves progress panel ===== */
+.cc-panel {
+    margin-top: 12px;
+}
+
+.cc-bar-row {
+    margin-bottom: 12px;
+}
+
+.cc-bar-hint {
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+    margin-top: 5px;
+}
+
+.cc-bar-hint-inline {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.cc-bar-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.cc-bar-label span:last-child {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* gauge-bar is overflow:hidden; cc-gauge lets the best marker sit on top */
+.cc-gauge {
+    position: relative;
+    height: 12px;
+}
+
+.cc-fill-crystal {
+    background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-primary) 100%);
+    box-shadow: 0 0 10px rgba(0, 188, 212, 0.35);
+}
+
+/* "best ever Φ" marker — a thin bright line the live fill chases */
+.cc-best-marker {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.7);
+    z-index: 2;
+    transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.cc-subrows {
+    margin-top: 4px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 8px;
+}
+
+.cc-outcome.good { color: var(--accent-success); }
+.cc-outcome.bad { color: var(--accent-danger); }
+.cc-outcome.warn { color: var(--accent-warning); }
+
+.cc-outcomes-wrap {
+    margin-top: 10px;
+}
+
+.cc-outcomes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+}
+
+.cc-outcome-chip {
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.cc-outcome-chip.good { color: var(--accent-success); border-color: rgba(76, 175, 80, 0.5); }
+.cc-outcome-chip.bad { color: var(--accent-danger); border-color: rgba(239, 83, 80, 0.5); }
+.cc-outcome-chip.warn { color: var(--accent-warning); border-color: rgba(255, 193, 7, 0.45); }
+
+.cc-outcome-empty {
+    font-size: 0.7rem;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.cc-help {
+    margin-top: 12px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.cc-help summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    user-select: none;
+    padding: 2px 0;
+}
+
+.cc-help summary:hover {
+    color: var(--text-secondary);
+}
+
+.cc-help ul {
+    margin: 8px 0 2px;
+    padding-left: 18px;
+}
+
+.cc-help li {
+    margin: 5px 0;
+    line-height: 1.45;
+}
+
+.cc-help b {
+    color: var(--text-primary);
+}
+
+/* ===== Held-out evaluation panel ===== */
+.eval-panel {
+    margin-top: 12px;
+    border-color: rgba(76, 175, 80, 0.35);
+}
+
+.eval-subtle {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.eval-games-badge {
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-headline {
+    display: flex;
+    gap: 12px;
+    margin: 4px 0 12px;
+}
+
+.eval-block {
+    flex: 1;
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius-sm);
+    padding: 10px 12px;
+    text-align: center;
+}
+
+.eval-big {
+    font-size: 1.55rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-sub {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-top: 5px;
+}
+
+.eval-verdict {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    margin: 0 0 10px;
+    border: 1px solid rgba(255, 193, 7, 0.35);
+    border-radius: var(--border-radius-sm);
+    background: rgba(255, 193, 7, 0.08);
+    font-size: 0.72rem;
+}
+
+.eval-verdict.best {
+    border-color: rgba(76, 175, 80, 0.45);
+    background: rgba(76, 175, 80, 0.09);
+}
+
+.eval-verdict.tied {
+    border-color: rgba(100, 181, 246, 0.4);
+    background: rgba(100, 181, 246, 0.08);
+}
+
+.eval-verdict.regressed {
+    border-color: rgba(255, 193, 7, 0.4);
+    background: rgba(255, 193, 7, 0.08);
+}
+
+.eval-verdict-label {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.eval-verdict-detail {
+    color: var(--text-secondary);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-spark-wrap {
+    margin-top: 4px;
+}
+
+.eval-spark {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin-top: 4px;
+    background: rgba(40, 40, 55, 0.5);
+    border-radius: var(--border-radius-sm);
+    overflow: visible;
 }

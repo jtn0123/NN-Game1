@@ -203,6 +203,19 @@ function createGameStatsElement(gameId, game, currentGame, maxScore) {
     return item;
 }
 
+function hasMeaningfulGameStats(game) {
+    return (Number(game.best_score) || 0) > 0
+        || (Number(game.total_episodes) || 0) > 0
+        || (Number(game.total_training_time) || 0) > 0;
+}
+
+function createHiddenInactiveNote(count) {
+    const note = document.createElement('div');
+    note.className = 'comparison-empty-note';
+    note.textContent = `${count} inactive game${count === 1 ? '' : 's'} hidden until they have training history.`;
+    return note;
+}
+
 /**
  * Load game statistics for comparison
  */
@@ -227,9 +240,18 @@ function loadGameStats() {
             maxScore = maxScore || 1; // Avoid division by zero
 
             const fragment = document.createDocumentFragment();
+            let hiddenInactive = 0;
             for (const gameId in stats) {
                 const game = stats[gameId];
+                if (gameId !== currentGame && !hasMeaningfulGameStats(game)) {
+                    hiddenInactive += 1;
+                    continue;
+                }
                 fragment.appendChild(createGameStatsElement(gameId, game, currentGame, maxScore));
+            }
+
+            if (hiddenInactive > 0) {
+                fragment.appendChild(createHiddenInactiveNote(hiddenInactive));
             }
 
             if (fragment.childNodes.length > 0) {

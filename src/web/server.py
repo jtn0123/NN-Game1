@@ -231,6 +231,12 @@ class WebDashboard:
         """Return allowed model directories as (directory, source) pairs."""
         return model_search_dirs(self.config)
 
+    def _refresh_model_service(self) -> None:
+        """Keep model browsing/loading aligned with the current game config."""
+        current_dirs = self._model_search_dirs()
+        if self.model_service.model_dirs != current_dirs:
+            self.model_service = ModelService(current_dirs)
+
     @staticmethod
     def _model_id(source: str, filename: str) -> str:
         """Create a browser-safe model identifier without exposing local paths."""
@@ -238,6 +244,7 @@ class WebDashboard:
 
     def _resolve_model_ref(self, model_ref: str) -> Optional[str]:
         """Resolve a model id, or a legacy absolute path, to an allowed .pth file."""
+        self._refresh_model_service()
         return self.model_service.resolve(model_ref)
 
     @staticmethod

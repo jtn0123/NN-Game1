@@ -83,8 +83,40 @@ class Config:
     # =========================================================================
 
     # Current game to play/train
-    # Options: 'breakout', 'space_invaders'
+    # Options: registered game IDs from src.game, e.g. 'breakout', 'crystal_caves'
     GAME_NAME: str = "breakout"
+
+    # Crystal Caves: when True, the caves are procedurally generated instead of
+    # the authored layouts. CRYSTAL_CAVES_SEED makes a procedural run reproducible.
+    # CRYSTAL_CAVES_FAMILIES restricts which level families are used (comma-
+    # separated, e.g. "platform_network,snake_bands"); empty = all families. This
+    # is the knob for curriculum training (start easy, add families over stages).
+    CRYSTAL_CAVES_PROCEDURAL: bool = False
+    CRYSTAL_CAVES_SEED: int = 0
+    CRYSTAL_CAVES_FAMILIES: str = ""
+    # AI-1 rich state: a wider perception window (19x11 ~ the 1991 view) + a coarse
+    # global objective map. When False, the legacy 11x9 window (119-feature state)
+    # that reached ~8% wins. Toggleable so the two can be compared head-to-head.
+    CRYSTAL_CAVES_RICH_STATE: bool = True
+    # Use a convolutional Q-network that reads the perception window as a 2D grid
+    # (the right architecture for the spatial rich state). Requires the game to set
+    # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.
+    USE_CNN_STATE: bool = False
+    # Spatial layout of the state vector (window/gmap/meta dims), published by the
+    # game at runtime so a CNN can reshape the flat state. None for non-spatial games.
+    STATE_LAYOUT: Optional[dict] = None
+    # Objective/threat budget for generated caves: "easy" is a learnable
+    # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
+    # game (10-14 crystals + hazards + enemies).
+    CRYSTAL_CAVES_DIFFICULTY: str = "normal"
+    # Procedural diversity. Previously procedural mode generated only 4 caves and
+    # reset() always reloaded CAVES[level_index] (which only advances on a win), so
+    # the agent trained+evaluated on essentially ONE fixed level — it memorised it
+    # instead of generalising. Now training samples a random cave from a pool of
+    # POOL_SIZE distinct caves each episode, while evaluation uses a fixed, disjoint
+    # HELD-OUT set (one cave per eval game → reproducible, and unseen → a true
+    # generalisation measure). 0 restores the legacy single-set behaviour.
+    CRYSTAL_CAVES_POOL_SIZE: int = 64
 
     # =========================================================================
     # SCREEN SETTINGS
@@ -237,6 +269,9 @@ class Config:
             max_player_bullets = 3
             num_aliens = 55  # 5 rows * 11 cols
             return 1 + max_player_bullets * 2 + num_aliens + 5 + 7
+        elif self.GAME_NAME == "crystal_caves":
+            # Local 11x9 tile window plus 20 metadata features.
+            return 11 * 9 + 20
         else:
             # Default fallback
             return 128
@@ -398,6 +433,13 @@ class Config:
     # Minimum learning rate (floor for schedulers)
     LR_MIN: float = 1e-5
 
+    # Explicit, horizon-matched LR decay driven by the trainer (cosine from
+    # LEARNING_RATE down to LR_MIN over the run's episodes). Unlike USE_LR_SCHEDULER
+    # (whose T_max is fixed at 2000), this completes over THIS run's episode count,
+    # so a 600-episode run actually freezes the policy near its peak by the end —
+    # the fix for late-training Q-drift / win-rate volatility. Off by default.
+    LR_DECAY: bool = False
+
     # =========================================================================
     # N-STEP RETURNS
     # =========================================================================
@@ -406,9 +448,12 @@ class Config:
     # Trades off bias vs variance in value estimation
     USE_N_STEP_RETURNS: bool = True
 
-    # Number of steps to look ahead (typically 2-3)
-    # 3 steps for better credit assignment in reactive gameplay
-    N_STEP_SIZE: int = 3
+    # Number of steps to look ahead for n-step returns.
+    # Raised from 3 to 6: Crystal Caves wins require a long switch->crystals->exit
+    # sequence (40+ steps), and 3-step returns can't propagate the terminal reward
+    # back far enough — the agent's Q-values stayed pinned near 0. 6 carries the
+    # signal twice as far without the variance of a very long horizon.
+    N_STEP_SIZE: int = 6
 
     # =========================================================================
     # NOISY NETWORKS
@@ -511,6 +556,12 @@ class Config:
 
     # Plateau detection: warn if no improvement after N evals
     EVAL_PLATEAU_THRESHOLD: int = 5
+
+    # Early-stop: end a training run once eval has plateaued for this many evals,
+    # instead of training the live policy past its peak into collapse (the best
+    # checkpoint already holds the peak). Opt-in via --early-stop. Off by default.
+    EARLY_STOP_ON_PLATEAU: bool = False
+    EARLY_STOP_PATIENCE: int = 4
 
     # Auto-exploration boost: when plateau detected, reset epsilon to explore new strategies
     # This helps escape local optima by forcing the agent to try new behaviors

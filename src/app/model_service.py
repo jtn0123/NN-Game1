@@ -71,6 +71,14 @@ class ModelService:
         if not model_files:
             return None
 
+        # Prefer the best-scoring checkpoint over the merely newest one. The
+        # final/latest save can be a post-collapse policy (RL training often
+        # peaks then regresses), whereas {game}_best.pth captures the peak.
+        # Warm-starting — and curriculum stages that resume the prior stage —
+        # should pick up from the best policy, not the last one written.
+        best_name = f"{self.config.GAME_NAME}_best.pth"
+        model_files.sort(key=lambda c: (os.path.basename(c.path) != best_name, -c.modified))
+
         for candidate in model_files:
             model_path = candidate.path
             info = Agent.inspect_model(
@@ -83,7 +91,8 @@ class ModelService:
                 and info.get("state_size") == state_size
                 and info.get("action_size") == action_size
             ):
-                log(f"📂 Auto-loading most recent compatible save: {os.path.basename(model_path)}")
+                kind = "best" if os.path.basename(model_path) == best_name else "most recent"
+                log(f"📂 Auto-loading {kind} compatible save: {os.path.basename(model_path)}")
                 return model_path
             log(f"⚠️  Skipping incompatible save: {os.path.basename(model_path)}")
 

@@ -85,6 +85,47 @@ TIPS
         action="store_true",
         help="Show game selection menu on launch (interactive game picker)",
     )
+    parser.add_argument(
+        "--random-caves",
+        action="store_true",
+        help="Crystal Caves: play procedurally generated caves instead of the authored ones",
+    )
+    parser.add_argument(
+        "--cave-families",
+        type=str,
+        default=None,
+        help="Crystal Caves: restrict generated level families (comma-separated, "
+        "e.g. platform_network,snake_bands). Used for curriculum training.",
+    )
+    parser.add_argument(
+        "--legacy-state",
+        action="store_true",
+        help="Crystal Caves: use the legacy 11x9 perception window (119-feature "
+        "state) instead of the AI-1 rich state (19x11 + global objective map). "
+        "For head-to-head state-representation comparisons.",
+    )
+    parser.add_argument(
+        "--cnn",
+        action="store_true",
+        help="Use a convolutional Q-network that reads the perception window as a "
+        "2D grid (exploits spatial structure; recommended for the rich state).",
+    )
+    parser.add_argument(
+        "--early-stop",
+        action="store_true",
+        help="End a run once eval win rate/score plateaus, instead of training the "
+        "live policy past its peak into collapse (keeps frequent evals).",
+    )
+    parser.add_argument(
+        "--cave-difficulty",
+        type=str,
+        choices=["tutorial", "easy", "normal"],
+        default=None,
+        help="Crystal Caves: objective/threat budget for generated caves. "
+        "'tutorial' is the simplest winnable level (1 open crystal, no lock); "
+        "'easy' is a learnable curriculum floor (few crystals, no threats); "
+        "'normal' is the full game (default).",
+    )
 
     parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
 
@@ -151,6 +192,12 @@ TIPS
         "--torch-compile",
         action="store_true",
         help="Enable torch.compile() for ~20-50%% speedup (PyTorch 2.0+)",
+    )
+    parser.add_argument(
+        "--lr-decay",
+        action="store_true",
+        help="Cosine-decay the learning rate to LR_MIN over the run's episodes "
+        "(freezes the policy near its peak; stabilizes late-training win rate)",
     )
     parser.add_argument(
         "--cpu",

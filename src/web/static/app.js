@@ -32,6 +32,7 @@ const DASHBOARD_ACTIONS = Object.freeze({
     'reset-chart': (target) => resetChartView(target.dataset.chart || 'all'),
     'toggle-nn-panel': () => toggleNNPanel(),
     'toggle-nn-visualization': () => toggleNNVisualization(),
+    'toggle-nn-connections': () => toggleNNConnections(),
     'set-log-filter': (target) => setLogFilter(target.dataset.filter || 'all'),
     'copy-logs': () => copyLogsToClipboard(),
     'clear-logs': () => clearLogs(),
@@ -366,18 +367,249 @@ function updateConnectionStatus(connected) {
     }
 }
 
+// Crystal Caves end-reason → plain-English display (icon, label, sentiment).
+const CC_OUTCOMES = {
+    won: { icon: '🏆', label: 'won', cls: 'good' },
+    killed: { icon: '☠️', label: 'killed', cls: 'bad' },
+    timeout: { icon: '⏱️', label: 'timeout', cls: 'warn' },
+    stalled: { icon: '🛑', label: 'stalled', cls: 'warn' },
+};
+
+function updateHeadlessUi(isHeadless) {
+    if (document.body) {
+        document.body.classList.toggle('is-headless-mode', isHeadless);
+    }
+    ['.preview-card', '.speed-control'].forEach((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return;
+        element.hidden = isHeadless;
+        if (isHeadless) {
+            element.setAttribute('inert', '');
+            element.setAttribute('aria-hidden', 'true');
+        } else {
+            element.removeAttribute('inert');
+            element.removeAttribute('aria-hidden');
+        }
+    });
+}
+
+/**
+ * Update the held-out Evaluation panel — the trustworthy generalization measure.
+ * Hidden until the first periodic eval runs; draws a sparkline of the eval-mean
+ * trajectory so the climb (or plateau) is visible at a glance.
+ */
+function updateEval(state) {
+    const panel = document.getElementById('eval-panel');
+    if (!panel) return;
+    if (!state.eval_ran) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    const round0 = (v) => Math.round(Number(v) || 0);
+    const isBaseline = Boolean(state.eval_is_baseline);
+
+    setText('eval-mean', round0(state.eval_mean_score).toLocaleString());
+    setText('eval-std', isBaseline ? 'saved best' : `± ${round0(state.eval_std_score)}`);
+    setText('eval-median', isBaseline ? '—' : round0(state.eval_median_score).toLocaleString());
+    setText('eval-best', round0(state.eval_best_mean).toLocaleString());
+    setText('eval-games', `${Number(state.eval_num_games) || 0} levels`);
+    setText(
+        'eval-last-ep',
+        isBaseline
+            ? `saved best @ ep ${(Number(state.eval_episode) || 0).toLocaleString()}`
+            : `last @ ep ${(Number(state.eval_episode) || 0).toLocaleString()}`
+    );
+
+    const verdict = document.getElementById('eval-verdict');
+    const verdictLabel = document.getElementById('eval-verdict-label');
+    const verdictDetail = document.getElementById('eval-verdict-detail');
+    if (verdict && verdictLabel && verdictDetail) {
+        const mean = Number(state.eval_mean_score) || 0;
+        const best = Number(state.eval_best_mean) || 0;
+        const delta = Number.isFinite(Number(state.eval_delta_from_best))
+            ? Number(state.eval_delta_from_best)
+            : mean - best;
+        const isNewBest = !isBaseline && typeof state.eval_is_new_best === 'boolean'
+            ? state.eval_is_new_best
+            : mean > best;
+        const isTiedBest = !isNewBest && delta === 0;
+        verdict.classList.toggle('best', isNewBest);
+        verdict.classList.toggle('tied', isTiedBest || isBaseline);
+        verdict.classList.toggle('regressed', !isBaseline && !isNewBest && !isTiedBest);
+        if (isBaseline) {
+            verdictLabel.textContent = 'Saved held-out best';
+            verdictDetail.textContent = 'training wins update this after eval';
+        } else if (isNewBest) {
+            verdictLabel.textContent = 'New held-out best';
+            verdictDetail.textContent = 'save eval-best checkpoint';
+        } else if (isTiedBest) {
+            verdictLabel.textContent = 'Matches held-out best';
+            verdictDetail.textContent = 'no weaker than best checkpoint';
+        } else {
+            verdictLabel.textContent = 'Below held-out best';
+            verdictDetail.textContent = `${round0(Math.abs(delta)).toLocaleString()} below best checkpoint`;
+        }
+    }
+
+    const winrateEl = document.getElementById('eval-winrate');
+    if (winrateEl) {
+        if (isBaseline) {
+            winrateEl.textContent = '—';
+            winrateEl.style.color = '';
+        } else {
+            const wr = Number(state.eval_win_rate) || 0;
+            winrateEl.textContent = `${(wr * 100).toFixed(1)}%`;
+            winrateEl.style.color = wr > 0 ? 'var(--accent-success)' : '';
+        }
+    }
+
+    // Sparkline of the eval-mean trajectory.
+    const line = document.getElementById('eval-spark-line');
+    const dot = document.getElementById('eval-spark-dot');
+    if (line) {
+        const hist = Array.isArray(state.eval_history)
+            ? state.eval_history.map(Number).filter(Number.isFinite)
+            : [];
+        if (hist.length < 2) {
+            line.setAttribute('points', '');
+            if (dot) {
+                dot.style.display = hist.length === 1 ? '' : 'none';
+                dot.setAttribute('cx', '150');
+                dot.setAttribute('cy', '22');
+            }
+        } else {
+            if (dot) dot.style.display = 'none';
+            const W = 300;
+            const H = 44;
+            const pad = 3;
+            const min = Math.min(...hist);
+            const max = Math.max(...hist);
+            const span = max - min || 1;
+            const points = hist
+                .map((v, i) => {
+                    const x = (i / (hist.length - 1)) * W;
+                    const y = H - pad - ((v - min) / span) * (H - 2 * pad);
+                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                })
+                .join(' ');
+            line.setAttribute('points', points);
+        }
+    }
+}
+
+/**
+ * Update the Crystal Caves progress panel from training state.
+ * Hidden entirely for other games; populated only when cc_active is set.
+ */
+function updateCrystalCaves(state) {
+    const panel = document.getElementById('crystal-caves-panel');
+    if (!panel) return;
+
+    const isCC = Boolean(state.cc_active) && state.game_name === 'crystal_caves';
+    panel.style.display = isCC ? '' : 'none';
+    if (!isCC) return;
+
+    const pctText = (v) => `${Math.round((Number(v) || 0) * 100)}%`;
+    const widthPct = (v) => `${Math.max(0, Math.min(100, (Number(v) || 0) * 100))}%`;
+
+    // Level completion (Φ) with a "best ever" marker.
+    const setWidth = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.style.width = widthPct(v);
+    };
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+
+    setWidth('cc-progress-fill', state.cc_progress);
+    setText('cc-progress-text', pctText(state.cc_progress));
+    const bestMarker = document.getElementById('cc-progress-best');
+    if (bestMarker) bestMarker.style.left = widthPct(state.cc_best_progress);
+
+    // Crystals — the key sub-goal.
+    setWidth('cc-crystal-fill', state.cc_crystal_frac);
+    const initial = Number(state.cc_initial_crystals) || 0;
+    const remaining = Number(state.cc_crystals_remaining) || 0;
+    const collected = Math.max(0, initial - remaining);
+    setText('cc-crystals-text', `${collected} / ${initial}`);
+
+    // Switch: show thrown/total, or "none" when the level has no switch.
+    const swTotal = Number(state.cc_switches_total) || 0;
+    const swUsed = Number(state.cc_switches_used) || 0;
+    let swText;
+    if (swTotal === 0) {
+        swText = 'none on this level';
+    } else if (swUsed >= swTotal) {
+        swText = `✓ ${swUsed} / ${swTotal} thrown`;
+    } else {
+        swText = `${swUsed} / ${swTotal} thrown`;
+    }
+    setText('cc-switch', swText);
+
+    setText('cc-depth', pctText(state.cc_depth_frac));
+    setText('cc-difficulty', state.cc_difficulty || '—');
+
+    // Last outcome (colour-coded).
+    const outcomeEl = document.getElementById('cc-outcome');
+    if (outcomeEl) {
+        const o = CC_OUTCOMES[state.cc_end_reason];
+        outcomeEl.textContent = o ? `${o.icon} ${o.label}` : '—';
+        outcomeEl.className = 'info-value cc-outcome' + (o ? ` ${o.cls}` : '');
+    }
+
+    // Recent-outcome breakdown: where episodes are ending.
+    const outcomesEl = document.getElementById('cc-outcomes');
+    if (outcomesEl) {
+        const counts = state.cc_end_reason_counts || {};
+        const total = Object.values(counts).reduce((sum, n) => sum + (Number(n) || 0), 0);
+        if (total <= 0) {
+            const empty = document.createElement('span');
+            empty.className = 'cc-outcome-empty';
+            empty.textContent = 'waiting for episodes…';
+            outcomesEl.replaceChildren(empty);
+        } else {
+            const order = ['won', 'killed', 'timeout', 'stalled'];
+            const keys = order
+                .filter((k) => counts[k])
+                .concat(Object.keys(counts).filter((k) => !order.includes(k)));
+            const chips = keys.map((k) => {
+                const o = CC_OUTCOMES[k] || { icon: '•', label: k, cls: '' };
+                const n = Number(counts[k]) || 0;
+                const share = Math.round((n / total) * 100);
+                const chip = document.createElement('span');
+                chip.className = `cc-outcome-chip ${o.cls || ''}`.trim();
+                chip.title = `${o.label}: ${n} of ${total} (${share}%)`;
+                chip.textContent = `${o.icon} ${n} (${share}%)`;
+                return chip;
+            });
+            outcomesEl.replaceChildren(...chips);
+        }
+    }
+}
+
 /**
  * Update dashboard with new data
  */
 function updateDashboard(data) {
     const state = data.state;
     const history = data.history;
+    updateHeadlessUi(Boolean(state.headless));
 
     // Update metrics
     document.getElementById('metric-episode').textContent = state.episode.toLocaleString();
     document.getElementById('metric-score').textContent = state.score;
     document.getElementById('metric-best').textContent = state.best_score;
-    document.getElementById('metric-winrate').textContent = (state.win_rate * 100).toFixed(1) + '%';
+    const winrateEl = document.getElementById('metric-winrate');
+    winrateEl.textContent = (state.win_rate * 100).toFixed(1) + '%';
+    // Green once the agent is actually winning some — easy signal for non-experts.
+    winrateEl.style.color = state.win_rate > 0 ? 'var(--accent-success)' : '';
 
     // Update epsilon gauge
     document.getElementById('epsilon-value').textContent = state.epsilon.toFixed(3);
@@ -431,6 +663,12 @@ function updateDashboard(data) {
 
     // Update system status badges
     updateSystemStatus(state);
+
+    // Update Crystal Caves progress panel (no-op for other games)
+    updateCrystalCaves(state);
+
+    // Update held-out evaluation panel (hidden until the first eval runs)
+    updateEval(state);
 
     // Update performance mode buttons and sync settings
     if (state.performance_mode) {
@@ -487,4 +725,7 @@ function updateDashboard(data) {
 
     // Update charts - pass current episode for accurate labels
     updateCharts(history, state.episode);
+    if (typeof DashboardCharts !== 'undefined' && DashboardCharts.resizeCharts) {
+        DashboardCharts.resizeCharts();
+    }
 }

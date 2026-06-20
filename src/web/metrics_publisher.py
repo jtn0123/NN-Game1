@@ -6,7 +6,7 @@ import base64
 import io
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
@@ -84,6 +84,10 @@ class MetricsPublisher:
 
         # Console log history
         self.console_logs: Deque[LogMessage] = deque(maxlen=500)
+
+        # Held-out eval mean-score trajectory (for the dashboard eval sparkline)
+        self._eval_history: Deque[float] = deque(maxlen=200)
+        self._cc_outcome_window: Deque[str] = deque(maxlen=100)
 
         # Thread safety for callbacks
         self._callback_lock = threading.Lock()
@@ -168,6 +172,8 @@ class MetricsPublisher:
         q_value_stay: float = 0.0,
         q_value_right: float = 0.0,
         selected_action: Optional[int] = None,
+        game_name: str = "",
+        cc_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Update metrics with new episode data.
@@ -175,7 +181,17 @@ class MetricsPublisher:
         Args:
             q_value_left, q_value_stay, q_value_right: Q-values for each action (Phase 1)
             selected_action: Index of action taken (0=LEFT, 1=STAY, 2=RIGHT)
+            game_name: Active game (drives which game-specific dashboard panels show)
+            cc_info: Crystal Caves per-episode info dict (progress, progress_parts,
+                crystals, end_reason). Populates the Crystal Caves dashboard panel.
         """
+        if game_name:
+            self.state.game_name = game_name
+        if cc_info is not None:
+            try:
+                self._update_crystal_caves(cc_info, won)
+            except Exception:  # dashboard telemetry must never crash training
+                _logger.warning("Failed to update Crystal Caves dashboard state", exc_info=True)
         self.state.episode = episode
         self.state.score = score
         self.state.best_score = max(self.state.best_score, score)
@@ -275,6 +291,102 @@ class MetricsPublisher:
             self.state.win_rate = 0.0
 
         # Notify callbacks (thread-safe copy to avoid modification during iteration)
+        with self._callback_lock:
+            callbacks = self._on_update_callbacks.copy()
+        for callback in callbacks:
+            callback(self.get_snapshot())
+
+    def _update_crystal_caves(self, info: Dict[str, Any], won: bool) -> None:
+        """Populate Crystal Caves-specific dashboard state from a game info dict.
+
+        ``info`` is the dict returned by ``CrystalCaves._info()``: it carries the
+        completion potential (``progress``), its component breakdown
+        (``progress_parts`` = crystal/switch/depth), the crystal counts, and how
+        the episode ended (``end_reason``)."""
+        self.state.cc_active = True
+        progress = float(info.get("progress", 0.0) or 0.0)
+        self.state.cc_progress = progress
+        self.state.cc_best_progress = max(self.state.cc_best_progress, progress)
+
+        parts = info.get("progress_parts") or {}
+        if isinstance(parts, dict):
+            self.state.cc_crystal_frac = float(parts.get("crystal_frac", 0.0) or 0.0)
+            self.state.cc_switch_done = float(parts.get("switch_done", 0.0) or 0.0)
+            self.state.cc_depth_frac = float(parts.get("depth_frac", 0.0) or 0.0)
+
+        self.state.cc_crystals_remaining = int(info.get("crystals_remaining", 0) or 0)
+        self.state.cc_initial_crystals = int(info.get("initial_crystals", 0) or 0)
+        self.state.cc_switches_total = int(info.get("switches_total", 0) or 0)
+        self.state.cc_switches_used = int(info.get("switches_used", 0) or 0)
+        self.state.cc_level_name = str(info.get("level_name", "") or "")
+
+        # Only count terminal reasons (skip the in-progress "running" sentinel).
+        reason = str(info.get("end_reason", "") or "")
+        if reason and reason != "running":
+            self.state.cc_end_reason = reason
+            self._cc_outcome_window.append(reason)
+            self.state.cc_end_reason_counts = dict(Counter(self._cc_outcome_window))
+
+    def record_eval(
+        self,
+        episode: int,
+        mean_score: float,
+        std_score: float,
+        median_score: float,
+        win_rate: float,
+        num_games: int,
+    ) -> None:
+        """Record a held-out evaluation result and push it to the dashboard.
+
+        This is the trustworthy generalisation measure (distinct from the rolling
+        training win_rate) — periodic deterministic eval on unseen held-out levels.
+        """
+        had_prior_eval = self.state.eval_ran
+        self.state.eval_ran = True
+        self.state.eval_is_baseline = False
+        self.state.eval_episode = int(episode)
+        self.state.eval_mean_score = float(mean_score)
+        self.state.eval_std_score = float(std_score)
+        self.state.eval_median_score = float(median_score)
+        self.state.eval_win_rate = float(win_rate)
+        self.state.eval_num_games = int(num_games)
+        previous_best = self.state.eval_best_mean
+        self.state.eval_is_new_best = (not had_prior_eval) or float(mean_score) > previous_best
+        self.state.eval_best_mean = max(previous_best, float(mean_score))
+        self.state.eval_delta_from_best = float(mean_score) - self.state.eval_best_mean
+        self._eval_history.append(float(mean_score))
+        self.state.eval_history = list(self._eval_history)
+
+        # Push immediately so the panel updates the moment an eval completes,
+        # rather than waiting for the next per-episode metric emit.
+        with self._callback_lock:
+            callbacks = self._on_update_callbacks.copy()
+        for callback in callbacks:
+            callback(self.get_snapshot())
+
+    def record_eval_baseline(
+        self,
+        *,
+        episode: int,
+        mean_score: float,
+        num_games: int,
+    ) -> None:
+        """Surface a saved eval-best checkpoint before the next live eval runs."""
+        self.state.eval_ran = True
+        self.state.eval_is_baseline = True
+        self.state.eval_episode = int(episode)
+        self.state.eval_mean_score = float(mean_score)
+        self.state.eval_std_score = 0.0
+        self.state.eval_median_score = float(mean_score)
+        self.state.eval_win_rate = 0.0
+        self.state.eval_best_mean = float(mean_score)
+        self.state.eval_delta_from_best = 0.0
+        self.state.eval_is_new_best = False
+        self.state.eval_num_games = int(num_games)
+        self._eval_history.clear()
+        self._eval_history.append(float(mean_score))
+        self.state.eval_history = list(self._eval_history)
+
         with self._callback_lock:
             callbacks = self._on_update_callbacks.copy()
         for callback in callbacks:
@@ -762,6 +874,33 @@ class MetricsPublisher:
         self.state.bricks_broken_total = 0
         self.state.episodes_per_second = 0.0
         self.state.steps_per_second = 0.0
+
+        # Reset Crystal Caves telemetry (keep cc_active/difficulty/level — those
+        # describe the run, not the per-episode progress)
+        self.state.cc_progress = 0.0
+        self.state.cc_best_progress = 0.0
+        self.state.cc_crystal_frac = 0.0
+        self.state.cc_switch_done = 0.0
+        self.state.cc_depth_frac = 0.0
+        self.state.cc_crystals_remaining = 0
+        self.state.cc_end_reason = ""
+        self.state.cc_end_reason_counts = {}
+        self._cc_outcome_window.clear()
+
+        # Reset held-out eval telemetry
+        self._eval_history.clear()
+        self.state.eval_ran = False
+        self.state.eval_episode = 0
+        self.state.eval_mean_score = 0.0
+        self.state.eval_std_score = 0.0
+        self.state.eval_median_score = 0.0
+        self.state.eval_win_rate = 0.0
+        self.state.eval_best_mean = 0.0
+        self.state.eval_delta_from_best = 0.0
+        self.state.eval_is_new_best = False
+        self.state.eval_is_baseline = False
+        self.state.eval_num_games = 0
+        self.state.eval_history = []
 
         # Reset timing
         self._episode_times.clear()

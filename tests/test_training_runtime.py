@@ -11,10 +11,15 @@ from src.app.training_runtime import (
     NNSnapshot,
     build_nn_snapshot,
     emit_nn_snapshot_to_dashboard,
+    eval_best_sidecar_path,
+    is_new_best_eval,
     is_new_best_score,
+    read_eval_best_baseline,
+    read_eval_best_record,
     request_save_and_stop,
     resolve_model_path,
     should_emit_episode_metrics,
+    write_eval_best_baseline,
 )
 
 
@@ -24,6 +29,59 @@ from src.app.training_runtime import (
 )
 def test_is_new_best_score_compares_against_previous_best(score, best_score, expected):
     assert is_new_best_score(score, best_score) is expected
+
+
+@pytest.mark.parametrize(
+    ("best_eval_score", "evals_since_improvement", "mean_score", "expected"),
+    [
+        (60.0, 0, 60.0, True),
+        (60.0, 1, 40.0, False),
+        (60.0, 1, 60.0, False),
+    ],
+)
+def test_is_new_best_eval_uses_evaluator_improvement_signal(
+    best_eval_score, evals_since_improvement, mean_score, expected
+):
+    evaluator = SimpleNamespace(
+        best_eval_score=best_eval_score,
+        evals_since_improvement=evals_since_improvement,
+    )
+
+    assert is_new_best_eval(evaluator, mean_score) is expected
+
+
+def test_eval_best_sidecar_round_trips_score(tmp_path):
+    model_dir = str(tmp_path / "models")
+    os.makedirs(model_dir)
+
+    assert read_eval_best_baseline(model_dir, "crystal_caves") is None
+
+    write_eval_best_baseline(
+        model_dir,
+        "crystal_caves",
+        episode=600,
+        mean_score=90.0,
+        checkpoint="crystal_caves_eval_best.pth",
+    )
+
+    assert eval_best_sidecar_path(model_dir, "crystal_caves").endswith(
+        "crystal_caves_eval_best.json"
+    )
+    assert read_eval_best_baseline(model_dir, "crystal_caves") == 90.0
+    assert read_eval_best_record(model_dir, "crystal_caves") == {
+        "episode": 600,
+        "mean_score": 90.0,
+        "checkpoint": "crystal_caves_eval_best.pth",
+    }
+
+
+def test_eval_best_sidecar_ignores_bad_json(tmp_path):
+    model_dir = str(tmp_path / "models")
+    os.makedirs(model_dir)
+    with open(eval_best_sidecar_path(model_dir, "crystal_caves"), "w", encoding="utf-8") as handle:
+        handle.write("{bad")
+
+    assert read_eval_best_baseline(model_dir, "crystal_caves") is None
 
 
 @pytest.mark.parametrize(

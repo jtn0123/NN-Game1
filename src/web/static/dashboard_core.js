@@ -210,11 +210,14 @@
             const epsilon = model?.epsilon;
             const reason = hasMeta ? meta.save_reason || '' : '';
             const loadAttrs = isLoadable
-                ? `data-action="load-model" data-model-id="${escapeHtmlAttribute(modelRef)}"`
+                ? `data-action="load-model" data-model-id="${escapeHtmlAttribute(modelRef)}" role="button" tabindex="0"`
                 : '';
             const loadWarning = isLoadable
                 ? ''
                 : `<span class="reason-badge error" title="${escapeHtmlAttribute(model?.load_error || 'Unreadable checkpoint')}">unreadable</span>`;
+            const metadataNote = isLoadable && !hasMeta
+                ? '<span class="reason-badge legacy" title="This checkpoint can be loaded, but it was saved before rich dashboard metadata existed.">legacy</span>'
+                : '';
             const reasonBadge = reason
                 ? `<span class="reason-badge ${escapeHtmlAttribute(reason)}">${escapeHtml(reason)}</span>`
                 : '';
@@ -226,6 +229,7 @@
                                 <div class="model-name">
                                     📁 ${escapeHtml(model?.name || modelDisplayName(modelRef))}
                                     ${reasonBadge}
+                                    ${metadataNote}
                                     ${loadWarning}
                                 </div>
                                 <span class="model-size">${formatMegabytes(model?.size)}</span>
@@ -251,7 +255,8 @@
                             <div class="model-date">${escapeHtml(model?.modified_str || '')}</div>
                         </div>
                         <button class="model-delete-btn" data-action="delete-model" data-model-id="${escapeHtmlAttribute(modelRef)}" data-model-name="${escapeHtmlAttribute(model?.name || modelDisplayName(modelRef))}" title="Delete this model">
-                            🗑️
+                            <span aria-hidden="true">🗑️</span>
+                            <span>Delete</span>
                         </button>
                     </div>
                 `;

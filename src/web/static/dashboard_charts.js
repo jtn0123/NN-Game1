@@ -899,6 +899,25 @@
         userHasPanned = { score: false, loss: false, qvalue: false };
     }
 
+    function resizeCharts() {
+        [scoreChart, lossChart, qvalueChart].forEach((chart) => {
+            if (chart && typeof chart.resize === 'function') {
+                chart.resize();
+            }
+        });
+        updateScrollbarPosition('score', scoreChart);
+        updateScrollbarPosition('loss', lossChart);
+        updateScrollbarPosition('qvalue', qvalueChart);
+    }
+
+    if (typeof window !== 'undefined') {
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(resizeCharts, 100);
+        });
+    }
+
     function configure(options = {}) {
         addConsoleLogCallback = options.addConsoleLog || addConsoleLogCallback;
     }
@@ -912,6 +931,7 @@
         updateCharts,
         resetChartView,
         clearCharts,
+        resizeCharts,
         downsampleLTTB,
     };
 

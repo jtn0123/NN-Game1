@@ -29,6 +29,8 @@ from .base_game import (
     VecGameConstructor,
 )
 from .breakout import Breakout, VecBreakout
+from .crystal_caves import CrystalCaves
+from .crystal_caves_vec import VecCrystalCaves
 from .menu import GameMenu
 from .particles import ParticleSystem, TrailRenderer
 from .pong import Pong, VecPong
@@ -121,6 +123,33 @@ GAME_REGISTRY: Dict[str, GameRegistryEntry] = {
         "difficulty": "Hard",
         "color": (200, 200, 200),  # Vector gray theme
         "icon": "🚀",
+    },
+    "crystal_caves": {
+        "class": CrystalCaves,
+        "vec_class": cast(VecGameConstructor, VecCrystalCaves),
+        "name": "Crystal Caves",
+        "description": "Explore caves, collect crystals, and escape",
+        "actions": [
+            "IDLE",
+            "LEFT",
+            "RIGHT",
+            "JUMP",
+            "LEFT_JUMP",
+            "RIGHT_JUMP",
+            "SHOOT",
+            "LEFT_SHOOT",
+            "RIGHT_SHOOT",
+            "INTERACT",
+        ],
+        "controls": [
+            "LEFT/RIGHT arrows (or A/D): Move",
+            "SPACE/UP/W: Jump",
+            "Z/Ctrl: Shoot",
+            "E/Enter: Interact with switches",
+        ],
+        "difficulty": "Hard",
+        "color": (90, 230, 255),  # Crystal cyan theme
+        "icon": "💎",
     },
 }
 
@@ -227,6 +256,8 @@ __all__ = [
     "VecSnake",
     "Asteroids",
     "VecAsteroids",
+    "CrystalCaves",
+    "VecCrystalCaves",
     "BaseGame",
     "BaseVecGame",
     "ControlDisplayProvider",

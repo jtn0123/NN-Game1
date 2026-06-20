@@ -27,7 +27,7 @@ References:
 import random
 import threading
 from collections import deque
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -39,7 +39,7 @@ from config import Config
 
 from .agent_metadata import SaveMetadata, TrainingHistory
 from .agent_persistence import AgentPersistenceMixin
-from .network import DQN, DuelingDQN
+from .network import DQN, DuelingDQN, SpatialDQN
 from .replay_buffer import PrioritizedReplayBuffer, ReplayBuffer
 
 __all__ = ["Agent", "SaveMetadata", "TrainingHistory"]
@@ -90,8 +90,16 @@ class Agent(AgentPersistenceMixin):
         self.action_size = action_size
         self.device = self.config.DEVICE
 
-        # Networks - use DuelingDQN if enabled in config
-        NetworkClass = DuelingDQN if self.config.USE_DUELING else DQN
+        # Networks: a convolutional net for grid-structured (spatial) observations
+        # when enabled and the game supplied a layout, else the (dueling) MLP.
+        layout = getattr(self.config, "STATE_LAYOUT", None)
+        if getattr(self.config, "USE_CNN_STATE", False) and layout is not None:
+
+            def NetworkClass(s: int, a: int, c: Any) -> Any:
+                return SpatialDQN(s, a, c, layout)
+
+        else:
+            NetworkClass = DuelingDQN if self.config.USE_DUELING else DQN  # type: ignore[assignment]
         self.policy_net = NetworkClass(state_size, action_size, config).to(self.device)
         self.target_net = NetworkClass(state_size, action_size, config).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -712,6 +720,15 @@ class Agent(AgentPersistenceMixin):
         if self.scheduler is not None and self._optimizer_steps_since_scheduler > 0:
             self.scheduler.step()
             self._optimizer_steps_since_scheduler = 0
+
+    def set_learning_rate(self, lr: float) -> None:
+        """Override the optimizer learning rate (used for explicit, horizon-matched
+        LR decay that the trainer drives per episode)."""
+        for group in self.optimizer.param_groups:
+            group["lr"] = lr
+
+    def get_learning_rate(self) -> float:
+        return float(self.optimizer.param_groups[0]["lr"])
 
     @staticmethod
     @staticmethod

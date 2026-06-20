@@ -32,6 +32,10 @@ class DashboardRouteContext(Protocol):
         """Return whether the current Flask request is authorized."""
         ...
 
+    def _refresh_model_service(self) -> None:
+        """Refresh model directories after runtime game/config changes."""
+        ...
+
 
 def api_error(message: str, status: int) -> Tuple[Response, int]:
     """Return the dashboard API's stable JSON error shape."""
@@ -187,6 +191,7 @@ def register_dashboard_routes(
 
         Searches both game-specific directory and legacy models directory.
         """
+        dashboard._refresh_model_service()
         payload: ModelsResponse = {
             "models": dashboard.model_service.list_models(),
             "current_game": dashboard.config.GAME_NAME,
@@ -201,6 +206,7 @@ def register_dashboard_routes(
         to prevent path traversal attacks.
         """
         try:
+            dashboard._refresh_model_service()
             success, filename, error = dashboard.model_service.delete(model_id)
             if not success:
                 return api_error(

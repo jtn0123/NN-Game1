@@ -180,6 +180,35 @@ def draw_asteroids_icon(
     pygame.draw.circle(surface, (100, 200, 255), (cx + 5, cy + 5), 3)
 
 
+def draw_crystal_caves_icon(
+    surface: pygame.Surface, rect: pygame.Rect, color: Tuple[int, int, int]
+) -> None:
+    """Draw a Crystal Caves-style cave icon."""
+    cx, cy = rect.centerx, rect.centery
+
+    cave_points = [
+        (cx - 34, cy + 26),
+        (cx - 28, cy - 14),
+        (cx - 12, cy - 30),
+        (cx + 12, cy - 29),
+        (cx + 29, cy - 12),
+        (cx + 34, cy + 26),
+    ]
+    pygame.draw.polygon(surface, (48, 52, 68), cave_points)
+    pygame.draw.lines(surface, (86, 95, 120), False, cave_points, 2)
+
+    crystal_shapes = [
+        [(cx - 13, cy + 1), (cx - 4, cy + 12), (cx - 13, cy + 25), (cx - 22, cy + 12)],
+        [(cx + 12, cy - 9), (cx + 24, cy + 7), (cx + 12, cy + 24), (cx, cy + 7)],
+    ]
+    for points in crystal_shapes:
+        pygame.draw.polygon(surface, color, points)
+        pygame.draw.polygon(surface, (230, 255, 255), points, 2)
+
+    pygame.draw.ellipse(surface, (210, 225, 235), (cx - 7, cy - 17, 15, 11))
+    pygame.draw.rect(surface, (240, 210, 90), (cx + 2, cy - 13, 5, 3), border_radius=1)
+
+
 class GameCard:
     """A single game selection card."""
 
@@ -289,6 +318,8 @@ class GameCard:
             draw_snake_icon(screen, icon_rect, self.base_color)
         elif self.game_id == "asteroids":
             draw_asteroids_icon(screen, icon_rect, self.base_color)
+        elif self.game_id == "crystal_caves":
+            draw_crystal_caves_icon(screen, icon_rect, self.base_color)
         else:
             # Generic game icon (fallback)
             pygame.draw.circle(screen, self.base_color, icon_rect.center, 20, 3)
@@ -487,11 +518,14 @@ class GameMenu:
         if num_games == 0:
             return
 
-        # Card dimensions - adjusted to fit 5 games on screen
-        # With 800px width: 5 cards at 140px + 4 gaps at 20px = 780px
-        card_width = 140
+        # Card dimensions scale to the registered game count.
         card_height = 200
         card_spacing = 20
+        max_total_width = max(320, self.screen_width - 40)
+        card_width = min(
+            140,
+            max(108, (max_total_width - (num_games - 1) * card_spacing) // num_games),
+        )
 
         # Calculate total width
         total_width = num_games * card_width + (num_games - 1) * card_spacing

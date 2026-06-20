@@ -51,6 +51,13 @@ class HeadlessDashboardMixin:
                 if len(training_history.scores) > 0:
                     self._sync_web_dashboard_history(training_history, metadata)
                     print(f"📊 Dashboard charts restored ({len(training_history.scores)} episodes)")
+
+            self.web_dashboard.publisher.record_save(
+                filename=os.path.basename(filepath),
+                reason="loaded",
+                episode=self.current_episode,
+                best_score=self.best_score,
+            )
         except Exception as e:
             print(f"⚠️ Could not restore dashboard history: {e}")
 
@@ -100,6 +107,12 @@ class HeadlessDashboardMixin:
             target_episodes=self.config.MAX_EPISODES,
             headless=True,  # No pygame, no screenshots
         )
+        self.web_dashboard.publisher.state.game_name = self.config.GAME_NAME
+        if self.config.GAME_NAME == "crystal_caves":
+            self.web_dashboard.publisher.state.cc_active = True
+            self.web_dashboard.publisher.state.cc_difficulty = getattr(
+                self.config, "CRYSTAL_CAVES_DIFFICULTY", ""
+            )
 
         # ADD: Set number of parallel environments
         self.web_dashboard.publisher.state.num_envs = self.num_envs

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -20,8 +21,12 @@ from src.app.model_service import ModelService as AppModelService
 from src.app.training_runtime import (
     build_nn_snapshot,
     emit_nn_snapshot_to_dashboard,
+    is_new_best_eval,
     is_new_best_score,
+    read_eval_best_baseline,
+    read_eval_best_record,
     should_emit_episode_metrics,
+    write_eval_best_baseline,
 )
 from src.game import BaseGame, BaseVecGame, list_games
 
@@ -96,8 +101,22 @@ class HeadlessTrainer(HeadlessDashboardMixin):
             config.BATCH_SIZE = 128
             config.GRADIENT_STEPS = 2
             config.USE_TORCH_COMPILE = False  # No benefit for small models on CPU
-            config.FORCE_CPU = True  # CPU is faster for this model size
+            config.FORCE_CPU = True  # CPU is faster for this (small MLP) model size
             print("🚀 Turbo mode: CPU, B=128, LE=8, GS=2 (~5000 steps/sec on M4)")
+
+        # The convolutional net is a different, conv-heavy workload — the M4 GPU is
+        # ~25% faster on it (the B=128 learn step ~30% faster), so don't force CPU.
+        import torch as _torch
+
+        gpu_available = _torch.cuda.is_available() or _torch.backends.mps.is_available()
+        if getattr(config, "USE_CNN_STATE", False) and gpu_available:
+            config.FORCE_CPU = False
+            # NOTE: a larger batch is NOT a free throughput win here. With the fixed
+            # turbo learn schedule it just doubles the replay ratio (2x learn compute
+            # per env step), which lowered wall-clock throughput in practice. It's a
+            # gradient-quality / sample-efficiency dial, not a speedup — left at the
+            # turbo default. The real throughput win is the vectorized get_state().
+            print(f"⚙️  CNN: using {config.DEVICE} (conv is faster on the GPU than CPU)")
 
         # Vectorized environment support
         self.num_envs = getattr(args, "vec_envs", 1)
@@ -149,6 +168,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         self.losses: list[float] = []  # Track losses for chart persistence
         self.epsilons: list[float] = []  # Track epsilon for chart persistence
         self.rewards: list[float] = []  # Track rewards for chart persistence
+        self.progresses: list[float] = []  # Track completion-progress (Crystal Caves)
+        self.end_reasons: list[str] = []  # CA-03: why each episode ended
+        self.progress_parts: list[dict] = []  # CA-03: Phi components at death
         self.total_steps = 0
         self.training_start_time = time.time()
 
@@ -220,6 +242,31 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 log_dir=os.path.join(config.LOG_DIR, "eval"),
                 plateau_threshold=config.EVAL_PLATEAU_THRESHOLD,
             )
+            eval_best_baseline = read_eval_best_baseline(
+                config.GAME_MODEL_DIR,
+                config.GAME_NAME,
+            )
+            if eval_best_baseline is not None:
+                self.evaluator.best_eval_score = eval_best_baseline
+                if self.web_dashboard:
+                    eval_best_record = read_eval_best_record(
+                        config.GAME_MODEL_DIR,
+                        config.GAME_NAME,
+                    )
+                    baseline_episode = (
+                        int(eval_best_record.get("episode", 0))
+                        if eval_best_record is not None
+                        else 0
+                    )
+                    self.web_dashboard.publisher.record_eval_baseline(
+                        episode=baseline_episode,
+                        mean_score=eval_best_baseline,
+                        num_games=int(getattr(config, "EVAL_EPISODES", 0) or 0),
+                    )
+                    self.web_dashboard.log(
+                        f"🎯 Restored held-out best: mean {eval_best_baseline:.0f}",
+                        "info",
+                    )
 
     def train(self) -> None:
         """Run headless training loop with optimized throughput."""
@@ -322,6 +369,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
             # Episode complete
             self.agent.decay_epsilon(episode)
             self.agent.step_scheduler()  # Step learning rate scheduler
+            self._apply_lr_decay(start_episode, episode)
             self.scores.append(info["score"])
 
             # Track wins (all bricks cleared)
@@ -356,11 +404,16 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     target_updates=self.target_updates,
                     bricks_broken=bricks_broken,
                     episode_length=episode_steps,
+                    game_name=config.GAME_NAME,
+                    cc_info=info if config.GAME_NAME == "crystal_caves" else None,
                 )
                 # Update performance settings in dashboard state
                 dashboard.publisher.state.learn_every = config.LEARN_EVERY
                 dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                 dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                dashboard.publisher.state.cc_difficulty = getattr(
+                    config, "CRYSTAL_CAVES_DIFFICULTY", ""
+                )
 
                 # Emit NN visualization data (throttled by server to ~10 FPS)
                 self._emit_nn_visualization(state, action)
@@ -553,6 +606,12 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     level = infos[i].get("level", 1)
                     self.levels.append(level)
 
+                    self.progresses.append(float(infos[i].get("progress", 0.0)))
+                    self.end_reasons.append(str(infos[i].get("end_reason", "")))
+                    parts = infos[i].get("progress_parts")
+                    if isinstance(parts, dict):
+                        self.progress_parts.append(parts)
+
                     # Track metrics for persistence (used by save)
                     avg_loss = self.agent.get_average_loss(100)
                     q_values_arr = self.agent.get_q_values(states[i])
@@ -605,11 +664,16 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                             target_updates=self.target_updates,
                             bricks_broken=bricks_broken,
                             episode_length=int(env_episode_steps[i]),
+                            game_name=config.GAME_NAME,
+                            cc_info=(infos[i] if config.GAME_NAME == "crystal_caves" else None),
                         )
                         # Update performance settings in dashboard state
                         dashboard.publisher.state.learn_every = config.LEARN_EVERY
                         dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                         dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                        dashboard.publisher.state.cc_difficulty = getattr(
+                            config, "CRYSTAL_CAVES_DIFFICULTY", ""
+                        )
 
                         # Emit NN visualization data (throttled by server to ~10 FPS)
                         # Convert numpy int64 to Python int for JSON serialization
@@ -649,8 +713,59 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                         )
                         self.evaluator.log_results(eval_results)
 
+                        if is_new_best_eval(self.evaluator, eval_results.mean_score):
+                            eval_best_filename = f"{self.config.GAME_NAME}_eval_best.pth"
+                            self._save_model(
+                                eval_best_filename,
+                                save_reason="eval_best",
+                                quiet=True,
+                                save_replay_buffer=False,
+                            )
+                            write_eval_best_baseline(
+                                self.config.GAME_MODEL_DIR,
+                                self.config.GAME_NAME,
+                                episode=self.current_episode,
+                                mean_score=eval_results.mean_score,
+                                checkpoint=eval_best_filename,
+                            )
+                            if self.web_dashboard:
+                                self.web_dashboard.log(
+                                    f"🎯 New held-out eval best: {eval_results.mean_score:.0f}",
+                                    "success",
+                                )
+
+                        # Surface the held-out eval on the dashboard (the trustworthy
+                        # generalisation number, distinct from the training win rate).
+                        if self.web_dashboard:
+                            self.web_dashboard.publisher.record_eval(
+                                episode=self.current_episode,
+                                mean_score=eval_results.mean_score,
+                                std_score=eval_results.std_score,
+                                median_score=eval_results.median_score,
+                                win_rate=eval_results.win_rate,
+                                num_games=eval_results.num_games,
+                            )
+
+                        # Early-stop: end the stage once eval has plateaued, instead
+                        # of training the live policy past its peak into collapse
+                        # (the best checkpoint already holds the peak). Uses its own
+                        # patience and pre-empts the exploration boost below.
+                        early_patience = getattr(config, "EARLY_STOP_PATIENCE", 4)
+                        if (
+                            getattr(config, "EARLY_STOP_ON_PLATEAU", False)
+                            and self.evaluator.evals_since_improvement >= early_patience
+                        ):
+                            print(
+                                f"\n⏹️  Early stop: eval plateaued "
+                                f"({self.evaluator.evals_since_improvement} evals without "
+                                f"improvement). Best checkpoint holds the peak.\n"
+                            )
+                            if self.web_dashboard:
+                                self.web_dashboard.log("⏹️ Early stop: eval plateaued", "warning")
+                            self.running = False
+
                         # Auto-exploration boost: when plateau detected, increase epsilon
-                        if self.evaluator.is_plateau() and not self._exploration_boost_active:
+                        elif self.evaluator.is_plateau() and not self._exploration_boost_active:
                             self._exploration_boost_active = True
                             self._exploration_boost_end_episode = (
                                 self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES
@@ -707,6 +822,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 if not self._exploration_boost_active:
                     self.agent.decay_epsilon(self.current_episode)
                 self.agent.step_scheduler()  # Step learning rate scheduler
+                self._apply_lr_decay(start_episode, self.current_episode)
 
             # Update states for next iteration (vector envs auto-reset completed games)
             states = next_states.copy()
@@ -737,12 +853,27 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 avg_loss = self.agent.get_average_loss(100)
                 avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
 
+                # Completion-progress (Crystal Caves): rolling mean and best-so-far
+                # of info["progress"]. This is the signal that should climb before
+                # win-rate does, so surface it directly in the training log.
+                progress_str = ""
+                if self.progresses:
+                    avg_prog = float(np.mean(self.progresses[-100:]))
+                    best_prog = float(np.max(self.progresses))
+                    progress_str = f"Φ completion: {avg_prog:.3f} (best {best_prog:.3f}) | "
+
+                lr_str = ""
+                if getattr(self.config, "LR_DECAY", False):
+                    lr_str = f"lr: {self.agent.get_learning_rate():.1e} | "
+
                 progress_msg = (
                     f"Ep {self.current_episode:5d} | "
                     f"Score: {last_score:4d} | "
                     f"Avg: {avg_score:6.1f} | "
+                    f"{progress_str}"
                     f"Loss: {avg_loss:.4f} | "
-                    f"Q: {avg_q:.1f} | "
+                    f"Q: {avg_q:.2f} | "
+                    f"{lr_str}"
                     f"ε: {self.agent.epsilon:.3f} | "
                     f"⚡ {steps_per_sec:,.0f} steps/s"
                 )
@@ -775,7 +906,73 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         recent_wins = self.wins[-100:]
         win_rate = sum(recent_wins) / len(recent_wins) if len(recent_wins) > 0 else 0
         print(f"   Win rate (100):   {win_rate*100:.1f}%")
+        if self.progresses:
+            print(f"   Final avg prog:   {np.mean(self.progresses[-100:]):.3f}")
+            print(f"   Best progress:    {np.max(self.progresses):.3f}")
+        self._print_progress_breakdown()
         print("=" * 70)
 
         if self.web_dashboard:
             self.web_dashboard.log("✅ Vectorized training complete!", "success")
+
+    def _apply_lr_decay(self, start_episode: int, current_episode: int) -> None:
+        """Cosine-decay the learning rate from LEARNING_RATE to LR_MIN over this
+        run's episodes (start_episode..MAX_EPISODES). Early LR matches the old
+        constant rate; late LR approaches zero, freezing the policy near its peak
+        so the live win rate stops oscillating. No-op unless LR_DECAY is set and
+        the run has a finite episode target."""
+        if not getattr(self.config, "LR_DECAY", False):
+            return
+        target = self.config.MAX_EPISODES
+        if target <= 0:
+            return  # unlimited run -> no horizon to decay over
+        lr0 = self.config.LEARNING_RATE
+        lr_min = getattr(self.config, "LR_MIN", 1e-5)
+        span = max(1, target - start_episode)
+        frac = min(1.0, max(0.0, (current_episode - start_episode) / span))
+        lr = lr_min + 0.5 * (lr0 - lr_min) * (1.0 + math.cos(math.pi * frac))
+        self.agent.set_learning_rate(lr)
+
+    @staticmethod
+    def _fmt_eta(seconds: float) -> str:
+        """Human-friendly time-remaining, e.g. '3m', '1h12m', '45s'."""
+        s = int(max(0, seconds))
+        if s >= 3600:
+            return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+        if s >= 60:
+            return f"{s // 60}m"
+        return f"{s}s"
+
+    def _print_progress_breakdown(self, window: int = 100) -> None:
+        """CA-03: print where the agent stalls — the end-reason mix and the mean
+        completion-progress components over the last `window` episodes. This
+        pinpoints the gate (crystals vs switch vs depth) the agent gets stuck on.
+        """
+        if not self.end_reasons and not self.progress_parts:
+            return
+
+        recent_reasons = self.end_reasons[-window:]
+        if recent_reasons:
+            counts: dict[str, int] = {}
+            for reason in recent_reasons:
+                counts[reason] = counts.get(reason, 0) + 1
+            total = len(recent_reasons)
+            mix = ", ".join(
+                f"{name} {count / total * 100:.0f}%"
+                for name, count in sorted(counts.items(), key=lambda kv: -kv[1])
+            )
+            print(f"   End reasons:      {mix}")
+
+        recent_parts = self.progress_parts[-window:]
+        if recent_parts:
+            keys = ("crystal_frac", "switch_done", "depth_frac", "won")
+            means = {
+                key: float(np.mean([float(p.get(key, 0.0)) for p in recent_parts])) for key in keys
+            }
+            print(
+                "   Phi@death parts:  "
+                f"crystals {means['crystal_frac']:.2f} | "
+                f"switch {means['switch_done']:.2f} | "
+                f"depth {means['depth_frac']:.2f} | "
+                f"won {means['won']:.2f}"
+            )

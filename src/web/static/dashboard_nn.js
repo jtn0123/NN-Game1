@@ -37,6 +37,7 @@ class NeuralNetworkVisualizer {
         this.renderQueue = [];
         this.skipNextWeightDraw = false;  // Phase 1.3: Skip weights when empty
         this.cachedWeights = null;  // Phase 1.3: Cache for weight data to handle selective transmission
+        this.showConnections = false;
 
         // Animation state
         this.pulsePhase = 0;
@@ -298,6 +299,10 @@ class NeuralNetworkVisualizer {
         }
     }
 
+    toggleConnections(enabled) {
+        this.showConnections = Boolean(enabled);
+    }
+
     render() {
         if (!this.ctx || !this.data || !this.width || !this.height) return;
 
@@ -318,12 +323,17 @@ class NeuralNetworkVisualizer {
         // Smooth activations
         const smoothedActivations = this.smoothActivations();
 
-        // Draw connections
-        this.drawConnections(layerPositions, smoothedActivations);
+        // Draw connections only when requested. The compact default keeps the
+        // live network readable during larger Crystal Caves runs.
+        if (this.showConnections) {
+            this.drawConnections(layerPositions, smoothedActivations);
+        }
 
         // Update and draw pulses
-        this.updatePulses(layerPositions, smoothedActivations);
-        this.drawPulses();
+        if (this.showConnections) {
+            this.updatePulses(layerPositions, smoothedActivations);
+            this.drawPulses();
+        }
 
         // Draw neurons
         this.drawNeurons(layerPositions, smoothedActivations);
@@ -731,7 +741,6 @@ class NeuralNetworkVisualizer {
         const qValues = this.data.q_values || [];
         const selectedAction = this.data.selected_action || 0;
         const actionLabels = this.data.action_labels || ['LEFT', 'STAY', 'RIGHT'];
-        const actionIcons = ['◀', '●', '▶'];
 
         if (qValues.length === 0) return;
 
@@ -801,13 +810,59 @@ class NeuralNetworkVisualizer {
             ctx.font = '14px sans-serif';
             ctx.fillStyle = isSelected ? '#dcdcf0' : '#787890';
             ctx.textAlign = 'center';
-            ctx.fillText(actionIcons[i] || '?', barX + barWidth / 2 - 5, qvY + 60);
+            ctx.fillText(this.actionGlyph(actionLabels[i], i), barX + barWidth / 2 - 5, qvY + 58);
+
+            ctx.font = '7px "JetBrains Mono", monospace';
+            ctx.fillStyle = isSelected ? '#a8f5c4' : '#666b7c';
+            ctx.fillText(this.shortActionLabel(actionLabels[i], i), barX + barWidth / 2 - 5, qvY + 72);
 
             // Q-value number
             ctx.font = '9px "JetBrains Mono", monospace';
             ctx.fillStyle = '#646478';
             ctx.fillText(qVal.toFixed(2), barX + barWidth / 2 - 5, qvY + 45 - barHeight - 4);
         }
+    }
+
+    actionGlyph(label, index) {
+        const normalized = String(label || '').toUpperCase();
+        const glyphs = {
+            IDLE: '•',
+            STAY: '•',
+            LEFT: '←',
+            RIGHT: '→',
+            JUMP: '↑',
+            LEFT_JUMP: '↖',
+            RIGHT_JUMP: '↗',
+            SHOOT: '●',
+            LEFT_SHOOT: '←●',
+            RIGHT_SHOOT: '●→',
+            INTERACT: 'E',
+        };
+        if (glyphs[normalized]) return glyphs[normalized];
+        if (normalized.includes('LEFT')) return '←';
+        if (normalized.includes('RIGHT')) return '→';
+        if (normalized.includes('JUMP')) return '↑';
+        if (normalized.includes('SHOOT')) return '●';
+        if (normalized.includes('INTERACT')) return 'E';
+        return String(index + 1);
+    }
+
+    shortActionLabel(label, index) {
+        const normalized = String(label || `A${index + 1}`).toUpperCase();
+        const labels = {
+            IDLE: 'IDLE',
+            STAY: 'STAY',
+            LEFT: 'LEFT',
+            RIGHT: 'RIGHT',
+            JUMP: 'JUMP',
+            LEFT_JUMP: 'L+J',
+            RIGHT_JUMP: 'R+J',
+            SHOOT: 'SHOT',
+            LEFT_SHOOT: 'L+S',
+            RIGHT_SHOOT: 'R+S',
+            INTERACT: 'USE',
+        };
+        return labels[normalized] || normalized.replace(/_/g, '+').slice(0, 5);
     }
 
     // Utility functions
@@ -841,9 +896,26 @@ let nnVisualizer = null;
 function initNNVisualizer() {
     const canvas = document.getElementById('nn-canvas');
     if (canvas) {
+        ensureNNConnectionsToggle();
         nnVisualizer = new NeuralNetworkVisualizer('nn-canvas');
         console.log('Neural Network Visualizer initialized');
     }
+}
+
+function ensureNNConnectionsToggle() {
+    if (document.getElementById('nn-connections-toggle')) return;
+    const headerRight = document.querySelector('.nn-viz-header-right');
+    const pauseButton = headerRight?.querySelector('[data-action="toggle-nn-visualization"]');
+    if (!headerRight || !pauseButton) return;
+
+    const button = document.createElement('button');
+    button.className = 'nn-viz-toggle';
+    button.id = 'nn-connections-toggle';
+    button.dataset.action = 'toggle-nn-connections';
+    button.setAttribute('aria-pressed', 'false');
+    button.setAttribute('aria-label', 'Show neural network connections');
+    button.textContent = 'Connections';
+    headerRight.insertBefore(button, pauseButton);
 }
 
 /**
@@ -852,6 +924,18 @@ function initNNVisualizer() {
 function toggleNNVisualization() {
     if (nnVisualizer) {
         nnVisualizer.toggle(!nnVisualizer.isEnabled);
+    }
+}
+
+function toggleNNConnections() {
+    if (!nnVisualizer) return;
+    const button = document.getElementById('nn-connections-toggle');
+    const nextValue = !nnVisualizer.showConnections;
+    nnVisualizer.toggleConnections(nextValue);
+    if (button) {
+        button.classList.toggle('active', nextValue);
+        button.setAttribute('aria-pressed', String(nextValue));
+        button.textContent = nextValue ? 'Hide Lines' : 'Connections';
     }
 }
 

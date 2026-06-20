@@ -86,6 +86,37 @@ class TrainingState:
     action_count_left: int = 0
     action_count_stay: int = 0
     action_count_right: int = 0
+    # Game identity (drives which game-specific panels the dashboard shows)
+    game_name: str = ""
+    # --- Crystal Caves live telemetry (left at 0/empty for other games) ---
+    cc_active: bool = False
+    cc_progress: float = 0.0  # overall completion potential Φ, 0..1
+    cc_best_progress: float = 0.0  # best Φ seen this run (only goes up)
+    cc_crystal_frac: float = 0.0  # fraction of this level's crystals collected, 0..1
+    cc_switch_done: float = 0.0  # 1.0 once the switch is thrown (0 if none/unthrown)
+    cc_depth_frac: float = 0.0  # how deep into the cave the agent reached, 0..1
+    cc_crystals_remaining: int = 0
+    cc_initial_crystals: int = 0
+    cc_switches_total: int = 0
+    cc_switches_used: int = 0
+    cc_level_name: str = ""
+    cc_difficulty: str = ""
+    cc_end_reason: str = ""  # how the last finished episode ended
+    cc_end_reason_counts: Dict[str, int] = field(default_factory=dict)
+    # --- Held-out evaluation (the trustworthy generalisation measure, distinct
+    # from the training win_rate above; populated only when periodic eval runs) ---
+    eval_ran: bool = False
+    eval_episode: int = 0  # training episode at the last eval
+    eval_mean_score: float = 0.0
+    eval_std_score: float = 0.0
+    eval_median_score: float = 0.0
+    eval_win_rate: float = 0.0
+    eval_best_mean: float = 0.0  # best eval mean so far (monotonic)
+    eval_delta_from_best: float = 0.0  # latest mean minus best mean; 0 means tied/new best
+    eval_is_new_best: bool = False
+    eval_is_baseline: bool = False  # true when showing a restored saved best before live eval
+    eval_num_games: int = 0
+    eval_history: List[float] = field(default_factory=list)  # eval-mean trajectory (sparkline)
 
 
 @dataclass

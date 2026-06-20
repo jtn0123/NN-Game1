@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 import pytest
 import torch
 
@@ -33,6 +34,30 @@ def test_model_service_marks_unreadable_checkpoints(tmp_path):
     assert models[0]["has_metadata"] is False
     assert "load_error" in models[0]
     assert "path" not in models[0]
+
+
+def test_model_service_uses_trusted_compatibility_loader_for_legacy_metadata(tmp_path):
+    model_dir = tmp_path / "models" / "crystal_caves"
+    model_dir.mkdir(parents=True)
+    torch.save(
+        {
+            "steps": 42,
+            "epsilon": 0.05,
+            "legacy_numpy": np.array([1, 2, 3]),
+            "metadata": {"episode": 9, "best_score": 123, "avg_score_last_100": 12.3},
+        },
+        model_dir / "crystal_caves_best.pth",
+    )
+
+    service = ModelService([(str(model_dir), "crystal_caves")])
+    models = service.list_models()
+
+    assert models[0]["id"] == "crystal_caves:crystal_caves_best.pth"
+    assert models[0]["is_loadable"] is True
+    assert models[0]["steps"] == 42
+    assert models[0]["has_metadata"] is True
+    assert models[0]["metadata"]["best_score"] == 123
+    assert "load_error" not in models[0]
 
 
 def test_model_service_resolves_ids_and_rejects_traversal(tmp_path):

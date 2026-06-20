@@ -422,6 +422,34 @@ class TestWebDashboardRoutes:
         assert data["models"][0]["id"] == "breakout:demo.pth"
         assert "path" not in data["models"][0]
 
+    def test_api_models_refreshes_after_runtime_game_change(self, tmp_path):
+        """Dashboard model browser should follow the current game config."""
+        from config import Config
+        from src.web.server import WebDashboard
+
+        config = Config()
+        config.GAME_NAME = "breakout"
+        config.MODEL_DIR = str(tmp_path / "models")
+        os.makedirs(config.GAME_MODEL_DIR)
+
+        dashboard = WebDashboard(port=5101, config=config)
+
+        config.GAME_NAME = "crystal_caves"
+        os.makedirs(config.GAME_MODEL_DIR)
+        model_path = os.path.join(config.GAME_MODEL_DIR, "crystal_caves_best.pth")
+        torch.save({"steps": 1, "epsilon": 0.5}, model_path)
+
+        dashboard.app.config["TESTING"] = True
+        with dashboard.app.test_client() as client:
+            response = client.get(
+                "/api/models",
+                headers={"X-Dashboard-Token": dashboard.access_token},
+            )
+
+        data = json.loads(response.data)
+        assert response.status_code == 200
+        assert data["models"][0]["id"] == "crystal_caves:crystal_caves_best.pth"
+
     def test_delete_model_requires_dashboard_token(self, tmp_path):
         """Mutating model routes should reject requests without the session token."""
         from config import Config
