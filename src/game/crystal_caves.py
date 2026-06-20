@@ -281,9 +281,18 @@ class CrystalCaves(
         }
 
         self.level_index = 0
-        # Procedural mode: replace the three authored caves with freshly generated
-        # ones (one per theme, in palette order) so level_index keeps theming them
-        # correctly. Authored dressing is cleared since generated caves have none.
+        # Per-episode level selection. Training samples a random cave from a pool so
+        # the agent generalises instead of memorising one level; evaluation switches
+        # to a fixed held-out set (see use_eval_levels). These hold the procedural
+        # generation params so both the training pool and the held-out set can be
+        # built from the same family/difficulty with disjoint seed ranges.
+        self._proc_params: Optional[dict] = None
+        self._randomize_levels = False
+        self._eval_mode = False
+        self._eval_caves: Tuple[CaveSpec, ...] = ()
+        self._eval_cursor = 0
+        # Procedural mode: replace the authored caves with freshly generated ones.
+        # Authored dressing is cleared since generated caves have none.
         if getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
             from .crystal_caves_gen import FAMILY_NAMES, THEME_NAMES, generate_cave
 
@@ -301,21 +310,20 @@ class CrystalCaves(
                     stacklevel=2,
                 )
             wanted = [f for f in requested if f in FAMILY_NAMES]
-            families = wanted or list(FAMILY_NAMES)
             difficulty = getattr(self.config, "CRYSTAL_CAVES_DIFFICULTY", "normal")
-            # Always four caves (themes cycle so the renderer palette stays
-            # consistent); the families are drawn from the requested set, which a
-            # curriculum widens stage by stage.
-            self.CAVES = tuple(
-                generate_cave(
-                    base * 10 + i,
-                    THEME_NAMES[i % len(THEME_NAMES)],
-                    families[i % len(families)],
-                    difficulty=difficulty,
-                )
-                for i in range(len(FAMILY_NAMES))
-            )
-            self.CAVE_DRESSING = {i: () for i in range(len(FAMILY_NAMES))}
+            self._proc_params = {
+                "base": base,
+                "families": wanted or list(FAMILY_NAMES),
+                "themes": THEME_NAMES,
+                "difficulty": difficulty,
+                "generate": generate_cave,
+            }
+            pool_size = int(getattr(self.config, "CRYSTAL_CAVES_POOL_SIZE", 0))
+            count = max(pool_size, len(FAMILY_NAMES))
+            self.CAVES = self._build_cave_set(count, seed_offset=0)
+            self.CAVE_DRESSING = {i: () for i in range(count)}
+            # Sample a random cave per episode once the pool has variety to offer.
+            self._randomize_levels = pool_size > 0 and count > 1
         self.level: CaveSpec = self.CAVES[0]
         self.grid: List[List[str]] = []
         self.level_cols = 0
@@ -413,9 +421,55 @@ class CrystalCaves(
         """Number of possible actions."""
         return len(self.ACTION_LABELS)
 
+    def _build_cave_set(self, count: int, seed_offset: int) -> Tuple[CaveSpec, ...]:
+        """Generate ``count`` distinct procedural caves from the stored generation
+        params. ``seed_offset`` carves out a disjoint seed range so the training
+        pool (offset 0) and the held-out eval set never overlap."""
+        p = self._proc_params
+        assert p is not None, "procedural generation params not initialised"
+        themes, fams = p["themes"], p["families"]
+        return tuple(
+            p["generate"](
+                p["base"] * 1000 + seed_offset + i,
+                themes[i % len(themes)],
+                fams[i % len(fams)],
+                difficulty=p["difficulty"],
+            )
+            for i in range(count)
+        )
+
+    def use_eval_levels(self, count: int) -> None:
+        """Switch this instance into evaluation mode: reset() will deterministically
+        cycle a fixed HELD-OUT set of ``count`` caves (disjoint from the training
+        pool, identical across calls) so eval measures generalisation, not memory.
+        No-op for authored (non-procedural) caves, which are already a fixed set."""
+        if self._proc_params is None or count <= 0:
+            return
+        # Build once; the seed range (offset 500000) is disjoint from the training
+        # pool's offset-0 range, so these levels are never seen during training.
+        if len(self._eval_caves) != count:
+            self._eval_caves = self._build_cave_set(count, seed_offset=500000)
+        self._eval_mode = True
+        self._eval_cursor = 0
+
+    def reset_eval_cursor(self) -> None:
+        """Restart the held-out cycle so every evaluation plays the same levels in
+        the same order (reproducible eval across training checkpoints)."""
+        self._eval_cursor = 0
+
     def reset(self) -> np.ndarray:
-        """Reset to the current cave and return the initial state."""
-        self.level = self.CAVES[self.level_index % len(self.CAVES)]
+        """Reset and return the initial state. In eval mode, deterministically cycle
+        the held-out caves; in training with a pool, sample a random cave; otherwise
+        fall back to the legacy CAVES[level_index] behaviour."""
+        if self._eval_mode and self._eval_caves:
+            self.level_index = self._eval_cursor % len(self._eval_caves)
+            self.level = self._eval_caves[self.level_index]
+            self._eval_cursor += 1
+        elif self._randomize_levels and len(self.CAVES) > 1:
+            self.level_index = int(np.random.randint(len(self.CAVES)))
+            self.level = self.CAVES[self.level_index]
+        else:
+            self.level = self.CAVES[self.level_index % len(self.CAVES)]
         self._load_level(self.level)
 
         self.vx = 0.0

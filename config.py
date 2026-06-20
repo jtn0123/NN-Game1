@@ -109,6 +109,14 @@ class Config:
     # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
     # game (10-14 crystals + hazards + enemies).
     CRYSTAL_CAVES_DIFFICULTY: str = "normal"
+    # Procedural diversity. Previously procedural mode generated only 4 caves and
+    # reset() always reloaded CAVES[level_index] (which only advances on a win), so
+    # the agent trained+evaluated on essentially ONE fixed level — it memorised it
+    # instead of generalising. Now training samples a random cave from a pool of
+    # POOL_SIZE distinct caves each episode, while evaluation uses a fixed, disjoint
+    # HELD-OUT set (one cave per eval game → reproducible, and unseen → a true
+    # generalisation measure). 0 restores the legacy single-set behaviour.
+    CRYSTAL_CAVES_POOL_SIZE: int = 64
 
     # =========================================================================
     # SCREEN SETTINGS

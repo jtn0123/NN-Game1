@@ -127,6 +127,15 @@ class Evaluator:
         original_epsilon = self.agent.epsilon
         self.agent.epsilon = 0.0
 
+        # Evaluate on a fixed HELD-OUT set of distinct caves (one per game), unseen
+        # during training, identical across evals. Without this the evaluator
+        # replayed a single fixed level N times (Score ± 0), which is neither
+        # diverse nor a generalisation measure. No-op for authored caves.
+        if hasattr(self.game, "use_eval_levels"):
+            self.game.use_eval_levels(num_episodes)
+        if hasattr(self.game, "reset_eval_cursor"):
+            self.game.reset_eval_cursor()
+
         scores = []
         levels = []
         steps_list = []

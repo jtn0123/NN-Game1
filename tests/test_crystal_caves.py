@@ -277,6 +277,7 @@ class TestCrystalCavesObjectives:
         cfg = Config()
         cfg.CRYSTAL_CAVES_PROCEDURAL = True
         g = CrystalCaves(cfg, headless=True)
+        g._randomize_levels = False  # pin to the specific two-lock cave under test
         g.CAVES = (spec,) + g.CAVES[1:]
         g.level_index = 0
         g.level = spec
@@ -826,3 +827,40 @@ def test_vectorized_window_matches_tile_code_loop(difficulty):
         _, _, done, _ = game.step(np.random.randint(0, game.action_size))
         if done:
             game.reset()
+
+
+def test_training_samples_diverse_caves_and_eval_is_held_out():
+    """Training must sample varied caves per episode (not memorise one level), and
+    evaluation must use a fixed, reproducible, held-out set disjoint from training."""
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_PROCEDURAL = True
+    cfg.CRYSTAL_CAVES_DIFFICULTY = "easy"
+    cfg.CRYSTAL_CAVES_FAMILIES = "platform_network"
+    np.random.seed(0)
+    game = CrystalCaves(cfg, headless=True)
+
+    # Training: a pool, sampled with variety across resets.
+    assert len(game.CAVES) == cfg.CRYSTAL_CAVES_POOL_SIZE
+    seen = set()
+    for _ in range(40):
+        game.reset()
+        seen.add(tuple(game.level.layout))
+    assert len(seen) > 5  # genuinely diverse, not one repeated level
+
+    # Eval: held-out, diverse, reproducible.
+    game.use_eval_levels(20)
+
+    def eval_pass():
+        game.reset_eval_cursor()
+        seq = []
+        for _ in range(20):
+            game.reset()
+            seq.append(tuple(game.level.layout))
+        return seq
+
+    pass1 = eval_pass()
+    pass2 = eval_pass()
+    assert len(set(pass1)) == 20  # 20 distinct held-out caves
+    assert pass1 == pass2  # identical across evals (reproducible)
+    train_layouts = {tuple(c.layout) for c in game.CAVES}
+    assert not (set(pass1) & train_layouts)  # truly held out — unseen in training
