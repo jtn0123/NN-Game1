@@ -258,6 +258,14 @@ class CrystalCaves(
         self.width = self.config.SCREEN_WIDTH
         self.height = self.config.SCREEN_HEIGHT
 
+        # AI-1 state toggle: legacy uses the old 11x9 window with no global map
+        # (119-feature state); rich uses the class defaults (19x11 + 11x6 map).
+        if not getattr(self.config, "CRYSTAL_CAVES_RICH_STATE", True):
+            self.WINDOW_COLS = 11
+            self.WINDOW_ROWS = 9
+            self.GLOBAL_MAP_COLS = 0
+            self.GLOBAL_MAP_ROWS = 0
+
         self.level_index = 0
         # Procedural mode: replace the three authored caves with freshly generated
         # ones (one per theme, in palette order) so level_index keeps theming them
@@ -583,6 +591,8 @@ class CrystalCaves(
         Combined with the player's normalized position in the metadata, this lets
         the agent steer toward objectives outside its local perception window."""
         gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
+        if gc * gr == 0:  # legacy state: no global map
+            return
         cw = max(1.0, self.level_cols / gc)
         ch = max(1.0, self.level_rows / gr)
         cells = [0.0] * (gc * gr)
@@ -608,9 +618,9 @@ class CrystalCaves(
         global-map region that still holds an uncollected objective. Densifies the
         navigate-toward-known-objectives signal; per-region + capped so it can't be
         farmed and never rivals collecting the objective."""
-        if self._obj_region_total >= self.OBJECTIVE_REGION_CAP:
-            return 0.0
         gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
+        if gc * gr == 0 or self._obj_region_total >= self.OBJECTIVE_REGION_CAP:
+            return 0.0  # legacy state has no map -> no region bonus
         cw = max(1.0, self.level_cols / gc)
         ch = max(1.0, self.level_rows / gr)
         pcol, prow = self._player_tile()

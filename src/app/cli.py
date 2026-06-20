@@ -98,6 +98,13 @@ TIPS
         "e.g. platform_network,snake_bands). Used for curriculum training.",
     )
     parser.add_argument(
+        "--legacy-state",
+        action="store_true",
+        help="Crystal Caves: use the legacy 11x9 perception window (119-feature "
+        "state) instead of the AI-1 rich state (19x11 + global objective map). "
+        "For head-to-head state-representation comparisons.",
+    )
+    parser.add_argument(
         "--cave-difficulty",
         type=str,
         choices=["tutorial", "easy", "normal"],

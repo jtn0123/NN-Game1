@@ -94,6 +94,10 @@ class Config:
     CRYSTAL_CAVES_PROCEDURAL: bool = False
     CRYSTAL_CAVES_SEED: int = 0
     CRYSTAL_CAVES_FAMILIES: str = ""
+    # AI-1 rich state: a wider perception window (19x11 ~ the 1991 view) + a coarse
+    # global objective map. When False, the legacy 11x9 window (119-feature state)
+    # that reached ~8% wins. Toggleable so the two can be compared head-to-head.
+    CRYSTAL_CAVES_RICH_STATE: bool = True
     # Objective/threat budget for generated caves: "easy" is a learnable
     # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
     # game (10-14 crystals + hazards + enemies).

@@ -221,6 +221,9 @@ def main():
     if getattr(args, "cave_difficulty", None):
         config.CRYSTAL_CAVES_DIFFICULTY = args.cave_difficulty
         print(f"🎚️  Crystal Caves difficulty: {args.cave_difficulty}")
+    if getattr(args, "legacy_state", False):
+        config.CRYSTAL_CAVES_RICH_STATE = False
+        print("🔭 Crystal Caves: legacy 11x9 state (rich state OFF)")
     if getattr(args, "lr_decay", False):
         config.LR_DECAY = True
         print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")
