@@ -81,6 +81,8 @@ def test_crystal_caves_panel_markup_and_binding_present():
         "cc-progress-best",
         "cc-crystal-fill",
         "cc-crystals-text",
+        "cc-crystal-trend-fill",
+        "cc-crystal-trend-text",
         "cc-switch",
         "cc-depth",
         "cc-difficulty",
@@ -113,6 +115,8 @@ def test_curriculum_panel_markup_and_binding_present():
         "curriculum-episode-text",
         "curriculum-stage-fill",
         "curriculum-gate",
+        "curriculum-gate-readiness",
+        "curriculum-checkpoint",
         "curriculum-next",
     ]:
         assert f'id="{element_id}"' in dashboard, f"missing template id: {element_id}"
@@ -141,6 +145,10 @@ def test_held_out_eval_panel_markup_and_binding_present():
         "eval-verdict",
         "eval-verdict-label",
         "eval-verdict-detail",
+        "eval-crystals",
+        "eval-switch",
+        "eval-depth",
+        "eval-outcomes",
         "eval-last-ep",
         "eval-spark-line",
         "eval-spark-dot",
@@ -150,6 +158,7 @@ def test_held_out_eval_panel_markup_and_binding_present():
 
     assert ".eval-panel" in styles
     assert ".eval-verdict" in styles
+    assert ".eval-subgoals" in styles
     assert "eval_is_baseline" in app_js
 
 

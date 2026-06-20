@@ -1090,6 +1090,11 @@ body {
     letter-spacing: 0;
 }
 
+.curriculum-gate-readiness {
+    border-color: rgba(255, 193, 7, 0.35);
+    background: rgba(255, 193, 7, 0.06);
+}
+
 /* ===== Crystal Caves progress panel ===== */
 .cc-panel {
     margin-top: 12px;
@@ -1136,6 +1141,11 @@ body {
 .cc-fill-crystal {
     background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-primary) 100%);
     box-shadow: 0 0 10px rgba(0, 188, 212, 0.35);
+}
+
+.cc-fill-crystal-trend {
+    background: linear-gradient(90deg, #00acc1 0%, #9ccc65 100%);
+    box-shadow: 0 0 10px rgba(0, 172, 193, 0.28);
 }
 
 /* "best ever Φ" marker — a thin bright line the live fill chases */
@@ -1315,6 +1325,37 @@ body {
     color: var(--text-secondary);
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+.eval-subgoals {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 0 0 8px;
+}
+
+.eval-subgoal {
+    padding: 7px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.eval-subgoal strong {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-outcomes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
 }
 
 .eval-spark-wrap {

@@ -20,7 +20,8 @@ Usage:
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -56,6 +57,13 @@ class EvalResults:
     # Survival metrics
     mean_steps: float
     max_steps: int
+
+    # Crystal Caves diagnostics. These stay zero/empty for games that do not
+    # report Crystal Caves progress_parts/end_reason telemetry.
+    mean_crystal_frac: float = 0.0
+    mean_switch_rate: float = 0.0
+    mean_depth_frac: float = 0.0
+    end_reason_counts: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -139,6 +147,10 @@ class Evaluator:
         scores = []
         levels = []
         steps_list = []
+        crystal_fracs = []
+        switch_rates = []
+        depth_fracs = []
+        end_reasons = []
         wins = 0
 
         try:
@@ -156,6 +168,15 @@ class Evaluator:
                 score = info.get("score", 0)
                 level = info.get("level", 1)
                 won = info.get("won", False)
+                parts: Any = info.get("progress_parts") or {}
+                if isinstance(parts, dict):
+                    crystal_fracs.append(float(parts.get("crystal_frac", 0.0) or 0.0))
+                    switch_rates.append(float(parts.get("switch_done", 0.0) or 0.0))
+                    depth_fracs.append(float(parts.get("depth_frac", 0.0) or 0.0))
+                reason = str(info.get("end_reason", "") or "")
+                if not reason or reason == "running":
+                    reason = "won" if won else ("timeout" if steps >= max_steps else "ended")
+                end_reasons.append(reason)
 
                 scores.append(score)
                 levels.append(level)
@@ -195,6 +216,10 @@ class Evaluator:
             win_rate=wins / num_episodes,
             mean_steps=float(np.mean(steps_arr)),
             max_steps=int(np.max(steps_arr)),
+            mean_crystal_frac=float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
+            mean_switch_rate=float(np.mean(switch_rates)) if switch_rates else 0.0,
+            mean_depth_frac=float(np.mean(depth_fracs)) if depth_fracs else 0.0,
+            end_reason_counts=dict(Counter(end_reasons)),
         )
 
         # Update history and check for plateau
@@ -247,6 +272,13 @@ class Evaluator:
         print(f"   Range:  {results.min_score} - {results.max_score}")
         print(f"   Level:  avg {results.mean_level:.1f}, max {results.max_level}")
         print(f"   Wins:   {results.wins}/{results.num_games} ({results.win_rate*100:.1f}%)")
+        if results.mean_crystal_frac or results.mean_switch_rate or results.end_reason_counts:
+            print(
+                f"   Caves:  crystals {results.mean_crystal_frac*100:.0f}%, "
+                f"switch {results.mean_switch_rate*100:.0f}%, "
+                f"depth {results.mean_depth_frac*100:.0f}%"
+            )
+            print(f"   Ends:   {results.end_reason_counts}")
         print(
             f"   Best eval ever: {self.best_eval_score:.0f} "
             f"(no improvement for {self.evals_since_improvement} evals)"

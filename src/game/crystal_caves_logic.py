@@ -160,7 +160,7 @@ class CrystalCavesLogicMixin:
         if not self.crystals and not self.exit_unlocked:
             self.exit_unlocked = True
             self.score += 500
-            reward += 10.0
+            reward += self.ALL_CRYSTALS_COLLECTED_BONUS
             self._add_tile_event(self.exit_pos, "sparkle", "EXIT OPEN", EGA["G"], ttl=58)
             self._mark_progress()
             self.audio.play("win")

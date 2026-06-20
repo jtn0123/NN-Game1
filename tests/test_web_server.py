@@ -257,6 +257,10 @@ class TestMetricsPublisher:
                 median_score=0.0,
                 win_rate=0.0,
                 num_games=20,
+                crystal_frac=0.25,
+                switch_rate=0.5,
+                depth_frac=0.75,
+                end_reason_counts={"timeout": 20},
             )
 
         st = publisher.state
@@ -264,6 +268,11 @@ class TestMetricsPublisher:
         assert st.eval_episode == 600
         assert st.eval_mean_score == 66.0
         assert st.eval_num_games == 20
+        assert st.eval_crystal_frac == 0.25
+        assert st.eval_switch_rate == 0.5
+        assert st.eval_depth_frac == 0.75
+        assert st.eval_end_reason_counts == {"timeout": 20}
+        assert st.eval_stage_history == []
         # Best is monotonic even though the mean dipped 31 -> 28 along the way.
         assert st.eval_best_mean == 66.0
         assert st.eval_delta_from_best == 0.0
@@ -294,6 +303,43 @@ class TestMetricsPublisher:
         assert st.eval_best_mean == 66.0
         assert st.eval_delta_from_best == 0.0
         assert st.eval_is_new_best is False
+
+    def test_record_eval_tracks_current_curriculum_stage_history(self):
+        publisher = MetricsPublisher(history_length=100)
+        publisher.record_curriculum_stage(
+            active=True,
+            stage_index=1,
+            stage_total=5,
+            stage_id="tutorial_platform",
+            stage_name="Tutorial platform floor",
+            difficulty="tutorial",
+            families="platform_network",
+            start_episode=0,
+            target_episode=300,
+            status="running",
+            gate="learn crystal",
+            next_stage_name="Easy platform networks",
+        )
+
+        publisher.record_eval(
+            episode=150,
+            mean_score=30,
+            std_score=0,
+            median_score=30,
+            win_rate=0.0,
+            num_games=12,
+        )
+        publisher.record_eval(
+            episode=300,
+            mean_score=80,
+            std_score=0,
+            median_score=80,
+            win_rate=0.1,
+            num_games=12,
+        )
+
+        assert publisher.state.eval_history == [30.0, 80.0]
+        assert publisher.state.eval_stage_history == [30.0, 80.0]
 
     def test_record_eval_pushes_an_update(self):
         """An eval must push to the dashboard immediately, not wait for the next
@@ -356,6 +402,10 @@ class TestMetricsPublisher:
             status="running",
             gate="stable switch/crystal collection",
             next_stage_name="Easy mixed families",
+            gate_ready=True,
+            gate_status="ready",
+            gate_detail="held-out gate passed",
+            checkpoint_mode="eval-best rollback",
         )
 
         st = publisher.state
@@ -370,8 +420,54 @@ class TestMetricsPublisher:
         assert st.curriculum_stage_target_episode == 900
         assert st.curriculum_stage_status == "running"
         assert st.curriculum_stage_gate == "stable switch/crystal collection"
+        assert st.curriculum_gate_ready is True
+        assert st.curriculum_gate_status == "ready"
+        assert st.curriculum_gate_detail == "held-out gate passed"
         assert st.curriculum_next_stage_name == "Easy mixed families"
+        assert st.curriculum_checkpoint_mode == "eval-best rollback"
         assert received[-1]["state"]["curriculum_stage_id"] == "easy_platform"
+
+    def test_crystal_caves_recent_crystal_trend_uses_terminal_episodes(self):
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update(
+            episode=1,
+            score=0,
+            epsilon=0.1,
+            loss=0.0,
+            game_name="crystal_caves",
+            cc_info={
+                "end_reason": "running",
+                "progress_parts": {"crystal_frac": 1.0},
+            },
+        )
+        assert publisher.state.cc_crystal_history == []
+
+        publisher.update(
+            episode=2,
+            score=0,
+            epsilon=0.1,
+            loss=0.0,
+            game_name="crystal_caves",
+            cc_info={
+                "end_reason": "timeout",
+                "progress_parts": {"crystal_frac": 0.5},
+            },
+        )
+        publisher.update(
+            episode=3,
+            score=0,
+            epsilon=0.1,
+            loss=0.0,
+            game_name="crystal_caves",
+            cc_info={
+                "end_reason": "won",
+                "progress_parts": {"crystal_frac": 1.0},
+            },
+        )
+
+        assert publisher.state.cc_crystal_history == [0.5, 1.0]
+        assert publisher.state.cc_recent_crystal_frac == 0.75
 
     def test_crystal_caves_outcome_counts_are_recent_window(self):
         publisher = MetricsPublisher(history_length=100)

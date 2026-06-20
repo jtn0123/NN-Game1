@@ -162,6 +162,34 @@ class TestEvaluate:
             assert results.max_level == 12
             assert results.level_distribution[12] == 1
 
+    def test_evaluate_records_crystal_caves_subgoals_and_end_reasons(self, config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            evaluator = Evaluator(
+                StaticEvalGame(
+                    {
+                        "score": 50,
+                        "level": 1,
+                        "won": False,
+                        "end_reason": "timeout",
+                        "progress_parts": {
+                            "crystal_frac": 0.5,
+                            "switch_done": 1.0,
+                            "depth_frac": 0.75,
+                        },
+                    }
+                ),
+                StaticEvalAgent(),
+                config,
+                log_dir=tmpdir,
+            )
+
+            results = evaluator.evaluate(num_episodes=3, max_steps=1)
+
+            assert results.mean_crystal_frac == 0.5
+            assert results.mean_switch_rate == 1.0
+            assert results.mean_depth_frac == 0.75
+            assert results.end_reason_counts == {"timeout": 3}
+
 
 class TestPlateauDetection:
     """Test plateau detection."""

@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from config import Config
+from src.ai.evaluator import EvalResults
 from src.app.headless import HeadlessTrainer
+from src.app.training_runtime import write_eval_best_baseline
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,15 @@ class CrystalCurriculumStage:
     default_episodes: int
     min_epsilon: float
     gate: str
+
+
+@dataclass(frozen=True)
+class StageGateResult:
+    """Promotion decision for a curriculum stage."""
+
+    ready: bool
+    status: str
+    detail: str
 
 
 DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
@@ -75,6 +86,9 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
     ),
 )
 
+STAGE_GATE_EXTENSION_FRACTION = 0.50
+STAGE_GATE_MAX_MULTIPLIER = 2.0
+
 
 def planned_stage_episodes(
     stages: tuple[CrystalCurriculumStage, ...],
@@ -115,6 +129,8 @@ def run_crystal_curriculum(
     config.USE_CNN_STATE = True
     config.EARLY_STOP_ON_PLATEAU = True
     config.EVAL_EVERY = min(config.EVAL_EVERY, 150)
+    full_gate_eval_episodes = config.EVAL_EPISODES
+    config.EVAL_EPISODES = min(config.EVAL_EPISODES, 12)
 
     stages = DEFAULT_CRYSTAL_CURRICULUM
     budgets = planned_stage_episodes(
@@ -167,6 +183,7 @@ def run_crystal_curriculum(
         trainer = HeadlessTrainer(config, stage_args, existing_dashboard=dashboard)
         dashboard = trainer.web_dashboard or dashboard
         stage_start = trainer.current_episode
+        trainer.epsilon_episode_offset = stage_start
         stage_target = stage_start + budget
         config.MAX_EPISODES = stage_target
         if dashboard:
@@ -190,7 +207,9 @@ def run_crystal_curriculum(
             start_episode=stage_start,
             target_episode=stage_target,
             status="running",
+            gate_result=StageGateResult(False, "checking", "waiting for held-out eval"),
             next_stage_name=next_stage,
+            checkpoint_mode="warm-start" if model_path else "fresh",
         )
         if dashboard:
             families = stage.families or "all families"
@@ -200,7 +219,61 @@ def run_crystal_curriculum(
                 "info",
             )
 
-        trainer.train()
+        gate_result = StageGateResult(False, "checking", "waiting for held-out eval")
+        max_target = stage_start + max(budget, int(round(budget * STAGE_GATE_MAX_MULTIPLIER)))
+        while True:
+            trainer.train()
+            eval_results = _run_stage_gate_eval(
+                trainer,
+                dashboard=dashboard,
+                eval_episodes=full_gate_eval_episodes,
+            )
+            gate_result = evaluate_stage_gate(stage, eval_results, dashboard=dashboard)
+            _publish_stage(
+                dashboard,
+                stage=stage,
+                index=index,
+                total=len(stages),
+                start_episode=stage_start,
+                target_episode=config.MAX_EPISODES,
+                status=("ready" if gate_result.ready else "gate-hold"),
+                gate_result=gate_result,
+                next_stage_name=next_stage,
+                checkpoint_mode="eval-best rollback" if model_path else "fresh",
+            )
+            if gate_result.ready or index == len(stages):
+                break
+
+            if trainer.current_episode >= max_target:
+                if dashboard:
+                    dashboard.log(
+                        f"🛑 Stage gate blocked {stage.name}: {gate_result.detail}",
+                        "warning",
+                    )
+                _publish_stage(
+                    dashboard,
+                    stage=stage,
+                    index=index,
+                    total=len(stages),
+                    start_episode=stage_start,
+                    target_episode=config.MAX_EPISODES,
+                    status="blocked",
+                    gate_result=gate_result,
+                    next_stage_name=next_stage,
+                    checkpoint_mode="eval-best rollback" if model_path else "fresh",
+                )
+                return
+
+            extension = max(1, int(round(budget * STAGE_GATE_EXTENSION_FRACTION)))
+            config.MAX_EPISODES = min(max_target, trainer.current_episode + extension)
+            if dashboard:
+                dashboard.publisher.state.target_episodes = config.MAX_EPISODES
+                dashboard.log(
+                    f"🚦 Holding {stage.name}: {gate_result.detail}. "
+                    f"Extending to episode {config.MAX_EPISODES}.",
+                    "warning",
+                )
+            trainer.running = True
 
         model_path = _snapshot_stage_eval_best(config, stage, index) or model_path
         _publish_stage(
@@ -209,9 +282,11 @@ def run_crystal_curriculum(
             index=index,
             total=len(stages),
             start_episode=stage_start,
-            target_episode=stage_target,
+            target_episode=config.MAX_EPISODES,
             status="complete",
+            gate_result=gate_result,
             next_stage_name=next_stage,
+            checkpoint_mode="eval-best rollback" if model_path else "fresh",
         )
 
         if not trainer.running and getattr(config, "EARLY_STOP_ON_PLATEAU", False):
@@ -239,6 +314,122 @@ def _snapshot_stage_eval_best(
     return snapshot_path
 
 
+def evaluate_stage_gate(
+    stage: CrystalCurriculumStage,
+    eval_results: Optional[EvalResults],
+    *,
+    dashboard: Optional[Any] = None,
+) -> StageGateResult:
+    """Return whether a stage has enough held-out evidence to promote."""
+    if eval_results is None:
+        return StageGateResult(False, "waiting", "no held-out eval yet")
+
+    timeout_share = _reason_share(eval_results, "timeout")
+    terminal_fail_share = timeout_share + _reason_share(eval_results, "stalled")
+    crystal = eval_results.mean_crystal_frac
+    switch = eval_results.mean_switch_rate
+    wins = eval_results.win_rate
+    recent_training_crystals = 0.0
+    if dashboard is not None:
+        recent_training_crystals = float(
+            getattr(dashboard.publisher.state, "cc_recent_crystal_frac", 0.0) or 0.0
+        )
+
+    if stage.stage_id == "tutorial_platform":
+        checks = [
+            (crystal >= 0.80, f"eval crystals {crystal*100:.0f}% >= 80%"),
+            (
+                max(wins, recent_training_crystals) >= 0.20,
+                f"wins {wins*100:.0f}% or train crystals {recent_training_crystals*100:.0f}% >= 20%",
+            ),
+            (terminal_fail_share <= 0.80, f"timeout/stall {terminal_fail_share*100:.0f}% <= 80%"),
+        ]
+    elif stage.stage_id == "easy_platform":
+        checks = [
+            (crystal >= 0.65, f"eval crystals {crystal*100:.0f}% >= 65%"),
+            (switch >= 0.35, f"eval switch {switch*100:.0f}% >= 35%"),
+            (wins >= 0.05, f"eval wins {wins*100:.0f}% >= 5%"),
+            (terminal_fail_share <= 0.75, f"timeout/stall {terminal_fail_share*100:.0f}% <= 75%"),
+        ]
+    elif stage.stage_id == "easy_mixed":
+        checks = [
+            (crystal >= 0.55, f"eval crystals {crystal*100:.0f}% >= 55%"),
+            (wins >= 0.05, f"eval wins {wins*100:.0f}% >= 5%"),
+            (terminal_fail_share <= 0.80, f"timeout/stall {terminal_fail_share*100:.0f}% <= 80%"),
+        ]
+    else:
+        checks = [
+            (crystal >= 0.50, f"eval crystals {crystal*100:.0f}% >= 50%"),
+            (wins >= 0.03, f"eval wins {wins*100:.0f}% >= 3%"),
+            (terminal_fail_share <= 0.85, f"timeout/stall {terminal_fail_share*100:.0f}% <= 85%"),
+        ]
+
+    failed = [detail for ok, detail in checks if not ok]
+    if failed:
+        return StageGateResult(False, "not ready", "; ".join(failed))
+    return StageGateResult(True, "ready", "held-out gate passed")
+
+
+def _reason_share(eval_results: EvalResults, reason: str) -> float:
+    total = max(1, sum(eval_results.end_reason_counts.values()))
+    return float(eval_results.end_reason_counts.get(reason, 0) / total)
+
+
+def _run_stage_gate_eval(
+    trainer: HeadlessTrainer,
+    *,
+    dashboard: Optional[Any],
+    eval_episodes: int,
+) -> Optional[EvalResults]:
+    if trainer.evaluator is None:
+        return None
+
+    previous_best = trainer.evaluator.best_eval_score
+    results = trainer.evaluator.evaluate(
+        num_episodes=eval_episodes,
+        max_steps=trainer.config.EVAL_MAX_STEPS,
+        episode_num=trainer.current_episode,
+    )
+    trainer.evaluator.log_results(results)
+
+    if results.mean_score > previous_best:
+        eval_best_filename = f"{trainer.config.GAME_NAME}_eval_best.pth"
+        trainer._save_model(
+            eval_best_filename,
+            save_reason="eval_best",
+            quiet=True,
+            save_replay_buffer=False,
+        )
+        write_eval_best_baseline(
+            trainer.config.GAME_MODEL_DIR,
+            trainer.config.GAME_NAME,
+            episode=trainer.current_episode,
+            mean_score=results.mean_score,
+            checkpoint=eval_best_filename,
+        )
+
+    if dashboard:
+        dashboard.publisher.record_eval(
+            episode=trainer.current_episode,
+            mean_score=results.mean_score,
+            std_score=results.std_score,
+            median_score=results.median_score,
+            win_rate=results.win_rate,
+            num_games=results.num_games,
+            crystal_frac=results.mean_crystal_frac,
+            switch_rate=results.mean_switch_rate,
+            depth_frac=results.mean_depth_frac,
+            end_reason_counts=results.end_reason_counts,
+        )
+        dashboard.log(
+            f"🚦 Gate eval: {results.mean_score:.0f} avg, "
+            f"{results.win_rate*100:.0f}% wins, "
+            f"{results.mean_crystal_frac*100:.0f}% crystals",
+            "info",
+        )
+    return results
+
+
 def _publish_stage(
     dashboard: Optional[Any],
     *,
@@ -249,6 +440,8 @@ def _publish_stage(
     target_episode: int,
     status: str,
     next_stage_name: str,
+    gate_result: StageGateResult,
+    checkpoint_mode: str,
 ) -> None:
     if dashboard is None:
         return
@@ -265,4 +458,8 @@ def _publish_stage(
         status=status,
         gate=stage.gate,
         next_stage_name=next_stage_name,
+        gate_ready=gate_result.ready,
+        gate_status=gate_result.status,
+        gate_detail=gate_result.detail,
+        checkpoint_mode=checkpoint_mode,
     )
