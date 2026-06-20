@@ -176,6 +176,15 @@ class CrystalCavesRenderingMixin:
         target_y = self.player_y + self.PLAYER_HEIGHT / 2 - visible_height / 2
         camera_x = int(np.clip(target_x, 0, max(0, self.level_width - self.width)))
         camera_y = int(np.clip(target_y, 0, max(0, self.level_height - visible_height)))
+        # screen shake on damage: a brief, deterministic decaying jitter (no RNG,
+        # render-only — never touches training state), clamped to stay in-bounds
+        shake = getattr(self, "shake_timer", 0)
+        if shake > 0:
+            mag = min(6, shake)
+            ox = mag if shake % 2 else -mag
+            oy = (mag // 2) if shake % 3 else -(mag // 2)
+            camera_x = int(np.clip(camera_x + ox, 0, max(0, self.level_width - self.width)))
+            camera_y = int(np.clip(camera_y + oy, 0, max(0, self.level_height - visible_height)))
         return camera_x, camera_y
 
     def _world_to_screen(

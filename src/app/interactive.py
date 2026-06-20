@@ -363,6 +363,23 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         if hasattr(self.game, "show_controls"):
             cast(ControlDisplayProvider, self.game).show_controls = True
 
+        # Title screen: render it and wait for a key before dropping into the cave
+        if hasattr(self.game, "render_title_screen"):
+            print("   Press any key to start (Q/ESC to quit)")
+            waiting = True
+            while waiting and self.running:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                        waiting = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                            self.running = False
+                        waiting = False
+                cast(Any, self.game).render_title_screen(self.screen)
+                pygame.display.flip()
+                self.clock.tick(self.config.FPS)
+
         state = self.game.reset()
         can_advance = hasattr(self.game, "advance_cave")
         action: int = 0

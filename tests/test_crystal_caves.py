@@ -424,6 +424,16 @@ class TestCrystalCavesPowerupsAndTreasure:
         assert game.score == score0 + 300
         assert tile not in game.treasures
 
+    def test_damage_triggers_screen_shake(self, game):
+        """Taking damage kicks the camera (render-only juice) without affecting
+        training state."""
+        game.invuln_timer = 0
+        game._damage_player()
+        assert game.shake_timer == game.SHAKE_FRAMES
+        shaken = game._camera()
+        game.shake_timer = 0
+        assert shaken != game._camera()  # the shake actually moved the camera
+
 
 class TestCrystalCavesRenderAndVectorized:
     """Test render and vectorized training surfaces."""

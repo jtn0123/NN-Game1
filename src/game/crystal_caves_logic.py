@@ -300,6 +300,7 @@ class CrystalCavesLogicMixin:
 
         self.health -= 1
         self.invuln_timer = self.INVULN_FRAMES
+        self.shake_timer = self.SHAKE_FRAMES  # juice: kick the camera on a hit
         self.vy = -5.5 * self.gravity_dir
         self.vx = -self.facing * 2.0
         self._add_visual_event(

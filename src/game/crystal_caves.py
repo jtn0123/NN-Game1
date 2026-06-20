@@ -168,6 +168,8 @@ class CrystalCaves(
 
     INVULN_FRAMES = 70
 
+    SHAKE_FRAMES = 16  # screen-shake duration on taking damage (render-only juice)
+
     EMPTY = "."
 
     SOLID = "#"
@@ -307,6 +309,7 @@ class CrystalCaves(
         self.steps_since_progress = 0
         self.invuln_timer = 0
         self.shoot_cooldown = 0
+        self.shake_timer = 0
         self.super_timer = 0
         self.freeze_timer = 0
         self.gravity_timer = 0
@@ -398,6 +401,7 @@ class CrystalCaves(
         self.steps_since_progress = 0
         self.invuln_timer = 0
         self.shoot_cooldown = 0
+        self.shake_timer = 0
         self.super_timer = 0
         self.freeze_timer = 0
         self.gravity_timer = 0
@@ -426,6 +430,7 @@ class CrystalCaves(
         self.steps += 1
         self.steps_since_progress += 1
         self.invuln_timer = max(0, self.invuln_timer - 1)
+        self.shake_timer = max(0, self.shake_timer - 1)
         self.shoot_cooldown = max(0, self.shoot_cooldown - 1)
         self.super_timer = max(0, self.super_timer - 1)
         self.freeze_timer = max(0, self.freeze_timer - 1)
