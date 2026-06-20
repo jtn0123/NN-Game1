@@ -65,6 +65,11 @@ class EvalResults:
     mean_depth_frac: float = 0.0
     end_reason_counts: Dict[str, int] = field(default_factory=dict)
 
+    # Win-rate-dominated "keep-best" score (set by Evaluator.evaluate). Drives the
+    # eval-best checkpoint and the plateau / early-stop signal so a high-score but
+    # low-win policy does not get kept over a winning one.
+    selection_score: float = 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -108,6 +113,9 @@ class Evaluator:
         self.eval_history: List[EvalResults] = []
         self.best_eval_score: float = 0.0
         self.evals_since_improvement: int = 0
+        # Win-rate-aware keep-best / regression signals (see EVAL_SELECTION_* config).
+        self.best_eval_selection: float = 0.0
+        self.best_eval_win_rate: float = 0.0
 
         # Create log directory
         os.makedirs(log_dir, exist_ok=True)
@@ -222,16 +230,43 @@ class Evaluator:
             end_reason_counts=dict(Counter(end_reasons)),
         )
 
+        results.selection_score = self._selection_score(results)
+
         # Update history and check for plateau
         self._update_history(results)
 
         return results
 
-    def _update_history(self, results: EvalResults) -> None:
-        """Update evaluation history and check for plateau."""
-        self.eval_history.append(results)
+    def _selection_score(self, results: EvalResults) -> float:
+        """Win-rate-dominated keep-best score (see EVAL_SELECTION_* config).
 
-        if results.mean_score > self.best_eval_score:
+        win_rate is weighted to dominate, crystal fraction is a strong secondary,
+        and mean_score is only a faint tiebreaker. For games that report neither
+        wins nor crystals this reduces to mean-score ordering, so non-Crystal-Caves
+        keep-best behavior is unchanged.
+        """
+        w_win = getattr(self.config, "EVAL_SELECTION_W_WIN", 1.0)
+        w_crystal = getattr(self.config, "EVAL_SELECTION_W_CRYSTAL", 0.2)
+        w_score = getattr(self.config, "EVAL_SELECTION_W_SCORE", 0.0001)
+        return (
+            results.win_rate * w_win
+            + results.mean_crystal_frac * w_crystal
+            + results.mean_score * w_score
+        )
+
+    def _update_history(self, results: EvalResults) -> None:
+        """Update evaluation history and check for plateau.
+
+        Improvement is measured on selection_score (win-rate dominated), not raw
+        mean_score, so a high-score/low-win policy does not reset the plateau
+        counter or get treated as a new best. best_eval_score still tracks the
+        mean score of the current selection-best eval for display/back-compat.
+        """
+        self.eval_history.append(results)
+        self.best_eval_win_rate = max(self.best_eval_win_rate, results.win_rate)
+
+        if results.selection_score > self.best_eval_selection:
+            self.best_eval_selection = results.selection_score
             self.best_eval_score = results.mean_score
             self.evals_since_improvement = 0
         else:

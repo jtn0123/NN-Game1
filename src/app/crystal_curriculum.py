@@ -174,6 +174,11 @@ def run_crystal_curriculum(
         )
         config.CRYSTAL_CAVES_DIFFICULTY = stage.difficulty
         config.CRYSTAL_CAVES_FAMILIES = stage.families
+        # On full-objective (normal) stages, perturbing an already-peaked policy with
+        # the plateau exploration boost tends to drive it into collapse — prefer
+        # early-stop + eval-best rollback there. The win-regression guard covers the
+        # earlier stages.
+        config.DISABLE_EXPLORATION_BOOST = stage.difficulty == "normal"
 
         stage_args = copy.copy(args)
         stage_args.headless = True
@@ -285,6 +290,9 @@ def run_crystal_curriculum(
                 )
             trainer.running = True
 
+        # Roll the live policy back to this stage's eval-best so the in-memory agent
+        # (and the snapshot below) reflect the kept-best, not a post-peak policy.
+        trainer._restore_eval_best()
         model_path = _snapshot_stage_eval_best(config, stage, index) or model_path
         _publish_stage(
             dashboard,
@@ -394,12 +402,17 @@ def _run_stage_gate_eval(
     if trainer.evaluator is None:
         return None
 
-    previous_best = trainer.evaluator.best_eval_score
+    # Keep-best is win-rate-aware: save the eval-best on the selection score (which
+    # win_rate dominates), not raw mean score, so the gate does not preserve a
+    # high-score/low-win policy over a winning one.
+    previous_best_selection = trainer.evaluator.best_eval_selection
     # The gate eval uses a different (larger) sample than the in-loop evals and must
     # not perturb the plateau/early-stop counter the vectorized trainer reads. Snapshot
     # the evaluator's plateau state, run the gate eval, then restore it after using the
     # results for the eval-best save decision below.
     saved_best = trainer.evaluator.best_eval_score
+    saved_best_selection = trainer.evaluator.best_eval_selection
+    saved_best_win_rate = trainer.evaluator.best_eval_win_rate
     saved_since_improvement = trainer.evaluator.evals_since_improvement
     saved_history_len = len(trainer.evaluator.eval_history)
     results = trainer.evaluator.evaluate(
@@ -408,11 +421,13 @@ def _run_stage_gate_eval(
         episode_num=trainer.current_episode,
     )
     trainer.evaluator.best_eval_score = saved_best
+    trainer.evaluator.best_eval_selection = saved_best_selection
+    trainer.evaluator.best_eval_win_rate = saved_best_win_rate
     trainer.evaluator.evals_since_improvement = saved_since_improvement
     del trainer.evaluator.eval_history[saved_history_len:]
     trainer.evaluator.log_results(results)
 
-    if results.mean_score > previous_best:
+    if results.selection_score > previous_best_selection:
         eval_best_filename = f"{trainer.config.GAME_NAME}_eval_best.pth"
         trainer._save_model(
             eval_best_filename,
