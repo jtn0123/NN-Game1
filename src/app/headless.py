@@ -107,15 +107,12 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         gpu_available = _torch.cuda.is_available() or _torch.backends.mps.is_available()
         if getattr(config, "USE_CNN_STATE", False) and gpu_available:
             config.FORCE_CPU = False
-            # Larger batch amortises GPU launch/transfer overhead for the conv net:
-            # measured ~30% more samples/sec at B=256 than B=128 on MPS, with less
-            # noisy gradients. (Turbo set 128 above for the tiny MLP; override it.)
-            if config.BATCH_SIZE < 256:
-                config.BATCH_SIZE = 256
-            print(
-                f"⚙️  CNN: using {config.DEVICE} (conv is faster on the GPU than CPU), "
-                f"batch {config.BATCH_SIZE}"
-            )
+            # NOTE: a larger batch is NOT a free throughput win here. With the fixed
+            # turbo learn schedule it just doubles the replay ratio (2x learn compute
+            # per env step), which lowered wall-clock throughput in practice. It's a
+            # gradient-quality / sample-efficiency dial, not a speedup — left at the
+            # turbo default. The real throughput win is the vectorized get_state().
+            print(f"⚙️  CNN: using {config.DEVICE} (conv is faster on the GPU than CPU)")
 
         # Vectorized environment support
         self.num_envs = getattr(args, "vec_envs", 1)
