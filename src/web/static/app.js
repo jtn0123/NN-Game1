@@ -411,7 +411,19 @@ function updateCrystalCaves(state) {
     const collected = Math.max(0, initial - remaining);
     setText('cc-crystals-text', `${collected} / ${initial}`);
 
-    setText('cc-switch', Number(state.cc_switch_done) >= 1 ? '✓ yes' : '—');
+    // Switch: show thrown/total, or "none" when the level has no switch.
+    const swTotal = Number(state.cc_switches_total) || 0;
+    const swUsed = Number(state.cc_switches_used) || 0;
+    let swText;
+    if (swTotal === 0) {
+        swText = 'none on this level';
+    } else if (swUsed >= swTotal) {
+        swText = `✓ ${swUsed} / ${swTotal} thrown`;
+    } else {
+        swText = `${swUsed} / ${swTotal} thrown`;
+    }
+    setText('cc-switch', swText);
+
     setText('cc-depth', pctText(state.cc_depth_frac));
     setText('cc-difficulty', state.cc_difficulty || '—');
 
@@ -459,7 +471,10 @@ function updateDashboard(data) {
     document.getElementById('metric-episode').textContent = state.episode.toLocaleString();
     document.getElementById('metric-score').textContent = state.score;
     document.getElementById('metric-best').textContent = state.best_score;
-    document.getElementById('metric-winrate').textContent = (state.win_rate * 100).toFixed(1) + '%';
+    const winrateEl = document.getElementById('metric-winrate');
+    winrateEl.textContent = (state.win_rate * 100).toFixed(1) + '%';
+    // Green once the agent is actually winning some — easy signal for non-experts.
+    winrateEl.style.color = state.win_rate > 0 ? 'var(--accent-success)' : '';
 
     // Update epsilon gauge
     document.getElementById('epsilon-value').textContent = state.epsilon.toFixed(3);

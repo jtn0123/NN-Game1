@@ -452,6 +452,30 @@ class TestSpatialDQN:
         agent = Agent(state_size=size, action_size=10, config=cfg)
         assert isinstance(agent.policy_net, SpatialDQN)
 
+    def test_exposes_visualizer_introspection(self):
+        """The dashboard NN panel needs get_layer_info/get_weights/activations;
+        without them build_nn_snapshot fails and the panel sticks on 'waiting'."""
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        net = SpatialDQN(size, 3, Config(), layout)
+
+        info = net.get_layer_info()
+        assert len(info) >= 3
+        assert info[0]["type"] == "input"
+        assert info[-1]["type"] == "output"
+        assert info[-1]["neurons"] == 3
+
+        weights = net.get_weights()
+        assert len(weights) >= 2
+        assert all(w.ndim == 2 for w in weights)
+
+        # Activations are only captured when the flag is set (skipped in training).
+        assert net.get_activations() == {}
+        net.capture_activations = True
+        net(torch.zeros(1, size))
+        acts = net.get_activations()
+        assert "layer_0" in acts and "layer_1" in acts
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

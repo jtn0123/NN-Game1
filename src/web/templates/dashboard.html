@@ -214,49 +214,51 @@
                 <!-- Crystal Caves live progress (shown only when training Crystal Caves) -->
                 <div class="info-card cc-panel" id="crystal-caves-panel" style="display: none;">
                     <div class="card-header">
-                        <h3 data-tooltip="Live progress through the current cave. The exit only unlocks once EVERY crystal is collected, so 'Crystals' is the sub-goal to watch — without it a win is impossible." data-tooltip-position="left">💎 Crystal Caves Progress</h3>
-                        <span class="info-value status-badge cc-difficulty-badge" id="cc-difficulty" data-tooltip="Training difficulty for the generated caves. tutorial = 1 open crystal, no threats (a winnable floor); easy = a few crystals; normal = the full game." data-tooltip-position="left">—</span>
+                        <h3 data-tooltip="Live progress through the current cave. The exit only unlocks once EVERY crystal is collected, so 'Crystals' is the sub-goal to watch — without it a win is impossible." data-tooltip-position="right">💎 Crystal Caves Progress</h3>
+                        <span class="info-value status-badge cc-difficulty-badge" id="cc-difficulty" data-tooltip="Training difficulty for the generated caves. tutorial = 1 open crystal, no threats (a winnable floor); easy = a few crystals; normal = the full game." data-tooltip-position="right">—</span>
                     </div>
 
                     <!-- Overall completion Φ -->
-                    <div class="cc-bar-row" data-tooltip="How close the agent got to clearing the level (0–100%), blending crystals + switch + depth into one number. The faint marker is the best it has ever reached this run. GOOD: the marker creeping toward 100%. STUCK: the marker flat for a long time." data-tooltip-position="left">
+                    <div class="cc-bar-row" data-tooltip="How close the agent got to clearing the level (0–100%), blending crystals + switch + depth into one number. The faint marker is the best it has ever reached this run. GOOD: the marker creeping toward 100%. STUCK: the marker flat for a long time." data-tooltip-position="right">
                         <div class="cc-bar-label"><span>🧭 Level completion</span><span id="cc-progress-text">0%</span></div>
                         <div class="gauge-bar cc-gauge">
                             <div class="gauge-fill cc-fill-progress" id="cc-progress-fill" style="width: 0%;"></div>
                             <div class="cc-best-marker" id="cc-progress-best" style="left: 0%;"></div>
                         </div>
+                        <div class="cc-bar-hint">blends crystals + switch + depth · the line marks the best so far — you want it creeping right</div>
                     </div>
 
                     <!-- Crystals: the key sub-goal -->
-                    <div class="cc-bar-row" data-tooltip="THE key sub-goal. The exit stays locked until every crystal is gathered, so a win is impossible until this bar is full. Early in training this sits near 0 — watch it climb. This is the single best predictor of whether wins are coming." data-tooltip-position="left">
+                    <div class="cc-bar-row" data-tooltip="THE key sub-goal. The exit stays locked until every crystal is gathered, so a win is impossible until this bar is full. Early in training this sits near 0 — watch it climb. This is the single best predictor of whether wins are coming." data-tooltip-position="right">
                         <div class="cc-bar-label"><span>💎 Crystals collected</span><span id="cc-crystals-text">0 / 0</span></div>
                         <div class="gauge-bar cc-gauge">
                             <div class="gauge-fill cc-fill-crystal" id="cc-crystal-fill" style="width: 0%;"></div>
                         </div>
+                        <div class="cc-bar-hint">the key sub-goal — the exit stays locked until this is full, so no win is possible until then</div>
                     </div>
 
                     <div class="cc-subrows">
-                        <div class="info-row" data-tooltip="Some levels hide a crystal behind a lever/switch. ✓ means the agent learned it must throw the switch first to reach that crystal. '—' means this level has no switch." data-tooltip-position="left">
+                        <div class="info-row" data-tooltip="Some levels hide a crystal behind a lever/switch. The count shows how many of this level's switches the agent has thrown; 'none' means the level has no switch to throw." data-tooltip-position="right">
                             <span class="info-label">🔑 Switch thrown</span>
                             <span class="info-value" id="cc-switch">—</span>
                         </div>
-                        <div class="info-row" data-tooltip="How far down into the cave the agent explored (0–100%). High depth but few crystals = it's wandering/falling, not collecting. They should rise together." data-tooltip-position="left">
+                        <div class="info-row" data-tooltip="How far down into the cave the agent explored (0–100%). High depth but few crystals = it's wandering/falling, not collecting. They should rise together." data-tooltip-position="right">
                             <span class="info-label">⛏️ Depth reached</span>
                             <span class="info-value" id="cc-depth">0%</span>
                         </div>
-                        <div class="info-row" data-tooltip="How the most recent episode ended. 🏆 won = cleared it (the goal). ☠️ killed = ran out of health (hazard/enemy). ⏱️ timeout = ran out of time. 🛑 stalled = stopped making progress and gave up." data-tooltip-position="left">
+                        <div class="info-row" data-tooltip="How the most recent episode ended. 🏆 won = cleared it (the goal). ☠️ killed = ran out of health (hazard/enemy). ⏱️ timeout = ran out of time. 🛑 stalled = stopped making progress and gave up." data-tooltip-position="right">
                             <span class="info-label">🏁 Last outcome</span>
                             <span class="info-value cc-outcome" id="cc-outcome">—</span>
                         </div>
                     </div>
 
                     <!-- Recent outcome breakdown: where episodes are ending -->
-                    <div class="cc-outcomes-wrap" data-tooltip="Where recent episodes are ending. This tells you WHAT the agent still needs to learn: mostly ☠️ killed → it dies to hazards/enemies; mostly 🛑 stalled → it gets stuck; mostly ⏱️ timeout → too slow/aimless; 🏆 won climbing → it's solving levels." data-tooltip-position="left">
-                        <div class="cc-bar-label"><span>📊 Recent outcomes</span></div>
+                    <div class="cc-outcomes-wrap" data-tooltip="Where recent episodes are ending. This tells you WHAT the agent still needs to learn: mostly ☠️ killed → it dies to hazards/enemies; mostly 🛑 stalled → it gets stuck; mostly ⏱️ timeout → too slow/aimless; 🏆 won climbing → it's solving levels." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>📊 Recent outcomes</span><span class="cc-bar-hint-inline">where episodes end</span></div>
                         <div class="cc-outcomes" id="cc-outcomes"><span class="cc-outcome-empty">waiting for episodes…</span></div>
                     </div>
 
-                    <details class="cc-help">
+                    <details class="cc-help" open>
                         <summary>ℹ️ How to read this</summary>
                         <ul>
                             <li><b>Win Rate</b> is the goal. It stays at <b>0%</b> for a while — the agent has to learn to collect every crystal before a single win is possible.</li>

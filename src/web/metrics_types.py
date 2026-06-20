@@ -97,6 +97,8 @@ class TrainingState:
     cc_depth_frac: float = 0.0  # how deep into the cave the agent reached, 0..1
     cc_crystals_remaining: int = 0
     cc_initial_crystals: int = 0
+    cc_switches_total: int = 0
+    cc_switches_used: int = 0
     cc_level_name: str = ""
     cc_difficulty: str = ""
     cc_end_reason: str = ""  # how the last finished episode ended

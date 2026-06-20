@@ -184,7 +184,10 @@ class MetricsPublisher:
         if game_name:
             self.state.game_name = game_name
         if cc_info is not None:
-            self._update_crystal_caves(cc_info, won)
+            try:
+                self._update_crystal_caves(cc_info, won)
+            except Exception:  # dashboard telemetry must never crash training
+                _logger.warning("Failed to update Crystal Caves dashboard state", exc_info=True)
         self.state.episode = episode
         self.state.score = score
         self.state.best_score = max(self.state.best_score, score)
@@ -309,6 +312,8 @@ class MetricsPublisher:
 
         self.state.cc_crystals_remaining = int(info.get("crystals_remaining", 0) or 0)
         self.state.cc_initial_crystals = int(info.get("initial_crystals", 0) or 0)
+        self.state.cc_switches_total = int(info.get("switches_total", 0) or 0)
+        self.state.cc_switches_used = int(info.get("switches_used", 0) or 0)
         self.state.cc_level_name = str(info.get("level_name", "") or "")
 
         # Only count terminal reasons (skip the in-progress "running" sentinel).

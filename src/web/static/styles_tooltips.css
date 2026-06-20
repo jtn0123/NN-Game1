@@ -106,6 +106,25 @@
     border-bottom-color: var(--accent-primary);
 }
 
+/* The right column is a fixed 360px scroll box (overflow clipped), so tooltips
+   inside it must stay within that width and the corner metric cards must anchor
+   to their own edge instead of centering (which would spill past the column). */
+.stats-column [data-tooltip]::before {
+    max-width: 300px;
+}
+
+.metrics-grid .metric-card:first-child[data-tooltip]::before {
+    left: 0;
+    right: auto;
+    transform: translateX(0);
+}
+
+.metrics-grid .metric-card:last-child[data-tooltip]::before {
+    left: auto;
+    right: 0;
+    transform: translateX(0);
+}
+
 /* Info row with tooltip styling */
 .info-row[data-tooltip] {
     cursor: help;

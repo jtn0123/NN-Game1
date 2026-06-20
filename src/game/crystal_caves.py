@@ -524,9 +524,7 @@ class CrystalCaves(
         crystal_frac = (self.initial_crystals - len(self.crystals)) / total
         switch_done = 0.0 if (self.switches - self.used_switches) else 1.0
         span = max(1, self.level_rows - self.sky_rows - 1)
-        depth_frac = float(
-            np.clip((self._max_depth_row - self.sky_rows) / span, 0.0, 1.0)
-        )
+        depth_frac = float(np.clip((self._max_depth_row - self.sky_rows) / span, 0.0, 1.0))
         won = 1.0 if self.won else 0.0
         phi = (
             self.PROGRESS_W_CRYSTAL * crystal_frac
@@ -787,6 +785,8 @@ class CrystalCaves(
             "ammo": self.ammo,
             "crystals_remaining": len(self.crystals),
             "initial_crystals": self.initial_crystals,
+            "switches_total": len(self.switches),
+            "switches_used": len(self.used_switches),
             "exit_unlocked": self.exit_unlocked,
             "doors_open": self.doors_open,
             "level": self.level_index,

@@ -990,6 +990,19 @@ body {
     margin-bottom: 12px;
 }
 
+.cc-bar-hint {
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: var(--text-muted);
+    margin-top: 5px;
+}
+
+.cc-bar-hint-inline {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
 .cc-bar-label {
     display: flex;
     justify-content: space-between;

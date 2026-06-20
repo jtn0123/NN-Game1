@@ -613,20 +613,53 @@ class SpatialDQN(nn.Module):
         meta = rest[:, self.gmap_size :]
         x = F.relu(self.conv1(win))
         x = self.pool(F.relu(self.conv2(x)))
+        if self.capture_activations:
+            # one value per conv filter (mean over the spatial grid) for the viz
+            self.activations["layer_0"] = x.mean(dim=(2, 3)).detach()
         x = torch.flatten(x, 1)
         x = torch.cat([x, gmap, meta], dim=1)
         x = F.relu(self.fc(x))
+        if self.capture_activations:
+            self.activations["layer_1"] = x.detach()
         if self.dueling:
             v = self.value(x)
             a = self.adv(x)
-            return v + (a - a.mean(dim=1, keepdim=True))
-        return self.head(x)
+            q = v + (a - a.mean(dim=1, keepdim=True))
+        else:
+            q = self.head(x)
+        if self.capture_activations:
+            self.activations["layer_2"] = q.detach()
+        return q
 
     def reset_noise(self) -> None:
         """No NoisyNets in the conv head; exploration is epsilon-greedy."""
 
     def get_activations(self) -> Dict[str, np.ndarray]:
         return {name: act.cpu().numpy() for name, act in self.activations.items()}
+
+    def get_layer_info(self) -> List[Dict]:
+        """Layer structure for the dashboard NN visualizer. The conv stack is
+        summarised as a single 'Conv' column (one node per filter) so the spatial
+        network renders on the same node-graph the MLP variants use."""
+        hidden = self.fc.out_features
+        return [
+            {"name": "Input", "neurons": self.state_size, "type": "input"},
+            {"name": "Conv", "neurons": self.conv2.out_channels, "type": "hidden"},
+            {"name": "Dense", "neurons": hidden, "type": "hidden"},
+            {"name": "Output (Q)", "neurons": self.action_size, "type": "output"},
+        ]
+
+    def get_weights(self) -> List[np.ndarray]:
+        """Sampled 2D weight matrices for the visualizer's connection lines — one
+        per layer transition (input->conv, conv->dense, dense->output)."""
+        conv_w = self.conv2.weight.detach().cpu().numpy()
+        conv_w = conv_w.reshape(conv_w.shape[0], -1)
+        out_layer = self.adv if self.dueling else self.head
+        return [
+            conv_w,
+            self.fc.weight.detach().cpu().numpy(),
+            out_layer.weight.detach().cpu().numpy(),
+        ]
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
