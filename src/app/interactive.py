@@ -364,9 +364,19 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
             cast(ControlDisplayProvider, self.game).show_controls = True
 
         state = self.game.reset()
+        can_advance = hasattr(self.game, "advance_cave")
+        action: int = 0
+        info: dict = {}
 
         while self.running:
             self._handle_events()
+
+            # Respect the pause menu (P key): freeze the sim, keep rendering so the
+            # menu is visible and interactive.
+            if self.paused:
+                self._render_frame(state, action, info)
+                self.clock.tick(self.config.FPS)
+                continue
 
             # Get keyboard input as dict for games that use get_human_action
             pressed = pygame.key.get_pressed()
@@ -402,9 +412,18 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
 
             if done:
                 score = info.get("score", 0)
-                print(f"   Game Over! Score: {score}")
-                pygame.time.wait(1500)  # Brief pause before reset
-                state = self.game.reset()
+                won = bool(info.get("won", False))
+                # let the win/lose banner (rendered by the game) read for a beat
+                self._render_frame(state, action, info)
+                if won and can_advance:
+                    print(f"   Cave cleared! Score: {score} — advancing to the next cave")
+                    pygame.time.wait(2200)
+                    cast(Any, self.game).advance_cave()  # next cave, not a replay
+                    state = self.game.get_state()
+                else:
+                    print(f"   Game Over! Score: {score}")
+                    pygame.time.wait(1800)
+                    state = self.game.reset()
 
             # Render
             self._render_frame(state, action, info)
