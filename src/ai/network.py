@@ -588,6 +588,15 @@ class SpatialDQN(nn.Module):
         self.meta_size = layout["meta"]
         self.dueling = bool(getattr(self.config, "USE_DUELING", True))
 
+        # Structured exploration: like DuelingDQN, put NoisyNets on the OUTPUT
+        # layers (the Rainbow placement) so the conv net actually explores via
+        # learned noise instead of relying on a low epsilon tuned for the MLP.
+        self.use_noisy = bool(getattr(self.config, "USE_NOISY_NETWORKS", False))
+        noisy_std = getattr(self.config, "NOISY_STD_INIT", 0.5)
+
+        def out_layer(in_f: int, out_f: int) -> nn.Module:
+            return NoisyLinear(in_f, out_f, noisy_std) if self.use_noisy else nn.Linear(in_f, out_f)
+
         self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2)
@@ -596,10 +605,11 @@ class SpatialDQN(nn.Module):
         merged = conv_out + self.gmap_size + self.meta_size
         self.fc = nn.Linear(merged, hidden)
         if self.dueling:
-            self.value = nn.Linear(hidden, 1)
-            self.adv = nn.Linear(hidden, action_size)
+            self.value = out_layer(hidden, 1)
+            self.adv = out_layer(hidden, action_size)
         else:
-            self.head = nn.Linear(hidden, action_size)
+            self.head = out_layer(hidden, action_size)
+        # Xavier-init the plain conv/linear layers; NoisyLinear self-inits.
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.xavier_uniform_(m.weight)
@@ -632,7 +642,17 @@ class SpatialDQN(nn.Module):
         return q
 
     def reset_noise(self) -> None:
-        """No NoisyNets in the conv head; exploration is epsilon-greedy."""
+        """Resample exploration noise on the output layers (no-op when NoisyNets
+        are disabled — exploration then falls back to epsilon-greedy)."""
+        if not self.use_noisy:
+            return
+        for layer in (
+            getattr(self, "value", None),
+            getattr(self, "adv", None),
+            getattr(self, "head", None),
+        ):
+            if isinstance(layer, NoisyLinear):
+                layer.reset_noise()
 
     def get_activations(self) -> Dict[str, np.ndarray]:
         return {name: act.cpu().numpy() for name, act in self.activations.items()}
@@ -652,14 +672,16 @@ class SpatialDQN(nn.Module):
     def get_weights(self) -> List[np.ndarray]:
         """Sampled 2D weight matrices for the visualizer's connection lines — one
         per layer transition (input->conv, conv->dense, dense->output)."""
+
+        def matrix(layer: nn.Module) -> np.ndarray:
+            if isinstance(layer, NoisyLinear):
+                return layer.visualization_weight()
+            return layer.weight.detach().cpu().numpy()  # type: ignore[union-attr]
+
         conv_w = self.conv2.weight.detach().cpu().numpy()
         conv_w = conv_w.reshape(conv_w.shape[0], -1)
         out_layer = self.adv if self.dueling else self.head
-        return [
-            conv_w,
-            self.fc.weight.detach().cpu().numpy(),
-            out_layer.weight.detach().cpu().numpy(),
-        ]
+        return [conv_w, matrix(self.fc), matrix(out_layer)]
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

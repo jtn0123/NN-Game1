@@ -476,6 +476,34 @@ class TestSpatialDQN:
         acts = net.get_activations()
         assert "layer_0" in acts and "layer_1" in acts
 
+    def test_noisy_nets_drive_exploration(self):
+        """With NoisyNets on, the conv head's output layers carry learned noise so
+        resampling changes the Q-values — that IS the exploration (no longer reliant
+        on a low epsilon tuned for the MLP). With them off it must be deterministic."""
+        from src.ai.network import NoisyLinear
+
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        x = torch.zeros(1, size)
+
+        cfg = Config()
+        cfg.USE_NOISY_NETWORKS = True
+        noisy = SpatialDQN(size, 10, cfg, layout)
+        noisy.train()
+        assert isinstance(noisy.adv, NoisyLinear)
+        noisy.reset_noise()
+        a = noisy(x)
+        noisy.reset_noise()
+        b = noisy(x)
+        assert torch.abs(a - b).max().item() > 1e-4  # noise actually perturbs Q-values
+
+        cfg2 = Config()
+        cfg2.USE_NOISY_NETWORKS = False
+        plain = SpatialDQN(size, 10, cfg2, layout)
+        plain.eval()
+        plain.reset_noise()  # no-op
+        assert torch.allclose(plain(x), plain(x))
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

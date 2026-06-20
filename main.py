@@ -172,6 +172,19 @@ def apply_cli_config_overrides(config: Config, args) -> None:
     if getattr(args, "cnn", False):
         config.USE_CNN_STATE = True
         print("🧠 CNN Q-network: reading the perception window as a 2D grid")
+        # Exploration safety net: with NoisyNets ON, the conv head now explores via
+        # learned noise (SpatialDQN), so the low default epsilon is fine. With
+        # NoisyNets OFF, epsilon-greedy is the ONLY exploration the CNN has — the
+        # default 0.1 (tuned for NoisyNets) starves it, so raise it to real coverage.
+        if not getattr(config, "USE_NOISY_NETWORKS", False):
+            config.EPSILON_START = max(config.EPSILON_START, 0.9)
+            config.EPSILON_DECAY = max(config.EPSILON_DECAY, 0.9997)
+            print(
+                "   ↳ NoisyNets off → epsilon-greedy exploration "
+                f"(start {config.EPSILON_START}, decay {config.EPSILON_DECAY})"
+            )
+        else:
+            print("   ↳ NoisyNets on → conv head explores via learned noise")
     if getattr(args, "early_stop", False):
         config.EARLY_STOP_ON_PLATEAU = True
         # evals must be frequent enough to detect a plateau within a stage
