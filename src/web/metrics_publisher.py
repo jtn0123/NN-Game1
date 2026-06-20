@@ -962,6 +962,22 @@ class MetricsPublisher:
         self.state.cc_end_reason = ""
         self.state.cc_end_reason_counts = {}
         self._cc_outcome_window.clear()
+        # Recent-crystal trend window + counts added by the curriculum work.
+        self._cc_crystal_window.clear()
+        self.state.cc_recent_crystal_frac = 0.0
+        self.state.cc_crystal_history = []
+        self.state.cc_initial_crystals = 0
+        self.state.cc_switches_total = 0
+        self.state.cc_switches_used = 0
+
+        # Reset curriculum stage telemetry so a fresh run does not show the prior
+        # stage/gate/eval-subgoal values until new data overwrites them.
+        self._eval_stage_histories.clear()
+        self.state.eval_stage_history = []
+        self.state.eval_crystal_frac = 0.0
+        self.state.eval_switch_rate = 0.0
+        self.state.eval_depth_frac = 0.0
+        self.state.eval_end_reason_counts = {}
 
         # Reset held-out eval telemetry
         self._eval_history.clear()

@@ -373,6 +373,7 @@ const CC_OUTCOMES = {
     killed: { icon: '☠️', label: 'killed', cls: 'bad' },
     timeout: { icon: '⏱️', label: 'timeout', cls: 'warn' },
     stalled: { icon: '🛑', label: 'stalled', cls: 'warn' },
+    ended: { icon: '⛳', label: 'ended', cls: '' },
 };
 
 function updateHeadlessUi(isHeadless) {

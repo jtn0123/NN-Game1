@@ -839,3 +839,59 @@ class TestMetricsPublisher:
         assert publisher.get_screenshot() is None
         assert publisher.get_save_status()["saves_this_session"] == 0
         assert publisher.get_nn_visualization()["step"] == 0
+
+    def test_reset_all_state_clears_crystal_caves_and_curriculum_telemetry(self):
+        """A 'start fresh' must not leak Crystal Caves / curriculum telemetry."""
+        publisher = MetricsPublisher(history_length=100)
+        publisher.record_curriculum_stage(
+            active=True,
+            stage_index=2,
+            stage_total=5,
+            stage_id="easy_platform",
+            stage_name="Easy platform networks",
+            difficulty="easy",
+            families="platform_network",
+            start_episode=300,
+            target_episode=900,
+            status="running",
+            gate="stable switch/crystal collection",
+            next_stage_name="Easy mixed families",
+        )
+        publisher.record_eval(
+            episode=300,
+            mean_score=80,
+            std_score=0,
+            median_score=80,
+            win_rate=0.1,
+            num_games=12,
+            crystal_frac=0.5,
+            switch_rate=0.4,
+            depth_frac=0.6,
+            end_reason_counts={"timeout": 8, "won": 4},
+            stage_id="easy_platform",
+        )
+        publisher.update(
+            episode=300,
+            score=10,
+            epsilon=0.2,
+            loss=0.0,
+            game_name="crystal_caves",
+            cc_info={"end_reason": "won", "progress_parts": {"crystal_frac": 1.0}},
+        )
+
+        # Sanity: the telemetry is populated before the reset.
+        assert publisher.state.eval_stage_history
+        assert publisher._cc_crystal_window
+        assert publisher._eval_stage_histories
+
+        publisher.reset_all_state()
+
+        assert publisher.state.cc_recent_crystal_frac == 0.0
+        assert publisher.state.cc_crystal_history == []
+        assert publisher.state.eval_stage_history == []
+        assert publisher.state.eval_crystal_frac == 0.0
+        assert publisher.state.eval_switch_rate == 0.0
+        assert publisher.state.eval_depth_frac == 0.0
+        assert publisher.state.eval_end_reason_counts == {}
+        assert list(publisher._cc_crystal_window) == []
+        assert publisher._eval_stage_histories == {}

@@ -132,6 +132,14 @@ def run_crystal_curriculum(
     full_gate_eval_episodes = config.EVAL_EPISODES
     config.EVAL_EPISODES = min(config.EVAL_EPISODES, 12)
 
+    # The periodic held-out eval, eval-best checkpointing, plateau detection, and
+    # EARLY_STOP_ON_PLATEAU live ONLY in HeadlessTrainer.train_vectorized(); the
+    # single-env train() path runs none of them. The whole curriculum (held-out
+    # gate, eval-best warm-start, early-stop rollback) depends on that machinery,
+    # so force vectorized training even when the user did not pass --vec-envs.
+    # Respect a larger user-provided value.
+    curriculum_vec_envs = max(int(getattr(args, "vec_envs", 1) or 1), 8)
+
     stages = DEFAULT_CRYSTAL_CURRICULUM
     budgets = planned_stage_episodes(
         stages,
@@ -147,6 +155,7 @@ def run_crystal_curriculum(
         print(
             f"   {index}/{len(stages)} {stage.name}: {stage.difficulty}, {families}, +{budget} ep"
         )
+    print(f"   vectorized envs per stage: {curriculum_vec_envs}")
     print("=" * 70 + "\n")
 
     base_model_dir = config.MODEL_DIR
@@ -175,6 +184,7 @@ def run_crystal_curriculum(
         stage_args.cave_difficulty = stage.difficulty
         stage_args.cave_families = stage.families or None
         stage_args.model = model_path
+        stage_args.vec_envs = curriculum_vec_envs
         # The trainer's config.MAX_EPISODES is set after load, because loaded
         # checkpoints carry their own episode number.
         stage_args.episodes = None
@@ -385,11 +395,21 @@ def _run_stage_gate_eval(
         return None
 
     previous_best = trainer.evaluator.best_eval_score
+    # The gate eval uses a different (larger) sample than the in-loop evals and must
+    # not perturb the plateau/early-stop counter the vectorized trainer reads. Snapshot
+    # the evaluator's plateau state, run the gate eval, then restore it after using the
+    # results for the eval-best save decision below.
+    saved_best = trainer.evaluator.best_eval_score
+    saved_since_improvement = trainer.evaluator.evals_since_improvement
+    saved_history_len = len(trainer.evaluator.eval_history)
     results = trainer.evaluator.evaluate(
         num_episodes=eval_episodes,
         max_steps=trainer.config.EVAL_MAX_STEPS,
         episode_num=trainer.current_episode,
     )
+    trainer.evaluator.best_eval_score = saved_best
+    trainer.evaluator.evals_since_improvement = saved_since_improvement
+    del trainer.evaluator.eval_history[saved_history_len:]
     trainer.evaluator.log_results(results)
 
     if results.mean_score > previous_best:
