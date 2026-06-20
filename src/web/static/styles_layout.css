@@ -980,3 +980,125 @@ body {
 .preview-placeholder.hidden {
     display: none;
 }
+
+/* ===== Crystal Caves progress panel ===== */
+.cc-panel {
+    margin-top: 12px;
+}
+
+.cc-bar-row {
+    margin-bottom: 12px;
+}
+
+.cc-bar-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.cc-bar-label span:last-child {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* gauge-bar is overflow:hidden; cc-gauge lets the best marker sit on top */
+.cc-gauge {
+    position: relative;
+    height: 12px;
+}
+
+.cc-fill-crystal {
+    background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-primary) 100%);
+    box-shadow: 0 0 10px rgba(0, 188, 212, 0.35);
+}
+
+/* "best ever Φ" marker — a thin bright line the live fill chases */
+.cc-best-marker {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.7);
+    z-index: 2;
+    transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+}
+
+.cc-subrows {
+    margin-top: 4px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 8px;
+}
+
+.cc-outcome.good { color: var(--accent-success); }
+.cc-outcome.bad { color: var(--accent-danger); }
+.cc-outcome.warn { color: var(--accent-warning); }
+
+.cc-outcomes-wrap {
+    margin-top: 10px;
+}
+
+.cc-outcomes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+}
+
+.cc-outcome-chip {
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.cc-outcome-chip.good { color: var(--accent-success); border-color: rgba(76, 175, 80, 0.5); }
+.cc-outcome-chip.bad { color: var(--accent-danger); border-color: rgba(239, 83, 80, 0.5); }
+.cc-outcome-chip.warn { color: var(--accent-warning); border-color: rgba(255, 193, 7, 0.45); }
+
+.cc-outcome-empty {
+    font-size: 0.7rem;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.cc-help {
+    margin-top: 12px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.cc-help summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    user-select: none;
+    padding: 2px 0;
+}
+
+.cc-help summary:hover {
+    color: var(--text-secondary);
+}
+
+.cc-help ul {
+    margin: 8px 0 2px;
+    padding-left: 18px;
+}
+
+.cc-help li {
+    margin: 5px 0;
+    line-height: 1.45;
+}
+
+.cc-help b {
+    color: var(--text-primary);
+}

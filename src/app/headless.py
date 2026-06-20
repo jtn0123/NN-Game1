@@ -370,11 +370,16 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     target_updates=self.target_updates,
                     bricks_broken=bricks_broken,
                     episode_length=episode_steps,
+                    game_name=config.GAME_NAME,
+                    cc_info=info if config.GAME_NAME == "crystal_caves" else None,
                 )
                 # Update performance settings in dashboard state
                 dashboard.publisher.state.learn_every = config.LEARN_EVERY
                 dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                 dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                dashboard.publisher.state.cc_difficulty = getattr(
+                    config, "CRYSTAL_CAVES_DIFFICULTY", ""
+                )
 
                 # Emit NN visualization data (throttled by server to ~10 FPS)
                 self._emit_nn_visualization(state, action)
@@ -625,11 +630,16 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                             target_updates=self.target_updates,
                             bricks_broken=bricks_broken,
                             episode_length=int(env_episode_steps[i]),
+                            game_name=config.GAME_NAME,
+                            cc_info=(infos[i] if config.GAME_NAME == "crystal_caves" else None),
                         )
                         # Update performance settings in dashboard state
                         dashboard.publisher.state.learn_every = config.LEARN_EVERY
                         dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
                         dashboard.publisher.state.batch_size = config.BATCH_SIZE
+                        dashboard.publisher.state.cc_difficulty = getattr(
+                            config, "CRYSTAL_CAVES_DIFFICULTY", ""
+                        )
 
                         # Emit NN visualization data (throttled by server to ~10 FPS)
                         # Convert numpy int64 to Python int for JSON serialization
@@ -684,9 +694,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                                 f"improvement). Best checkpoint holds the peak.\n"
                             )
                             if self.web_dashboard:
-                                self.web_dashboard.log(
-                                    "⏹️ Early stop: eval plateaued", "warning"
-                                )
+                                self.web_dashboard.log("⏹️ Early stop: eval plateaued", "warning")
                             self.running = False
 
                         # Auto-exploration boost: when plateau detected, increase epsilon
@@ -901,8 +909,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         if recent_parts:
             keys = ("crystal_frac", "switch_done", "depth_frac", "won")
             means = {
-                key: float(np.mean([float(p.get(key, 0.0)) for p in recent_parts]))
-                for key in keys
+                key: float(np.mean([float(p.get(key, 0.0)) for p in recent_parts])) for key in keys
             }
             print(
                 "   Phi@death parts:  "

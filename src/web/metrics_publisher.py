@@ -168,6 +168,8 @@ class MetricsPublisher:
         q_value_stay: float = 0.0,
         q_value_right: float = 0.0,
         selected_action: Optional[int] = None,
+        game_name: str = "",
+        cc_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Update metrics with new episode data.
@@ -175,7 +177,14 @@ class MetricsPublisher:
         Args:
             q_value_left, q_value_stay, q_value_right: Q-values for each action (Phase 1)
             selected_action: Index of action taken (0=LEFT, 1=STAY, 2=RIGHT)
+            game_name: Active game (drives which game-specific dashboard panels show)
+            cc_info: Crystal Caves per-episode info dict (progress, progress_parts,
+                crystals, end_reason). Populates the Crystal Caves dashboard panel.
         """
+        if game_name:
+            self.state.game_name = game_name
+        if cc_info is not None:
+            self._update_crystal_caves(cc_info, won)
         self.state.episode = episode
         self.state.score = score
         self.state.best_score = max(self.state.best_score, score)
@@ -279,6 +288,35 @@ class MetricsPublisher:
             callbacks = self._on_update_callbacks.copy()
         for callback in callbacks:
             callback(self.get_snapshot())
+
+    def _update_crystal_caves(self, info: Dict[str, Any], won: bool) -> None:
+        """Populate Crystal Caves-specific dashboard state from a game info dict.
+
+        ``info`` is the dict returned by ``CrystalCaves._info()``: it carries the
+        completion potential (``progress``), its component breakdown
+        (``progress_parts`` = crystal/switch/depth), the crystal counts, and how
+        the episode ended (``end_reason``)."""
+        self.state.cc_active = True
+        progress = float(info.get("progress", 0.0) or 0.0)
+        self.state.cc_progress = progress
+        self.state.cc_best_progress = max(self.state.cc_best_progress, progress)
+
+        parts = info.get("progress_parts") or {}
+        if isinstance(parts, dict):
+            self.state.cc_crystal_frac = float(parts.get("crystal_frac", 0.0) or 0.0)
+            self.state.cc_switch_done = float(parts.get("switch_done", 0.0) or 0.0)
+            self.state.cc_depth_frac = float(parts.get("depth_frac", 0.0) or 0.0)
+
+        self.state.cc_crystals_remaining = int(info.get("crystals_remaining", 0) or 0)
+        self.state.cc_initial_crystals = int(info.get("initial_crystals", 0) or 0)
+        self.state.cc_level_name = str(info.get("level_name", "") or "")
+
+        # Only count terminal reasons (skip the in-progress "running" sentinel).
+        reason = str(info.get("end_reason", "") or "")
+        if reason and reason != "running":
+            self.state.cc_end_reason = reason
+            counts = self.state.cc_end_reason_counts
+            counts[reason] = counts.get(reason, 0) + 1
 
     def log(self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None) -> None:
         """Add a log message to the console."""
@@ -762,6 +800,17 @@ class MetricsPublisher:
         self.state.bricks_broken_total = 0
         self.state.episodes_per_second = 0.0
         self.state.steps_per_second = 0.0
+
+        # Reset Crystal Caves telemetry (keep cc_active/difficulty/level — those
+        # describe the run, not the per-episode progress)
+        self.state.cc_progress = 0.0
+        self.state.cc_best_progress = 0.0
+        self.state.cc_crystal_frac = 0.0
+        self.state.cc_switch_done = 0.0
+        self.state.cc_depth_frac = 0.0
+        self.state.cc_crystals_remaining = 0
+        self.state.cc_end_reason = ""
+        self.state.cc_end_reason_counts = {}
 
         # Reset timing
         self._episode_times.clear()

@@ -148,6 +148,56 @@ def print_startup_banner() -> None:
     print("=" * 60)
 
 
+def apply_cli_config_overrides(config: Config, args) -> None:
+    """Apply run-tuning CLI flags onto the config.
+
+    Must run BEFORE the web-mode dispatch: ``run_web_mode`` returns before
+    main()'s later flag-handling, so without this --web would silently ignore
+    --cnn / --cave-difficulty / --random-caves / --early-stop / etc. and train a
+    default-config run instead of the one the user asked for.
+    """
+    # Crystal Caves: procedurally generated caves
+    if getattr(args, "random_caves", False):
+        config.CRYSTAL_CAVES_PROCEDURAL = True
+        print("🎲 Crystal Caves: procedurally generated caves")
+    if getattr(args, "cave_families", None):
+        config.CRYSTAL_CAVES_FAMILIES = args.cave_families
+        print(f"🎓 Crystal Caves families: {args.cave_families}")
+    if getattr(args, "cave_difficulty", None):
+        config.CRYSTAL_CAVES_DIFFICULTY = args.cave_difficulty
+        print(f"🎚️  Crystal Caves difficulty: {args.cave_difficulty}")
+    if getattr(args, "legacy_state", False):
+        config.CRYSTAL_CAVES_RICH_STATE = False
+        print("🔭 Crystal Caves: legacy 11x9 state (rich state OFF)")
+    if getattr(args, "cnn", False):
+        config.USE_CNN_STATE = True
+        print("🧠 CNN Q-network: reading the perception window as a 2D grid")
+    if getattr(args, "early_stop", False):
+        config.EARLY_STOP_ON_PLATEAU = True
+        # evals must be frequent enough to detect a plateau within a stage
+        config.EVAL_EVERY = min(config.EVAL_EVERY, 150)
+        print(
+            f"⏹️  Early-stop on eval plateau (patience {config.EARLY_STOP_PATIENCE}, "
+            f"eval every {config.EVAL_EVERY})"
+        )
+    if getattr(args, "lr_decay", False):
+        config.LR_DECAY = True
+        print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")
+
+    # Force CPU if specified (faster for small models on M4)
+    if getattr(args, "cpu", False):
+        config.FORCE_CPU = True
+        print("💻 CPU mode: Using CPU (faster for small models on M4)")
+
+    # Set seed if specified
+    if getattr(args, "seed", None):
+        np.random.seed(args.seed)
+        import torch
+
+        torch.manual_seed(args.seed)
+        config.SEED = args.seed
+
+
 def main():
     """Main entry point."""
     # Show banner for non-help invocations
@@ -177,6 +227,11 @@ def main():
         console_output=config.LOG_TO_CONSOLE,
         file_output=config.LOG_TO_FILE,
     )
+
+    # Apply run-tuning flags to config up front so every entry point (web,
+    # headless, visual) honours them — run_web_mode returns before the rest of
+    # main(), so these must be set before dispatching to it.
+    apply_cli_config_overrides(config, args)
 
     # Web mode: use web interface for everything
     if hasattr(args, "web") and args.web:
@@ -211,46 +266,8 @@ def main():
         if game_info:
             print(f"🎮 Game: {game_info['icon']} {game_info['name']}")
 
-    # Crystal Caves: procedurally generated caves
-    if getattr(args, "random_caves", False):
-        config.CRYSTAL_CAVES_PROCEDURAL = True
-        print("🎲 Crystal Caves: procedurally generated caves")
-    if getattr(args, "cave_families", None):
-        config.CRYSTAL_CAVES_FAMILIES = args.cave_families
-        print(f"🎓 Crystal Caves families: {args.cave_families}")
-    if getattr(args, "cave_difficulty", None):
-        config.CRYSTAL_CAVES_DIFFICULTY = args.cave_difficulty
-        print(f"🎚️  Crystal Caves difficulty: {args.cave_difficulty}")
-    if getattr(args, "legacy_state", False):
-        config.CRYSTAL_CAVES_RICH_STATE = False
-        print("🔭 Crystal Caves: legacy 11x9 state (rich state OFF)")
-    if getattr(args, "cnn", False):
-        config.USE_CNN_STATE = True
-        print("🧠 CNN Q-network: reading the perception window as a 2D grid")
-    if getattr(args, "early_stop", False):
-        config.EARLY_STOP_ON_PLATEAU = True
-        # evals must be frequent enough to detect a plateau within a stage
-        config.EVAL_EVERY = min(config.EVAL_EVERY, 150)
-        print(
-            f"⏹️  Early-stop on eval plateau (patience {config.EARLY_STOP_PATIENCE}, "
-            f"eval every {config.EVAL_EVERY})"
-        )
-    if getattr(args, "lr_decay", False):
-        config.LR_DECAY = True
-        print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")
-
-    # Force CPU if specified (faster for small models on M4)
-    if hasattr(args, "cpu") and args.cpu:
-        config.FORCE_CPU = True
-        print("💻 CPU mode: Using CPU (faster for small models on M4)")
-
-    # Set seed if specified
-    if args.seed:
-        np.random.seed(args.seed)
-        import torch
-
-        torch.manual_seed(args.seed)
-        config.SEED = args.seed
+    # Run-tuning flags (--cnn/--cave-difficulty/--seed/...) were already applied
+    # above via apply_cli_config_overrides() so that --web honours them too.
 
     # Handle headless mode separately (no pygame)
     if args.headless:

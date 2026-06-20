@@ -366,6 +366,88 @@ function updateConnectionStatus(connected) {
     }
 }
 
+// Crystal Caves end-reason → plain-English display (icon, label, sentiment).
+const CC_OUTCOMES = {
+    won: { icon: '🏆', label: 'won', cls: 'good' },
+    killed: { icon: '☠️', label: 'killed', cls: 'bad' },
+    timeout: { icon: '⏱️', label: 'timeout', cls: 'warn' },
+    stalled: { icon: '🛑', label: 'stalled', cls: 'warn' },
+};
+
+/**
+ * Update the Crystal Caves progress panel from training state.
+ * Hidden entirely for other games; populated only when cc_active is set.
+ */
+function updateCrystalCaves(state) {
+    const panel = document.getElementById('crystal-caves-panel');
+    if (!panel) return;
+
+    const isCC = Boolean(state.cc_active) && state.game_name === 'crystal_caves';
+    panel.style.display = isCC ? '' : 'none';
+    if (!isCC) return;
+
+    const pctText = (v) => `${Math.round((Number(v) || 0) * 100)}%`;
+    const widthPct = (v) => `${Math.max(0, Math.min(100, (Number(v) || 0) * 100))}%`;
+
+    // Level completion (Φ) with a "best ever" marker.
+    const setWidth = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.style.width = widthPct(v);
+    };
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+
+    setWidth('cc-progress-fill', state.cc_progress);
+    setText('cc-progress-text', pctText(state.cc_progress));
+    const bestMarker = document.getElementById('cc-progress-best');
+    if (bestMarker) bestMarker.style.left = widthPct(state.cc_best_progress);
+
+    // Crystals — the key sub-goal.
+    setWidth('cc-crystal-fill', state.cc_crystal_frac);
+    const initial = Number(state.cc_initial_crystals) || 0;
+    const remaining = Number(state.cc_crystals_remaining) || 0;
+    const collected = Math.max(0, initial - remaining);
+    setText('cc-crystals-text', `${collected} / ${initial}`);
+
+    setText('cc-switch', Number(state.cc_switch_done) >= 1 ? '✓ yes' : '—');
+    setText('cc-depth', pctText(state.cc_depth_frac));
+    setText('cc-difficulty', state.cc_difficulty || '—');
+
+    // Last outcome (colour-coded).
+    const outcomeEl = document.getElementById('cc-outcome');
+    if (outcomeEl) {
+        const o = CC_OUTCOMES[state.cc_end_reason];
+        outcomeEl.textContent = o ? `${o.icon} ${o.label}` : '—';
+        outcomeEl.className = 'info-value cc-outcome' + (o ? ` ${o.cls}` : '');
+    }
+
+    // Recent-outcome breakdown: where episodes are ending.
+    const outcomesEl = document.getElementById('cc-outcomes');
+    if (outcomesEl) {
+        const counts = state.cc_end_reason_counts || {};
+        const total = Object.values(counts).reduce((sum, n) => sum + (Number(n) || 0), 0);
+        if (total <= 0) {
+            outcomesEl.innerHTML = '<span class="cc-outcome-empty">waiting for episodes…</span>';
+        } else {
+            const order = ['won', 'killed', 'timeout', 'stalled'];
+            const keys = order
+                .filter((k) => counts[k])
+                .concat(Object.keys(counts).filter((k) => !order.includes(k)));
+            outcomesEl.innerHTML = keys
+                .map((k) => {
+                    const o = CC_OUTCOMES[k] || { icon: '•', label: k, cls: '' };
+                    const n = Number(counts[k]) || 0;
+                    const share = Math.round((n / total) * 100);
+                    const title = `${o.label}: ${n} of ${total} (${share}%)`;
+                    return `<span class="cc-outcome-chip ${o.cls}" title="${title}">${o.icon} ${share}%</span>`;
+                })
+                .join('');
+        }
+    }
+}
+
 /**
  * Update dashboard with new data
  */
@@ -431,6 +513,9 @@ function updateDashboard(data) {
 
     // Update system status badges
     updateSystemStatus(state);
+
+    // Update Crystal Caves progress panel (no-op for other games)
+    updateCrystalCaves(state);
 
     // Update performance mode buttons and sync settings
     if (state.performance_mode) {

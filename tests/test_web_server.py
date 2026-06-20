@@ -175,6 +175,74 @@ class TestMetricsPublisher:
         assert publisher.state.epsilon == 0.5
         assert publisher.state.loss == 0.01
 
+    def test_crystal_caves_info_populates_panel_state(self):
+        """cc_info should drive the Crystal Caves dashboard fields."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update(
+            episode=5,
+            score=350,
+            epsilon=0.1,
+            loss=0.01,
+            won=False,
+            game_name="crystal_caves",
+            cc_info={
+                "progress": 0.45,
+                "progress_parts": {
+                    "crystal_frac": 0.33,
+                    "switch_done": 1.0,
+                    "depth_frac": 0.6,
+                    "won": 0.0,
+                },
+                "crystals_remaining": 2,
+                "initial_crystals": 3,
+                "level_name": "Cave 1",
+                "end_reason": "killed",
+            },
+        )
+
+        state = publisher.state
+        assert state.game_name == "crystal_caves"
+        assert state.cc_active is True
+        assert state.cc_progress == 0.45
+        assert state.cc_best_progress == 0.45
+        assert state.cc_crystal_frac == 0.33
+        assert state.cc_switch_done == 1.0
+        assert state.cc_depth_frac == 0.6
+        assert state.cc_crystals_remaining == 2
+        assert state.cc_initial_crystals == 3
+        assert state.cc_level_name == "Cave 1"
+        assert state.cc_end_reason == "killed"
+        assert state.cc_end_reason_counts == {"killed": 1}
+
+    def test_crystal_caves_best_progress_is_monotonic(self):
+        """cc_best_progress should only ever rise, even as live progress dips."""
+        publisher = MetricsPublisher(history_length=100)
+
+        for prog in (0.30, 0.55, 0.20):
+            publisher.update(
+                episode=1,
+                score=0,
+                epsilon=0.1,
+                loss=0.0,
+                game_name="crystal_caves",
+                cc_info={"progress": prog, "end_reason": "running"},
+            )
+
+        # "running" episodes are in-progress, so they must NOT be counted as outcomes.
+        assert publisher.state.cc_best_progress == 0.55
+        assert publisher.state.cc_progress == 0.20
+        assert publisher.state.cc_end_reason_counts == {}
+
+    def test_non_crystal_game_leaves_panel_inactive(self):
+        """Other games never pass cc_info, so the panel stays hidden."""
+        publisher = MetricsPublisher(history_length=100)
+
+        publisher.update(episode=1, score=10, epsilon=0.5, loss=0.1, game_name="breakout")
+
+        assert publisher.state.game_name == "breakout"
+        assert publisher.state.cc_active is False
+
     def test_history_tracking(self):
         """MetricsPublisher should track history."""
         publisher = MetricsPublisher(history_length=100)

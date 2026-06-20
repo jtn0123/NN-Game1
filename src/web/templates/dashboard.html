@@ -193,22 +193,78 @@
             <div class="stats-column">
                 <!-- Metrics Grid -->
                 <div class="metrics-grid">
-                    <div class="metric-card" data-tooltip="One complete game from start to finish. Each episode ends when all bricks are cleared (win) or the ball is lost (lose)." data-tooltip-position="bottom">
+                    <div class="metric-card" data-tooltip="One complete game: from a fresh start (reset) until the agent wins or fails. Training is measured in episodes." data-tooltip-position="bottom">
                         <div class="metric-label">Episode</div>
                         <div class="metric-value" id="metric-episode">0</div>
                     </div>
-                    <div class="metric-card highlight" data-tooltip="Points earned in the current episode. The AI gets +10 points for each brick destroyed." data-tooltip-position="bottom">
+                    <div class="metric-card highlight" data-tooltip="Points earned in the current episode. Goes up as the agent does useful things (collecting crystals, making progress) and down when it fails." data-tooltip-position="bottom">
                         <div class="metric-label">Current Score</div>
                         <div class="metric-value" id="metric-score">0</div>
                     </div>
-                    <div class="metric-card best" data-tooltip="The highest score achieved in any single episode. This shows the AI's peak performance so far." data-tooltip-position="bottom">
+                    <div class="metric-card best" data-tooltip="The highest single-episode score so far — the agent's peak performance. This can only go up." data-tooltip-position="bottom">
                         <div class="metric-label">Best Score</div>
                         <div class="metric-value" id="metric-best">0</div>
                     </div>
-                    <div class="metric-card" data-tooltip="Percentage of recent episodes where the AI cleared all bricks. Higher = better. Calculated over a rolling window." data-tooltip-position="bottom">
+                    <div class="metric-card" data-tooltip="THE headline number: % of the last 100 episodes the agent FULLY completed. For Crystal Caves a win = every crystal collected AND the exit reached. Higher is better — on these procedural levels even 10–20% is a strong result. 0% early on is normal." data-tooltip-position="bottom">
                         <div class="metric-label">Win Rate</div>
                         <div class="metric-value" id="metric-winrate">0%</div>
                     </div>
+                </div>
+
+                <!-- Crystal Caves live progress (shown only when training Crystal Caves) -->
+                <div class="info-card cc-panel" id="crystal-caves-panel" style="display: none;">
+                    <div class="card-header">
+                        <h3 data-tooltip="Live progress through the current cave. The exit only unlocks once EVERY crystal is collected, so 'Crystals' is the sub-goal to watch — without it a win is impossible." data-tooltip-position="left">💎 Crystal Caves Progress</h3>
+                        <span class="info-value status-badge cc-difficulty-badge" id="cc-difficulty" data-tooltip="Training difficulty for the generated caves. tutorial = 1 open crystal, no threats (a winnable floor); easy = a few crystals; normal = the full game." data-tooltip-position="left">—</span>
+                    </div>
+
+                    <!-- Overall completion Φ -->
+                    <div class="cc-bar-row" data-tooltip="How close the agent got to clearing the level (0–100%), blending crystals + switch + depth into one number. The faint marker is the best it has ever reached this run. GOOD: the marker creeping toward 100%. STUCK: the marker flat for a long time." data-tooltip-position="left">
+                        <div class="cc-bar-label"><span>🧭 Level completion</span><span id="cc-progress-text">0%</span></div>
+                        <div class="gauge-bar cc-gauge">
+                            <div class="gauge-fill cc-fill-progress" id="cc-progress-fill" style="width: 0%;"></div>
+                            <div class="cc-best-marker" id="cc-progress-best" style="left: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Crystals: the key sub-goal -->
+                    <div class="cc-bar-row" data-tooltip="THE key sub-goal. The exit stays locked until every crystal is gathered, so a win is impossible until this bar is full. Early in training this sits near 0 — watch it climb. This is the single best predictor of whether wins are coming." data-tooltip-position="left">
+                        <div class="cc-bar-label"><span>💎 Crystals collected</span><span id="cc-crystals-text">0 / 0</span></div>
+                        <div class="gauge-bar cc-gauge">
+                            <div class="gauge-fill cc-fill-crystal" id="cc-crystal-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <div class="cc-subrows">
+                        <div class="info-row" data-tooltip="Some levels hide a crystal behind a lever/switch. ✓ means the agent learned it must throw the switch first to reach that crystal. '—' means this level has no switch." data-tooltip-position="left">
+                            <span class="info-label">🔑 Switch thrown</span>
+                            <span class="info-value" id="cc-switch">—</span>
+                        </div>
+                        <div class="info-row" data-tooltip="How far down into the cave the agent explored (0–100%). High depth but few crystals = it's wandering/falling, not collecting. They should rise together." data-tooltip-position="left">
+                            <span class="info-label">⛏️ Depth reached</span>
+                            <span class="info-value" id="cc-depth">0%</span>
+                        </div>
+                        <div class="info-row" data-tooltip="How the most recent episode ended. 🏆 won = cleared it (the goal). ☠️ killed = ran out of health (hazard/enemy). ⏱️ timeout = ran out of time. 🛑 stalled = stopped making progress and gave up." data-tooltip-position="left">
+                            <span class="info-label">🏁 Last outcome</span>
+                            <span class="info-value cc-outcome" id="cc-outcome">—</span>
+                        </div>
+                    </div>
+
+                    <!-- Recent outcome breakdown: where episodes are ending -->
+                    <div class="cc-outcomes-wrap" data-tooltip="Where recent episodes are ending. This tells you WHAT the agent still needs to learn: mostly ☠️ killed → it dies to hazards/enemies; mostly 🛑 stalled → it gets stuck; mostly ⏱️ timeout → too slow/aimless; 🏆 won climbing → it's solving levels." data-tooltip-position="left">
+                        <div class="cc-bar-label"><span>📊 Recent outcomes</span></div>
+                        <div class="cc-outcomes" id="cc-outcomes"><span class="cc-outcome-empty">waiting for episodes…</span></div>
+                    </div>
+
+                    <details class="cc-help">
+                        <summary>ℹ️ How to read this</summary>
+                        <ul>
+                            <li><b>Win Rate</b> is the goal. It stays at <b>0%</b> for a while — the agent has to learn to collect every crystal before a single win is possible.</li>
+                            <li><b>Crystals collected</b> is the leading indicator. It climbs <i>before</i> win rate does. If it's stuck near 0, no wins are coming yet.</li>
+                            <li><b>Level completion</b> blends crystals + switch + depth. A rising "best" marker = the agent is genuinely getting further.</li>
+                            <li><b>Recent outcomes</b> tells you the current failure mode — that's the thing to fix next.</li>
+                        </ul>
+                    </details>
                 </div>
 
                 <!-- Epsilon Gauge -->
