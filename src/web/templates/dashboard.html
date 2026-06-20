@@ -211,6 +211,34 @@
                     </div>
                 </div>
 
+                <!-- Held-out evaluation: the trustworthy generalization measure (shown once eval runs) -->
+                <div class="info-card eval-panel" id="eval-panel" style="display: none;">
+                    <div class="card-header">
+                        <h3 data-tooltip="THE trustworthy number: deterministic (greedy) performance on a FIXED set of UNSEEN held-out levels — not the training levels. This is the real generalization measure. It is distinct from the top 'Win Rate' card, which is the exploration policy on training levels and can look very different." data-tooltip-position="right">🎯 Evaluation <span class="eval-subtle">· held-out</span></h3>
+                        <span class="info-value status-badge eval-games-badge" id="eval-games" data-tooltip="How many distinct unseen levels are scored each evaluation." data-tooltip-position="right">— levels</span>
+                    </div>
+
+                    <div class="eval-headline">
+                        <div class="eval-block" data-tooltip="Average score across the unseen held-out levels (± spread, and the median). Watch the TREND: a rising mean = genuinely learning to generalize to new caves, not memorizing one. A wide spread with median 0 means it solves a subset and fails the rest." data-tooltip-position="right">
+                            <div class="eval-big" id="eval-mean">0</div>
+                            <div class="eval-sub"><span id="eval-std">± 0</span> · median <span id="eval-median">0</span></div>
+                            <div class="eval-label">mean score</div>
+                        </div>
+                        <div class="eval-block" data-tooltip="Win rate on the unseen held-out levels (greedy policy). THIS is the real win rate — the top 'Win Rate' card is the training/exploration win rate and is usually higher." data-tooltip-position="right">
+                            <div class="eval-big" id="eval-winrate">0%</div>
+                            <div class="eval-sub">best mean <span id="eval-best">0</span></div>
+                            <div class="eval-label">held-out wins</div>
+                        </div>
+                    </div>
+
+                    <div class="eval-spark-wrap" data-tooltip="The held-out mean score over training. UP = learning to generalize. FLAT = genuinely stuck (now a real signal, no longer an eval artifact)." data-tooltip-position="right">
+                        <div class="cc-bar-label"><span>📈 Held-out trend</span><span id="eval-last-ep" class="cc-bar-hint-inline">—</span></div>
+                        <svg class="eval-spark" id="eval-spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true">
+                            <polyline id="eval-spark-line" fill="none" stroke="var(--accent-success)" stroke-width="2" vector-effect="non-scaling-stroke" points=""></polyline>
+                        </svg>
+                    </div>
+                </div>
+
                 <!-- Crystal Caves live progress (shown only when training Crystal Caves) -->
                 <div class="info-card cc-panel" id="crystal-caves-panel" style="display: none;">
                     <div class="card-header">

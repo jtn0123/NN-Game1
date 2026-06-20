@@ -243,6 +243,46 @@ class TestMetricsPublisher:
         assert publisher.state.game_name == "breakout"
         assert publisher.state.cc_active is False
 
+    def test_record_eval_drives_the_held_out_panel(self):
+        """record_eval should populate the held-out eval state + sparkline history,
+        with a monotonic best — this is the trustworthy generalization measure."""
+        publisher = MetricsPublisher(history_length=100)
+        assert publisher.state.eval_ran is False
+
+        for ep, mean in [(150, 31), (300, 28), (450, 42), (600, 66)]:
+            publisher.record_eval(
+                episode=ep,
+                mean_score=mean,
+                std_score=100.0,
+                median_score=0.0,
+                win_rate=0.0,
+                num_games=20,
+            )
+
+        st = publisher.state
+        assert st.eval_ran is True
+        assert st.eval_episode == 600
+        assert st.eval_mean_score == 66.0
+        assert st.eval_num_games == 20
+        # Best is monotonic even though the mean dipped 31 -> 28 along the way.
+        assert st.eval_best_mean == 66.0
+        # History feeds the sparkline in trajectory order.
+        assert st.eval_history == [31.0, 28.0, 42.0, 66.0]
+
+    def test_record_eval_pushes_an_update(self):
+        """An eval must push to the dashboard immediately, not wait for the next
+        per-episode metric emit."""
+        publisher = MetricsPublisher(history_length=100)
+        received = []
+        publisher.on_update(lambda snapshot: received.append(snapshot))
+
+        publisher.record_eval(
+            episode=150, mean_score=31, std_score=108, median_score=0, win_rate=0.0, num_games=20
+        )
+
+        assert len(received) == 1
+        assert received[0]["state"]["eval_mean_score"] == 31.0
+
     def test_history_tracking(self):
         """MetricsPublisher should track history."""
         publisher = MetricsPublisher(history_length=100)

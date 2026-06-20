@@ -103,6 +103,17 @@ class TrainingState:
     cc_difficulty: str = ""
     cc_end_reason: str = ""  # how the last finished episode ended
     cc_end_reason_counts: Dict[str, int] = field(default_factory=dict)
+    # --- Held-out evaluation (the trustworthy generalisation measure, distinct
+    # from the training win_rate above; populated only when periodic eval runs) ---
+    eval_ran: bool = False
+    eval_episode: int = 0  # training episode at the last eval
+    eval_mean_score: float = 0.0
+    eval_std_score: float = 0.0
+    eval_median_score: float = 0.0
+    eval_win_rate: float = 0.0
+    eval_best_mean: float = 0.0  # best eval mean so far (monotonic)
+    eval_num_games: int = 0
+    eval_history: List[float] = field(default_factory=list)  # eval-mean trajectory (sparkline)
 
 
 @dataclass

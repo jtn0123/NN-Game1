@@ -1115,3 +1115,70 @@ body {
 .cc-help b {
     color: var(--text-primary);
 }
+
+/* ===== Held-out evaluation panel ===== */
+.eval-panel {
+    margin-top: 12px;
+    border-color: rgba(76, 175, 80, 0.35);
+}
+
+.eval-subtle {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.eval-games-badge {
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-headline {
+    display: flex;
+    gap: 12px;
+    margin: 4px 0 12px;
+}
+
+.eval-block {
+    flex: 1;
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius-sm);
+    padding: 10px 12px;
+    text-align: center;
+}
+
+.eval-big {
+    font-size: 1.55rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-sub {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+}
+
+.eval-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-top: 5px;
+}
+
+.eval-spark-wrap {
+    margin-top: 4px;
+}
+
+.eval-spark {
+    display: block;
+    width: 100%;
+    height: 44px;
+    margin-top: 4px;
+    background: rgba(40, 40, 55, 0.5);
+    border-radius: var(--border-radius-sm);
+    overflow: visible;
+}

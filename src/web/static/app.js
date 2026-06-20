@@ -375,6 +375,67 @@ const CC_OUTCOMES = {
 };
 
 /**
+ * Update the held-out Evaluation panel — the trustworthy generalization measure.
+ * Hidden until the first periodic eval runs; draws a sparkline of the eval-mean
+ * trajectory so the climb (or plateau) is visible at a glance.
+ */
+function updateEval(state) {
+    const panel = document.getElementById('eval-panel');
+    if (!panel) return;
+    if (!state.eval_ran) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    const round0 = (v) => Math.round(Number(v) || 0);
+
+    setText('eval-mean', round0(state.eval_mean_score).toLocaleString());
+    setText('eval-std', `± ${round0(state.eval_std_score)}`);
+    setText('eval-median', round0(state.eval_median_score).toLocaleString());
+    setText('eval-best', round0(state.eval_best_mean).toLocaleString());
+    setText('eval-games', `${Number(state.eval_num_games) || 0} levels`);
+    setText('eval-last-ep', `last @ ep ${(Number(state.eval_episode) || 0).toLocaleString()}`);
+
+    const winrateEl = document.getElementById('eval-winrate');
+    if (winrateEl) {
+        const wr = Number(state.eval_win_rate) || 0;
+        winrateEl.textContent = `${(wr * 100).toFixed(1)}%`;
+        winrateEl.style.color = wr > 0 ? 'var(--accent-success)' : '';
+    }
+
+    // Sparkline of the eval-mean trajectory.
+    const line = document.getElementById('eval-spark-line');
+    if (line) {
+        const hist = Array.isArray(state.eval_history)
+            ? state.eval_history.map(Number).filter(Number.isFinite)
+            : [];
+        if (hist.length < 2) {
+            line.setAttribute('points', '');
+        } else {
+            const W = 300;
+            const H = 44;
+            const pad = 3;
+            const min = Math.min(...hist);
+            const max = Math.max(...hist);
+            const span = max - min || 1;
+            const points = hist
+                .map((v, i) => {
+                    const x = (i / (hist.length - 1)) * W;
+                    const y = H - pad - ((v - min) / span) * (H - 2 * pad);
+                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                })
+                .join(' ');
+            line.setAttribute('points', points);
+        }
+    }
+}
+
+/**
  * Update the Crystal Caves progress panel from training state.
  * Hidden entirely for other games; populated only when cc_active is set.
  */
@@ -531,6 +592,9 @@ function updateDashboard(data) {
 
     // Update Crystal Caves progress panel (no-op for other games)
     updateCrystalCaves(state);
+
+    // Update held-out evaluation panel (hidden until the first eval runs)
+    updateEval(state);
 
     // Update performance mode buttons and sync settings
     if (state.performance_mode) {

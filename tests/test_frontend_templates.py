@@ -94,3 +94,28 @@ def test_crystal_caves_panel_markup_and_binding_present():
     # The panel reuses the gauge styling and ships its own colour classes.
     assert ".cc-fill-crystal" in styles
     assert ".cc-best-marker" in styles
+
+
+def test_held_out_eval_panel_markup_and_binding_present():
+    """The held-out Evaluation panel markup must stay in sync with its JS binding."""
+    dashboard = (ROOT / "src" / "web" / "templates" / "dashboard.html").read_text(encoding="utf-8")
+    app_js = (ROOT / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    styles = (ROOT / "src" / "web" / "static" / "styles_layout.css").read_text(encoding="utf-8")
+
+    assert 'id="eval-panel"' in dashboard
+    assert "updateEval" in app_js
+
+    for element_id in [
+        "eval-mean",
+        "eval-std",
+        "eval-median",
+        "eval-winrate",
+        "eval-best",
+        "eval-games",
+        "eval-last-ep",
+        "eval-spark-line",
+    ]:
+        assert f'id="{element_id}"' in dashboard, f"missing template id: {element_id}"
+        assert element_id in app_js, f"app.js never targets id: {element_id}"
+
+    assert ".eval-panel" in styles

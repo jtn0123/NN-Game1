@@ -684,6 +684,18 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                         )
                         self.evaluator.log_results(eval_results)
 
+                        # Surface the held-out eval on the dashboard (the trustworthy
+                        # generalisation number, distinct from the training win rate).
+                        if self.web_dashboard:
+                            self.web_dashboard.publisher.record_eval(
+                                episode=self.current_episode,
+                                mean_score=eval_results.mean_score,
+                                std_score=eval_results.std_score,
+                                median_score=eval_results.median_score,
+                                win_rate=eval_results.win_rate,
+                                num_games=eval_results.num_games,
+                            )
+
                         # Early-stop: end the stage once eval has plateaued, instead
                         # of training the live policy past its peak into collapse
                         # (the best checkpoint already holds the peak). Uses its own

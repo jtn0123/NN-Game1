@@ -85,6 +85,9 @@ class MetricsPublisher:
         # Console log history
         self.console_logs: Deque[LogMessage] = deque(maxlen=500)
 
+        # Held-out eval mean-score trajectory (for the dashboard eval sparkline)
+        self._eval_history: Deque[float] = deque(maxlen=200)
+
         # Thread safety for callbacks
         self._callback_lock = threading.Lock()
 
@@ -322,6 +325,38 @@ class MetricsPublisher:
             self.state.cc_end_reason = reason
             counts = self.state.cc_end_reason_counts
             counts[reason] = counts.get(reason, 0) + 1
+
+    def record_eval(
+        self,
+        episode: int,
+        mean_score: float,
+        std_score: float,
+        median_score: float,
+        win_rate: float,
+        num_games: int,
+    ) -> None:
+        """Record a held-out evaluation result and push it to the dashboard.
+
+        This is the trustworthy generalisation measure (distinct from the rolling
+        training win_rate) — periodic deterministic eval on unseen held-out levels.
+        """
+        self.state.eval_ran = True
+        self.state.eval_episode = int(episode)
+        self.state.eval_mean_score = float(mean_score)
+        self.state.eval_std_score = float(std_score)
+        self.state.eval_median_score = float(median_score)
+        self.state.eval_win_rate = float(win_rate)
+        self.state.eval_num_games = int(num_games)
+        self.state.eval_best_mean = max(self.state.eval_best_mean, float(mean_score))
+        self._eval_history.append(float(mean_score))
+        self.state.eval_history = list(self._eval_history)
+
+        # Push immediately so the panel updates the moment an eval completes,
+        # rather than waiting for the next per-episode metric emit.
+        with self._callback_lock:
+            callbacks = self._on_update_callbacks.copy()
+        for callback in callbacks:
+            callback(self.get_snapshot())
 
     def log(self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None) -> None:
         """Add a log message to the console."""
@@ -816,6 +851,18 @@ class MetricsPublisher:
         self.state.cc_crystals_remaining = 0
         self.state.cc_end_reason = ""
         self.state.cc_end_reason_counts = {}
+
+        # Reset held-out eval telemetry
+        self._eval_history.clear()
+        self.state.eval_ran = False
+        self.state.eval_episode = 0
+        self.state.eval_mean_score = 0.0
+        self.state.eval_std_score = 0.0
+        self.state.eval_median_score = 0.0
+        self.state.eval_win_rate = 0.0
+        self.state.eval_best_mean = 0.0
+        self.state.eval_num_games = 0
+        self.state.eval_history = []
 
         # Reset timing
         self._episode_times.clear()
