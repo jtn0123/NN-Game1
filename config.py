@@ -414,6 +414,13 @@ class Config:
     # Minimum learning rate (floor for schedulers)
     LR_MIN: float = 1e-5
 
+    # Explicit, horizon-matched LR decay driven by the trainer (cosine from
+    # LEARNING_RATE down to LR_MIN over the run's episodes). Unlike USE_LR_SCHEDULER
+    # (whose T_max is fixed at 2000), this completes over THIS run's episode count,
+    # so a 600-episode run actually freezes the policy near its peak by the end —
+    # the fix for late-training Q-drift / win-rate volatility. Off by default.
+    LR_DECAY: bool = False
+
     # =========================================================================
     # N-STEP RETURNS
     # =========================================================================

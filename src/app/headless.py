@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -325,6 +326,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
             # Episode complete
             self.agent.decay_epsilon(episode)
             self.agent.step_scheduler()  # Step learning rate scheduler
+            self._apply_lr_decay(start_episode, episode)
             self.scores.append(info["score"])
 
             # Track wins (all bricks cleared)
@@ -716,6 +718,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 if not self._exploration_boost_active:
                     self.agent.decay_epsilon(self.current_episode)
                 self.agent.step_scheduler()  # Step learning rate scheduler
+                self._apply_lr_decay(start_episode, self.current_episode)
 
             # Update states for next iteration (vector envs auto-reset completed games)
             states = next_states.copy()
@@ -755,6 +758,10 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     best_prog = float(np.max(self.progresses))
                     progress_str = f"🪨 prog: {avg_prog:.3f} (best {best_prog:.3f}) | "
 
+                lr_str = ""
+                if getattr(self.config, "LR_DECAY", False):
+                    lr_str = f"lr: {self.agent.get_learning_rate():.1e} | "
+
                 progress_msg = (
                     f"Ep {self.current_episode:5d} | "
                     f"Score: {last_score:4d} | "
@@ -762,6 +769,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                     f"{progress_str}"
                     f"Loss: {avg_loss:.4f} | "
                     f"Q: {avg_q:.1f} | "
+                    f"{lr_str}"
                     f"ε: {self.agent.epsilon:.3f} | "
                     f"⚡ {steps_per_sec:,.0f} steps/s"
                 )
@@ -802,6 +810,24 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
         if self.web_dashboard:
             self.web_dashboard.log("✅ Vectorized training complete!", "success")
+
+    def _apply_lr_decay(self, start_episode: int, current_episode: int) -> None:
+        """Cosine-decay the learning rate from LEARNING_RATE to LR_MIN over this
+        run's episodes (start_episode..MAX_EPISODES). Early LR matches the old
+        constant rate; late LR approaches zero, freezing the policy near its peak
+        so the live win rate stops oscillating. No-op unless LR_DECAY is set and
+        the run has a finite episode target."""
+        if not getattr(self.config, "LR_DECAY", False):
+            return
+        target = self.config.MAX_EPISODES
+        if target <= 0:
+            return  # unlimited run -> no horizon to decay over
+        lr0 = self.config.LEARNING_RATE
+        lr_min = getattr(self.config, "LR_MIN", 1e-5)
+        span = max(1, target - start_episode)
+        frac = min(1.0, max(0.0, (current_episode - start_episode) / span))
+        lr = lr_min + 0.5 * (lr0 - lr_min) * (1.0 + math.cos(math.pi * frac))
+        self.agent.set_learning_rate(lr)
 
     def _print_progress_breakdown(self, window: int = 100) -> None:
         """CA-03: print where the agent stalls — the end-reason mix and the mean

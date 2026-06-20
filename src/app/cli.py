@@ -175,6 +175,12 @@ TIPS
         help="Enable torch.compile() for ~20-50%% speedup (PyTorch 2.0+)",
     )
     parser.add_argument(
+        "--lr-decay",
+        action="store_true",
+        help="Cosine-decay the learning rate to LR_MIN over the run's episodes "
+        "(freezes the policy near its peak; stabilizes late-training win rate)",
+    )
+    parser.add_argument(
         "--cpu",
         action="store_true",
         help="Force CPU (faster than MPS for small models on M4)",

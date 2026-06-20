@@ -221,6 +221,9 @@ def main():
     if getattr(args, "cave_difficulty", None):
         config.CRYSTAL_CAVES_DIFFICULTY = args.cave_difficulty
         print(f"🎚️  Crystal Caves difficulty: {args.cave_difficulty}")
+    if getattr(args, "lr_decay", False):
+        config.LR_DECAY = True
+        print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")
 
     # Force CPU if specified (faster for small models on M4)
     if hasattr(args, "cpu") and args.cpu:

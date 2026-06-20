@@ -713,6 +713,15 @@ class Agent(AgentPersistenceMixin):
             self.scheduler.step()
             self._optimizer_steps_since_scheduler = 0
 
+    def set_learning_rate(self, lr: float) -> None:
+        """Override the optimizer learning rate (used for explicit, horizon-matched
+        LR decay that the trainer drives per episode)."""
+        for group in self.optimizer.param_groups:
+            group["lr"] = lr
+
+    def get_learning_rate(self) -> float:
+        return float(self.optimizer.param_groups[0]["lr"])
+
     @staticmethod
     @staticmethod
     def get_network_activations(self) -> dict:
