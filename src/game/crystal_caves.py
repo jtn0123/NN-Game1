@@ -9,6 +9,7 @@ live in sibling mixin modules to keep each file focused and under budget.
 
 from __future__ import annotations
 
+import warnings
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
@@ -265,11 +266,19 @@ class CrystalCaves(
             from .crystal_caves_gen import FAMILY_NAMES, THEME_NAMES, generate_cave
 
             base = getattr(self.config, "CRYSTAL_CAVES_SEED", 0)
-            wanted = [
+            requested = [
                 f.strip()
                 for f in getattr(self.config, "CRYSTAL_CAVES_FAMILIES", "").split(",")
-                if f.strip() in FAMILY_NAMES
+                if f.strip()
             ]
+            invalid = [f for f in requested if f not in FAMILY_NAMES]
+            if invalid:  # surface config typos instead of silently using all families
+                warnings.warn(
+                    f"Unknown Crystal Caves families ignored: {invalid}. "
+                    f"Valid families: {', '.join(FAMILY_NAMES)}",
+                    stacklevel=2,
+                )
+            wanted = [f for f in requested if f in FAMILY_NAMES]
             families = wanted or list(FAMILY_NAMES)
             difficulty = getattr(self.config, "CRYSTAL_CAVES_DIFFICULTY", "normal")
             # Always four caves (themes cycle so the renderer palette stays

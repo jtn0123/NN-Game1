@@ -141,6 +141,23 @@ def test_elevator_levels_stay_solvable():
     assert found >= 3, f"expected elevators to appear; found {found}"
 
 
+def test_invalid_cave_family_warns_instead_of_silent_fallback():
+    """A typo'd --cave-families surfaces a warning rather than silently using all
+    families (GEN-1)."""
+    import warnings
+
+    from config import Config
+    from src.game.crystal_caves import CrystalCaves
+
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_PROCEDURAL = True
+    cfg.CRYSTAL_CAVES_FAMILIES = "platform_netwrok,snake_bands"  # first is a typo
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        CrystalCaves(cfg, headless=True)
+    assert any("Unknown Crystal Caves families" in str(w.message) for w in caught)
+
+
 def test_procedural_config_replaces_caves_and_is_playable():
     """CRYSTAL_CAVES_PROCEDURAL swaps the authored caves for generated ones that
     theme correctly, stay solvable, and drive the game without error."""
