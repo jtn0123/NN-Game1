@@ -343,12 +343,15 @@ class CrystalCavesLogicMixin:
         candidates: List[Tuple[str, int, int]] = []
 
         unused_switches = self.switches - self.used_switches
-        if self.exit_unlocked and not self.doors_open and unused_switches:
+        # Phase order for the switch-gates-a-crystal model: throw every lever
+        # FIRST (each opens a door gating a crystal), then collect all crystals,
+        # then head for the exit. Targeting the switch while crystals remain is
+        # essential — otherwise the compass points at the still-gated crystal the
+        # player can't yet reach, and the switch only gets thrown by accident.
+        if unused_switches and self.crystals:
             candidates = [("switch", col, row) for col, row in unused_switches]
         elif self.crystals:
             candidates = [("crystal", col, row) for col, row in self.crystals]
-        elif self.exit_unlocked:
-            candidates = [("exit", self.exit_pos[0], self.exit_pos[1])]
         elif unused_switches:
             candidates = [("switch", col, row) for col, row in unused_switches]
         else:

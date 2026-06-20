@@ -131,6 +131,10 @@ class TestCrystalCavesState:
         assert state[center_idx] == 1.0
 
     def test_target_metadata_points_to_active_objective(self, game):
+        # Levers are thrown first (they gate crystals); throw them so the crystal-
+        # collection phase is active, then verify the compass points at a crystal.
+        game.used_switches = set(game.switches)
+        game.open_colors = set(game.door_color.values())
         crystal = next(iter(game.crystals))
         game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE
         game.player_y = crystal[1] * game.TILE_SIZE
@@ -144,6 +148,13 @@ class TestCrystalCavesState:
         assert target_dx > 0.5
         assert 0.0 <= target_distance <= 1.0
         assert target_kind == pytest.approx(0.25)
+
+    def test_target_points_to_switch_before_crystals(self, game):
+        """With levers unthrown and crystals remaining, the compass targets the
+        switch first — it gates a crystal, so it must be thrown to finish."""
+        assert game.switches and game.crystals
+        target, _ = game._current_target()
+        assert target is not None and target[0] == "switch"
 
 
 class TestCrystalCavesMovement:
