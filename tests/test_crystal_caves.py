@@ -84,7 +84,11 @@ class TestCrystalCavesInitialization:
 
     def test_state_shape(self, game):
         state = game.get_state()
-        expected_size = 11 * 9 + 20
+        expected_size = (
+            game.WINDOW_COLS * game.WINDOW_ROWS
+            + game.GLOBAL_MAP_COLS * game.GLOBAL_MAP_ROWS
+            + game.METADATA_SIZE
+        )
         assert state.shape == (expected_size,)
         assert game.state_size == expected_size
 
@@ -140,7 +144,10 @@ class TestCrystalCavesState:
         game.player_y = crystal[1] * game.TILE_SIZE
 
         state = game.get_state()
-        metadata_start = game.WINDOW_COLS * game.WINDOW_ROWS
+        metadata_start = (
+            game.WINDOW_COLS * game.WINDOW_ROWS
+            + game.GLOBAL_MAP_COLS * game.GLOBAL_MAP_ROWS
+        )
         target_dx = state[metadata_start + 15]
         target_distance = state[metadata_start + 17]
         target_kind = state[metadata_start + 18]
@@ -698,13 +705,14 @@ class TestCrystalCavesRenderAndVectorized:
             assert path.stat().st_size > 1000
 
     def test_vec_env_shapes(self, config):
+        size = CrystalCaves(config, headless=True).state_size
         vec = VecCrystalCaves(3, config, headless=True)
         states = vec.reset()
-        assert states.shape == (3, 119)
+        assert states.shape == (3, size)
 
         actions = np.array([CrystalCaves.IDLE, CrystalCaves.RIGHT, CrystalCaves.JUMP])
         next_states, rewards, dones, infos = vec.step(actions)
-        assert next_states.shape == (3, 119)
+        assert next_states.shape == (3, size)
         assert rewards.shape == (3,)
         assert dones.shape == (3,)
         assert len(infos) == 3

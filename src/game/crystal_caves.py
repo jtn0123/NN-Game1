@@ -101,9 +101,19 @@ class CrystalCaves(
 
     PLAYER_HEIGHT = 30
 
-    WINDOW_COLS = 11
+    # Local perception window — sized to roughly what a 1991 Crystal Caves player
+    # saw on screen (~20x10 tiles), not the old tiny 11x9 sliver. (AI-1)
+    WINDOW_COLS = 19
 
-    WINDOW_ROWS = 9
+    WINDOW_ROWS = 11
+
+    # Coarse global objective map: the level downsampled to GLOBAL_MAP_COLS x
+    # GLOBAL_MAP_ROWS cells, each marking the highest-priority remaining objective
+    # in that region (crystal/switch/exit). Gives the agent a memory of where the
+    # objectives are beyond its window — the fix for local-window blindness. (AI-1)
+    GLOBAL_MAP_COLS = 11
+
+    GLOBAL_MAP_ROWS = 6
 
     METADATA_SIZE = 20
 
@@ -347,8 +357,12 @@ class CrystalCaves(
 
     @property
     def state_size(self) -> int:
-        """State vector dimension."""
-        return self.WINDOW_COLS * self.WINDOW_ROWS + self.METADATA_SIZE
+        """State vector dimension: local window + global objective map + metadata."""
+        return (
+            self.WINDOW_COLS * self.WINDOW_ROWS
+            + self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS
+            + self.METADATA_SIZE
+        )
 
     @property
     def action_size(self) -> int:
@@ -495,6 +509,11 @@ class CrystalCaves(
         center_idx = (self.WINDOW_ROWS * self.WINDOW_COLS) // 2
         self._state_array[center_idx] = self.TILE_CODES[self.PLAYER]
 
+        # coarse global objective map (where the remaining crystals/switches/exit
+        # are across the whole cave) so the agent isn't blind beyond its window
+        self._fill_global_map(idx)
+        idx += self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS
+
         max_x = max(1.0, self.level_width - self.PLAYER_WIDTH)
         max_y = max(1.0, self.level_height - self.PLAYER_HEIGHT)
         max_level = max(1, len(self.CAVES) - 1)
@@ -523,6 +542,34 @@ class CrystalCaves(
         ]
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)
         return self._state_array.copy()
+
+    def _fill_global_map(self, start: int) -> None:
+        """Write a coarse GLOBAL_MAP_COLS x GLOBAL_MAP_ROWS map of remaining
+        objectives into the state at ``start``. Each cell holds the highest-
+        priority remaining objective in that region of the cave: an uncollected
+        crystal (0.4), an unthrown switch (0.6), or the unlocked exit (0.9).
+        Combined with the player's normalized position in the metadata, this lets
+        the agent steer toward objectives outside its local perception window."""
+        gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
+        cw = max(1.0, self.level_cols / gc)
+        ch = max(1.0, self.level_rows / gr)
+        cells = [0.0] * (gc * gr)
+
+        def mark(col: int, row: int, value: float) -> None:
+            cx = min(gc - 1, int(col / cw))
+            cy = min(gr - 1, int(row / ch))
+            i = cy * gc + cx
+            if value > cells[i]:
+                cells[i] = value
+
+        for c, r in self.crystals:
+            mark(c, r, 0.4)
+        for c, r in self.switches - self.used_switches:
+            mark(c, r, 0.6)
+        if self.exit_unlocked:
+            mark(self.exit_pos[0], self.exit_pos[1], 0.9)
+
+        self._state_array[start : start + gc * gr] = np.array(cells, dtype=np.float32)
 
     def close(self) -> None:
         """Clean up resources."""
