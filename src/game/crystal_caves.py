@@ -135,7 +135,13 @@ class CrystalCaves(
     PROGRESS_W_SWITCH = 0.15  # every required switch thrown
     PROGRESS_W_DEPTH = 0.15  # deepest row reached (how far into the cave)
     PROGRESS_W_WIN = 0.20  # reached the exit
-    PROGRESS_REWARD_SCALE = 6.0  # total shaping reward earned across a full clear
+    # Total dense shaping reward earned across a full clear. Raised from 6.0:
+    # policies plateaued at ~61% completion (2/3 crystals + switch) because the
+    # final stretch (last crystal + exit) was under-rewarded relative to its
+    # difficulty. A stronger potential-based pull up the progress gradient keeps a
+    # continuous signal toward the full clear, every step. Potential-based, so it
+    # does not change the optimal policy — only how fast it is found.
+    PROGRESS_REWARD_SCALE = 10.0
 
     # AI-2: a small, one-time, capped bonus for first reaching a coarse global-map
     # region that holds an uncollected objective. Turns the AI-1 objective map from

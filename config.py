@@ -261,7 +261,7 @@ class Config:
             max_player_bullets = 3
             num_aliens = 55  # 5 rows * 11 cols
             return 1 + max_player_bullets * 2 + num_aliens + 5 + 7
-        elif self.GAME_NAME == 'crystal_caves':
+        elif self.GAME_NAME == "crystal_caves":
             # Local 11x9 tile window plus 20 metadata features.
             return 11 * 9 + 20
         else:
@@ -440,9 +440,12 @@ class Config:
     # Trades off bias vs variance in value estimation
     USE_N_STEP_RETURNS: bool = True
 
-    # Number of steps to look ahead (typically 2-3)
-    # 3 steps for better credit assignment in reactive gameplay
-    N_STEP_SIZE: int = 3
+    # Number of steps to look ahead for n-step returns.
+    # Raised from 3 to 6: Crystal Caves wins require a long switch->crystals->exit
+    # sequence (40+ steps), and 3-step returns can't propagate the terminal reward
+    # back far enough — the agent's Q-values stayed pinned near 0. 6 carries the
+    # signal twice as far without the variance of a very long horizon.
+    N_STEP_SIZE: int = 6
 
     # =========================================================================
     # NOISY NETWORKS
