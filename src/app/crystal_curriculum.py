@@ -161,6 +161,9 @@ def run_crystal_curriculum(
         stage_start = trainer.current_episode
         stage_target = stage_start + budget
         config.MAX_EPISODES = stage_target
+        if dashboard:
+            dashboard.publisher.state.target_episodes = stage_target
+            dashboard.publisher.state.training_start_time = trainer.training_start_time
 
         _publish_stage(
             dashboard,
