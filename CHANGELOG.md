@@ -1,6 +1,29 @@
 # CHANGELOG
 
 
+## v0.1.0 (2026-06-20)
+
+### Features
+
+- Add Crystal Caves training and dashboard telemetry
+  ([`df8d395`](https://github.com/jtn0123/NN-Game1/commit/df8d3954cb4819d2c7ada6e1c8b4efd39b6eac22))
+
+Adds Crystal Caves training/evaluation/dashboard telemetry and desktop dashboard dogfood polish.
+
+### Refactoring
+
+- Complete grade improvement items
+  ([`67f865e`](https://github.com/jtn0123/NN-Game1/commit/67f865e7a6575ea0873c573870c8db7bdebffa53))
+
+Squashed PR #22: complete grade-driven refactors and keep source files below 1000 LOC.
+
+- Complete grade polish and coverage ([#23](https://github.com/jtn0123/NN-Game1/pull/23),
+  [`7d0701b`](https://github.com/jtn0123/NN-Game1/commit/7d0701bc9bfaf7b7f5c5604cff5c0f465943a97e))
+
+- Split runtime and dashboard modules ([#21](https://github.com/jtn0123/NN-Game1/pull/21),
+  [`0ad6136`](https://github.com/jtn0123/NN-Game1/commit/0ad6136a8a072464edffb48d2610731e832fd43d))
+
+
 ## v0.0.4 (2026-06-16)
 
 ### Bug Fixes
