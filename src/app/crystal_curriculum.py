@@ -22,6 +22,7 @@ class CrystalCurriculumStage:
     difficulty: str
     families: str
     default_episodes: int
+    min_epsilon: float
     gate: str
 
 
@@ -32,6 +33,7 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
         difficulty="tutorial",
         families="platform_network",
         default_episodes=300,
+        min_epsilon=0.35,
         gate="learn crystal -> exit on the simplest lock-free caves",
     ),
     CrystalCurriculumStage(
@@ -40,6 +42,7 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
         difficulty="easy",
         families="platform_network",
         default_episodes=750,
+        min_epsilon=0.25,
         gate="held-out wins and stable switch/crystal collection",
     ),
     CrystalCurriculumStage(
@@ -48,6 +51,7 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
         difficulty="easy",
         families="",
         default_episodes=900,
+        min_epsilon=0.22,
         gate="generalize easy play across all generator families",
     ),
     CrystalCurriculumStage(
@@ -56,6 +60,7 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
         difficulty="normal",
         families="platform_network",
         default_episodes=900,
+        min_epsilon=0.18,
         gate="carry the easy policy into full-objective platform caves",
     ),
     CrystalCurriculumStage(
@@ -64,6 +69,7 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
         difficulty="normal",
         families="",
         default_episodes=1200,
+        min_epsilon=0.15,
         gate="full Crystal Caves generalization across normal levels",
     ),
 )
@@ -164,6 +170,15 @@ def run_crystal_curriculum(
         if dashboard:
             dashboard.publisher.state.target_episodes = stage_target
             dashboard.publisher.state.training_start_time = trainer.training_start_time
+        if trainer.agent.epsilon < stage.min_epsilon:
+            old_epsilon = trainer.agent.epsilon
+            trainer.agent.epsilon = stage.min_epsilon
+            if dashboard:
+                dashboard.log(
+                    f"🎲 Stage exploration floor: ε {old_epsilon:.3f} → "
+                    f"{trainer.agent.epsilon:.3f}",
+                    "info",
+                )
 
         _publish_stage(
             dashboard,
