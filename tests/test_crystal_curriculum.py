@@ -2,7 +2,6 @@
 
 from src.app.crystal_curriculum import (
     DEFAULT_CRYSTAL_CURRICULUM,
-    _default_warm_start_checkpoint,
     planned_stage_episodes,
 )
 
@@ -37,14 +36,3 @@ def test_planned_stage_episodes_allow_equal_stage_override():
     )
 
     assert budgets == [25, 25, 25, 25, 25]
-
-
-def test_default_warm_start_prefers_existing_eval_best(tmp_path):
-    game_dir = tmp_path / "crystal_caves"
-    game_dir.mkdir()
-    best = game_dir / "crystal_caves_best.pth"
-    eval_best = game_dir / "crystal_caves_eval_best.pth"
-    best.write_bytes(b"best")
-    eval_best.write_bytes(b"eval")
-
-    assert _default_warm_start_checkpoint(str(tmp_path), "crystal_caves") == str(eval_best)

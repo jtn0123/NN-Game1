@@ -6,6 +6,7 @@ import argparse
 import copy
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -132,17 +133,18 @@ def run_crystal_curriculum(
         )
     print("=" * 70 + "\n")
 
-    dashboard = existing_dashboard
     base_model_dir = config.MODEL_DIR
-    model_path = getattr(args, "model", None) or _default_warm_start_checkpoint(
+    run_model_dir = os.path.join(
         base_model_dir,
-        config.GAME_NAME,
+        "crystal_caves_curriculum",
+        time.strftime("run_%Y%m%d_%H%M%S"),
     )
+    dashboard = existing_dashboard
+    model_path = getattr(args, "model", None)
 
     for index, (stage, budget) in enumerate(zip(stages, budgets), start=1):
         config.MODEL_DIR = os.path.join(
-            base_model_dir,
-            "crystal_caves_curriculum",
+            run_model_dir,
             f"stage{index:02d}_{stage.stage_id}",
         )
         config.CRYSTAL_CAVES_DIFFICULTY = stage.difficulty
@@ -235,16 +237,6 @@ def _snapshot_stage_eval_best(
     snapshot_path = os.path.join(config.GAME_MODEL_DIR, snapshot_name)
     shutil.copy2(eval_best, snapshot_path)
     return snapshot_path
-
-
-def _default_warm_start_checkpoint(base_model_dir: str, game_name: str) -> Optional[str]:
-    """Return the best existing non-curriculum checkpoint, if present."""
-    game_dir = os.path.join(base_model_dir, game_name)
-    for filename in (f"{game_name}_eval_best.pth", f"{game_name}_best.pth"):
-        path = os.path.join(game_dir, filename)
-        if os.path.exists(path):
-            return path
-    return None
 
 
 def _publish_stage(
