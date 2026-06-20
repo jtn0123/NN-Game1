@@ -392,6 +392,41 @@ class MetricsPublisher:
         for callback in callbacks:
             callback(self.get_snapshot())
 
+    def record_curriculum_stage(
+        self,
+        *,
+        active: bool,
+        stage_index: int,
+        stage_total: int,
+        stage_id: str,
+        stage_name: str,
+        difficulty: str,
+        families: str,
+        start_episode: int,
+        target_episode: int,
+        status: str,
+        gate: str,
+        next_stage_name: str,
+    ) -> None:
+        """Publish the active Crystal Caves curriculum stage to the dashboard."""
+        self.state.curriculum_active = active
+        self.state.curriculum_stage_index = stage_index
+        self.state.curriculum_stage_total = stage_total
+        self.state.curriculum_stage_id = stage_id
+        self.state.curriculum_stage_name = stage_name
+        self.state.curriculum_stage_difficulty = difficulty
+        self.state.curriculum_stage_families = families
+        self.state.curriculum_stage_start_episode = start_episode
+        self.state.curriculum_stage_target_episode = target_episode
+        self.state.curriculum_stage_status = status
+        self.state.curriculum_stage_gate = gate
+        self.state.curriculum_next_stage_name = next_stage_name
+
+        with self._callback_lock:
+            callbacks = self._on_update_callbacks.copy()
+        for callback in callbacks:
+            callback(self.get_snapshot())
+
     def log(self, message: str, level: str = "info", data: Optional[Dict[str, Any]] = None) -> None:
         """Add a log message to the console."""
         log_entry = LogMessage(

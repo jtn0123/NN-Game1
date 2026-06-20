@@ -214,10 +214,11 @@ body {
 
 .metrics-grid { order: 0; }
 .eval-panel { order: 1; }
-.controls-card { order: 2; }
+.curriculum-panel { order: 2; }
 .cc-panel { order: 3; }
 .gauge-card { order: 4; }
-.stats-column > .info-card:not(.eval-panel):not(.cc-panel) { order: 5; }
+.controls-card { order: 5; }
+.stats-column > .info-card:not(.eval-panel):not(.curriculum-panel):not(.cc-panel) { order: 6; }
 .save-card { order: 6; }
 .settings-card { order: 7; }
 .comparison-card { order: 8; }
@@ -1011,6 +1012,82 @@ body {
 
 .preview-placeholder.hidden {
     display: none;
+}
+
+/* ===== Crystal Caves curriculum panel ===== */
+.curriculum-panel {
+    margin-top: 12px;
+    border-color: rgba(33, 150, 243, 0.35);
+}
+
+.curriculum-badge {
+    color: var(--accent-cyan);
+}
+
+.curriculum-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.curriculum-stage-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.25;
+}
+
+.curriculum-stage-meta {
+    margin-top: 3px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.curriculum-status {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(33, 150, 243, 0.45);
+    background: rgba(33, 150, 243, 0.10);
+    color: var(--accent-cyan);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0;
+}
+
+.curriculum-fill {
+    background: linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-cyan) 100%);
+    box-shadow: 0 0 10px rgba(33, 150, 243, 0.32);
+}
+
+.curriculum-notes {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.curriculum-note {
+    padding: 8px 9px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+.curriculum-note-label {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0;
 }
 
 /* ===== Crystal Caves progress panel ===== */

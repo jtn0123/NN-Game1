@@ -96,6 +96,32 @@ def test_crystal_caves_panel_markup_and_binding_present():
     assert ".cc-best-marker" in styles
 
 
+def test_curriculum_panel_markup_and_binding_present():
+    """The Crystal Caves curriculum panel must stay wired to dashboard state."""
+    dashboard = (ROOT / "src" / "web" / "templates" / "dashboard.html").read_text(encoding="utf-8")
+    app_js = (ROOT / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    styles = (ROOT / "src" / "web" / "static" / "styles_layout.css").read_text(encoding="utf-8")
+
+    assert 'id="curriculum-panel"' in dashboard
+    assert "updateCurriculum" in app_js
+
+    for element_id in [
+        "curriculum-stage-count",
+        "curriculum-stage-name",
+        "curriculum-stage-meta",
+        "curriculum-status",
+        "curriculum-episode-text",
+        "curriculum-stage-fill",
+        "curriculum-gate",
+        "curriculum-next",
+    ]:
+        assert f'id="{element_id}"' in dashboard, f"missing template id: {element_id}"
+        assert element_id in app_js, f"app.js never targets id: {element_id}"
+
+    assert ".curriculum-panel" in styles
+    assert ".curriculum-fill" in styles
+
+
 def test_held_out_eval_panel_markup_and_binding_present():
     """The held-out Evaluation panel markup must stay in sync with its JS binding."""
     dashboard = (ROOT / "src" / "web" / "templates" / "dashboard.html").read_text(encoding="utf-8")

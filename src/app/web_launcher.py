@@ -11,6 +11,7 @@ from typing import Any
 import pygame
 
 from config import Config
+from src.app.crystal_curriculum import run_crystal_curriculum
 from src.app.headless import HeadlessTrainer
 from src.app.interactive import GameApp
 
@@ -84,7 +85,10 @@ def run_web_mode(config: Config, args: argparse.Namespace) -> None:
     while True:
         return_to_menu = False
         try:
-            if args.headless and selected_mode != "human":
+            if getattr(args, "crystal_curriculum", False) and selected_game == "crystal_caves":
+                args.headless = True
+                run_crystal_curriculum(config, args, existing_dashboard=dashboard)
+            elif args.headless and selected_mode != "human":
                 trainer = HeadlessTrainer(config, args, existing_dashboard=dashboard)
                 trainer.train()
             else:

@@ -72,6 +72,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
 from src.app.cli import parse_args
+from src.app.crystal_curriculum import run_crystal_curriculum
 from src.app.headless import HeadlessTrainer
 from src.app.interactive import GameApp
 from src.app.model_commands import inspect_model, list_models
@@ -193,6 +194,13 @@ def apply_cli_config_overrides(config: Config, args) -> None:
             f"⏹️  Early-stop on eval plateau (patience {config.EARLY_STOP_PATIENCE}, "
             f"eval every {config.EVAL_EVERY})"
         )
+    if getattr(args, "crystal_curriculum", False):
+        config.GAME_NAME = "crystal_caves"
+        config.CRYSTAL_CAVES_PROCEDURAL = True
+        config.USE_CNN_STATE = True
+        config.EARLY_STOP_ON_PLATEAU = True
+        config.EVAL_EVERY = min(config.EVAL_EVERY, 150)
+        print("🎓 Crystal Caves curriculum: staged training enabled")
     if getattr(args, "lr_decay", False):
         config.LR_DECAY = True
         print("📉 LR decay: cosine to LR_MIN over the run (stabilizes late training)")
@@ -245,6 +253,10 @@ def main():
     # headless, visual) honours them — run_web_mode returns before the rest of
     # main(), so these must be set before dispatching to it.
     apply_cli_config_overrides(config, args)
+
+    if getattr(args, "crystal_curriculum", False):
+        args.game = "crystal_caves"
+        args.headless = True
 
     # Web mode: use web interface for everything
     if hasattr(args, "web") and args.web:
@@ -302,6 +314,13 @@ def main():
                 print(f"🎮 Selected: {game_info['icon']} {game_info['name']}")
             else:
                 print(f"🎮 Selected: {selected}")
+
+        if getattr(args, "crystal_curriculum", False):
+            try:
+                run_crystal_curriculum(config, args)
+            except KeyboardInterrupt:
+                print("\n\n⛔ Curriculum interrupted by user")
+            return
 
         trainer = HeadlessTrainer(config, args)
         try:

@@ -504,6 +504,47 @@ function updateEval(state) {
 }
 
 /**
+ * Update the staged Crystal Caves curriculum panel.
+ */
+function updateCurriculum(state) {
+    const panel = document.getElementById('curriculum-panel');
+    if (!panel) return;
+
+    const active = Boolean(state.curriculum_active);
+    panel.style.display = active ? '' : 'none';
+    if (!active) return;
+
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    const stageIndex = Number(state.curriculum_stage_index) || 0;
+    const stageTotal = Number(state.curriculum_stage_total) || 0;
+    const start = Number(state.curriculum_stage_start_episode) || 0;
+    const target = Number(state.curriculum_stage_target_episode) || 0;
+    const episode = Number(state.episode) || start;
+    const span = Math.max(1, target - start);
+    const completed = Math.max(0, Math.min(span, episode - start));
+    const pct = Math.max(0, Math.min(100, (completed / span) * 100));
+
+    setText('curriculum-stage-count', `${stageIndex} / ${stageTotal}`);
+    setText('curriculum-stage-name', state.curriculum_stage_name || '—');
+    const families = state.curriculum_stage_families || 'all';
+    const difficulty = state.curriculum_stage_difficulty || '—';
+    setText('curriculum-stage-meta', `${difficulty} · ${families}`);
+    setText('curriculum-status', state.curriculum_stage_status || 'running');
+    setText(
+        'curriculum-episode-text',
+        `${completed.toLocaleString()} / ${span.toLocaleString()} ep`
+    );
+    setText('curriculum-gate', state.curriculum_stage_gate || '—');
+    setText('curriculum-next', state.curriculum_next_stage_name || '—');
+
+    const fill = document.getElementById('curriculum-stage-fill');
+    if (fill) fill.style.width = `${pct}%`;
+}
+
+/**
  * Update the Crystal Caves progress panel from training state.
  * Hidden entirely for other games; populated only when cc_active is set.
  */
@@ -666,6 +707,9 @@ function updateDashboard(data) {
 
     // Update Crystal Caves progress panel (no-op for other games)
     updateCrystalCaves(state);
+
+    // Update staged curriculum panel (no-op for single-stage runs)
+    updateCurriculum(state);
 
     // Update held-out evaluation panel (hidden until the first eval runs)
     updateEval(state);
