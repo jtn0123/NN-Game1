@@ -100,9 +100,10 @@ TIPS
     parser.add_argument(
         "--cave-difficulty",
         type=str,
-        choices=["easy", "normal"],
+        choices=["tutorial", "easy", "normal"],
         default=None,
         help="Crystal Caves: objective/threat budget for generated caves. "
+        "'tutorial' is the simplest winnable level (1 open crystal, no lock); "
         "'easy' is a learnable curriculum floor (few crystals, no threats); "
         "'normal' is the full game (default).",
     )

@@ -484,8 +484,12 @@ def _place_elevators(grid: Grid, rng: random.Random, surface: int, shaft: int) -
 # on a learnable floor (few crystals, no threats) and ramp to the full game. The
 # terrain family is unchanged; only what gets placed on it changes.
 DIFFICULTY: Dict[str, Dict[str, Any]] = {
-    "easy": {"crystals": (2, 3), "ammo": 2, "hazards": (0, 0), "enemies": (0, 0)},
-    "normal": {"crystals": (10, 14), "ammo": 3, "hazards": (6, 9), "enemies": (3, 6)},
+    # The simplest winnable level: one crystal on the open route, no switch/lock,
+    # no threats — "collect them all" is trivially satisfiable, so the agent only
+    # has to grab a crystal and reach the exit. The curriculum's first rung.
+    "tutorial": {"crystals": (1, 1), "ammo": 1, "hazards": (0, 0), "enemies": (0, 0), "locks": 0},
+    "easy": {"crystals": (2, 3), "ammo": 2, "hazards": (0, 0), "enemies": (0, 0), "locks": 1},
+    "normal": {"crystals": (10, 14), "ammo": 3, "hazards": (6, 9), "enemies": (3, 6), "locks": 1},
 }
 DIFFICULTY_NAMES = tuple(DIFFICULTY.keys())
 
@@ -536,18 +540,22 @@ def _attempt(
     # opens an obstacle, as in the original, not the exit). A gated crystal makes
     # its switch mandatory because every crystal is needed to unlock the exit.
     # "normal" caves sometimes add a second, differently-coloured lock (a blue
-    # lever opens only the blue door) for an authentic multi-key puzzle.
-    gated = _place_gated_pocket(grid, (px, py), standing, surface, door_char=DOOR)
-    if gated is None:
-        return None
-    locks = [(*gated, DOOR, SWITCH)]  # (pocket_cell, door_cell, door_char, switch_char)
-    if difficulty == "normal" and rng.random() < 0.5:
-        taken = {gated[0], gated[1]}
-        gated2 = _place_gated_pocket(
-            grid, (px, py), standing, surface, door_char=DOOR2, avoid=taken
-        )
-        if gated2 is not None:
-            locks.append((*gated2, DOOR2, SWITCH2))
+    # lever opens only the blue door) for an authentic multi-key puzzle. The
+    # "tutorial" tier uses no lock at all (locks == 0): one open crystal + exit.
+    n_locks = diff.get("locks", 1)
+    locks: List[Tuple[Cell, Cell, str, str]] = []
+    if n_locks >= 1:
+        gated = _place_gated_pocket(grid, (px, py), standing, surface, door_char=DOOR)
+        if gated is None:
+            return None
+        locks.append((*gated, DOOR, SWITCH))
+        if difficulty == "normal" and rng.random() < 0.5:
+            taken = {gated[0], gated[1]}
+            gated2 = _place_gated_pocket(
+                grid, (px, py), standing, surface, door_char=DOOR2, avoid=taken
+            )
+            if gated2 is not None:
+                locks.append((*gated2, DOOR2, SWITCH2))
 
     # the exit sits openly in the cave; collecting all crystals unlocks it
     _seal_unreachable_open(grid, (px, py), surface)
