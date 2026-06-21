@@ -746,8 +746,12 @@ class NStepReplayBuffer(ReplayBuffer):
         self.n_steps = n_steps
         self.gamma = gamma
 
-        # Temporary buffer to accumulate N-step trajectories
+        # Temporary buffer to accumulate N-step trajectories (single-env push() path)
         self._n_step_buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]] = []
+        # Per-environment N-step accumulation buffers for the vectorized push_batch()
+        # path. Parallel envs are columns that persist across consecutive timesteps, so
+        # each must accumulate its own trajectory independently.
+        self._env_buffers: List[List[Tuple[np.ndarray, int, float, np.ndarray, bool]]] = []
 
     def push(self, state, action, reward, next_state, done):
         """
@@ -761,48 +765,96 @@ class NStepReplayBuffer(ReplayBuffer):
 
         # Flush when we have N steps or episode ended
         if done or len(self._n_step_buffer) >= self.n_steps:
-            self._flush_n_step_buffer(done)
+            self._flush_buffer(self._n_step_buffer)
 
-    def _flush_n_step_buffer(self, done: bool):
-        """Compute and store N-step experiences."""
-        if not self._n_step_buffer:
+    def push_batch(self, states, actions, rewards, next_states, dones):
+        """Accumulate N-step returns per parallel environment (vectorized path).
+
+        The inherited ReplayBuffer.push_batch stores raw 1-step transitions, which is
+        WRONG for N-step returns — the agent's target discounts by gamma**N_STEP. The
+        vectorized training loop (used whenever --vec-envs > 1, which the Crystal Caves
+        curriculum forces) calls push_batch, so without this override n-step is silently
+        bypassed. Each parallel env accumulates its own trajectory and flushes N-step
+        returns exactly like the single-env push() path.
+        """
+        states = np.asarray(states)
+        actions = np.asarray(actions)
+        rewards = np.asarray(rewards)
+        next_states = np.asarray(next_states)
+        dones = np.asarray(dones)
+        batch_size = len(states)
+        if batch_size <= 0:
+            raise ValueError("push_batch requires at least one experience")
+        if states.ndim != 2 or next_states.shape != states.shape:
+            raise ValueError("states and next_states must be matching 2D arrays")
+
+        if len(self._env_buffers) != batch_size:
+            # Env count changed: flush any partial per-env trajectories, then resize.
+            for buf in self._env_buffers:
+                self._flush_buffer(buf)
+            self._env_buffers = [[] for _ in range(batch_size)]
+
+        for i in range(batch_size):
+            buf = self._env_buffers[i]
+            buf.append(
+                (
+                    np.asarray(states[i]).copy(),
+                    int(actions[i]),
+                    float(rewards[i]),
+                    np.asarray(next_states[i]).copy(),
+                    bool(dones[i]),
+                )
+            )
+            if bool(dones[i]) or len(buf) >= self.n_steps:
+                self._flush_buffer(buf)
+
+    def _flush_buffer(self, buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]]) -> None:
+        """Compute and store N-step returns for one trajectory buffer, then clear it."""
+        if not buffer:
             return
 
-        n = len(self._n_step_buffer)
+        n = len(buffer)
 
         # For each experience in the buffer, compute its N-step return
         for i in range(n):
-            state, action, _, _, _ = self._n_step_buffer[i]
+            state, action, _, _, _ = buffer[i]
 
-            # Compute discounted N-step return from position i
-            # Track the actual final index (where we stopped, either at N steps or early termination)
+            # Compute discounted N-step return from position i. Track the actual final
+            # index (where we stopped, either at N steps or early termination).
             n_step_reward = 0.0
-            actual_final_idx = i  # Track where we actually end up
+            actual_final_idx = i
             for j in range(i, min(i + self.n_steps, n)):
-                _, _, r, _, d = self._n_step_buffer[j]
+                _, _, r, _, d = buffer[j]
                 n_step_reward += (self.gamma ** (j - i)) * r
-                actual_final_idx = j  # Update to current position
+                actual_final_idx = j
                 if d:
                     break  # Stop at terminal state
 
             # Use the actual final index to get the correct next state and done flag
-            _, _, _, n_step_next_state, n_step_done = self._n_step_buffer[actual_final_idx]
+            _, _, _, n_step_next_state, n_step_done = buffer[actual_final_idx]
 
             # Store the N-step experience in the base buffer
             super().push(state, action, n_step_reward, n_step_next_state, n_step_done)
 
-        # Clear temporary buffer
-        self._n_step_buffer.clear()
+        buffer.clear()
+
+    def _flush_n_step_buffer(self, done: bool) -> None:
+        """Backward-compatible wrapper: flush the single-env push() trajectory buffer."""
+        self._flush_buffer(self._n_step_buffer)
 
     def __len__(self) -> int:
         """Return total experiences (main buffer + buffered)."""
+        pending = len(self._n_step_buffer) + sum(len(b) for b in self._env_buffers)
         # Cap at capacity to maintain contract with capacity tests
-        return min(super().__len__() + len(self._n_step_buffer), self.capacity)
+        return min(super().__len__() + pending, self.capacity)
 
     def clear(self) -> None:
         """Clear all experiences from buffer."""
         super().clear()
         self._n_step_buffer.clear()
+        for buf in self._env_buffers:
+            buf.clear()
+        self._env_buffers = []
 
 
 # Testing

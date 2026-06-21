@@ -157,7 +157,8 @@ class Agent(AgentPersistenceMixin):
         self._use_per = False  # Default to False, set True only if using PER
 
         if use_n_step:
-            # N-step buffer doesn't support PER currently
+            # N-step buffer doesn't support PER currently — surface the silent
+            # downgrade so the config (which advertises both) doesn't mislead.
             from src.ai.replay_buffer import NStepReplayBuffer
 
             n_steps = getattr(self.config, "N_STEP_SIZE", 3)
@@ -168,6 +169,11 @@ class Agent(AgentPersistenceMixin):
                 gamma=self.config.GAMMA,
             )
             print(f"✓ N-step returns enabled (n={n_steps})")
+            if getattr(self.config, "USE_PRIORITIZED_REPLAY", False):
+                print(
+                    "⚠️  Prioritized Experience Replay is DISABLED: the N-step buffer "
+                    "does not support PER yet (N-step takes precedence)."
+                )
         elif getattr(self.config, "USE_PRIORITIZED_REPLAY", False):
             # Prioritized Experience Replay
             self._use_per = True

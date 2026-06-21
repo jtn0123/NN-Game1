@@ -49,6 +49,15 @@ DEFAULT_CRYSTAL_CURRICULUM: tuple[CrystalCurriculumStage, ...] = (
         gate="learn crystal -> exit on the simplest lock-free caves",
     ),
     CrystalCurriculumStage(
+        stage_id="easy_open_platform",
+        name="Easy open platform (lock-free)",
+        difficulty="easy_open",
+        families="platform_network",
+        default_episodes=500,
+        min_epsilon=0.30,
+        gate="collect multiple crystals on the open walkable route, no lock yet",
+    ),
+    CrystalCurriculumStage(
         stage_id="easy_platform",
         name="Easy platform networks",
         difficulty="easy",
@@ -386,6 +395,17 @@ def evaluate_stage_gate(
             (
                 max(wins, recent_training_crystals) >= 0.20,
                 f"wins {wins*100:.0f}% or train crystals {recent_training_crystals*100:.0f}% >= 20%",
+            ),
+            (terminal_fail_share <= 0.80, f"timeout/stall {terminal_fail_share*100:.0f}% <= 80%"),
+        ]
+    elif stage.stage_id == "easy_open_platform":
+        # Lock-free multi-crystal floor: require reliable crystal collection (no
+        # switch exists to gate on), with some win/collection signal.
+        checks = [
+            (crystal >= 0.70, f"eval crystals {crystal*100:.0f}% >= 70%"),
+            (
+                max(wins, recent_training_crystals) >= 0.15,
+                f"wins {wins*100:.0f}% or train crystals {recent_training_crystals*100:.0f}% >= 15%",
             ),
             (terminal_fail_share <= 0.80, f"timeout/stall {terminal_fail_share*100:.0f}% <= 80%"),
         ]
