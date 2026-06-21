@@ -92,6 +92,9 @@ class Config:
     # separated, e.g. "platform_network,snake_bands"); empty = all families. This
     # is the knob for curriculum training (start easy, add families over stages).
     CRYSTAL_CAVES_PROCEDURAL: bool = False
+    # Drill mode: use the hand-authored single-skill teaching levels instead of the
+    # authored/procedural caves (for skill diagnostics and motor-skill pre-training).
+    CRYSTAL_CAVES_DRILLS: bool = False
     CRYSTAL_CAVES_SEED: int = 0
     CRYSTAL_CAVES_FAMILIES: str = ""
     # AI-1 rich state: a wider perception window (19x11 ~ the 1991 view) + a coarse

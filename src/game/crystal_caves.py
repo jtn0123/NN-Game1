@@ -308,9 +308,17 @@ class CrystalCaves(
         self._eval_mode = False
         self._eval_caves: Tuple[CaveSpec, ...] = ()
         self._eval_cursor = 0
+        # Drill mode: replace the cave set with the hand-authored single-skill drills
+        # (for skill diagnostics and motor-skill pre-training). Takes precedence.
+        if getattr(self.config, "CRYSTAL_CAVES_DRILLS", False):
+            from .crystal_caves_drills import DRILL_CAVES
+
+            self.CAVES = DRILL_CAVES
+            self.CAVE_DRESSING = {i: () for i in range(len(DRILL_CAVES))}
+            self._randomize_levels = len(DRILL_CAVES) > 1
         # Procedural mode: replace the authored caves with freshly generated ones.
         # Authored dressing is cleared since generated caves have none.
-        if getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
+        elif getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
             from .crystal_caves_gen import FAMILY_NAMES, THEME_NAMES, generate_cave
 
             base = getattr(self.config, "CRYSTAL_CAVES_SEED", 0)
