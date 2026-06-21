@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.3.0 (2026-06-21)
+
+### Features
+
+- Reduce Crystal Caves stalls + harden deps/dashboard/eval
+  ([#28](https://github.com/jtn0123/NN-Game1/pull/28),
+  [`ea9a2b6`](https://github.com/jtn0123/NN-Game1/commit/ea9a2b6a0fc14002716b2c69f0da843b7fd04179))
+
+Final-approach reward gradient fix (A/B-validated: stall rate 53%->10%) + NOISY_STD 0.7->0.5, plus
+  dependency caps, dashboard emit guards, eval determinism tests, batch eval-mode hardening, and a
+  dated CVE reminder.
+
+
 ## v0.2.0 (2026-06-21)
 
 ### Features
