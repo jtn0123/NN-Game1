@@ -117,6 +117,31 @@ class TrainingState:
     eval_is_baseline: bool = False  # true when showing a restored saved best before live eval
     eval_num_games: int = 0
     eval_history: List[float] = field(default_factory=list)  # eval-mean trajectory (sparkline)
+    eval_stage_history: List[float] = field(default_factory=list)  # current-stage eval means
+    eval_crystal_frac: float = 0.0
+    eval_switch_rate: float = 0.0
+    eval_depth_frac: float = 0.0
+    eval_end_reason_counts: Dict[str, int] = field(default_factory=dict)
+    # --- Crystal Caves curriculum state ---
+    curriculum_active: bool = False
+    curriculum_stage_index: int = 0
+    curriculum_stage_total: int = 0
+    curriculum_stage_id: str = ""
+    curriculum_stage_name: str = ""
+    curriculum_stage_difficulty: str = ""
+    curriculum_stage_families: str = ""
+    curriculum_stage_start_episode: int = 0
+    curriculum_stage_target_episode: int = 0
+    curriculum_stage_status: str = ""
+    curriculum_stage_gate: str = ""
+    curriculum_gate_ready: bool = False
+    curriculum_gate_status: str = ""
+    curriculum_gate_detail: str = ""
+    curriculum_next_stage_name: str = ""
+    curriculum_checkpoint_mode: str = ""  # fresh, warm-start, eval-best rollback
+    # Recent Crystal Caves training signal, stage-local enough for quick diagnosis.
+    cc_recent_crystal_frac: float = 0.0
+    cc_crystal_history: List[float] = field(default_factory=list)
 
 
 @dataclass

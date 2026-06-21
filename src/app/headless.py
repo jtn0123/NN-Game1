@@ -233,6 +233,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         self.evaluator: Optional[Evaluator] = None
         self._exploration_boost_active: bool = False
         self._exploration_boost_end_episode: int = 0
+        self.epsilon_episode_offset: int = 0
         if config.EVAL_EVERY > 0:
             eval_game = GameClass(config, headless=True)  # type: ignore[call-arg]
             self.evaluator = Evaluator(
@@ -248,6 +249,12 @@ class HeadlessTrainer(HeadlessDashboardMixin):
             )
             if eval_best_baseline is not None:
                 self.evaluator.best_eval_score = eval_best_baseline
+                # Seed the win-rate-aware selection baseline from the restored score
+                # (the sidecar does not store win rate). Treating the baseline as
+                # zero-win is conservative: a genuinely winning eval still beats it.
+                self.evaluator.best_eval_selection = eval_best_baseline * getattr(
+                    config, "EVAL_SELECTION_W_SCORE", 0.0001
+                )
                 if self.web_dashboard:
                     eval_best_record = read_eval_best_record(
                         config.GAME_MODEL_DIR,
@@ -367,7 +374,7 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                 steps_since_report += 1
 
             # Episode complete
-            self.agent.decay_epsilon(episode)
+            self.agent.decay_epsilon(max(0, episode - self.epsilon_episode_offset))
             self.agent.step_scheduler()  # Step learning rate scheduler
             self._apply_lr_decay(start_episode, episode)
             self.scores.append(info["score"])
@@ -506,6 +513,33 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
         if self.web_dashboard:
             self.web_dashboard.log("✅ Training complete!", "success")
+
+    def _eval_win_rate_regressed(self, eval_results: Any) -> bool:
+        """Return whether the held-out win rate has fallen well below its best.
+
+        Used to distinguish a genuine collapse (win rate cratering past the peak)
+        from a plateau, so the exploration boost is not fired at a policy that is
+        already regressing.
+        """
+        if self.evaluator is None or self.evaluator.best_eval_win_rate <= 0.0:
+            return False
+        frac = getattr(self.config, "EVAL_BOOST_WIN_REGRESSION_FRAC", 0.7)
+        return eval_results.win_rate < frac * self.evaluator.best_eval_win_rate
+
+    def _restore_eval_best(self) -> bool:
+        """Reload the eval-best checkpoint's weights into the live policy.
+
+        Weights-only (keeps the current training position) so the in-memory policy
+        matches the kept-best checkpoint after early-stop. Returns False if no
+        eval-best checkpoint exists yet.
+        """
+        eval_best_path = os.path.join(
+            self.config.GAME_MODEL_DIR, f"{self.config.GAME_NAME}_eval_best.pth"
+        )
+        restored = self.agent.load_weights_only(eval_best_path)
+        if restored and self.web_dashboard:
+            self.web_dashboard.log("↩️ Rolled live policy back to eval-best", "info")
+        return restored
 
     def train_vectorized(self) -> None:
         """
@@ -744,6 +778,10 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                                 median_score=eval_results.median_score,
                                 win_rate=eval_results.win_rate,
                                 num_games=eval_results.num_games,
+                                crystal_frac=eval_results.mean_crystal_frac,
+                                switch_rate=eval_results.mean_switch_rate,
+                                depth_frac=eval_results.mean_depth_frac,
+                                end_reason_counts=eval_results.end_reason_counts,
                             )
 
                         # Early-stop: end the stage once eval has plateaued, instead
@@ -763,9 +801,22 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                             if self.web_dashboard:
                                 self.web_dashboard.log("⏹️ Early stop: eval plateaued", "warning")
                             self.running = False
+                            # True rollback: make the live policy match the eval-best
+                            # checkpoint so the stage ends on the peak (not the
+                            # post-peak/collapsed weights), and any subsequent gate
+                            # eval or _final.pth reflects the kept-best policy.
+                            self._restore_eval_best()
 
-                        # Auto-exploration boost: when plateau detected, increase epsilon
-                        elif self.evaluator.is_plateau() and not self._exploration_boost_active:
+                        # Auto-exploration boost: when plateau detected, increase epsilon.
+                        # Skipped when the boost is disabled (e.g. full-objective stages)
+                        # or when the win rate has regressed below the best — that is a
+                        # collapse, not a plateau, and randomness only deepens it.
+                        elif (
+                            self.evaluator.is_plateau()
+                            and not self._exploration_boost_active
+                            and not getattr(config, "DISABLE_EXPLORATION_BOOST", False)
+                            and not self._eval_win_rate_regressed(eval_results)
+                        ):
                             self._exploration_boost_active = True
                             self._exploration_boost_end_episode = (
                                 self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES
@@ -791,7 +842,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
                             self.web_dashboard.log(
                                 f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
                                 f"max level {eval_results.max_level}, "
-                                f"{eval_results.win_rate*100:.0f}% wins{plateau_str}",
+                                f"{eval_results.win_rate*100:.0f}% wins, "
+                                f"{eval_results.mean_crystal_frac*100:.0f}% crystals"
+                                f"{plateau_str}",
                                 ("info" if not self.evaluator.is_plateau() else "warning"),
                             )
 
@@ -820,7 +873,9 @@ class HeadlessTrainer(HeadlessDashboardMixin):
 
                 # Only decay epsilon if not in boost mode
                 if not self._exploration_boost_active:
-                    self.agent.decay_epsilon(self.current_episode)
+                    self.agent.decay_epsilon(
+                        max(0, self.current_episode - self.epsilon_episode_offset)
+                    )
                 self.agent.step_scheduler()  # Step learning rate scheduler
                 self._apply_lr_decay(start_episode, self.current_episode)
 

@@ -126,6 +126,21 @@ TIPS
         "'easy' is a learnable curriculum floor (few crystals, no threats); "
         "'normal' is the full game (default).",
     )
+    parser.add_argument(
+        "--crystal-curriculum",
+        action="store_true",
+        help="Crystal Caves: run the staged curriculum instead of one fixed "
+        "difficulty/family. Stages warm-start from eval-best checkpoints and "
+        "advance from tutorial/easy to normal mixed caves. In this mode "
+        "--episodes is the total curriculum budget.",
+    )
+    parser.add_argument(
+        "--curriculum-stage-episodes",
+        type=int,
+        default=None,
+        help="Crystal Caves curriculum: override the episode budget for every "
+        "stage. If omitted, --episodes is spread across stage weights.",
+    )
 
     parser.add_argument("--model", type=str, default=None, help="Path to model file to load")
 

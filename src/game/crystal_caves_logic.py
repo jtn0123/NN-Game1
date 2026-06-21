@@ -160,7 +160,7 @@ class CrystalCavesLogicMixin:
         if not self.crystals and not self.exit_unlocked:
             self.exit_unlocked = True
             self.score += 500
-            reward += 10.0
+            reward += self.ALL_CRYSTALS_COLLECTED_BONUS
             self._add_tile_event(self.exit_pos, "sparkle", "EXIT OPEN", EGA["G"], ttl=58)
             self._mark_progress()
             self.audio.play("win")
@@ -404,10 +404,42 @@ class CrystalCavesLogicMixin:
         if current_target != previous_target or not np.isfinite(previous_distance):
             return 0.0
 
+        reward = self._target_best_approach_reward(current_target, current_distance)
         tile_progress = (previous_distance - current_distance) / self.TILE_SIZE
         if tile_progress > 0.03:
             self._mark_progress()
-        return float(np.clip(tile_progress * 0.08, -0.03, 0.06))
+        reward += float(np.clip(tile_progress * 0.08, -0.03, 0.06))
+        return reward
+
+    def _target_best_approach_reward(
+        self: Any,
+        target: Tuple[str, int, int],
+        current_distance: float,
+    ) -> float:
+        """Reward only new closest approaches to the active objective.
+
+        The per-frame distance reward above can be noisy. This monotonic bonus
+        gives clearer credit for genuinely getting closer to the current crystal,
+        switch, or exit, while avoiding back-and-forth farming.
+        """
+        if not np.isfinite(current_distance):
+            return 0.0
+
+        best = self._target_best_distances.get(target)
+        if best is None:
+            self._target_best_distances[target] = current_distance
+            return 0.0
+
+        improvement = best - current_distance
+        if improvement <= self.TILE_SIZE * 0.10:
+            return 0.0
+
+        self._target_best_distances[target] = current_distance
+        kind = target[0]
+        multiplier = {"crystal": 1.5, "switch": 1.1, "exit": 1.2}.get(kind, 1.0)
+        reward = (improvement / self.TILE_SIZE) * self.TARGET_BEST_APPROACH_SCALE * multiplier
+        self._mark_progress()
+        return float(np.clip(reward, 0.0, self.TARGET_BEST_APPROACH_CAP))
 
     def _mark_progress(self: Any) -> None:
         self.steps_since_progress = 0

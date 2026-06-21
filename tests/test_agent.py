@@ -560,6 +560,38 @@ class TestSaveLoadEdgeCases:
             # Verify network state dict is saved
             assert "policy_net_state_dict" in checkpoint
 
+    def test_load_weights_only_swaps_weights_without_rewinding_state(self, config):
+        """load_weights_only restores network weights but keeps training position."""
+        config.FORCE_CPU = True
+        source = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+        with torch.no_grad():
+            for param in source.policy_net.parameters():
+                param.fill_(0.0777)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "eval_best.pth")
+            source.save(filepath)
+
+            live = Agent(
+                state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config
+            )
+            live.epsilon = 0.3
+            live.steps = 12345
+
+            assert live.load_weights_only(filepath) is True
+
+            # Weights swapped to the checkpoint...
+            for src, restored in zip(source.policy_net.parameters(), live.policy_net.parameters()):
+                assert torch.allclose(src, restored)
+            # ...but the training position is preserved (not rewound by the checkpoint).
+            assert live.epsilon == 0.3
+            assert live.steps == 12345
+
+    def test_load_weights_only_returns_false_for_missing_file(self, config):
+        config.FORCE_CPU = True
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+        assert agent.load_weights_only("/nonexistent/eval_best.pth") is False
+
     def test_load_preserves_network_weights(self, agent, config):
         """Loading should exactly restore network weights."""
         # Modify weights

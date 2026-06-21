@@ -373,6 +373,7 @@ const CC_OUTCOMES = {
     killed: { icon: '☠️', label: 'killed', cls: 'bad' },
     timeout: { icon: '⏱️', label: 'timeout', cls: 'warn' },
     stalled: { icon: '🛑', label: 'stalled', cls: 'warn' },
+    ended: { icon: '⛳', label: 'ended', cls: '' },
 };
 
 function updateHeadlessUi(isHeadless) {
@@ -469,13 +470,23 @@ function updateEval(state) {
         }
     }
 
-    // Sparkline of the eval-mean trajectory.
+    setText('eval-crystals', `${((Number(state.eval_crystal_frac) || 0) * 100).toFixed(0)}%`);
+    setText('eval-switch', `${((Number(state.eval_switch_rate) || 0) * 100).toFixed(0)}%`);
+    setText('eval-depth', `${((Number(state.eval_depth_frac) || 0) * 100).toFixed(0)}%`);
+    renderOutcomeChips('eval-outcomes', state.eval_end_reason_counts || {});
+
+    // Sparkline of the current stage eval-mean trajectory when available. Fall
+    // back to global history for non-curriculum runs and saved baselines.
     const line = document.getElementById('eval-spark-line');
     const dot = document.getElementById('eval-spark-dot');
     if (line) {
-        const hist = Array.isArray(state.eval_history)
+        const stageHist = Array.isArray(state.eval_stage_history)
+            ? state.eval_stage_history.map(Number).filter(Number.isFinite)
+            : [];
+        const globalHist = Array.isArray(state.eval_history)
             ? state.eval_history.map(Number).filter(Number.isFinite)
             : [];
+        const hist = stageHist.length ? stageHist : globalHist;
         if (hist.length < 2) {
             line.setAttribute('points', '');
             if (dot) {
@@ -501,6 +512,52 @@ function updateEval(state) {
             line.setAttribute('points', points);
         }
     }
+}
+
+/**
+ * Update the staged Crystal Caves curriculum panel.
+ */
+function updateCurriculum(state) {
+    const panel = document.getElementById('curriculum-panel');
+    if (!panel) return;
+
+    const active = Boolean(state.curriculum_active);
+    panel.style.display = active ? '' : 'none';
+    if (!active) return;
+
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    const stageIndex = Number(state.curriculum_stage_index) || 0;
+    const stageTotal = Number(state.curriculum_stage_total) || 0;
+    const start = Number(state.curriculum_stage_start_episode) || 0;
+    const target = Number(state.curriculum_stage_target_episode) || 0;
+    const episode = Number(state.episode) || start;
+    const span = Math.max(1, target - start);
+    const completed = Math.max(0, Math.min(span, episode - start));
+    const pct = Math.max(0, Math.min(100, (completed / span) * 100));
+
+    setText('curriculum-stage-count', `${stageIndex} / ${stageTotal}`);
+    setText('curriculum-stage-name', state.curriculum_stage_name || '—');
+    const families = state.curriculum_stage_families || 'all';
+    const difficulty = state.curriculum_stage_difficulty || '—';
+    setText('curriculum-stage-meta', `${difficulty} · ${families}`);
+    setText('curriculum-status', state.curriculum_stage_status || 'running');
+    setText(
+        'curriculum-episode-text',
+        `${completed.toLocaleString()} / ${span.toLocaleString()} ep`
+    );
+    setText('curriculum-gate', state.curriculum_stage_gate || '—');
+    const gateReady = Boolean(state.curriculum_gate_ready);
+    const gateStatus = state.curriculum_gate_status || (gateReady ? 'ready' : 'checking');
+    const gateDetail = state.curriculum_gate_detail || 'waiting for held-out eval';
+    setText('curriculum-gate-readiness', `${gateReady ? '✓' : '•'} ${gateStatus}: ${gateDetail}`);
+    setText('curriculum-checkpoint', state.curriculum_checkpoint_mode || '—');
+    setText('curriculum-next', state.curriculum_next_stage_name || '—');
+
+    const fill = document.getElementById('curriculum-stage-fill');
+    if (fill) fill.style.width = `${pct}%`;
 }
 
 /**
@@ -539,6 +596,8 @@ function updateCrystalCaves(state) {
     const remaining = Number(state.cc_crystals_remaining) || 0;
     const collected = Math.max(0, initial - remaining);
     setText('cc-crystals-text', `${collected} / ${initial}`);
+    setWidth('cc-crystal-trend-fill', state.cc_recent_crystal_frac);
+    setText('cc-crystal-trend-text', pctText(state.cc_recent_crystal_frac));
 
     // Switch: show thrown/total, or "none" when the level has no switch.
     const swTotal = Number(state.cc_switches_total) || 0;
@@ -565,33 +624,38 @@ function updateCrystalCaves(state) {
     }
 
     // Recent-outcome breakdown: where episodes are ending.
-    const outcomesEl = document.getElementById('cc-outcomes');
-    if (outcomesEl) {
-        const counts = state.cc_end_reason_counts || {};
-        const total = Object.values(counts).reduce((sum, n) => sum + (Number(n) || 0), 0);
-        if (total <= 0) {
-            const empty = document.createElement('span');
-            empty.className = 'cc-outcome-empty';
-            empty.textContent = 'waiting for episodes…';
-            outcomesEl.replaceChildren(empty);
-        } else {
-            const order = ['won', 'killed', 'timeout', 'stalled'];
-            const keys = order
-                .filter((k) => counts[k])
-                .concat(Object.keys(counts).filter((k) => !order.includes(k)));
-            const chips = keys.map((k) => {
-                const o = CC_OUTCOMES[k] || { icon: '•', label: k, cls: '' };
-                const n = Number(counts[k]) || 0;
-                const share = Math.round((n / total) * 100);
-                const chip = document.createElement('span');
-                chip.className = `cc-outcome-chip ${o.cls || ''}`.trim();
-                chip.title = `${o.label}: ${n} of ${total} (${share}%)`;
-                chip.textContent = `${o.icon} ${n} (${share}%)`;
-                return chip;
-            });
-            outcomesEl.replaceChildren(...chips);
-        }
+    renderOutcomeChips('cc-outcomes', state.cc_end_reason_counts || {});
+}
+
+function renderOutcomeChips(containerId, counts) {
+    const outcomesEl = document.getElementById(containerId);
+    if (!outcomesEl) return;
+    const total = Object.values(counts || {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+    if (total <= 0) {
+        const empty = document.createElement('span');
+        empty.className = 'cc-outcome-empty';
+        empty.textContent = containerId === 'eval-outcomes'
+            ? 'waiting for eval outcomes…'
+            : 'waiting for episodes…';
+        outcomesEl.replaceChildren(empty);
+        return;
     }
+
+    const order = ['won', 'killed', 'timeout', 'stalled', 'ended'];
+    const keys = order
+        .filter((k) => counts[k])
+        .concat(Object.keys(counts).filter((k) => !order.includes(k)));
+    const chips = keys.map((k) => {
+        const o = CC_OUTCOMES[k] || { icon: '•', label: k, cls: '' };
+        const n = Number(counts[k]) || 0;
+        const share = Math.round((n / total) * 100);
+        const chip = document.createElement('span');
+        chip.className = `cc-outcome-chip ${o.cls || ''}`.trim();
+        chip.title = `${o.label}: ${n} of ${total} (${share}%)`;
+        chip.textContent = `${o.icon} ${n} (${share}%)`;
+        return chip;
+    });
+    outcomesEl.replaceChildren(...chips);
 }
 
 /**
@@ -666,6 +730,9 @@ function updateDashboard(data) {
 
     // Update Crystal Caves progress panel (no-op for other games)
     updateCrystalCaves(state);
+
+    // Update staged curriculum panel (no-op for single-stage runs)
+    updateCurriculum(state);
 
     // Update held-out evaluation panel (hidden until the first eval runs)
     updateEval(state);

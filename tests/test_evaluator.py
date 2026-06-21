@@ -162,6 +162,34 @@ class TestEvaluate:
             assert results.max_level == 12
             assert results.level_distribution[12] == 1
 
+    def test_evaluate_records_crystal_caves_subgoals_and_end_reasons(self, config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            evaluator = Evaluator(
+                StaticEvalGame(
+                    {
+                        "score": 50,
+                        "level": 1,
+                        "won": False,
+                        "end_reason": "timeout",
+                        "progress_parts": {
+                            "crystal_frac": 0.5,
+                            "switch_done": 1.0,
+                            "depth_frac": 0.75,
+                        },
+                    }
+                ),
+                StaticEvalAgent(),
+                config,
+                log_dir=tmpdir,
+            )
+
+            results = evaluator.evaluate(num_episodes=3, max_steps=1)
+
+            assert results.mean_crystal_frac == 0.5
+            assert results.mean_switch_rate == 1.0
+            assert results.mean_depth_frac == 0.75
+            assert results.end_reason_counts == {"timeout": 3}
+
 
 class TestPlateauDetection:
     """Test plateau detection."""
@@ -245,6 +273,69 @@ class TestGetSummary:
         assert summary["num_evals"] == 1
         assert "best_eval_score" in summary
         assert "is_plateau" in summary
+
+
+def _eval_results(*, win_rate, mean_score, crystal_frac=0.0):
+    return EvalResults(
+        timestamp="now",
+        episode=1,
+        num_games=10,
+        mean_score=mean_score,
+        median_score=mean_score,
+        std_score=0.0,
+        min_score=0,
+        max_score=int(mean_score),
+        q25_score=0.0,
+        q75_score=mean_score,
+        mean_level=1.0,
+        max_level=1,
+        level_distribution={1: 10},
+        wins=int(win_rate * 10),
+        win_rate=win_rate,
+        mean_steps=100.0,
+        max_steps=100,
+        mean_crystal_frac=crystal_frac,
+    )
+
+
+class TestSelectionScoreKeepBest:
+    """Win-rate-aware keep-best: selection_score must dominate raw mean score."""
+
+    def _evaluator(self, config):
+        return Evaluator(StaticEvalGame({}), StaticEvalAgent(), config, log_dir=tempfile.mkdtemp())
+
+    def test_selection_score_prioritizes_win_rate_over_mean_score(self, config):
+        evaluator = self._evaluator(config)
+        winning = _eval_results(win_rate=0.18, mean_score=100, crystal_frac=0.6)
+        high_score = _eval_results(win_rate=0.04, mean_score=400, crystal_frac=0.2)
+
+        assert evaluator._selection_score(winning) > evaluator._selection_score(high_score)
+
+    def test_update_history_keeps_winning_policy_over_higher_score(self, config):
+        evaluator = self._evaluator(config)
+        winning = _eval_results(win_rate=0.18, mean_score=100)
+        winning.selection_score = evaluator._selection_score(winning)
+        evaluator._update_history(winning)
+
+        assert evaluator.evals_since_improvement == 0
+        assert evaluator.best_eval_score == 100
+
+        # Higher mean score but the win rate collapsed — must NOT count as a new best.
+        collapsed = _eval_results(win_rate=0.04, mean_score=400)
+        collapsed.selection_score = evaluator._selection_score(collapsed)
+        evaluator._update_history(collapsed)
+
+        assert evaluator.evals_since_improvement == 1
+        assert evaluator.best_eval_score == 100
+        assert evaluator.best_eval_win_rate == pytest.approx(0.18)
+
+    def test_score_only_game_preserves_mean_score_ordering(self, config):
+        """With no wins/crystals, selection_score stays monotonic in mean score."""
+        evaluator = self._evaluator(config)
+        low = _eval_results(win_rate=0.0, mean_score=50)
+        high = _eval_results(win_rate=0.0, mean_score=120)
+
+        assert evaluator._selection_score(high) > evaluator._selection_score(low)
 
 
 if __name__ == "__main__":

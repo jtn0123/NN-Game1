@@ -20,7 +20,8 @@ Usage:
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -56,6 +57,18 @@ class EvalResults:
     # Survival metrics
     mean_steps: float
     max_steps: int
+
+    # Crystal Caves diagnostics. These stay zero/empty for games that do not
+    # report Crystal Caves progress_parts/end_reason telemetry.
+    mean_crystal_frac: float = 0.0
+    mean_switch_rate: float = 0.0
+    mean_depth_frac: float = 0.0
+    end_reason_counts: Dict[str, int] = field(default_factory=dict)
+
+    # Win-rate-dominated "keep-best" score (set by Evaluator.evaluate). Drives the
+    # eval-best checkpoint and the plateau / early-stop signal so a high-score but
+    # low-win policy does not get kept over a winning one.
+    selection_score: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -100,6 +113,9 @@ class Evaluator:
         self.eval_history: List[EvalResults] = []
         self.best_eval_score: float = 0.0
         self.evals_since_improvement: int = 0
+        # Win-rate-aware keep-best / regression signals (see EVAL_SELECTION_* config).
+        self.best_eval_selection: float = 0.0
+        self.best_eval_win_rate: float = 0.0
 
         # Create log directory
         os.makedirs(log_dir, exist_ok=True)
@@ -139,6 +155,10 @@ class Evaluator:
         scores = []
         levels = []
         steps_list = []
+        crystal_fracs = []
+        switch_rates = []
+        depth_fracs = []
+        end_reasons = []
         wins = 0
 
         try:
@@ -156,6 +176,15 @@ class Evaluator:
                 score = info.get("score", 0)
                 level = info.get("level", 1)
                 won = info.get("won", False)
+                parts: Any = info.get("progress_parts") or {}
+                if isinstance(parts, dict):
+                    crystal_fracs.append(float(parts.get("crystal_frac", 0.0) or 0.0))
+                    switch_rates.append(float(parts.get("switch_done", 0.0) or 0.0))
+                    depth_fracs.append(float(parts.get("depth_frac", 0.0) or 0.0))
+                reason = str(info.get("end_reason", "") or "")
+                if not reason or reason == "running":
+                    reason = "won" if won else ("timeout" if steps >= max_steps else "ended")
+                end_reasons.append(reason)
 
                 scores.append(score)
                 levels.append(level)
@@ -195,18 +224,49 @@ class Evaluator:
             win_rate=wins / num_episodes,
             mean_steps=float(np.mean(steps_arr)),
             max_steps=int(np.max(steps_arr)),
+            mean_crystal_frac=float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
+            mean_switch_rate=float(np.mean(switch_rates)) if switch_rates else 0.0,
+            mean_depth_frac=float(np.mean(depth_fracs)) if depth_fracs else 0.0,
+            end_reason_counts=dict(Counter(end_reasons)),
         )
+
+        results.selection_score = self._selection_score(results)
 
         # Update history and check for plateau
         self._update_history(results)
 
         return results
 
-    def _update_history(self, results: EvalResults) -> None:
-        """Update evaluation history and check for plateau."""
-        self.eval_history.append(results)
+    def _selection_score(self, results: EvalResults) -> float:
+        """Win-rate-dominated keep-best score (see EVAL_SELECTION_* config).
 
-        if results.mean_score > self.best_eval_score:
+        win_rate is weighted to dominate, crystal fraction is a strong secondary,
+        and mean_score is only a faint tiebreaker. For games that report neither
+        wins nor crystals this reduces to mean-score ordering, so non-Crystal-Caves
+        keep-best behavior is unchanged.
+        """
+        w_win = getattr(self.config, "EVAL_SELECTION_W_WIN", 1.0)
+        w_crystal = getattr(self.config, "EVAL_SELECTION_W_CRYSTAL", 0.2)
+        w_score = getattr(self.config, "EVAL_SELECTION_W_SCORE", 0.0001)
+        return (
+            results.win_rate * w_win
+            + results.mean_crystal_frac * w_crystal
+            + results.mean_score * w_score
+        )
+
+    def _update_history(self, results: EvalResults) -> None:
+        """Update evaluation history and check for plateau.
+
+        Improvement is measured on selection_score (win-rate dominated), not raw
+        mean_score, so a high-score/low-win policy does not reset the plateau
+        counter or get treated as a new best. best_eval_score still tracks the
+        mean score of the current selection-best eval for display/back-compat.
+        """
+        self.eval_history.append(results)
+        self.best_eval_win_rate = max(self.best_eval_win_rate, results.win_rate)
+
+        if results.selection_score > self.best_eval_selection:
+            self.best_eval_selection = results.selection_score
             self.best_eval_score = results.mean_score
             self.evals_since_improvement = 0
         else:
@@ -247,6 +307,13 @@ class Evaluator:
         print(f"   Range:  {results.min_score} - {results.max_score}")
         print(f"   Level:  avg {results.mean_level:.1f}, max {results.max_level}")
         print(f"   Wins:   {results.wins}/{results.num_games} ({results.win_rate*100:.1f}%)")
+        if results.mean_crystal_frac or results.mean_switch_rate or results.end_reason_counts:
+            print(
+                f"   Caves:  crystals {results.mean_crystal_frac*100:.0f}%, "
+                f"switch {results.mean_switch_rate*100:.0f}%, "
+                f"depth {results.mean_depth_frac*100:.0f}%"
+            )
+            print(f"   Ends:   {results.end_reason_counts}")
         print(
             f"   Best eval ever: {self.best_eval_score:.0f} "
             f"(no improvement for {self.evals_since_improvement} evals)"

@@ -184,6 +184,25 @@ class TestCrystalCavesMovement:
         assert reward > -0.01
         assert info["steps_since_progress"] == 0
 
+    def test_new_closest_approach_to_crystal_gets_nonfarmable_bonus(self, game):
+        game.switches.clear()
+        crystal = next(iter(game.crystals))
+        game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE * 4
+        game.player_y = crystal[1] * game.TILE_SIZE
+
+        target, distance = game._current_target()
+        assert target is not None and target[0] == "crystal"
+        assert game._target_best_approach_reward(target, distance) == 0.0
+
+        game.player_x += game.TILE_SIZE
+        _, closer_distance = game._current_target()
+        reward = game._target_best_approach_reward(target, closer_distance)
+        assert reward > 0.0
+
+        game.player_x -= game.TILE_SIZE
+        _, farther_distance = game._current_target()
+        assert game._target_best_approach_reward(target, farther_distance) == 0.0
+
     def test_move_left_decreases_x(self, game):
         place_on_floor(game)
         initial_x = game.player_x
@@ -222,7 +241,7 @@ class TestCrystalCavesObjectives:
         _, reward, _, info = game.step(CrystalCaves.IDLE)
         assert game.exit_unlocked
         assert info["exit_unlocked"]
-        assert reward >= 9.0
+        assert reward >= game.ALL_CRYSTALS_COLLECTED_BONUS - 1.0
 
     def test_exit_unlock_emits_visual_feedback(self, config):
         game = CrystalCaves(config, headless=False)

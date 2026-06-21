@@ -360,6 +360,54 @@ class AgentPersistenceMixin:
 
         return metadata, training_history
 
+    def load_weights_only(self: Any, filepath: str, quiet: bool = True) -> bool:
+        """Load only the policy/target network weights from a checkpoint.
+
+        Unlike :meth:`load`, this does NOT restore the optimizer, epsilon, step
+        counters, metadata, or replay buffer — it swaps the network parameters in
+        place while preserving the current training position. Used for "true
+        rollback" to the eval-best checkpoint after early-stop so the live policy
+        matches the kept-best one without rewinding the run.
+
+        Returns True on success, False if the file is missing or incompatible.
+        """
+        if not os.path.exists(filepath):
+            return False
+        try:
+            checkpoint = load_checkpoint(
+                filepath,
+                map_location=self.device,
+                trusted_dirs=self._trusted_checkpoint_dirs(),
+                allow_unsafe_fallback=True,
+            )
+        except Exception as e:
+            if not quiet:
+                print(f"⚠️ Could not load weights from {os.path.basename(filepath)}: {e}")
+            return False
+
+        saved_state_size = checkpoint.get("state_size", self.state_size)
+        saved_action_size = checkpoint.get("action_size", self.action_size)
+        if saved_state_size != self.state_size or saved_action_size != self.action_size:
+            if not quiet:
+                print("⚠️ Cannot load weights - architecture mismatch.")
+            return False
+
+        try:
+            policy_state = self._adapt_state_dict_for_compile(
+                checkpoint["policy_net_state_dict"], self.policy_net
+            )
+            target_state = self._adapt_state_dict_for_compile(
+                checkpoint["target_net_state_dict"], self.target_net
+            )
+            self.policy_net.load_state_dict(policy_state)
+            self.target_net.load_state_dict(target_state)
+        except (KeyError, RuntimeError) as e:
+            if not quiet:
+                print(f"⚠️ Could not load weights: {e}")
+            return False
+
+        return True
+
     @staticmethod
     def inspect_model(
         filepath: str,
