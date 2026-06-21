@@ -5,6 +5,34 @@ This file is automatically loaded by pytest and applies configuration
 to all tests in the tests/ directory.
 """
 
+import os
+import random
+
+import numpy as np
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _seed_everything():
+    """Seed all RNGs before every test for reproducible, non-flaky runs.
+
+    RL tests lean on random sampling (epsilon-greedy, replay sampling, weight
+    init); seeding torch/numpy/random per test removes order- and run-dependent
+    flakiness and gives a stable baseline for determinism assertions.
+    """
+    random.seed(0)
+    np.random.seed(0)
+    os.environ["PYTHONHASHSEED"] = "0"
+    try:
+        import torch
+
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+    except ImportError:
+        pass
+    yield
+
 
 def pytest_configure(config):
     """Configure pytest with custom markers and warning filters."""

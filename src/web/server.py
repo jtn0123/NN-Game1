@@ -374,22 +374,29 @@ class WebDashboard:
             return socket_controls.clear_logs(self, emit)
 
         # Auto-emit on metric updates
-        # Bug 65 fix: Add null/running checks to prevent AttributeError during shutdown
+        # Bug 65 fix: null/running checks prevent AttributeError during shutdown.
+        # These callbacks run from the training thread; a dead/disconnected client can
+        # make socketio.emit() raise, which would propagate up and silence ALL future
+        # metric emits. Swallow emit errors so one bad client can't black out the run.
+        def _safe_emit(event: str, payload: Any) -> None:
+            if not (self.socketio and self._running):
+                return
+            try:
+                self.socketio.emit(event, payload)
+            except Exception as exc:
+                logging.getLogger(__name__).debug("socket emit %s failed: %s", event, exc)
+
         def broadcast_update(snapshot):
-            if self.socketio and self._running:
-                self.socketio.emit("state_update", snapshot)
+            _safe_emit("state_update", snapshot)
 
         def broadcast_log(log_entry: LogMessage):
-            if self.socketio and self._running:
-                self.socketio.emit("console_log", log_entry.to_dict())
+            _safe_emit("console_log", log_entry.to_dict())
 
         def broadcast_save(save_info: Dict[str, Any]):
-            if self.socketio and self._running:
-                self.socketio.emit("save_event", save_info)
+            _safe_emit("save_event", save_info)
 
         def broadcast_nn_update(nn_data: Dict[str, Any]):
-            if self.socketio and self._running:
-                self.socketio.emit("nn_update", nn_data)
+            _safe_emit("nn_update", nn_data)
 
         # Clear and register callbacks atomically (prevents race condition)
         with self.publisher._callback_lock:

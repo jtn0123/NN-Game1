@@ -164,6 +164,16 @@ class CrystalCaves(
     TARGET_BEST_APPROACH_SCALE = 0.18
     TARGET_BEST_APPROACH_CAP = 0.18
 
+    # Per-frame approach reward (delta-distance to the active objective). Must clear
+    # the per-step living penalty (-0.01) so closing distance is a clearly-positive
+    # gradient: at full MOVE_SPEED (4.2/32 tiles/step) this yields ~+0.0197/step, net
+    # ~+0.0097 vs the living penalty. (Raised from 0.08/0.06: the old gradient was
+    # ~+0.0005/step net — below noise — so the greedy policy idled until the stall
+    # timer fired instead of committing to the final approach.)
+    APPROACH_REWARD_SCALE = 0.15
+    APPROACH_REWARD_CLIP_POS = 0.12
+    APPROACH_REWARD_CLIP_NEG = -0.03
+
     MOVE_SPEED = 4.2
 
     AIR_SPEED = 3.3

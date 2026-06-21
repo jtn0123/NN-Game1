@@ -408,7 +408,13 @@ class CrystalCavesLogicMixin:
         tile_progress = (previous_distance - current_distance) / self.TILE_SIZE
         if tile_progress > 0.03:
             self._mark_progress()
-        reward += float(np.clip(tile_progress * 0.08, -0.03, 0.06))
+        reward += float(
+            np.clip(
+                tile_progress * self.APPROACH_REWARD_SCALE,
+                self.APPROACH_REWARD_CLIP_NEG,
+                self.APPROACH_REWARD_CLIP_POS,
+            )
+        )
         return reward
 
     def _target_best_approach_reward(
