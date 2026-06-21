@@ -894,6 +894,55 @@ class TestPushBatchCircularWrapping:
         # Position should be 15 % 10 = 5
         assert buffer._position == 5
 
+    def test_push_batch_accumulates_nstep_like_push(self, state_size):
+        """push_batch (vectorized path) must accumulate N-step returns, not store raw
+        1-step transitions — i.e. match the single-env push() path. Regression guard
+        for the bug where NStepReplayBuffer inherited 1-step push_batch."""
+        push_buf = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.9)
+        batch_buf = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.9)
+
+        for i, r in enumerate([1.0, 2.0, 3.0]):
+            state = np.ones(state_size, dtype=np.float32) * i
+            next_state = np.ones(state_size, dtype=np.float32) * (i + 1)
+            push_buf.push(state, i, r, next_state, False)
+            batch_buf.push_batch(
+                np.array([state]),
+                np.array([i]),
+                np.array([r]),
+                np.array([next_state]),
+                np.array([False]),
+            )
+
+        assert push_buf._size == 3
+        assert batch_buf._size == 3
+        # First transition's 3-step return = 1 + 0.9*2 + 0.81*3 = 5.23 (NOT the raw 1.0).
+        assert np.isclose(push_buf.rewards[:3].max(), 5.23)
+        assert np.allclose(np.sort(push_buf.rewards[:3]), np.sort(batch_buf.rewards[:3]))
+
+    def test_push_batch_accumulates_each_env_independently(self, state_size):
+        """Per-env trajectories must not interleave across parallel environments."""
+        buffer = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.9)
+
+        for step in range(3):
+            states = np.stack(
+                [
+                    np.ones(state_size, dtype=np.float32) * step,
+                    np.ones(state_size, dtype=np.float32) * (100 + step),
+                ]
+            )
+            buffer.push_batch(
+                states,
+                np.array([0, 1]),
+                np.array([1.0, 10.0]),  # env0 reward 1, env1 reward 10
+                states + 1,
+                np.array([False, False]),
+            )
+
+        assert buffer._size == 6
+        # env0 n-step returns [1, 1.9, 2.71]; env1 [10, 19, 27.1] — no cross-env mixing.
+        expected = np.sort([1.0, 1.9, 2.71, 10.0, 19.0, 27.1])
+        assert np.allclose(np.sort(buffer.rewards[:6]), expected)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
