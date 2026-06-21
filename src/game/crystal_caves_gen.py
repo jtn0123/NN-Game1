@@ -491,6 +491,11 @@ DIFFICULTY: Dict[str, Dict[str, Any]] = {
     # no threats — "collect them all" is trivially satisfiable, so the agent only
     # has to grab a crystal and reach the exit. The curriculum's first rung.
     "tutorial": {"crystals": (1, 1), "ammo": 1, "hazards": (0, 0), "enemies": (0, 0), "locks": 0},
+    # Bridges the tutorial->easy cliff: multiple crystals to teach collect-and-route,
+    # but NO lock (so no gated 1-wide drop-pocket) — every crystal stays on the open
+    # walkable route. Mirrors the real game's opening rooms (several crystals along the
+    # walking floor, colour-keyed doors arrive later).
+    "easy_open": {"crystals": (2, 3), "ammo": 1, "hazards": (0, 0), "enemies": (0, 0), "locks": 0},
     "easy": {"crystals": (2, 3), "ammo": 2, "hazards": (0, 0), "enemies": (0, 0), "locks": 1},
     "normal": {"crystals": (10, 14), "ammo": 3, "hazards": (6, 9), "enemies": (3, 6), "locks": 1},
 }
@@ -615,6 +620,20 @@ def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> 
     ]
     rng.shuffle(free)
 
+    # L3: on lock-free tiers (tutorial/easy_open) guarantee at least one crystal sits
+    # on the WALK-ONLY route (no jump needed), so a policy that has only learned to
+    # walk/fall can still collect a crystal and produce the dense crystal signal that
+    # bootstraps learning. take() pops from the end, so append a walk-reachable cell
+    # last to ensure it becomes the first crystal placed.
+    if n_locks == 0:
+        reach_walk = cave_reachable(grid, (px, py), doors_open=True, jump=0)
+        walk_free = [t for t in free if t in reach_walk]
+        if not walk_free:
+            return None
+        guaranteed = walk_free[0]
+        free.remove(guaranteed)
+        free.append(guaranteed)
+
     def take(n: int) -> List[Cell]:
         return [free.pop() for _ in range(min(n, len(free)))]
 
@@ -639,6 +658,12 @@ def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> 
 
     rows = ["".join(row) for row in grid]
     if not _solvable(rows):
+        return None
+    # L5: easier tiers must be solvable with the locomotion that tier is meant to
+    # require — enforce a per-tier walk/ride-reachable coverage floor, not just the
+    # jump-aware solvability above (a tutorial level that needs a jump is unwinnable
+    # for a policy that hasn't learned to jump).
+    if not _walk_coverage_ok(rows, difficulty):
         return None
     return CaveSpec(
         name=f"Generated {family} {theme}",
@@ -670,6 +695,39 @@ def _solvable(rows) -> bool:
     # must be reachable
     reach = cave_reachable_keyed(rows, player)
     return all(c in reach for c in crystals) and exit_ in reach
+
+
+# Minimum fraction of crystals reachable WITHOUT jumping (walk + fall + ride elevators)
+# per difficulty tier. None = jump-aware solvability only (the historical behaviour).
+_WALK_COVERAGE_FLOOR: Dict[str, float] = {
+    "tutorial": 1.0,
+    "easy_open": 0.6,
+    "easy": 0.4,
+}
+
+
+def _walk_coverage_ok(rows, difficulty: str) -> bool:
+    """Whether the level is solvable with the locomotion the tier requires.
+
+    cave_reachable(jump=0) floods walking, falling, and elevator-riding (the elevator
+    shaft is treated as free vertical travel), but NOT jumping — so this certifies the
+    objectives a non-jumping policy can actually reach. ``normal`` keeps the prior
+    jump-aware-only guarantee.
+    """
+    floor = _WALK_COVERAGE_FLOOR.get(difficulty)
+    if floor is None:
+        return True
+    player = _find(rows, PLAYER)[0]
+    crystals = _find(rows, CRYSTAL)
+    if not crystals:
+        return True
+    reach_walk = cave_reachable(rows, player, doors_open=True, jump=0)
+    walk_crystals = sum(1 for c in crystals if c in reach_walk)
+    if difficulty == "tutorial":
+        # The single crystal AND the exit must be walk/ride reachable.
+        exit_ = _find(rows, EXIT)[0]
+        return walk_crystals == len(crystals) and exit_ in reach_walk
+    return walk_crystals / len(crystals) >= floor
 
 
 def generate_cave(

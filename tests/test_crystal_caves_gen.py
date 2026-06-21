@@ -15,10 +15,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.game.crystal_caves_gen import (
     ACID,
     CRYSTAL,
+    DIFFICULTY,
+    EXIT,
     FAMILY_NAMES,
+    PLAYER,
     SPIKE,
+    SWITCH_CHARS,
     THEME_NAMES,
     _find,
+    _find_any,
     cave_reachable,
     generate_cave,
     grade_cave,
@@ -196,3 +201,42 @@ def test_reachability_oracle_matches_solvable_levels():
         (c, r) for r, row in enumerate(spec.layout) for c, ch in enumerate(row) if ch == "*"
     ]
     assert all(crystal in reach for crystal in crystals)
+
+
+GEN_TIER_SEEDS = [0, 1, 2, 3, 5, 7, 11, 13]
+
+
+def test_easy_open_difficulty_is_lock_free_with_multiple_crystals():
+    """L1: the easy_open tier exists, has no lock, and asks for 2-3 crystals."""
+    assert "easy_open" in DIFFICULTY
+    assert DIFFICULTY["easy_open"]["locks"] == 0
+    assert DIFFICULTY["easy_open"]["crystals"] == (2, 3)
+
+
+@pytest.mark.parametrize("seed", GEN_TIER_SEEDS)
+def test_easy_open_caves_are_lock_free(seed):
+    """L1: easy_open caves carry no switch/door (lock-free), so no gated pocket."""
+    spec = generate_cave(seed, difficulty="easy_open")
+    assert not _find_any(spec.layout, SWITCH_CHARS)
+    assert 2 <= len(_find(spec.layout, CRYSTAL)) <= 3
+
+
+@pytest.mark.parametrize("seed", GEN_TIER_SEEDS)
+def test_tutorial_crystal_and_exit_are_walk_reachable(seed):
+    """L3/L5: the tutorial crystal AND exit are reachable without jumping."""
+    spec = generate_cave(seed, difficulty="tutorial")
+    player = _find(spec.layout, PLAYER)[0]
+    reach_walk = cave_reachable(spec.layout, player, doors_open=True, jump=0)
+    assert all(c in reach_walk for c in _find(spec.layout, CRYSTAL))
+    assert _find(spec.layout, EXIT)[0] in reach_walk
+
+
+@pytest.mark.parametrize("seed", GEN_TIER_SEEDS)
+def test_easy_open_crystals_mostly_walk_reachable(seed):
+    """L5: at least 60% of easy_open crystals are reachable without jumping."""
+    spec = generate_cave(seed, difficulty="easy_open")
+    player = _find(spec.layout, PLAYER)[0]
+    reach_walk = cave_reachable(spec.layout, player, doors_open=True, jump=0)
+    crystals = _find(spec.layout, CRYSTAL)
+    walk = sum(1 for c in crystals if c in reach_walk)
+    assert walk / len(crystals) >= 0.6

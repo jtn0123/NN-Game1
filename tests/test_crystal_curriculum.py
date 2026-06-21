@@ -51,7 +51,7 @@ def test_planned_stage_episodes_use_defaults_without_total_budget():
         per_stage_override=None,
     )
 
-    assert budgets == [300, 750, 900, 900, 1200]
+    assert budgets == [300, 500, 750, 900, 900, 1200]
 
 
 def test_planned_stage_episodes_spread_total_budget_across_stage_weights():
@@ -73,7 +73,7 @@ def test_planned_stage_episodes_allow_equal_stage_override():
         per_stage_override=25,
     )
 
-    assert budgets == [25, 25, 25, 25, 25]
+    assert budgets == [25, 25, 25, 25, 25, 25]
 
 
 def test_tutorial_gate_requires_crystal_reliability():
@@ -98,8 +98,9 @@ def test_tutorial_gate_passes_with_crystals_and_some_success_signal():
 
 
 def test_easy_platform_gate_requires_switch_and_wins():
+    easy_platform = next(s for s in DEFAULT_CRYSTAL_CURRICULUM if s.stage_id == "easy_platform")
     result = evaluate_stage_gate(
-        DEFAULT_CRYSTAL_CURRICULUM[1],
+        easy_platform,
         _eval_result(crystal=0.8, switch=0.1, wins=0.0, end_reasons={"timeout": 9, "won": 1}),
     )
 
