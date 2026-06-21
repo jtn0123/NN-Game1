@@ -336,29 +336,41 @@ class Agent(AgentPersistenceMixin):
         if training and hasattr(self.policy_net, "reset_noise"):
             self.policy_net.reset_noise()  # type: ignore[operator]
 
-        # Epsilon-greedy exploration (works alongside NoisyNets as fallback)
-        # Only apply if epsilon > 0 and in training mode
-        if training and self.epsilon > 0:
-            # Determine which states get random actions (exploration)
-            # Use np.less() for clearer typing than < operator
-            explore_mask = np.less(np.random.random(batch_size), self.epsilon)
-            num_explored = int(np.sum(explore_mask))
-            num_exploited = batch_size - num_explored
+        # In eval, put the network in eval() mode so NoisyLinear uses the noise-free
+        # mean weights (mirrors select_action). Without this, a vectorized eval would
+        # still apply learned noise and be non-deterministic.
+        was_training = self.policy_net.training
+        if not training:
+            self.policy_net.eval()
+        try:
+            # Epsilon-greedy exploration (works alongside NoisyNets as fallback)
+            # Only apply if epsilon > 0 and in training mode
+            if training and self.epsilon > 0:
+                # Determine which states get random actions (exploration)
+                # Use np.less() for clearer typing than < operator
+                explore_mask = np.less(np.random.random(batch_size), self.epsilon)
+                num_explored = int(np.sum(explore_mask))
+                num_exploited = batch_size - num_explored
 
-            if num_explored > 0:
-                # Random actions for exploring states
-                actions[explore_mask] = np.random.randint(0, self.action_size, size=num_explored)
+                if num_explored > 0:
+                    # Random actions for exploring states
+                    actions[explore_mask] = np.random.randint(
+                        0, self.action_size, size=num_explored
+                    )
 
-            if num_exploited > 0:
-                # Exploitation: best Q-value actions for non-exploring states
-                # NoisyNets provide additional exploration within network forward pass
-                exploit_mask = ~explore_mask
-                actions[exploit_mask] = self._greedy_actions_for_states(states[exploit_mask])
-        else:
-            # Pure NoisyNets or evaluation mode: all actions from network
-            # NoisyNets handle exploration via learned noise parameters
-            num_exploited = batch_size
-            actions = self._greedy_actions_for_states(states)
+                if num_exploited > 0:
+                    # Exploitation: best Q-value actions for non-exploring states
+                    # NoisyNets provide additional exploration within network forward pass
+                    exploit_mask = ~explore_mask
+                    actions[exploit_mask] = self._greedy_actions_for_states(states[exploit_mask])
+            else:
+                # Pure NoisyNets or evaluation mode: all actions from network
+                # NoisyNets handle exploration via learned noise parameters
+                num_exploited = batch_size
+                actions = self._greedy_actions_for_states(states)
+        finally:
+            if was_training and not training:
+                self.policy_net.train()
 
         return actions, num_explored, num_exploited
 

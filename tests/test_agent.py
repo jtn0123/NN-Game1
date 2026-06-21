@@ -99,6 +99,25 @@ class TestActionSelection:
         with pytest.raises(ValueError, match="State batch size mismatch"):
             agent.select_actions_batch(states, training=False)
 
+    def test_select_actions_batch_eval_uses_noise_free_mean_weights(self, config):
+        """The vectorized greedy path must disable NoisyNet noise in eval, matching
+        the single-state greedy path (both use mean weights), and restore mode."""
+        config.USE_NOISY_NETWORKS = True
+        config.USE_DUELING = True  # NoisyNets require DuelingDQN
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+        agent.epsilon = 0.0
+        agent.policy_net.train()  # simulate being called mid-training
+        if hasattr(agent.policy_net, "reset_noise"):
+            agent.policy_net.reset_noise()
+
+        states = np.random.randn(4, config.STATE_SIZE).astype(np.float32)
+        batch_actions, _, _ = agent.select_actions_batch(states, training=False)
+        single_actions = [agent.select_action(s, training=False) for s in states]
+
+        assert list(batch_actions) == single_actions
+        # Training mode is restored after the eval call.
+        assert agent.policy_net.training is True
+
     def test_greedy_action_selection(self, agent, config):
         """With epsilon=0, should always select best action."""
         agent.epsilon = 0

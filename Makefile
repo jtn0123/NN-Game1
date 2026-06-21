@@ -38,6 +38,7 @@ lint:
 audit:
 	# CVE-2025-3000 currently has no patched torch release on PyPI.
 	# Keep auditing all other advisories and remove this once torch ships a fix.
+	# TODO(2026-09-01): recheck for a patched torch; the audit script warns in CI past this date.
 	$(PYTHON) .github/scripts/run_dependency_audit.py -r requirements.txt --ignore-vuln CVE-2025-3000
 
 build:

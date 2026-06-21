@@ -9,8 +9,8 @@ description = "Deep Q-learning agents for classic arcade games with a live train
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "torch>=2.0.0",
-    "numpy>=1.24.0",
+    "torch>=2.0.0,<3.0.0",  # cap next major: torch 3.x will carry breaking changes
+    "numpy>=1.24.0,<3.0.0",  # cap next major (lock is 2.4.6; <2.0 would force untested 1.x)
     "pygame>=2.6.1",
     "matplotlib>=3.7.0",
     "Pillow>=12.2.0",
