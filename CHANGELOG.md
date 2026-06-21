@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.3.1 (2026-06-21)
+
+### Bug Fixes
+
+- Restore N-step on vectorized path + faithful winnable-floor level design
+  ([#29](https://github.com/jtn0123/NN-Game1/pull/29),
+  [`adf470a`](https://github.com/jtn0123/NN-Game1/commit/adf470a51557f26975402765751aa0f76096a319))
+
+N1: per-env N-step accumulation in NStepReplayBuffer.push_batch (was silently storing 1-step on the
+  vec path the curriculum forces). L1/L3/L5: easy_open rung + walk-reachability guarantees +
+  per-tier solvability gate. A/B-validated: N1 lifts training Q -0.06->-0.58; level design moves
+  held-out crystals 0%->17%.
+
+
 ## v0.3.0 (2026-06-21)
 
 ### Features
