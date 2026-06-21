@@ -465,7 +465,7 @@ class Config:
 
     # Standard deviation for noise initialization
     # Higher values = more initial exploration (0.5 standard, 0.7 for more exploration)
-    NOISY_STD_INIT: float = 0.7
+    NOISY_STD_INIT: float = 0.5
 
     # =========================================================================
     # REWARD SHAPING

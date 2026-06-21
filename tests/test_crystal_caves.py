@@ -184,6 +184,31 @@ class TestCrystalCavesMovement:
         assert reward > -0.01
         assert info["steps_since_progress"] == 0
 
+    def test_approach_reward_gradient_clears_living_penalty(self, game):
+        """Closing distance at full speed must be a clearly-positive net gradient.
+
+        Guards the fix for the greedy stall: the old per-frame approach reward netted
+        only ~+0.0005/step against the -0.01 living penalty (sub-noise), so the policy
+        idled until the stall timer fired. The gradient must comfortably clear the
+        living penalty so approaching the objective is unambiguously worthwhile.
+        """
+        living_penalty = 0.01
+        full_speed_tiles = game.MOVE_SPEED / game.TILE_SIZE
+        per_step = min(
+            game.APPROACH_REWARD_CLIP_POS,
+            full_speed_tiles * game.APPROACH_REWARD_SCALE,
+        )
+        assert per_step - living_penalty > 0.005
+
+    def test_approach_reward_penalizes_moving_away(self, game):
+        """Receding from the objective stays penalized (negative clip preserved)."""
+        full_speed_tiles = game.MOVE_SPEED / game.TILE_SIZE
+        receding = max(
+            game.APPROACH_REWARD_CLIP_NEG,
+            -full_speed_tiles * game.APPROACH_REWARD_SCALE,
+        )
+        assert receding < 0
+
     def test_new_closest_approach_to_crystal_gets_nonfarmable_bonus(self, game):
         game.switches.clear()
         crystal = next(iter(game.crystals))
