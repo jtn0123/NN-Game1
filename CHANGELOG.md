@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-06-21)
+
+### Features
+
+- Gate Crystal Caves curriculum promotion ([#27](https://github.com/jtn0123/NN-Game1/pull/27),
+  [`4485221`](https://github.com/jtn0123/NN-Game1/commit/44852218eecf0977563af27a6d65c37d41aab330))
+
+Staged Crystal Caves curriculum with held-out gated promotion, win-rate-aware keep-best, true
+  eval-best rollback, guarded exploration boost, per-stage exploration anneal, and forced-vectorized
+  eval so the curriculum's eval/early-stop/keep-best machinery actually runs. Validated end-to-end
+  in a live run.
+
+
 ## v0.1.0 (2026-06-20)
 
 ### Features
