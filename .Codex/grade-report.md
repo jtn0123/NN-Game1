@@ -1,358 +1,316 @@
 # Codebase Grade Report
 
 **Project:** nn-game1
-**Audited:** 2026-06-17
-**Stack:** Python 3.10-3.12 DQN/Pygame training app with Flask/Socket.IO dashboard, vanilla JS frontend modules, Node tests, and Playwright dashboard smoke coverage.
+**Audited:** 2026-06-25
+**Stack:** Python 3.10-3.12 DQN/Pygame training app with Crystal Caves RL experiments, Flask/Socket.IO dashboard, vanilla JS dashboard modules, Node tests, Playwright smoke, and local experiment artifact tooling.
 
 ## Summary
 
 | ID | Category | Grade | Items |
 |----|----------|-------|-------|
 | A | Architecture & Design | B+ | 4 |
-| B | Backend Quality | B+ | 4 |
-| C | Frontend Quality | B | 4 |
-| D | Testing & Reliability | B+ | 4 |
-| E | Security | B | 4 |
+| B | Backend Quality | B+ | 3 |
+| C | Frontend Quality | B | 3 |
+| D | Testing & Reliability | A- | 4 |
+| E | Security | B | 3 |
 | F | Dependencies & Tech Currency | B+ | 3 |
 | G | Performance & Scalability | B+ | 3 |
-| H | Documentation & Onboarding | B | 4 |
+| H | Documentation & Onboarding | B+ | 3 |
 | I | Developer Experience & Tooling | A- | 3 |
-| **Overall** | | **B+** | **33** |
+| **Overall** | | **B+** | **29** |
 
-**Top 5 highest-leverage fixes:** B1, D1, C1, E1, A1
+**Top 5 highest-leverage fixes:** A1, D2, G1, H1, I1
+
+**Current readiness verdict:** architecture is good enough to move back to NN improvement after a small stabilization pass. Do not keep doing broad file-splitting just to chase 500-line files; remaining simplification work should be tied directly to NN iteration speed, checkpoint safety, or experiment comparability.
 
 **Validation snapshot:**
-- `git diff --quiet HEAD origin/main`: passed; this worktree matches the merged `origin/main` tree.
-- `make verify`: passed; black, ruff, mypy, 24 JS tests, 668 pytest tests, 71.86% coverage, release config, hygiene, source-size gate, dependency audit, and package build all passed.
-- `make dashboard-smoke`: passed.
-- `npm audit --audit-level=moderate`: passed with 0 vulnerabilities.
-- `python -m pip_audit -r requirements.txt --ignore-vuln CVE-2025-3000`: passed with no known vulnerabilities found and 1 intentional torch advisory ignore.
 
-**Implementation update for A/B/C/D/G/I request:**
-- A: extracted model commands and web launcher orchestration out of `main.py`; added grouped typed `Config` views; moved Breakout entities into `breakout_entities.py`; extracted shared runtime dashboard emission policy.
-- B: fixed vectorized new-best dashboard emission, added shared checkpoint discovery, typed route context/handlers more strictly, and replaced the socket control dispatcher chain with a handler table.
-- C: replaced raw NN inspection panel HTML insertion with DOM construction, added dialog focus trap/restore behavior, and strengthened CDN failure reporting/pinning.
-- D: added focused Python and Node coverage for runtime helpers, vector no-copy reset semantics, config groups, checkpoint discovery, NN panel safety, dialogs, and expanded Playwright dashboard smoke journeys.
-- G: bounded initial dashboard history snapshots, fixed no-copy vector reset state behavior for completed envs, and added repeatable performance smoke budgets.
-- I: added `make setup`, `scripts/bootstrap_dev.py`, `.pre-commit-config.yaml`, CI Playwright smoke/perf gates, and stricter mypy ratchets for newly typed modules.
-
-**Post-implementation validation:**
-- `make verify`: passed on 2026-06-17. This included black, ruff, mypy, 27 Node dashboard tests, performance smoke, 682 pytest tests with 70.46% coverage, Playwright dashboard smoke, release config, repository hygiene, source-size gate, dependency audit, and package build.
+- Latest current-tree full gate from the persistence cleanup pass: `make verify PYTHON=/Users/justin/.pyenv/versions/3.12.11/bin/python` passed with `1094 passed`, coverage `77.21%`, dashboard smoke clean, dependency audit clean, file-size gate clean, and package build successful.
+- Node dependency audit rechecked during this audit: `npm audit --audit-level=moderate` returned `found 0 vulnerabilities`.
+- Source-size gate is green, but many files remain in the 850-999 LOC band, so line count is no longer a blocking risk but still shows complexity pockets.
 
 ---
 
 ## A - Architecture & Design - B+
 
-The app now has clear top-level domains: app runtimes, game registry, AI/training, visualizers, and web dashboard. `src/game/base_game.py:55-147` defines the game contract, `src/game/__init__.py:64-125` centralizes registered games, and web concerns are split across `src/web/routes.py`, `src/web/model_service.py`, `src/web/socket_controls.py`, and `src/web/metrics_publisher.py`. The remaining architectural ceiling is that the interactive/headless runtime classes and game files still coordinate many lifecycle concerns in-process.
+The architecture is materially better than earlier in the week. NN extension contracts now live in `src/ai/extension_contracts.py`, experiment-only losses moved out of `agent.py` into `src/ai/agent_experiments.py`, PER+n-step is isolated in `src/ai/prioritized_n_step.py`, and the status-session runner has been split into `experiments/cc_status/` modules. The grade is capped below A because runtime orchestration, the core `Agent`, metrics publishing, and several experiment modules still contain large multi-responsibility methods.
 
-#### A1 - Split runtime loop orchestration into focused services
-- **Where:** `src/app/interactive.py:54-260`, `src/app/headless.py:37-219`, `src/app/headless.py:220-431`, `src/app/headless.py:452-755`
-- **What's wrong:** `GameApp` and `HeadlessTrainer` still own configuration mutation, dashboard callback wiring, model loading, training loops, metrics publishing, checkpoint decisions, and shutdown behavior. The files are under the line budget now, but each class still has several reasons to change.
-- **Impact:** Major - central runtime changes can accidentally affect save/load, dashboard updates, or training stability.
-- **Fix:** Extract a `RuntimeSession`/`TrainingLoop` service for episode stepping and checkpoint cadence, a dashboard binding object for callback registration, and a model lifecycle object for load/save/reset. Keep `GameApp` and `HeadlessTrainer` as composition roots.
+#### A1 - Split runtime orchestration from app composition roots
+- **Where:** `src/app/headless.py:63`, `src/app/headless.py:278`, `src/app/interactive.py:72`, `src/app/interactive.py:507`
+- **What's wrong:** `HeadlessTrainer` and `GameApp` still mix CLI/config mutation, environment creation, model lifecycle, dashboard callbacks, training loops, metrics emission, and shutdown behavior. File size is under the hard 1000-line gate, but the classes still have several reasons to change.
+- **Impact:** Major - runtime changes can accidentally affect dashboard state, checkpoint cadence, training speed, or model resume behavior.
+- **Fix:** Extract a `TrainingSession` or `RuntimeSession` object that owns episode stepping, checkpoint decisions, and metric emission. Keep `HeadlessTrainer` and `GameApp` as thin composition roots that wire config, dashboard, and UI.
 - **Effort:** L
-- **Grade lift:** B+ -> A- (removes the largest remaining coupling hotspot)
+- **Grade lift:** B+ -> A- (removes the largest remaining architecture hotspot)
 
-#### A2 - Finish separating game rules from rendering and entities
-- **Where:** `src/game/asteroids.py:31-220`, `src/game/breakout.py:31-195`, `src/game/pong.py`, `src/game/snake.py`, `src/game/space_invaders.py:1-878`
-- **What's wrong:** Several game modules still mix entities, state transitions, reward shaping, collision logic, human input helpers, and rendering. `space_invaders` has started this split with entity/rendering modules, but the pattern is not consistent across games.
-- **Impact:** Moderate - gameplay fixes and performance work are harder to isolate and test than they need to be.
-- **Fix:** Establish a common pattern per game: `*_entities.py`, `*_rules.py`, `*_rendering.py`, and a thin game facade implementing `BaseGame`. Start with `asteroids.py` and `breakout.py` because they are the largest remaining game files.
-- **Effort:** L
-- **Grade lift:** B+ -> A- (makes the game layer easier to extend without regressions)
-
-#### A3 - Break `Config` into nested typed configuration groups
-- **Where:** `config.py:20-32`, `config.py:38-163`, `config.py:173-203`, `config.py:213-260`
-- **What's wrong:** One `Config` dataclass holds cross-game screen settings, per-game knobs, neural-network settings, training behavior, visualization settings, storage paths, and device selection. Some values are explicitly legacy or approximate, such as `STATE_SIZE`.
-- **Impact:** Moderate - unrelated settings are easy to mutate from CLI/dashboard code, and game-specific defaults are harder to validate independently.
-- **Fix:** Introduce nested dataclasses such as `GameConfig`, `TrainingConfig`, `NetworkConfig`, `DashboardConfig`, and `StorageConfig`. Add compatibility properties for existing callers, then migrate call sites gradually.
+#### A2 - Keep new NN methods behind provider-style extension points
+- **Where:** `src/ai/extension_contracts.py:1`, `src/ai/agent_experiments.py:20`, `src/ai/agent.py:557`
+- **What's wrong:** The extension contract exists, but existing route/demo/correction losses still sit in one large mixin and depend on agent internals. A future experiment could still grow `AgentExperimentMixin` instead of registering a standalone provider.
+- **Impact:** Moderate - new NN ideas can become hard to compare or remove if they grow the agent surface again.
+- **Fix:** Move the next new loss into a provider module that implements `AuxiliaryLossProvider`; do not add another branch to `AgentExperimentMixin` unless it is promoted. Add a provider smoke test and a recipe.
 - **Effort:** M
-- **Grade lift:** B+ -> A- (reduces cross-domain configuration coupling)
+- **Grade lift:** B+ -> A- (keeps future NN expansion plug-in oriented)
 
-#### A4 - Shrink the launcher compatibility surface
-- **Where:** `main.py:75-85`, `main.py:100-203`, `main.py:206-240`
-- **What's wrong:** `main.py` still imports internal runtime and game types directly and owns model inspection/listing plus web startup details. This keeps import-time coupling to pygame, torch, and dashboard modules higher than a launcher needs.
-- **Impact:** Moderate - packaging and CLI changes are more fragile when the entrypoint remains a broad compatibility layer.
-- **Fix:** Move model inspection/listing to `src/app/model_commands.py` and web startup to `src/app/web_launcher.py`. Leave `main.py` as `parse_args`, dispatch, and process exit handling.
+#### A3 - Split experiment run modes by lifecycle, not only by idea name
+- **Where:** `experiments/cc_status/runs_demo.py:189`, `experiments/cc_status/runs_demo.py:465`, `experiments/cc_status/runs_route.py:217`, `experiments/cc_status/corrections.py:64`
+- **What's wrong:** The runner split worked, but some run-mode functions are still 175-309 LOC and own setup, training, selection, eval, reporting, and artifact wiring in one function.
+- **Impact:** Moderate - experiment bugs are likely to hide in long run modes, and future NN ideas will copy/paste flow code.
+- **Fix:** Extract shared lifecycle helpers for `prepare_trainer`, `train_with_selection`, `evaluate_selected_checkpoint`, and `write_run_artifacts`. Keep recipe-specific code mostly as config and provider installation.
 - **Effort:** M
-- **Grade lift:** B+ -> A- (clarifies the app boundary and reduces import coupling)
+- **Grade lift:** B+ -> A- (reduces duplicated experiment scaffolding)
+
+#### A4 - Finish game-layer separation only where it supports Crystal Caves work
+- **Where:** `src/game/crystal_caves.py:286`, `src/game/crystal_caves_logic.py:14`, `src/game/crystal_caves_rendering.py:13`, `src/game/crystal_caves_dressing.py:13`
+- **What's wrong:** Crystal Caves has been decomposed, but the facade and mixins still form a large implicit class with game state spread across files. Further splitting every classic game would be expensive and not directly tied to the current NN blocker.
+- **Impact:** Minor - this is maintainability friction, but not the main reason NN progress is slow.
+- **Fix:** Only split Crystal Caves surfaces that block NN instrumentation or level-gen work. Defer broad refactors of Pong/Snake/Asteroids unless they become active targets.
+- **Effort:** M
+- **Grade lift:** B+ -> A- (focused cleanup without derailing NN work)
 
 ---
 
 ## B - Backend Quality - B+
 
-Backend and app-service quality is solid. The dashboard has stable error helpers in `src/web/routes.py:19-30`, typed API payloads in `src/web/contracts.py:8-123`, model path helpers in `src/app/model_paths.py:21-79`, and safe checkpoint loading in `src/utils/checkpoint_loader.py:34-66`. Remaining issues are mostly around runtime edge cases, partially typed Flask surfaces, and service ownership boundaries.
+The app/backend layer is solid for a local training tool. Route contracts, model services, restricted checkpoint loading, artifact validation, and dashboard APIs are tested and broadly organized. Remaining backend work is mostly about smaller service boundaries and reducing broad `Any` surfaces around dashboard/runtime integration.
 
-#### B1 - Fix vectorized new-best dashboard emission
-- **Where:** `src/app/headless.py:560-584`
-- **What's wrong:** The vectorized training loop updates `self.best_score` before computing `is_new_best = score > self.best_score`, making the new-best flag false after the update. The dashboard still updates on early episodes and every fifth episode, but it can miss immediate new-best updates in vectorized mode.
-- **Impact:** Moderate - users can see stale best-score dashboard state during high-speed vectorized training.
-- **Fix:** Compute `is_new_best = score > self.best_score` before mutating `self.best_score`, reuse that boolean for saving and dashboard emission, and add a focused vectorized-loop test.
-- **Effort:** S
-- **Grade lift:** B+ -> A- (removes a concrete user-visible runtime bug)
-
-#### B2 - Type route handlers and dashboard context more strictly
-- **Where:** `src/web/routes.py:33-214`, `src/web/server.py:123-190`, `src/web/socket_controls.py:17-40`, `mypy.ini:4-7`
-- **What's wrong:** Mypy passes, but route handler bodies are not checked because untyped functions are still allowed. The live mypy run reported annotation notes for `src/web/routes.py`, and `dashboard: Any` hides contract drift between Flask routes and `WebDashboard`.
-- **Impact:** Moderate - API payload shape regressions can slip through type checking even though contracts exist.
-- **Fix:** Add return annotations to route hooks and handlers, define a `DashboardRouteContext` protocol for route dependencies, and enable `check_untyped_defs` or `disallow_untyped_defs` for `src/web` first.
+#### B1 - Consolidate checkpoint inspection/listing behind one repository
+- **Where:** `src/ai/agent_persistence.py:526`, `src/app/model_service.py:16`, `src/web/model_service.py:21`, `src/app/checkpoint_catalog.py:1`
+- **What's wrong:** Checkpoint save/load is now cleaner, but static inspection, app model service, web model service, and checkpoint catalog still split related model lifecycle behavior. This creates drift risk around compatibility, opaque IDs, trusted dirs, and metadata display.
+- **Impact:** Moderate - checkpoint regressions are high-cost because they affect resume, selected-eval validation, and dashboard loading.
+- **Fix:** Create a shared `CheckpointRepository` for inspect/list/resolve/delete/metadata. Keep app/web services as adapters around it. Start by moving `inspect_model` and `list_models`.
 - **Effort:** M
-- **Grade lift:** B+ -> A- (turns existing contracts into stronger static guarantees)
+- **Grade lift:** B+ -> A- (centralizes model lifecycle semantics)
 
-#### B3 - Consolidate app and web model-service boundaries
-- **Where:** `src/app/model_service.py:15-188`, `src/web/model_service.py:19-141`, `src/app/model_paths.py:21-79`
-- **What's wrong:** The app model service and web model service now share path rules, but they still split listing, resolution, loading, deletion, cleanup, metadata, and compatibility behavior across two service classes. That makes it easy for web behavior to drift from app save/load expectations.
-- **Impact:** Moderate - checkpoint lifecycle bugs are costly because they affect user saves and resume flows.
-- **Fix:** Create a shared `CheckpointRepository` for model directories, opaque IDs, compatibility inspection, listing, deletion, and metadata. Keep app/web services as thin adapters around that repository.
-- **Effort:** M
-- **Grade lift:** B+ -> A- (centralizes the persistence contract)
-
-#### B4 - Replace the control dispatcher chain with a handler table
-- **Where:** `src/web/socket_controls.py:285-321`
-- **What's wrong:** `dispatch_control` is a long conditional chain even though each action already has a focused handler. Adding new actions requires editing the dispatcher and increases the chance of inconsistent validation or acknowledgement behavior.
-- **Impact:** Minor - the current implementation works, but action growth will keep adding friction.
-- **Fix:** Build a dictionary from action name to small handler callable, with shared signature normalization for handlers that need `emit_event`. Keep the existing tests as the safety net.
+#### B2 - Split route registration by API group
+- **Where:** `src/web/routes.py:65`
+- **What's wrong:** `register_dashboard_routes` still defines all HTTP routes in one 192-line nested function. The protocol typing is better, but adding a route still means editing a broad registration body.
+- **Impact:** Moderate - dashboard API changes are easy to review poorly when all routes are adjacent nested closures.
+- **Fix:** Split into `register_status_routes`, `register_model_routes`, `register_control_routes`, and `register_game_routes`, each taking the same route context and CSP helpers.
 - **Effort:** S
-- **Grade lift:** B+ -> A- (small clarity win in a central API surface)
+- **Grade lift:** B+ -> A- (small clarity win in a central API layer)
+
+#### B3 - Reduce broad `Any` typing at app/web seams
+- **Where:** `src/web/server.py:107`, `src/web/routes.py:16`, `src/app/headless.py:47`, `src/app/interactive.py:54`
+- **What's wrong:** Mypy passes, but important integration boundaries still use `Any` for dashboard, config, callbacks, and model-service surfaces. That weakens the value of the new route contracts.
+- **Impact:** Moderate - type checking may miss contract drift between runtime, dashboard, and model loading.
+- **Fix:** Add small Protocols for dashboard callbacks, model services, and runtime dashboard bindings. Ratchet `check_untyped_defs` or `disallow_untyped_defs` for `src/web` and selected `src/app` modules.
+- **Effort:** M
+- **Grade lift:** B+ -> A- (turns existing contracts into stronger static checks)
 
 ---
 
 ## C - Frontend Quality - B
 
-The frontend has improved a lot: dashboard JS and CSS are split, destructive flows use custom dialogs, and core helpers have Node tests. `src/web/templates/dashboard.html:522-532` still loads plain global scripts in a strict order, `src/web/static/dashboard_state.js:5-31` exposes mutable globals for compatibility, and several modules still write HTML strings into the DOM. This is good for a small local app, but not yet an A-level frontend architecture.
+The dashboard is functional and test-covered, with split JS/CSS modules and Playwright smoke coverage. It is still a vanilla global-script application, and the NN dashboard script is right at the line budget. For a local tool this is acceptable, but the frontend is not yet as modular as the Python side.
 
-#### C1 - Move dashboard scripts to importable modules
-- **Where:** `src/web/templates/dashboard.html:522-532`, `src/web/static/dashboard_state.js:5-31`, `src/web/static/app.js:29-63`
-- **What's wrong:** Frontend modules communicate through globals and load order instead of explicit imports/exports. This makes tests rely on VM-loaded script order and makes missing-script failures possible at runtime.
-- **Impact:** Moderate - frontend behavior remains harder to isolate, tree-check, and refactor safely.
-- **Fix:** Convert dashboard scripts to ES modules or a small build step, export explicit APIs, and load one entry module from the template. Keep `dashboard_core.js` CommonJS support only for tests or replace tests with native ESM imports.
+#### C1 - Split `dashboard_nn.js` into focused NN panels/modules
+- **Where:** `src/web/static/dashboard_nn.js:1`
+- **What's wrong:** `dashboard_nn.js` is 999 LOC and sits exactly below the file-size gate. It owns NN data rendering, interactions, and panel updates, making it the frontend file most likely to fail the next feature addition.
+- **Impact:** Moderate - NN inspection UI changes are likely while improving the agent, and this file is too close to the limit.
+- **Fix:** Split into `dashboard_nn_state.js`, `dashboard_nn_render.js`, and `dashboard_nn_events.js`, preserving existing globals only through a thin compatibility export. Move tests with the split.
 - **Effort:** M
-- **Grade lift:** B -> B+ (removes the largest frontend maintainability limiter)
+- **Grade lift:** B -> B+ (removes the biggest frontend hotspot)
 
-#### C2 - Remove raw HTML insertion from inspection panels
-- **Where:** `src/web/static/dashboard_nn_panels.js:31-85`, `src/web/static/dashboard_nn_panels.js:220-254`, `src/web/static/dashboard_controls.js:369-374`
-- **What's wrong:** Some flows still render template strings through `innerHTML`. Several values are escaped or numeric, and `DashboardCore.modelListHtml` has escape tests, but the pattern leaves future fields vulnerable to accidental unsafe interpolation.
-- **Impact:** Moderate - dashboard data is mostly local, but this is a recurring XSS footgun as inspection/model metadata grows.
-- **Fix:** Build inspection panels with DOM nodes and `textContent`, or use a tiny safe rendering helper that requires escaped text nodes by default. Add tests that hostile layer/action names and metadata render as text.
+#### C2 - Move dashboard scripts toward explicit module imports
+- **Where:** `src/web/templates/dashboard.html:522`, `src/web/static/dashboard_state.js:1`, `src/web/static/app.js:1`
+- **What's wrong:** Script ordering and global state still define module contracts. Tests work, but the runtime graph is implicit.
+- **Impact:** Moderate - frontend refactors are harder and missing-script/load-order failures remain possible.
+- **Fix:** Convert to ESM or introduce a minimal build step. Load one dashboard entry module from the template and export/import explicit APIs.
 - **Effort:** M
-- **Grade lift:** B -> B+ (hardens the most fragile rendering pattern)
+- **Grade lift:** B -> B+ (improves maintainability without changing product behavior)
 
-#### C3 - Add focus trapping and focus restore for dashboard dialogs
-- **Where:** `src/web/static/dashboard_dialogs.js:45-114`, `src/web/templates/dashboard.html:508-519`
-- **What's wrong:** Dialogs set `role="dialog"`, `aria-modal`, focus a preferred button, and support Escape, but they do not trap Tab focus or restore focus to the opener. The static model browser modal has markup roles but relies on external behavior for complete keyboard ergonomics.
-- **Impact:** Moderate - keyboard and assistive-technology users can lose context during destructive controls like start fresh, delete, or save and quit.
-- **Fix:** Track the opener before showing each dialog, loop focus within the dialog while open, close on Escape consistently, and restore focus after close. Add a small JS test for focus cycling and restore.
+#### C3 - Remove remaining unsafe HTML rendering patterns as panels grow
+- **Where:** `src/web/static/dashboard_nn_panels.js:31`, `src/web/static/dashboard_controls.js:369`
+- **What's wrong:** Some rendering paths still use template strings or `innerHTML`. Existing escaping and tests reduce risk, but the pattern is easy to misuse as NN metadata grows.
+- **Impact:** Minor - data is local, but this is a recurring dashboard hardening issue.
+- **Fix:** Prefer DOM builders and `textContent` for inspection/model metadata, or centralize safe rendering in one helper with hostile-input tests.
 - **Effort:** S
-- **Grade lift:** B -> B+ (raises accessibility reliability in core workflows)
-
-#### C4 - Localize third-party browser dependencies or add stronger fallbacks
-- **Where:** `src/web/templates/dashboard.html:9-12`, `src/web/static/app.js:162-199`, `tests/js/dashboard_startup.test.mjs:154-178`
-- **What's wrong:** Chart.js, chart zoom, and Socket.IO client are loaded from CDNs. Startup tests verify visible errors when Chart.js or Socket.IO are missing, but the dashboard still depends on external network availability unless those scripts are cached.
-- **Impact:** Moderate - local training dashboards should stay useful when offline or when a CDN is blocked.
-- **Fix:** Vendor or package the browser assets into `src/web/static/vendor/`, pin versions, update CSP to serve them from self, and keep the existing startup-error tests as fallback coverage.
-- **Effort:** M
-- **Grade lift:** B -> B+ (improves local reliability and supports CSP hardening)
+- **Grade lift:** B -> B+ (small hardening and maintenance win)
 
 ---
 
-## D - Testing & Reliability - B+
+## D - Testing & Reliability - A-
 
-The test base is strong for a hobby/learning project: `make verify` passes 668 Python tests and 24 JS tests, with 71.86% coverage and a package build. The repo also has a Playwright dashboard smoke test in `tests/e2e/dashboard_smoke.mjs`. The grade is capped below A because coverage is uneven, several runtime files are omitted from coverage, and the smoke test is not part of `make verify` or CI.
+This category is now strong. The repo has 1000+ Python tests, JS tests, Playwright dashboard smoke, file-size gates, coverage gates, mypy, Ruff, Black, dependency audit, and package build verification. The remaining gap is not quantity; it is making the tests more targeted at NN correctness and reducing blind spots hidden by total coverage.
 
-#### D1 - Raise coverage on low-covered game/render/runtime surfaces
-- **Where:** coverage output for `src/game/space_invaders_rendering.py`, `src/game/snake.py`, `src/game/asteroids.py`, `src/game/space_invaders_entities.py`; `pyproject.toml:74-85`
-- **What's wrong:** Total coverage clears the 70% gate, but some meaningful gameplay/rendering files are far below that and several runtime files are omitted from coverage. This leaves game-specific behavior and visual/runtime edges weaker than the overall number suggests.
-- **Impact:** Major - game and runtime regressions are the most likely user-visible failures.
-- **Fix:** Add tests for render-helper geometry, snake/asteroids edge cases, and runtime save/reset/pause flows that can run headless. Ratchet coverage by package or file group rather than only total coverage.
+#### D1 - Add package/file-group coverage ratchets
+- **Where:** `pyproject.toml:74`, coverage output for `src/app/crystal_curriculum.py`, `src/game/space_invaders_rendering.py`, `src/game/snake.py`, `src/game/asteroids.py`
+- **What's wrong:** Total coverage is 77.21%, but low-covered files remain masked by stronger files. Several runtime/render/game surfaces are below the reliability level suggested by the aggregate number.
+- **Impact:** Moderate - broad coverage can look healthy while specific gameplay/runtime paths remain under-tested.
+- **Fix:** Add package-level or file-group coverage floors for `src/ai`, `src/game/crystal_caves*`, `src/web`, and `experiments/cc_status`. Keep a lower floor for legacy games if they are not active.
 - **Effort:** M
-- **Grade lift:** B+ -> A- (turns broad coverage into deeper reliability)
+- **Grade lift:** A- -> A (makes coverage signal harder to game accidentally)
 
-#### D2 - Put the Playwright dashboard smoke in CI or `make verify`
-- **Where:** `Makefile:31`, `Makefile:49`, `.github/workflows/ci.yml:54-66`, `tests/e2e/dashboard_smoke.mjs:62-135`
-- **What's wrong:** `make dashboard-smoke` passes locally, but `make verify` and CI do not run it. The most realistic browser coverage is therefore easy to skip before merging.
-- **Impact:** Moderate - dashboard regressions can pass the main gate even when a real browser would fail.
-- **Fix:** Add a CI job or `verify-browser` target that installs/uses a stable browser and runs `make dashboard-smoke`. If full CI cost is too high, run it on PRs touching `src/web/**`, `tests/e2e/**`, or templates/static assets.
+#### D2 - Add NN learning-target contract tests before new algorithm changes
+- **Where:** `src/ai/agent.py:557`, `src/ai/replay_buffer.py:713`, `src/ai/prioritized_n_step.py:17`, `src/ai/agent_experiments.py:29`
+- **What's wrong:** Replay and persistence are well tested, but future NN expansion needs very direct tests for target computation, auxiliary loss composition, metric history emission, and provider failures.
+- **Impact:** Major - a small target/loss bug can invalidate long training runs while all gameplay tests still pass.
+- **Fix:** Add tests that build deterministic mini-batches and assert DQN target math, n-step/PER weighting, auxiliary contribution weights, metric history updates, and provider error behavior.
+- **Effort:** M
+- **Grade lift:** A- -> A (protects the riskiest future work)
+
+#### D3 - Keep Playwright smoke in the main gate and add one NN-inspection journey
+- **Where:** `Makefile:49`, `.github/workflows/ci.yml:54`, `tests/e2e/dashboard_smoke.mjs:1`
+- **What's wrong:** Dashboard smoke now runs in `make verify` and CI, but it mostly covers dashboard shell, save/load, settings, and performance mode. NN inspection panels are still mostly unit-tested.
+- **Impact:** Moderate - the visual NN surface is central to this project and can break in browser-only ways.
+- **Fix:** Add a Playwright assertion that the NN inspection panel opens, receives mocked layer/action data, and does not throw console/page errors.
 - **Effort:** S
-- **Grade lift:** B+ -> A- (promotes the best frontend reliability check to a merge gate)
+- **Grade lift:** A- -> A (covers a high-value user-facing path)
 
-#### D3 - Expand browser journeys beyond save/load smoke
-- **Where:** `tests/e2e/dashboard_smoke.mjs:97-110`, `src/web/static/dashboard_controls.js:43-107`, `src/web/static/dashboard_settings.js`
-- **What's wrong:** The current smoke covers connection, save, load modal, and the selected game dropdown. It does not exercise settings changes, game switching, start-fresh confirmation branches, keyboard dialog behavior, screenshot fallback, or NN inspection panels.
-- **Impact:** Moderate - the dashboard's riskiest interaction paths still rely mostly on unit tests and manual confidence.
-- **Fix:** Add Playwright journeys for settings apply/reject, start-fresh cancel/save/skip, model delete cancel, game switch cancel, and keyboard-only dialog dismissal. Keep the disposable server fixture so no real models are touched.
-- **Effort:** M
-- **Grade lift:** B+ -> A- (covers the high-risk user workflows)
-
-#### D4 - Make performance regression tests less anecdotal
-- **Where:** `tests/test_performance_budgets.py:12-34`, `benchmark.py:69-105`
-- **What's wrong:** There is one loose replay-buffer budget and a rich manual benchmark script, but no tracked benchmark artifact or trend gate for training throughput, vectorized stepping, dashboard payload size, or chart rendering.
-- **Impact:** Moderate - performance regressions could land gradually without a clear signal.
-- **Fix:** Add a small benchmark target that records replay sampling, single-env step, vectorized step, and dashboard snapshot serialization timings. Store thresholds conservatively and run the quick version in CI.
-- **Effort:** M
-- **Grade lift:** B+ -> A- (protects the project's performance-oriented features)
+#### D4 - Keep compatibility tests for checkpoint schema as first-class contracts
+- **Where:** `tests/test_agent_persistence_contracts.py:1`, `src/ai/agent_persistence.py:17`
+- **What's wrong:** Recent tests cover many save/load behaviors, but this file should become the required landing zone for any checkpoint schema change. Otherwise future feature work may bypass the contract.
+- **Impact:** Minor - current state is good, but the risk returns when new metadata/replay fields are added.
+- **Fix:** Add a short comment/docstring in the test file listing which schema changes require new contract tests. Do not rely only on round-trip tests.
+- **Effort:** S
+- **Grade lift:** A- -> A (preserves the hardening work already done)
 
 ---
 
 ## E - Security - B
 
-The local dashboard has meaningful protections: session tokens are generated with `secrets.token_urlsafe`, HTTP APIs and Socket.IO controls are token-gated, model IDs are opaque, checkpoint paths are constrained, PyTorch restricted loading is tried first, CodeQL is enabled, and dependency audit runs. This is solid for a trusted local training app. The grade is capped by token-in-URL ergonomics, `unsafe-inline` CSP, lack of rate limiting, and an intentional ignored torch advisory.
+Security is reasonable for a local training dashboard. Token auth, no-referrer headers, opaque model IDs, restricted PyTorch checkpoint loading, CodeQL, dependency review, pip audit, and npm audit are all in place. The cap is browser-side hardening: query-string tokens and `unsafe-inline` CSP remain.
 
-#### E1 - Remove `unsafe-inline` from the dashboard CSP
-- **Where:** `src/web/server.py:34-44`, `src/web/templates/dashboard.html:12`, `src/web/templates/dashboard.html:14-16`
-- **What's wrong:** The CSP currently allows inline scripts and inline styles. That is partly needed by the inline token assignment and template style patterns, but it weakens the XSS blast-radius protection.
-- **Impact:** Moderate - CSP is one of the strongest defenses if future dashboard rendering accidentally injects unsafe HTML.
-- **Fix:** Move the inline token bootstrap to a data/meta read path, remove inline style dependencies where practical, serve all scripts from `self`, and update tests to assert no `unsafe-inline` remains.
-- **Effort:** M
-- **Grade lift:** B -> B+ (tightens browser-side containment)
-
-#### E2 - Replace query-string dashboard tokens with a less leaky bootstrap
-- **Where:** `src/web/server.py:202-214`, `src/web/routes.py:51-76`, `README.md:613-619`
-- **What's wrong:** The dashboard URL includes `?token=...`. The app sets no-referrer headers, but query tokens still land in browser history, copied URLs, local terminal output, and potentially logs.
-- **Impact:** Moderate - LAN dashboard use is documented, and leaked tokenized URLs grant control access until the session ends.
-- **Fix:** Keep the first open URL as a one-time bootstrap token, set an HttpOnly/SameSite session cookie, redirect to `/`, and require the cookie or header thereafter. Keep `NN_GAME_DASHBOARD_TOKEN` for automation.
+#### E1 - Replace query-string dashboard tokens with cookie bootstrap
+- **Where:** `src/web/server.py:147`, `src/web/server.py:183`, `src/web/routes.py:65`
+- **What's wrong:** Dashboard URLs include `?token=...`. The no-referrer header helps, but tokenized URLs still appear in browser history, terminal output, copied links, and local logs.
+- **Impact:** Moderate - LAN dashboard mode is supported, and leaked tokens grant mutating control until the session ends.
+- **Fix:** Use a one-time bootstrap URL to set an HttpOnly/SameSite cookie, then redirect to `/` without the query token. Keep header token support for automation.
 - **Effort:** M
 - **Grade lift:** B -> B+ (reduces accidental credential leakage)
 
-#### E3 - Add basic throttling for mutating controls
-- **Where:** `src/web/server.py:345-360`, `src/web/socket_controls.py:285-321`, `src/web/routes.py:160-183`
-- **What's wrong:** Authorized controls can be called repeatedly without rate limiting or per-action cooldowns. The dashboard is local/trusted by design, but actions like save, delete, start fresh, and restart have filesystem or process impact.
-- **Impact:** Minor - token auth is the main control, but throttling would limit mistakes, scripts, or repeated clicks.
-- **Fix:** Add a small per-token/per-action cooldown for destructive controls and return stable 429/ack errors. Cover save/delete/start-fresh/restart behavior in socket and route tests.
+#### E2 - Remove `unsafe-inline` from CSP after vendoring browser assets
+- **Where:** `src/web/server.py:31`, `src/web/templates/dashboard.html:9`
+- **What's wrong:** The CSP allows inline scripts/styles and external CDN script sources. This weakens the containment value of CSP if a future dashboard render path mishandles HTML.
+- **Impact:** Moderate - CSP is a useful backstop for the dashboard's dynamic UI.
+- **Fix:** Move token bootstrap to meta/data attributes or cookies, vendor Chart.js/Socket.IO assets locally, remove inline style/script dependencies, and update CSP tests.
 - **Effort:** M
-- **Grade lift:** B -> B+ (adds defense in depth around mutating controls)
+- **Grade lift:** B -> B+ (hardens the browser surface)
 
-#### E4 - Add an expiration policy for the ignored torch advisory
-- **Where:** `Makefile:20-23`, `README.md:662`, `constraints.txt:20`
-- **What's wrong:** `pip-audit` intentionally ignores `CVE-2025-3000` because no patched torch release is available. The reason is documented, but there is no date, owner, or automated reminder to remove the ignore when a fixed torch exists.
-- **Impact:** Moderate - ignored advisories can become invisible long-term debt.
-- **Fix:** Add a short allowlist file with vulnerability ID, package, rationale, date added, review-by date, and upstream status. Make the audit helper print or fail when the review date expires.
+#### E3 - Add basic cooldowns for destructive dashboard controls
+- **Where:** `src/web/socket_controls.py:285`, `src/web/routes.py:160`, `src/web/server.py:332`
+- **What's wrong:** Tokenized control APIs can be spammed without rate limiting. This is acceptable for local use but weak for LAN use or accidental repeated clicks.
+- **Impact:** Minor - token auth is the main protection, but cooldowns would reduce damage from mistakes.
+- **Fix:** Add per-token/per-action cooldowns for save, delete, start-fresh, restart, and load-model controls. Return stable 429 HTTP responses or socket ack errors.
 - **Effort:** S
-- **Grade lift:** B -> B+ (keeps a known security exception accountable)
+- **Grade lift:** B -> B+ (small resilience gain)
 
 ---
 
 ## F - Dependencies & Tech Currency - B+
 
-Dependency hygiene is good: package metadata lives in `pyproject.toml`, reproducible pins live in `constraints.txt`, the compatibility `requirements.txt` installs extras, Dependabot covers pip and GitHub Actions, dependency review runs on PRs, and `pip-audit` plus `npm audit` pass apart from the documented torch advisory ignore. The main gap is process hardening around upgrades and Node audit automation.
+Dependency health is good. Python dependencies are capped, CI tests Python 3.11/3.12, package builds pass, pip audit passes with an intentional torch CVE waiver, npm audit returns 0 vulnerabilities, CodeQL runs, and Dependabot is configured. The remaining work is mostly around making the one known torch advisory and Node 24 requirement easier to manage.
 
-#### F1 - Add a constraints refresh and upgrade playbook
-- **Where:** `pyproject.toml:5-37`, `constraints.txt:1-22`, `requirements.txt:1-8`
-- **What's wrong:** Runtime dependency ranges and pinned constraints are present, but there is no documented command for regenerating pins, testing upgrades, or deciding when to move Python/Node ranges forward.
-- **Impact:** Moderate - dependency freshness will depend on ad hoc updates instead of a repeatable process.
-- **Fix:** Add `docs/dependencies.md` or a Make target documenting how to regenerate `constraints.txt`, run `make verify`, run `npm audit`, and review torch/CUDA/PyTorch compatibility.
+#### F1 - Track the intentional torch advisory as a dated work item
+- **Where:** `Makefile:23`, `.github/scripts/run_dependency_audit.py:1`
+- **What's wrong:** `CVE-2025-3000` is intentionally ignored because there is no patched torch release. The Makefile includes a TODO date, but the decision should also live in a dependency risk note or issue.
+- **Impact:** Moderate - ignored CVEs can become stale if not revisited.
+- **Fix:** Add a short dependency-risk note linking the ignore, its reason, and the recheck date. Remove the waiver as soon as a patched torch release is available.
 - **Effort:** S
-- **Grade lift:** B+ -> A- (makes future upgrades predictable)
+- **Grade lift:** B+ -> A- (keeps security debt visible)
 
-#### F2 - Automate Node audit in the main verification path
-- **Where:** `package.json:5-12`, `Makefile:20-23`, `.github/workflows/ci.yml:54-66`
-- **What's wrong:** `npm audit --audit-level=moderate` passes, but it is not part of `make verify` or CI. The frontend dependency surface is tiny, so the cost is low.
-- **Impact:** Minor - JS dependency risk is low today, but easy automation is missing.
-- **Fix:** Add `node-audit` and include it in `make verify` and CI after `npm ci` or equivalent setup.
+#### F2 - Make Node 24 requirement explicit in setup docs and CI expectations
+- **Where:** `package.json:9`, `README.md:129`, `.github/workflows/ci.yml:28`
+- **What's wrong:** `package.json` requires Node 24. CI installs it, but the README setup section only calls out Python prerequisites before `make setup`.
+- **Impact:** Minor - local dashboard test setup can fail confusingly on older Node versions.
+- **Fix:** Add Node 24 to prerequisites and bootstrap error messaging.
 - **Effort:** S
-- **Grade lift:** B+ -> A- (closes a cheap dependency-audit gap)
+- **Grade lift:** B+ -> A- (smooths local setup)
 
-#### F3 - Separate legacy full-dev install from runtime install guidance
-- **Where:** `requirements.txt:1-8`, `pyproject.toml:23-37`, `README.md:656-660`
-- **What's wrong:** `pip install -r requirements.txt -c constraints.txt` installs `.[web,test,dev]` for compatibility. That is convenient, but it blurs runtime, web, test, and dev dependencies for users who only want to run the game.
-- **Impact:** Minor - larger installs increase setup time and dependency exposure.
-- **Fix:** Keep `requirements.txt` as a dev compatibility shim, but document `pip install .`, `pip install .[web]`, and `pip install -r requirements.txt -c constraints.txt` as separate runtime/web/dev paths.
+#### F3 - Keep constraints and pyproject dependency ranges synchronized
+- **Where:** `requirements.txt:1`, `constraints.txt:1`, `pyproject.toml:10`
+- **What's wrong:** The project uses both install requirements and package metadata dependency ranges. This is fine, but drift can cause local dev, CI, and package users to test different dependency sets.
+- **Impact:** Minor - dependency drift is a recurring source of hard-to-reproduce test failures.
+- **Fix:** Add a small script/check that verifies each runtime dependency appears consistently in `requirements.txt` and `pyproject.toml`, with constraints only pinning where intended.
 - **Effort:** S
-- **Grade lift:** B+ -> A- (sharpens install intent without code churn)
+- **Grade lift:** B+ -> A- (prevents dependency metadata drift)
 
 ---
 
 ## G - Performance & Scalability - B+
 
-The project has real performance thinking: replay buffers use contiguous arrays, performance modes are explicit, vectorized environments exist for multiple games, metrics and NN visualization are throttled, dashboard charts downsample, and a benchmark script exists. The remaining work is mostly about bounding payload growth and making performance claims enforceable in CI.
+Performance is a real strength for the project: vectorized envs, replay sampling budgets, dashboard payload limits, status-session heartbeats, live metrics, and artifact validation all support fast iteration. The remaining need is trend visibility so regressions are caught before long NN runs are wasted.
 
-#### G1 - Bound initial dashboard history payloads
-- **Where:** `src/web/metrics_publisher.py:52-67`, `src/web/metrics_publisher.py:336-348`, `src/web/static/dashboard_charts.js:736-750`
-- **What's wrong:** `get_snapshot()` sends the full retained history arrays to clients, and the configured history length is 100000 episodes. This is acceptable in many local runs but can become expensive for long training sessions and reconnects.
-- **Impact:** Moderate - long-running sessions can pay large serialization, transfer, and chart-update costs at connection time.
-- **Fix:** Add query/options for recent-window snapshots, send compact summary stats by default, and let the frontend request older history pages only when the user scrolls back.
+#### G1 - Add a repeatable NN-run smoke benchmark before full experiments
+- **Where:** `experiments/cc_status_session.py:1`, `experiments/cc_status/training.py:123`, `tests/test_performance_budgets.py:1`
+- **What's wrong:** There are performance tests for replay sampling and dashboard snapshot size, but no quick benchmark that catches NN training-loop throughput regressions before launching multi-hour sessions.
+- **Impact:** Major - slowdowns in vector env stepping, replay sampling, or dashboard metrics can waste expensive experiment time.
+- **Fix:** Add a `make nn-smoke-benchmark` target that runs a tiny status-session recipe and records steps/sec, replay size, loss samples, live metrics writes, and artifact validation time. Store conservative thresholds.
 - **Effort:** M
-- **Grade lift:** B+ -> A- (keeps dashboard cost bounded during long training)
+- **Grade lift:** B+ -> A- (protects the most expensive workflow)
 
-#### G2 - Make vectorized environments truly vectorized where feasible
-- **Where:** `src/game/space_invaders_vec.py:95-148`, `src/game/asteroids_vec.py:49-75`, `src/game/base_game.py:214-243`
-- **What's wrong:** Vectorized environment classes still loop over individual game objects in Python. That is a useful batching boundary for action selection and replay insertion, but it is not true vectorized physics/collision computation.
-- **Impact:** Moderate - high `--vec-envs` settings will eventually hit Python loop overhead.
-- **Fix:** Start with one game, likely Breakout or Space Invaders, and move state arrays, collision checks, and reward updates into batched NumPy operations. Keep the current object-loop implementation as a compatibility fallback.
-- **Effort:** L
-- **Grade lift:** B+ -> A- (unlocks the next training-throughput tier)
+#### G2 - Bound dashboard NN payloads the same way history payloads are bounded
+- **Where:** `src/web/metrics_publisher.py:156`, `src/web/metrics_publisher_nn.py:13`, `src/web/static/dashboard_nn.js:1`
+- **What's wrong:** History snapshots are bounded and tested, but NN inspection payloads can grow as more activations/layer metadata are exposed.
+- **Impact:** Moderate - dashboard updates can become a hidden training slowdown.
+- **Fix:** Add explicit caps for layer/neuron/action inspection arrays and a payload-size performance test.
+- **Effort:** S
+- **Grade lift:** B+ -> A- (prevents frontend instrumentation from hurting training)
 
-#### G3 - Gate quick performance budgets in CI
-- **Where:** `tests/test_performance_budgets.py:12-34`, `benchmark.py:69-105`, `src/web/static/dashboard_nn.js:214-236`
-- **What's wrong:** Performance-sensitive code has optimizations and manual benchmarks, but CI only has one loose replay-buffer budget. Dashboard render timing and training throughput are not tracked over time.
-- **Impact:** Moderate - performance regressions can land slowly and only be noticed during real training.
-- **Fix:** Add a `make perf-smoke` target with conservative budgets for replay sampling, vectorized stepping, dashboard snapshot serialization, and NN canvas update model generation. Run it on changed performance-sensitive files.
-- **Effort:** M
-- **Grade lift:** B+ -> A- (turns performance expectations into a repeatable signal)
+#### G3 - Keep artifact size budgets for experiment outputs
+- **Where:** `.Codex/artifacts/`, `experiments/cc_status/artifacts.py:1`, `CC_NN_CLEANUP_AUDIT.md:1`
+- **What's wrong:** The cleanup removed replay-heavy checkpoint bloat, but future runs can still accidentally write huge full checkpoints or redundant traces.
+- **Impact:** Moderate - artifact bloat slows comparisons and makes future sessions harder to reason about.
+- **Fix:** Add artifact validation warnings for total artifact size, full replay checkpoint presence in rejected runs, and excessive JSONL trace size. Keep selected-checkpoint-only as the default.
+- **Effort:** S
+- **Grade lift:** B+ -> A- (preserves the cleaned experiment workflow)
 
 ---
 
-## H - Documentation & Onboarding - B
+## H - Documentation & Onboarding - B+
 
-The README is thorough, `docs/architecture.md` is current and helpful, and the Makefile exposes practical validation commands. The main issue is stale or noisy docs: the README still shows older project structure and extension steps in places, while multiple historical bug/planning reports remain at the root.
+Documentation is much stronger than typical for an experimental RL repo. The Crystal Caves handoff, experiment tracker, metrics review, cleanup audit, and extension architecture all capture hard-earned decisions. The downside is that there are now many overlapping docs, and the root README still reflects the older general arcade-game project more than the current Crystal Caves NN workflow.
 
-#### H1 - Update stale README architecture and extension sections
-- **Where:** `README.md:34-77`, `README.md:666-703`, `docs/architecture.md:13-37`
-- **What's wrong:** The README's project tree and "Extending to Other Games" section still describe older structure and say to register games in config, while the real registry lives in `src/game/__init__.py`.
-- **Impact:** Moderate - new contributors can follow outdated extension guidance and make changes in the wrong place.
-- **Fix:** Replace the old tree with the current app/web/game/AI layout and update extension docs to use `BaseGame`, `GAME_REGISTRY`, vectorized optional support, and matching tests.
+#### H1 - Create one current "start here for Crystal Caves NN" index
+- **Where:** `CC_NN_HANDOFF.md:1`, `CC_NN_EXPERIMENT_TRACKER.md:1`, `CC_NN_EXTENSION_ARCHITECTURE.md:1`, `CC_NN_CLEANUP_AUDIT.md:1`
+- **What's wrong:** The documentation is valuable but scattered. A future AI or human can easily read the wrong doc first and repeat archived work.
+- **Impact:** Major - repeated failed NN ideas are one of the project's biggest time costs.
+- **Fix:** Add `CC_NN_START_HERE.md` that links the current baseline, promotion gate, recipe commands, no-repeat list, and next recommended experiment. Keep it short and update it after each promoted baseline.
 - **Effort:** S
-- **Grade lift:** B -> B+ (removes the biggest onboarding mismatch)
+- **Grade lift:** B+ -> A- (makes future sessions faster and less error-prone)
 
-#### H2 - Move historical bug and planning reports into an archive
-- **Where:** `30_BUGS_LIST.md`, `30_MORE_BUGS_LIST.md`, `BUGS_AND_IMPROVEMENTS.md`, `POTENTIAL_BUGS.md`, `PLANNING.md`, `PHASE1_IMPLEMENTATION_SUMMARY.md`, `PHASE2_BACKEND_SUMMARY.md`, `PROGRESS_REPORT.md`
-- **What's wrong:** The repo root contains many historical audit/planning artifacts alongside active setup files. They are useful context, but they make it harder to identify the canonical docs.
-- **Impact:** Minor - onboarding feels noisier than the current code quality deserves.
-- **Fix:** Move historical reports to `docs/archive/` and add a short `docs/archive/README.md` that explains what is historical versus current.
+#### H2 - Update README project structure for the current architecture
+- **Where:** `README.md:31`, `README.md:48`, `README.md:129`
+- **What's wrong:** The README still presents the older simple structure with core files like `agent.py`, `network.py`, and `trainer.py`, but the current repo has web services, app runtimes, Crystal Caves modules, status-session experiments, and architecture docs.
+- **Impact:** Moderate - onboarding through README does not match the actual codebase shape.
+- **Fix:** Replace the old tree with the current domain layout and add a Crystal Caves experiment workflow subsection pointing to `CC_NN_START_HERE.md`.
 - **Effort:** S
-- **Grade lift:** B -> B+ (makes the repo easier to scan)
+- **Grade lift:** B+ -> A- (aligns public docs with current reality)
 
-#### H3 - Expand architecture docs for persistence, dashboard auth, and release flow
-- **Where:** `docs/architecture.md:29-50`, `README.md:613-662`, `.github/workflows/release.yml:1-88`
-- **What's wrong:** `docs/architecture.md` gives a good map, but it does not explain important contracts such as checkpoint trust boundaries, opaque model IDs, dashboard token flow, release/versioning behavior, or dependency-audit exceptions.
-- **Impact:** Moderate - contributors can miss the hidden contracts that matter most for safe changes.
-- **Fix:** Add sections for checkpoint lifecycle, dashboard auth/control flow, release automation, dependency audit exceptions, and validation lanes. Link each section to the owning files and tests.
+#### H3 - Mark archived/negative experiments as machine-readable recipes or retired notes
+- **Where:** `CC_NN_EXPERIMENT_TRACKER.md:16`, `docs/cc_nn_experiment_tracker/`, `experiments/cc_status/recipes.py`
+- **What's wrong:** The no-repeat decisions are documented in prose. That is useful, but not as enforceable as recipe metadata that marks an idea as promoted, diagnostic, retired, or blocked.
+- **Impact:** Moderate - future sessions may reintroduce failed settings because the code still supports them.
+- **Fix:** Add status metadata to recipes/experiment descriptors and generate a short no-repeat table into docs.
 - **Effort:** M
-- **Grade lift:** B -> B+ (documents the non-obvious system contracts)
-
-#### H4 - Add a short contributor workflow doc
-- **Where:** `README.md:623-662`, `Makefile:1-49`, `.github/workflows/ci.yml:1-75`
-- **What's wrong:** Developer commands exist, but there is no compact contributor guide that says which command to run for a one-line docs change, a Python change, a dashboard change, or a release-sensitive change.
-- **Impact:** Minor - contributors may over-run or under-run checks.
-- **Fix:** Add `CONTRIBUTING.md` with setup, branch naming, validation matrix, PR title convention, and when to run dashboard smoke.
-- **Effort:** S
-- **Grade lift:** B -> B+ (turns the existing tooling into a clearer workflow)
+- **Grade lift:** B+ -> A- (turns documentation into workflow guardrails)
 
 ---
 
 ## I - Developer Experience & Tooling - A-
 
-The tooling is strong: `make verify` is meaningful, CI runs Python 3.11 and 3.12, release config is validated, package build is checked, file size is gated, repo hygiene is checked, PR title lint supports semantic release, CodeQL and dependency review are enabled, and helper scripts self-install ruff/pip-audit when needed. The main limitations are stricter typing, browser smoke automation, and local bootstrap polish.
+DevEx is one of the strongest areas now. `make verify` is comprehensive, CI mirrors the important checks, file-size limits are enforced, pre-commit exists, tests are broad, package builds pass, and the experiment runner produces validated artifacts. The remaining work is packaging the current dirty tree and adding a few NN-specific fast lanes.
 
-#### I1 - Ratchet mypy strictness by package
-- **Where:** `mypy.ini:1-7`, `src/web/routes.py:33-214`, `src/web/server.py:123-190`
-- **What's wrong:** Mypy passes, but untyped function bodies are not checked. The live run reported notes for route payload annotations, showing that static checking is not yet as strict as the docs imply.
-- **Impact:** Moderate - type drift can hide in route and callback bodies.
-- **Fix:** Add package-specific mypy sections: start with `check_untyped_defs = True` for `src/web` and `src/app`, then move toward `disallow_untyped_defs = True` for small helper modules.
+#### I1 - Stabilize the current architecture branch into a reviewable PR
+- **Where:** `git status`, `CC_NN_CLEANUP_AUDIT.md:1`, `.Codex/grade-report.md:1`
+- **What's wrong:** The working tree has many modified and untracked files from valuable architecture, metrics, docs, and experiment-runner work. The code verifies, but it is not yet packaged into a clean review unit.
+- **Impact:** Major - starting new NN experiments before stabilizing this branch risks mixing architecture changes with result changes.
+- **Fix:** Do one PR-prep pass: group changes by durable area, ensure generated artifacts stay ignored, update start-here docs, run `make verify`, then commit/push/open PR. Do not add new NN method changes into the same review.
 - **Effort:** M
-- **Grade lift:** A- -> A (makes type checking match the project's maturity)
+- **Grade lift:** A- -> A (turns validated local work into durable project state)
 
-#### I2 - Add a one-command dev bootstrap
-- **Where:** `README.md:656-660`, `package.json:5-12`, `pyproject.toml:23-37`
-- **What's wrong:** Setup instructions are clear, but there is no `make setup` or script that installs Python constraints plus Node dependencies and verifies the selected Python/Node versions.
-- **Impact:** Minor - first-time setup still requires manual command ordering.
-- **Fix:** Add `make setup` or `scripts/bootstrap_dev.py` that checks Python 3.10-3.12, installs `requirements.txt -c constraints.txt`, runs `npm install`, and prints the next validation command.
+#### I2 - Add fast NN-specific make targets
+- **Where:** `Makefile:1`, `experiments/cc_status/recipes.py`, `tests/test_cc_status_session.py:1`
+- **What's wrong:** `make verify` is excellent but broad. New NN methods need a faster preflight that runs provider tests, recipe expansion, one-episode smoke, artifact validation, and selected checkpoint inspection.
+- **Impact:** Moderate - developers may skip expensive checks or run overly broad checks during rapid NN iteration.
+- **Fix:** Add `make nn-smoke`, `make nn-provider-test`, and `make cc-status-smoke` targets that call the relevant tests/recipes with the standard Python path.
 - **Effort:** S
-- **Grade lift:** A- -> A (smooths onboarding without changing runtime code)
+- **Grade lift:** A- -> A (improves iteration speed for the next phase)
 
-#### I3 - Add pre-commit hooks for cheap checks
-- **Where:** `Makefile:1-49`, `.github/workflows/ci.yml:37-66`
-- **What's wrong:** CI and Make targets are good, but there is no pre-commit configuration for black, ruff, source-size, and basic hygiene. Developers can discover cheap failures only after running larger gates.
-- **Impact:** Minor - local feedback can be faster for frequent edits.
-- **Fix:** Add `.pre-commit-config.yaml` or a lightweight `make precommit` target using existing commands. Keep it optional, but document it in `CONTRIBUTING.md`.
-- **Effort:** S
-- **Grade lift:** A- -> A (improves the local edit loop)
+#### I3 - Ratchet type checks onto `experiments/cc_status`
+- **Where:** `mypy.ini:1`, `experiments/cc_status/*.py`
+- **What's wrong:** The core app is type-checked, but experiment modules still use many `Any`, `noqa`, and dynamic dict payloads. That is understandable for fast research, but the runner is now important infrastructure.
+- **Impact:** Moderate - experiment result bugs are expensive because they can invalidate runs without failing app tests.
+- **Fix:** Add a gradual mypy target for `experiments/cc_status` starting with artifact/recipe/promotion modules, then expand to run modes after shared lifecycle helpers land.
+- **Effort:** M
+- **Grade lift:** A- -> A (makes experiment infrastructure more trustworthy)

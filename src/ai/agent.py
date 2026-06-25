@@ -37,15 +37,18 @@ from torch.optim.lr_scheduler import _LRScheduler
 
 from config import Config
 
+from .agent_experiments import AgentExperimentMixin
 from .agent_metadata import SaveMetadata, TrainingHistory
 from .agent_persistence import AgentPersistenceMixin
+from .extension_contracts import AuxiliaryLossContribution, AuxiliaryLossProvider
 from .network import DQN, DuelingDQN, SpatialDQN
+from .prioritized_n_step import PrioritizedNStepReplayBuffer
 from .replay_buffer import PrioritizedReplayBuffer, ReplayBuffer
 
 __all__ = ["Agent", "SaveMetadata", "TrainingHistory"]
 
 
-class Agent(AgentPersistenceMixin):
+class Agent(AgentExperimentMixin, AgentPersistenceMixin):
     """
     DQN Agent for reinforcement learning.
 
@@ -72,9 +75,9 @@ class Agent(AgentPersistenceMixin):
 
     # Type annotations for instance variables
     # Note: torch.compile() wraps the network but preserves the interface at runtime
-    policy_net: Union[DQN, DuelingDQN]
-    target_net: Union[DQN, DuelingDQN]
-    memory: Union[ReplayBuffer, PrioritizedReplayBuffer]
+    policy_net: Union[DQN, DuelingDQN, SpatialDQN]
+    target_net: Union[DQN, DuelingDQN, SpatialDQN]
+    memory: Union[ReplayBuffer, PrioritizedReplayBuffer, PrioritizedNStepReplayBuffer]
 
     def __init__(self, state_size: int, action_size: int, config: Optional[Config] = None):
         """
@@ -152,28 +155,35 @@ class Agent(AgentPersistenceMixin):
         # Track if using NoisyNets for exploration (disables epsilon-greedy)
         self._use_noisy_nets = getattr(self.config, "USE_NOISY_NETWORKS", False)
 
-        # Replay buffer - prioritize N-step > PER > basic
+        # Replay buffer
         use_n_step = getattr(self.config, "USE_N_STEP_RETURNS", False)
         self._use_per = False  # Default to False, set True only if using PER
 
         if use_n_step:
-            # N-step buffer doesn't support PER currently — surface the silent
-            # downgrade so the config (which advertises both) doesn't mislead.
             from src.ai.replay_buffer import NStepReplayBuffer
 
             n_steps = getattr(self.config, "N_STEP_SIZE", 3)
-            self.memory = NStepReplayBuffer(
-                capacity=self.config.MEMORY_SIZE,
-                state_size=state_size,
-                n_steps=n_steps,
-                gamma=self.config.GAMMA,
-            )
-            print(f"✓ N-step returns enabled (n={n_steps})")
             if getattr(self.config, "USE_PRIORITIZED_REPLAY", False):
-                print(
-                    "⚠️  Prioritized Experience Replay is DISABLED: the N-step buffer "
-                    "does not support PER yet (N-step takes precedence)."
+                self._use_per = True
+                self.memory = PrioritizedNStepReplayBuffer(
+                    capacity=self.config.MEMORY_SIZE,
+                    state_size=state_size,
+                    n_steps=n_steps,
+                    gamma=self.config.GAMMA,
+                    alpha=getattr(self.config, "PER_ALPHA", 0.6),
+                    beta_start=getattr(self.config, "PER_BETA_START", 0.4),
+                    beta_end=1.0,
+                    beta_frames=getattr(self.config, "PER_BETA_FRAMES", 100000),
                 )
+                print(f"✓ N-step prioritized replay enabled (n={n_steps})")
+            else:
+                self.memory = NStepReplayBuffer(
+                    capacity=self.config.MEMORY_SIZE,
+                    state_size=state_size,
+                    n_steps=n_steps,
+                    gamma=self.config.GAMMA,
+                )
+                print(f"✓ N-step returns enabled (n={n_steps})")
         elif getattr(self.config, "USE_PRIORITIZED_REPLAY", False):
             # Prioritized Experience Replay
             self._use_per = True
@@ -220,7 +230,23 @@ class Agent(AgentPersistenceMixin):
 
         # Training metrics (bounded to prevent memory growth during long training)
         self.losses: deque[float] = deque(maxlen=10000)
+        self.route_aux_losses: deque[float] = deque(maxlen=10000)
+        self.route_aux_accuracies: deque[float] = deque(maxlen=10000)
+        self.demo_action_losses: deque[float] = deque(maxlen=10000)
+        self.demo_conservative_losses: deque[float] = deque(maxlen=10000)
+        self.demo_action_accuracies: deque[float] = deque(maxlen=10000)
+        self.close_zone_demo_action_losses: deque[float] = deque(maxlen=10000)
+        self.close_zone_demo_action_accuracies: deque[float] = deque(maxlen=10000)
+        self.correction_action_losses: deque[float] = deque(maxlen=10000)
+        self.correction_action_accuracies: deque[float] = deque(maxlen=10000)
         self._losses_lock = threading.Lock()  # Thread safety for concurrent reads/writes
+        self._demo_action_states: Optional[torch.Tensor] = None
+        self._demo_action_actions: Optional[torch.Tensor] = None
+        self._close_zone_demo_action_states: Optional[torch.Tensor] = None
+        self._close_zone_demo_action_actions: Optional[torch.Tensor] = None
+        self._correction_action_states: Optional[torch.Tensor] = None
+        self._correction_action_actions: Optional[torch.Tensor] = None
+        self._extra_auxiliary_loss_providers: list[AuxiliaryLossProvider] = []
 
         # Track whether last action was exploration (for accurate metrics)
         self._last_action_explored: bool = False
@@ -545,7 +571,7 @@ class Agent(AgentPersistenceMixin):
         # Sample batch - different path for PER vs uniform
         if self._use_per:
             # PER sampling returns indices and importance sampling weights
-            assert isinstance(self.memory, PrioritizedReplayBuffer)
+            assert isinstance(self.memory, (PrioritizedReplayBuffer, PrioritizedNStepReplayBuffer))
             (
                 states_np,
                 actions_np,
@@ -634,6 +660,11 @@ class Agent(AgentPersistenceMixin):
         else:
             loss = nn.SmoothL1Loss()(current_q, target_q)
 
+        auxiliary_contributions = self._auxiliary_loss_contributions(states)
+        for contribution in auxiliary_contributions:
+            if contribution.weight != 0.0:
+                loss = loss + contribution.weighted_loss()
+
         # Optimize (outside autocast for numerical stability)
         self.optimizer.zero_grad()
         loss.backward()
@@ -650,15 +681,30 @@ class Agent(AgentPersistenceMixin):
 
         # Update PER priorities with TD errors
         if self._use_per and indices is not None:
-            assert isinstance(self.memory, PrioritizedReplayBuffer)
+            assert isinstance(self.memory, (PrioritizedReplayBuffer, PrioritizedNStepReplayBuffer))
             self.memory.update_priorities(indices, td_errors.abs().cpu().numpy())
 
         # Store loss for metrics (thread-safe)
         loss_value = loss.item()
         with self._losses_lock:
             self.losses.append(loss_value)
+            self._append_auxiliary_metrics_locked(auxiliary_contributions)
 
         return loss_value
+
+    def _append_auxiliary_metrics_locked(
+        self, contributions: tuple[AuxiliaryLossContribution, ...]
+    ) -> None:
+        """Append auxiliary metrics while ``_losses_lock`` is already held."""
+        for contribution in contributions:
+            for metric in contribution.metrics:
+                history = getattr(self, metric.history, None)
+                if history is None or not hasattr(history, "append"):
+                    raise AttributeError(
+                        f"Auxiliary loss '{contribution.name}' emitted unknown "
+                        f"metric history '{metric.history}'"
+                    )
+                history.append(metric.value)
 
     def _compute_q_values(
         self,

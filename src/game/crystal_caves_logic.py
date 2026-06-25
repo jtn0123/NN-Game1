@@ -91,10 +91,36 @@ class CrystalCavesLogicMixin:
             self.player_y = next_y
             remaining -= step
 
+    def _invalid_shoot_penalty(self: Any) -> float:
+        if not getattr(self.config, "CRYSTAL_CAVES_INVALID_SHOOT_PENALTY", False):
+            return 0.0
+        self._invalid_shoot_count += 1
+        self._invalid_shoot_total += self.INVALID_SHOOT_PENALTY
+        return self.INVALID_SHOOT_PENALTY
+
+    def _shot_has_plausible_target(self: Any) -> bool:
+        direction = 1 if self.facing >= 0 else -1
+        start_x = self.player_x + (self.PLAYER_WIDTH if direction > 0 else -8)
+        start_y = self.player_y + self.PLAYER_HEIGHT * 0.45
+        max_range = self.TILE_SIZE * 10
+        left = start_x if direction > 0 else start_x - max_range
+        corridor = pygame.Rect(int(left), int(start_y - 8), int(max_range), 16)
+
+        for enemy in self.enemies:
+            if enemy.alive and corridor.colliderect(enemy.rect):
+                return True
+
+        for tank in self.air_tanks:
+            if corridor.colliderect(self._tile_rect(tank)):
+                return True
+
+        return False
+
     def _try_shoot(self: Any) -> float:
         if self.shoot_cooldown > 0 or self.ammo <= 0:
-            return -0.03
+            return -0.03 + self._invalid_shoot_penalty()
 
+        has_target = self._shot_has_plausible_target()
         self.ammo -= 1
         self.shoot_cooldown = self.SHOOT_COOLDOWN
         self.audio.play("shoot")
@@ -120,11 +146,15 @@ class CrystalCavesLogicMixin:
         if not self.grounded:
             self.vx -= 0.35 * self.facing
 
-        return -0.01
+        reward = -0.01
+        if not has_target:
+            reward += self._invalid_shoot_penalty()
+        return reward
 
     def _try_interact(self: Any) -> float:
         reward = 0.0
         player_col, player_row = self._player_tile()
+        penalize_invalid = getattr(self.config, "CRYSTAL_CAVES_INVALID_INTERACT_PENALTY", False)
         for switch in self.switches:
             col, row = switch
             if abs(col - player_col) <= 1 and abs(row - player_row) <= 1:
@@ -140,22 +170,40 @@ class CrystalCavesLogicMixin:
                             self._add_tile_event(door, "sparkle", "OPEN", EGA["G"], ttl=42)
                     self._mark_progress()
                     self.audio.play("switch")
+                elif penalize_invalid:
+                    reward += self.INVALID_INTERACT_PENALTY
+                    self._invalid_interact_count += 1
+                    self._invalid_interact_total += self.INVALID_INTERACT_PENALTY
                 else:
                     reward += 0.05
                 break
+        else:
+            if penalize_invalid:
+                reward += self.INVALID_INTERACT_PENALTY
+                self._invalid_interact_count += 1
+                self._invalid_interact_total += self.INVALID_INTERACT_PENALTY
         return reward
 
     def _collect_pickups(self: Any) -> float:
         reward = 0.0
         touched_tiles = self._tiles_for_rect(self._player_rect())
+        collected_crystal = False
 
         for tile in list(self.crystals.intersection(touched_tiles)):
             self.crystals.remove(tile)
             self.score += 100
             reward += 5.0
+            collected_crystal = True
             self._add_tile_event(tile, "sparkle", "+100", EGA["Y"], ttl=34)
             self._mark_progress()
             self.audio.play("gem")
+
+        if collected_crystal and getattr(self.config, "CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL", False):
+            self.game_over = True
+            self.won = True
+            self._end_reason = "first_crystal_goal"
+            reward += self.FIRST_CRYSTAL_GOAL_BONUS
+            return reward
 
         if not self.crystals and not self.exit_unlocked:
             self.exit_unlocked = True
@@ -446,6 +494,56 @@ class CrystalCavesLogicMixin:
         reward = (improvement / self.TILE_SIZE) * self.TARGET_BEST_APPROACH_SCALE * multiplier
         self._mark_progress()
         return float(np.clip(reward, 0.0, self.TARGET_BEST_APPROACH_CAP))
+
+    def _anti_loop_penalty(
+        self: Any,
+        previous_target: Optional[Tuple[str, int, int]],
+        previous_distance: float,
+    ) -> float:
+        """Penalize repeated no-progress tile loops during opt-in experiments."""
+        if not getattr(self.config, "CRYSTAL_CAVES_ANTI_LOOP_REWARD", False):
+            return 0.0
+        if self.game_over or previous_target is None or not np.isfinite(previous_distance):
+            return 0.0
+
+        current_target, current_distance = self._current_target()
+        if current_target != previous_target or not np.isfinite(current_distance):
+            self._anti_loop_same_tile_steps = 0
+            self._anti_loop_no_approach_steps = 0
+            self._anti_loop_recent_tiles.clear()
+            return 0.0
+
+        tile = self._player_tile()
+        if tile == self._anti_loop_tile:
+            self._anti_loop_same_tile_steps += 1
+        else:
+            self._anti_loop_tile = tile
+            self._anti_loop_same_tile_steps = 1
+        self._anti_loop_recent_tiles.append(tile)
+
+        tile_progress = (previous_distance - current_distance) / self.TILE_SIZE
+        if tile_progress > 0.015:
+            self._anti_loop_no_approach_steps = 0
+            return 0.0
+        self._anti_loop_no_approach_steps += 1
+
+        penalty = 0.0
+        if self._anti_loop_same_tile_steps >= 18:
+            penalty -= 0.02
+        if self._anti_loop_same_tile_steps >= 60:
+            penalty -= 0.02
+        if (
+            len(self._anti_loop_recent_tiles) >= 45
+            and len(set(self._anti_loop_recent_tiles)) <= 3
+            and self._anti_loop_no_approach_steps >= 30
+        ):
+            penalty -= 0.025
+        if self._anti_loop_no_approach_steps >= 120:
+            penalty -= 0.015
+
+        if penalty:
+            self._anti_loop_total += penalty
+        return penalty
 
     def _mark_progress(self: Any) -> None:
         self.steps_since_progress = 0

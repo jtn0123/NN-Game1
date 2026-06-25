@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.game.crystal_caves import CrystalCaves
-from src.game.crystal_caves_drills import DRILL_BY_SKILL, DRILL_CAVES
+from src.game.crystal_caves_drills import BRIDGE_CAVES, DRILL_BY_SKILL, DRILL_CAVES
 from src.game.crystal_caves_gen import _find, cave_reachable
 
 
@@ -63,3 +63,36 @@ def test_game_loads_drills_in_drill_mode():
     state = game.reset()
     assert state.shape == (game.state_size,)
     assert game.crystals  # the active drill has at least one crystal to collect
+
+
+@pytest.mark.parametrize("spec", BRIDGE_CAVES, ids=lambda s: s.name)
+def test_bridge_is_well_formed(spec):
+    """Bridge levels should keep the same compact cave contract as drills."""
+    rows = spec.layout
+    assert len(rows) == 18
+    assert all(len(r) == 44 for r in rows)
+    assert len(_find(rows, "P")) == 1
+    assert len(_find(rows, "E")) == 1
+    assert len(_find(rows, "*")) >= 1
+
+
+@pytest.mark.parametrize("spec", BRIDGE_CAVES, ids=lambda s: s.name)
+def test_bridge_is_solvable(spec):
+    """Bridge levels are training material, so all objectives must be reachable."""
+    rows = spec.layout
+    player = _find(rows, "P")[0]
+    reach = cave_reachable(rows, player, doors_open=True)
+    for crystal in _find(rows, "*"):
+        assert crystal in reach, f"{spec.name}: crystal {crystal} unreachable"
+    assert _find(rows, "E")[0] in reach, f"{spec.name}: exit unreachable"
+
+
+def test_game_loads_bridges_in_bridge_mode():
+    config = Config()
+    config.GAME_NAME = "crystal_caves"
+    config.CRYSTAL_CAVES_BRIDGES = True
+    game = CrystalCaves(config, headless=True)
+    assert game.CAVES == BRIDGE_CAVES
+    state = game.reset()
+    assert state.shape == (game.state_size,)
+    assert game.crystals

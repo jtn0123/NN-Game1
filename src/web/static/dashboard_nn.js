@@ -1,7 +1,3 @@
-// ============================================================
-// NEURAL NETWORK VISUALIZATION
-// ============================================================
-
 /**
  * Neural Network Visualizer - Canvas-based real-time visualization
  *

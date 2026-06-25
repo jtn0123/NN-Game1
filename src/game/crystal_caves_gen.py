@@ -487,6 +487,41 @@ def _place_elevators(grid: Grid, rng: random.Random, surface: int, shaft: int) -
 # on a learnable floor (few crystals, no threats) and ramp to the full game. The
 # terrain family is unchanged; only what gets placed on it changes.
 DIFFICULTY: Dict[str, Dict[str, Any]] = {
+    # First-objective routing floor: same full cave footprint and normal spawn,
+    # but the single crystal is placed near the entrance route. This is for
+    # training the "leave spawn and collect one real cave crystal" skill before
+    # asking the policy to route across the whole tutorial cave.
+    "route_floor": {
+        "crystals": (1, 1),
+        "ammo": 1,
+        "hazards": (0, 0),
+        "enemies": (0, 0),
+        "locks": 0,
+        "route_floor": True,
+    },
+    # Stricter first-objective scaffold: the crystal sits on the catch ledge
+    # directly under the entrance shaft. This removes the fall-past timing problem
+    # from route_floor while still practicing "walk to shaft, descend, collect".
+    "route_catch": {
+        "crystals": (1, 1),
+        "ammo": 1,
+        "hazards": (0, 0),
+        "enemies": (0, 0),
+        "locks": 0,
+        "route_catch": True,
+    },
+    # Middle first-objective scaffold: the crystal is still walk/fall reachable
+    # from the entrance route, but it is laterally offset from the shaft catch.
+    # This bridges catch-ledge mastery to normal tutorial crystals without adding
+    # jump timing, hazards, locks, or multiple objectives.
+    "route_offset": {
+        "crystals": (1, 1),
+        "ammo": 1,
+        "hazards": (0, 0),
+        "enemies": (0, 0),
+        "locks": 0,
+        "route_offset": True,
+    },
     # The simplest winnable level: one crystal on the open route, no switch/lock,
     # no threats — "collect them all" is trivially satisfiable, so the agent only
     # has to grab a crystal and reach the exit. The curriculum's first rung.
@@ -568,7 +603,10 @@ def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> 
     reach_open = cave_reachable(grid, (px, py), doors_open=True)
     standing = _standing_tiles(grid, reach_open, surface)
     pocket_cells = {lk[0] for lk in locks}
-    exit_cell = _place_open_exit(grid, (px, py), standing, surface, avoid=pocket_cells)
+    exit_avoid = set(pocket_cells)
+    if diff.get("route_catch"):
+        exit_avoid.add((shaft, surface + 2))
+    exit_cell = _place_open_exit(grid, (px, py), standing, surface, avoid=exit_avoid)
     if exit_cell is None:
         return None
     ex, ey = exit_cell
@@ -630,7 +668,49 @@ def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> 
         walk_free = [t for t in free if t in reach_walk]
         if not walk_free:
             return None
-        guaranteed = walk_free[0]
+        if diff.get("route_floor"):
+            guaranteed = min(
+                walk_free,
+                key=lambda t: (abs(t[0] - px) + abs(t[1] - py), t[1], t[0]),
+            )
+        elif diff.get("route_catch"):
+            catch_tile = (shaft, surface + 2)
+            guaranteed = (
+                catch_tile
+                if catch_tile in walk_free
+                else min(
+                    walk_free,
+                    key=lambda t: (
+                        abs(t[0] - catch_tile[0]) + abs(t[1] - catch_tile[1]),
+                        t[1],
+                        t[0],
+                    ),
+                )
+            )
+        elif diff.get("route_offset"):
+            catch_tile = (shaft, surface + 2)
+            shaft_cols = {shaft, shaft + 1}
+            offset_free = [
+                t
+                for t in walk_free
+                if t[0] not in shaft_cols
+                and t[1] >= surface + 2
+                and 2 <= abs(t[0] - catch_tile[0]) + abs(t[1] - catch_tile[1]) <= 10
+            ]
+            if not offset_free:
+                offset_free = [t for t in walk_free if t[0] not in shaft_cols]
+            if not offset_free:
+                offset_free = walk_free
+            guaranteed = min(
+                offset_free,
+                key=lambda t: (
+                    abs(t[0] - catch_tile[0]) + abs(t[1] - catch_tile[1]),
+                    t[1],
+                    t[0],
+                ),
+            )
+        else:
+            guaranteed = walk_free[0]
         free.remove(guaranteed)
         free.append(guaranteed)
 
@@ -700,6 +780,9 @@ def _solvable(rows) -> bool:
 # Minimum fraction of crystals reachable WITHOUT jumping (walk + fall + ride elevators)
 # per difficulty tier. None = jump-aware solvability only (the historical behaviour).
 _WALK_COVERAGE_FLOOR: Dict[str, float] = {
+    "route_floor": 1.0,
+    "route_catch": 1.0,
+    "route_offset": 1.0,
     "tutorial": 1.0,
     "easy_open": 0.6,
     "easy": 0.4,
@@ -723,7 +806,7 @@ def _walk_coverage_ok(rows, difficulty: str) -> bool:
         return True
     reach_walk = cave_reachable(rows, player, doors_open=True, jump=0)
     walk_crystals = sum(1 for c in crystals if c in reach_walk)
-    if difficulty == "tutorial":
+    if difficulty in {"route_floor", "route_catch", "route_offset", "tutorial"}:
         # The single crystal AND the exit must be walk/ride reachable.
         exit_ = _find(rows, EXIT)[0]
         return walk_crystals == len(crystals) and exit_ in reach_walk

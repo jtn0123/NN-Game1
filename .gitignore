@@ -129,6 +129,7 @@ test-results/
 
 # Generated experiment outputs
 experiments/run_*/
+.Codex/artifacts/
 
 # Model files (large binary files)
 *.pth

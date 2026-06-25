@@ -128,3 +128,73 @@ DRILL_BY_SKILL: Dict[str, CaveSpec] = {
     "staircase": DRILL_CAVES[4],
     "reach_exit": DRILL_CAVES[5],
 }
+
+
+BRIDGE_CAVES: Tuple[CaveSpec, ...] = (
+    # B1 two-step climb — easier than the four-step staircase but no longer a
+    # single isolated hop. Teaches chaining two upward transitions before the exit.
+    _drill(
+        "bridge: two-step climb",
+        skill="bridge_two_step",
+        opens=[(12, 1, 16, 16), (10, 17, 14, 29), (8, 30, 12, 42)],
+        player=(3, 16),
+        crystals=((22, 14), (34, 12)),
+        exit_cell=(41, 12),
+        accent=(160, 220, 120),
+    ),
+    # B2 safe gap — same horizontal-jump decision as the acid drill, but the pit
+    # is non-lethal so exploration does not immediately teach jump avoidance.
+    _drill(
+        "bridge: safe gap collect",
+        skill="bridge_safe_gap",
+        opens=[(11, 1, 14, 42), (15, 19, 16, 23)],
+        player=(3, 14),
+        crystals=((15, 14), (31, 14)),
+        exit_cell=(41, 14),
+        accent=(160, 220, 120),
+    ),
+    # B3 flat switch route — puts the causal switch/door relationship into an
+    # otherwise trivial route so full-level door logic gets clean practice.
+    _drill(
+        "bridge: switch opens route",
+        skill="bridge_switch",
+        opens=[(12, 1, 16, 42)],
+        player=(3, 16),
+        crystals=((13, 16), (34, 16)),
+        exit_cell=(41, 16),
+        extra=((22, 16, "s"), (28, 16, "D")),
+        accent=(160, 220, 120),
+    ),
+    # B4 collect then hop to exit — a gentler version of the known full-game wall:
+    # collect on the floor, then make a small vertical transition to the exit.
+    _drill(
+        "bridge: collect then low exit",
+        skill="bridge_exit_hop",
+        opens=[(12, 1, 16, 25), (11, 26, 15, 34), (10, 35, 14, 42)],
+        player=(3, 16),
+        crystals=((14, 16), (29, 15)),
+        exit_cell=(40, 14),
+        accent=(160, 220, 120),
+    ),
+    # B5 mini route — combines switch, two crystals, and a small exit climb in a
+    # compact cave. This is intentionally still simpler than procedural tutorial.
+    _drill(
+        "bridge: mini full route",
+        skill="bridge_mini_route",
+        opens=[(12, 1, 16, 18), (11, 19, 15, 28), (10, 29, 14, 42)],
+        player=(3, 16),
+        crystals=((12, 16), (33, 14)),
+        exit_cell=(41, 14),
+        extra=((18, 16, "s"), (25, 15, "D")),
+        accent=(160, 220, 120),
+    ),
+)
+
+
+BRIDGE_BY_SKILL: Dict[str, CaveSpec] = {
+    "two_step": BRIDGE_CAVES[0],
+    "safe_gap": BRIDGE_CAVES[1],
+    "switch": BRIDGE_CAVES[2],
+    "exit_hop": BRIDGE_CAVES[3],
+    "mini_route": BRIDGE_CAVES[4],
+}
