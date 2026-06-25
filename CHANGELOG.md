@@ -1,6 +1,50 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-06-25)
+
+### Documentation
+
+- Investigation handoff summary for external review
+  ([`67f5068`](https://github.com/jtn0123/NN-Game1/commit/67f506850a8e2febd4bf07409f2ea5d29ab46228))
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+### Features
+
+- Drill skill-diagnostic harness (train on drills, report per-skill mastery)
+  ([`3ed9731`](https://github.com/jtn0123/NN-Game1/commit/3ed9731e8eb829c18d3fec3ad02253c8970420c2))
+
+experiments/drill_train.py trains on the single-skill drill set and then greedily evals each drill
+  on its own, printing a per-skill table (win% / crystal% / reached-exit%). A skill that stays ~0%
+  even on its dedicated drill is the real wall. Doubles as motor-skill pre-training (produces a
+  skill-trained policy).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+- Hand-authored single-skill drill levels for Crystal Caves
+  ([`d1b3db5`](https://github.com/jtn0123/NN-Game1/commit/d1b3db57ff04c4e2f539a636946c5840acbad816))
+
+A starter set of 6 tiny, deliberately-shaped teaching levels (src/game/ crystal_caves_drills.py),
+  each isolating ONE motor skill: walk+collect, jump up a ledge, jump a gap, drop-and-climb-out,
+  climb a staircase, and collect-then-jump-to-exit (the exact wall the agent is stuck on). True to
+  1991, whose opening levels each introduce one mechanic.
+
+Two intended uses: (1) diagnostic — run a policy on each to read its per-skill win rate instead of
+  inferring the missing skill; (2) teaching — pre-train/interleave so the agent enters full levels
+  already knowing these motor skills.
+
+CRYSTAL_CAVES_DRILLS config flag loads the drill set (authored, randomized). Tests verify every
+  drill is a valid 18x44 grid, solvable under the jump-aware oracle, that the jump drills genuinely
+  require jumps the walk drill does not, and that the game loads them in drill mode. Full suite
+  green; mypy/ruff/black clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+- Harden Crystal Caves NN experiment workflow
+  ([`45519d5`](https://github.com/jtn0123/NN-Game1/commit/45519d55f4278d84cf186a99943a8846d25f8022))
+
+
 ## v0.3.1 (2026-06-21)
 
 ### Bug Fixes
