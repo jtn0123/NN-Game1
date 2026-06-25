@@ -671,6 +671,39 @@ class TestPrioritizedReplayIntegration:
         assert agent._use_per is True
         assert len(agent.memory) == 100
 
+    def test_prioritized_n_step_integrated_learning(self, config):
+        """Agent should keep PER active when N-step returns are also enabled."""
+        from src.ai.prioritized_n_step import PrioritizedNStepReplayBuffer
+
+        config.USE_PRIORITIZED_REPLAY = True
+        config.USE_N_STEP_RETURNS = True
+        config.N_STEP_SIZE = 3
+        config.MEMORY_SIZE = 500
+        config.MEMORY_MIN = 50
+        config.BATCH_SIZE = 16
+        config.LEARN_EVERY = 1
+        config.GRADIENT_STEPS = 1
+
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
+        assert agent._use_per is True
+        assert isinstance(agent.memory, PrioritizedNStepReplayBuffer)
+
+        while agent.memory._size < 100:
+            state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            action = np.random.randint(0, config.ACTION_SIZE)
+            reward = np.random.randn()
+            next_state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            agent.remember(state, action, reward, next_state, False)
+
+        frame_count_before = agent.memory._frame_count
+        loss = agent.learn()
+
+        assert loss is not None
+        assert isinstance(loss, float)
+        assert agent.memory._frame_count == frame_count_before + 1
+        assert not np.allclose(agent.memory.priorities[: agent.memory._size], 1.0)
+
 
 class TestHardUpdateTargetNetwork:
     """Test hard update target network functionality."""

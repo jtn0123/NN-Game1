@@ -833,10 +833,24 @@ class NStepReplayBuffer(ReplayBuffer):
             # Use the actual final index to get the correct next state and done flag
             _, _, _, n_step_next_state, n_step_done = buffer[actual_final_idx]
 
-            # Store the N-step experience in the base buffer
-            super().push(state, action, n_step_reward, n_step_next_state, n_step_done)
+            self._store_transition(state, action, n_step_reward, n_step_next_state, n_step_done)
 
         buffer.clear()
+
+    def _store_transition(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+    ) -> None:
+        """Store a computed N-step transition in the backing replay buffer.
+
+        Subclasses can override this hook to attach metadata such as priorities
+        while reusing the same N-step accumulation logic.
+        """
+        ReplayBuffer.push(self, state, action, reward, next_state, done)
 
     def _flush_n_step_buffer(self, done: bool) -> None:
         """Backward-compatible wrapper: flush the single-env push() trajectory buffer."""

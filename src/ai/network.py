@@ -587,6 +587,7 @@ class SpatialDQN(nn.Module):
         self.gmap_size = gr * gc
         self.meta_size = layout["meta"]
         self.dueling = bool(getattr(self.config, "USE_DUELING", True))
+        self.route_aux_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_LOSS", False))
 
         # Structured exploration: like DuelingDQN, put NoisyNets on the OUTPUT
         # layers (the Rainbow placement) so the conv net actually explores via
@@ -609,6 +610,8 @@ class SpatialDQN(nn.Module):
             self.adv = out_layer(hidden, action_size)
         else:
             self.head = out_layer(hidden, action_size)
+        if self.route_aux_enabled:
+            self.route_aux_head = nn.Linear(hidden, 9)
         # Xavier-init the plain conv/linear layers; NoisyLinear self-inits.
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
@@ -616,7 +619,7 @@ class SpatialDQN(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
+    def _features(self, state: torch.Tensor) -> torch.Tensor:
         win = state[:, : self.win_size].view(-1, 1, self.win_rows, self.win_cols)
         rest = state[:, self.win_size :]
         gmap = rest[:, : self.gmap_size]
@@ -631,6 +634,10 @@ class SpatialDQN(nn.Module):
         x = F.relu(self.fc(x))
         if self.capture_activations:
             self.activations["layer_1"] = x.detach()
+        return x
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        x = self._features(state)
         if self.dueling:
             v = self.value(x)
             a = self.adv(x)
@@ -640,6 +647,12 @@ class SpatialDQN(nn.Module):
         if self.capture_activations:
             self.activations["layer_2"] = q.detach()
         return q
+
+    def route_aux_logits(self, state: torch.Tensor) -> torch.Tensor:
+        """Predict one of 9 coarse objective directions from shared features."""
+        if not self.route_aux_enabled:
+            raise RuntimeError("route auxiliary head is disabled")
+        return self.route_aux_head(self._features(state))
 
     def reset_noise(self) -> None:
         """Resample exploration noise on the output layers (no-op when NoisyNets

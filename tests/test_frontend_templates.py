@@ -17,6 +17,24 @@ ACTION_KEY_RE = re.compile(r"'([^']+)'\s*:")
 STYLE_BLOCK_RE = re.compile(r"<style\b", re.IGNORECASE)
 
 
+def dashboard_styles() -> str:
+    """Return the dashboard stylesheet bundle the template loads through styles.css."""
+
+    style_dir = ROOT / "src" / "web" / "static"
+    return "\n".join(
+        (style_dir / filename).read_text(encoding="utf-8")
+        for filename in [
+            "styles_layout.css",
+            "styles_preview.css",
+            "styles_crystal_eval.css",
+            "styles_controls.css",
+            "styles_tooltips.css",
+            "styles_models_nn.css",
+            "styles_inspection.css",
+        ]
+    )
+
+
 def test_frontend_markup_does_not_use_inline_event_handlers():
     """Templates and generated markup should bind behavior from JavaScript."""
     paths = [
@@ -70,7 +88,7 @@ def test_crystal_caves_panel_markup_and_binding_present():
     """
     dashboard = (ROOT / "src" / "web" / "templates" / "dashboard.html").read_text(encoding="utf-8")
     app_js = (ROOT / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    styles = (ROOT / "src" / "web" / "static" / "styles_layout.css").read_text(encoding="utf-8")
+    styles = dashboard_styles()
 
     assert 'id="crystal-caves-panel"' in dashboard
     assert "updateCrystalCaves" in app_js
@@ -102,7 +120,7 @@ def test_curriculum_panel_markup_and_binding_present():
     """The Crystal Caves curriculum panel must stay wired to dashboard state."""
     dashboard = (ROOT / "src" / "web" / "templates" / "dashboard.html").read_text(encoding="utf-8")
     app_js = (ROOT / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    styles = (ROOT / "src" / "web" / "static" / "styles_layout.css").read_text(encoding="utf-8")
+    styles = dashboard_styles()
 
     assert 'id="curriculum-panel"' in dashboard
     assert "updateCurriculum" in app_js
@@ -130,7 +148,7 @@ def test_held_out_eval_panel_markup_and_binding_present():
     """The held-out Evaluation panel markup must stay in sync with its JS binding."""
     dashboard = (ROOT / "src" / "web" / "templates" / "dashboard.html").read_text(encoding="utf-8")
     app_js = (ROOT / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    styles = (ROOT / "src" / "web" / "static" / "styles_layout.css").read_text(encoding="utf-8")
+    styles = dashboard_styles()
 
     assert 'id="eval-panel"' in dashboard
     assert "updateEval" in app_js
@@ -165,7 +183,7 @@ def test_held_out_eval_panel_markup_and_binding_present():
 def test_headless_dashboard_hides_dead_visual_controls():
     """Headless runs should not show no-op preview/speed controls."""
     app_js = (ROOT / "src" / "web" / "static" / "app.js").read_text(encoding="utf-8")
-    styles = (ROOT / "src" / "web" / "static" / "styles_layout.css").read_text(encoding="utf-8")
+    styles = dashboard_styles()
 
     assert "is-headless-mode" in app_js
     assert ".is-headless-mode .preview-card" in styles

@@ -442,6 +442,19 @@ class TestSpatialDQN:
         out = net(torch.zeros(2, size))
         assert out.shape == (2, 10)
 
+    def test_route_auxiliary_head_predicts_direction_bins_when_enabled(self):
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_ROUTE_AUX_LOSS = True
+        net = SpatialDQN(size, 10, cfg, layout)
+
+        out = net(torch.zeros(4, size))
+        logits = net.route_aux_logits(torch.zeros(4, size))
+
+        assert out.shape == (4, 10)
+        assert logits.shape == (4, 9)
+
     def test_agent_uses_cnn_when_enabled(self):
         from src.ai.agent import Agent
 

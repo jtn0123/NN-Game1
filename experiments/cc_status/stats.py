@@ -1,0 +1,51 @@
+"""Small aggregation helpers for status-session metrics."""
+
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any
+
+import numpy as np
+
+
+def mean_dicts(rows: list[dict[str, float]]) -> dict[str, float]:
+    if not rows:
+        return {}
+    keys = sorted({key for row in rows for key in row})
+    return {key: float(np.mean([row.get(key, 0.0) for row in rows])) for key in keys}
+
+
+def counter_tail(values: list[str], n: int = 100) -> dict[str, int]:
+    return dict(Counter(values[-n:]))
+
+
+def mean_tail(values: list[float], n: int = 100) -> float:
+    return float(np.mean(values[-n:])) if values else 0.0
+
+
+def max_or_zero(values: list[float]) -> float:
+    return float(max(values)) if values else 0.0
+
+
+def trainer_source_stats(trainer: Any) -> dict[str, Any]:
+    vec_env = getattr(trainer, "vec_env", None)
+    stats_fn = getattr(vec_env, "source_stats", None)
+    if callable(stats_fn):
+        return stats_fn()
+    return {}
+
+
+def trainer_reverse_start_stats(trainer: Any) -> dict[str, Any]:
+    vec_env = getattr(trainer, "vec_env", None)
+    stats_fn = getattr(vec_env, "reverse_start_stats", None)
+    if callable(stats_fn):
+        return stats_fn()
+    return {}
+
+
+def trainer_archive_stats(trainer: Any) -> dict[str, Any]:
+    vec_env = getattr(trainer, "vec_env", None)
+    stats_fn = getattr(vec_env, "archive_stats", None)
+    if callable(stats_fn):
+        return stats_fn()
+    return {}

@@ -10,7 +10,8 @@ live in sibling mixin modules to keep each file focused and under budget.
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Optional, Set, Tuple
+from collections import deque
+from typing import Deque, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pygame
@@ -31,6 +32,7 @@ from .crystal_caves_entities import (
     Enemy,
     VisualEvent,
 )
+from .crystal_caves_geometry import CrystalCavesGeometryMixin
 from .crystal_caves_logic import CrystalCavesLogicMixin
 from .crystal_caves_rendering import CrystalCavesRenderingMixin
 
@@ -39,6 +41,7 @@ class CrystalCaves(
     CrystalCavesRenderingMixin,
     CrystalCavesDressingMixin,
     CrystalCavesLogicMixin,
+    CrystalCavesGeometryMixin,
     BaseGame,
 ):
     """
@@ -150,6 +153,8 @@ class CrystalCaves(
     # be farmed and never out-weighs collecting the objective itself.
     OBJECTIVE_REGION_BONUS = 0.4
     OBJECTIVE_REGION_CAP = 4.0
+    NOVELTY_REGION_BONUS = 0.08
+    NOVELTY_REGION_CAP = 3.0
 
     # TS-01: discrete one-time bonus the step the gating switch is thrown
     # (closed->open). The switch is the causal crux of a clear yet was rewarded
@@ -157,6 +162,9 @@ class CrystalCaves(
     # continuous progress shaping.
     SWITCH_THROW_BONUS = 8.0
     ALL_CRYSTALS_COLLECTED_BONUS = 16.0
+    FIRST_CRYSTAL_GOAL_BONUS = 20.0
+    INVALID_INTERACT_PENALTY = -0.05
+    INVALID_SHOOT_PENALTY = -0.04
 
     # Monotonic dense reward for getting closer than ever to the current
     # objective. This gives the agent a clearer gradient toward the first
@@ -308,9 +316,26 @@ class CrystalCaves(
         self._eval_mode = False
         self._eval_caves: Tuple[CaveSpec, ...] = ()
         self._eval_cursor = 0
+        # Drill mode: replace the cave set with the hand-authored single-skill drills
+        # (for skill diagnostics and motor-skill pre-training). Takes precedence.
+        if getattr(self.config, "CRYSTAL_CAVES_DRILLS", False):
+            from .crystal_caves_drills import DRILL_CAVES
+
+            self.CAVES = DRILL_CAVES
+            self.CAVE_DRESSING = {i: () for i in range(len(DRILL_CAVES))}
+            self._randomize_levels = len(DRILL_CAVES) > 1
+        # Bridge mode: small compositional teaching levels between the single
+        # skill drills and procedural tutorial caves. Drill mode takes
+        # precedence when both flags are accidentally enabled.
+        elif getattr(self.config, "CRYSTAL_CAVES_BRIDGES", False):
+            from .crystal_caves_drills import BRIDGE_CAVES
+
+            self.CAVES = BRIDGE_CAVES
+            self.CAVE_DRESSING = {i: () for i in range(len(BRIDGE_CAVES))}
+            self._randomize_levels = len(BRIDGE_CAVES) > 1
         # Procedural mode: replace the authored caves with freshly generated ones.
         # Authored dressing is cleared since generated caves have none.
-        if getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
+        elif getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
             from .crystal_caves_gen import FAMILY_NAMES, THEME_NAMES, generate_cave
 
             base = getattr(self.config, "CRYSTAL_CAVES_SEED", 0)
@@ -379,6 +404,13 @@ class CrystalCaves(
         self._progress = 0.0
         self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
         self._obj_region_total = 0.0  # AI-2
+        self._visited_novelty_cells: Set[Tuple[int, int]] = set()
+        self._novelty_bonus_total = 0.0
+        self._anti_loop_tile: Optional[Tuple[int, int]] = None
+        self._anti_loop_same_tile_steps = 0
+        self._anti_loop_no_approach_steps = 0
+        self._anti_loop_recent_tiles: Deque[Tuple[int, int]] = deque(maxlen=80)
+        self._anti_loop_total = 0.0
 
         self.crystals: Set[Tuple[int, int]] = set()
         self.initial_crystals = 0
@@ -519,7 +551,19 @@ class CrystalCaves(
         self._end_reason = "running"
         self._visited_obj_cells = set()
         self._obj_region_total = 0.0
+        self._visited_novelty_cells = set()
+        self._novelty_bonus_total = 0.0
+        self._remember_current_novelty_cell()
         self._target_best_distances: Dict[Tuple[str, int, int], float] = {}
+        self._anti_loop_tile = None
+        self._anti_loop_same_tile_steps = 0
+        self._anti_loop_no_approach_steps = 0
+        self._anti_loop_recent_tiles.clear()
+        self._anti_loop_total = 0.0
+        self._invalid_interact_count = 0
+        self._invalid_interact_total = 0.0
+        self._invalid_shoot_count = 0
+        self._invalid_shoot_total = 0.0
 
         return self.get_state()
 
@@ -565,6 +609,7 @@ class CrystalCaves(
         reward += self._check_player_danger()
         reward += self._check_exit()
         reward += self._target_progress_reward(previous_target, previous_distance)
+        reward += self._anti_loop_penalty(previous_target, previous_distance)
 
         # Completion-progress shaping (PT-01/PT-02): reward any increase in the
         # monotonic progress potential — deeper into the cave, more crystals, the
@@ -581,6 +626,10 @@ class CrystalCaves(
         region_bonus = self._objective_region_reward()
         if region_bonus:
             reward += region_bonus
+            self._mark_progress()
+        novelty_bonus = self._novelty_region_reward()
+        if novelty_bonus:
+            reward += novelty_bonus
             self._mark_progress()
 
         if self.steps >= self.MAX_STEPS and not self.game_over:
@@ -719,6 +768,49 @@ class CrystalCaves(
         self._visited_obj_cells.add(cell)
         self._obj_region_total += self.OBJECTIVE_REGION_BONUS
         return self.OBJECTIVE_REGION_BONUS
+
+    def _novelty_cell(self) -> tuple[int, int]:
+        gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
+        cw = max(1.0, self.level_cols / max(1, gc))
+        ch = max(1.0, self.level_rows / max(1, gr))
+        pcol, prow = self._player_tile()
+        return (
+            min(max(0, gc - 1), max(0, int(pcol / cw))),
+            min(max(0, gr - 1), max(0, int(prow / ch))),
+        )
+
+    def _remember_current_novelty_cell(self) -> None:
+        if self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS == 0:
+            return
+        self._visited_novelty_cells.add(self._novelty_cell())
+
+    def _novelty_region_reward(self) -> float:
+        """Opt-in one-time bonus for entering new coarse regions.
+
+        This is broader than the objective-region bonus: it rewards coverage of
+        the real full cave, not only cells that already contain a visible
+        objective. It is capped below a crystal pickup so it can encourage
+        exploration without replacing the objective.
+        """
+        if not getattr(self.config, "CRYSTAL_CAVES_NOVELTY_BONUS", False):
+            return 0.0
+        if self.game_over or self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS == 0:
+            return 0.0
+        if self._novelty_bonus_total >= self.NOVELTY_REGION_CAP:
+            return 0.0
+        target, distance = self._current_target()
+        if target is None or not np.isfinite(distance):
+            return 0.0
+        cell = self._novelty_cell()
+        if cell in self._visited_novelty_cells:
+            return 0.0
+        self._visited_novelty_cells.add(cell)
+        bonus = min(
+            self.NOVELTY_REGION_BONUS,
+            self.NOVELTY_REGION_CAP - self._novelty_bonus_total,
+        )
+        self._novelty_bonus_total += bonus
+        return bonus
 
     def close(self) -> None:
         """Clean up resources."""
@@ -878,203 +970,10 @@ class CrystalCaves(
             "progress": round(self._progress, 3),
             "progress_parts": self._progress_potential()[1],
             "end_reason": self._end_reason,
+            "anti_loop_penalty_total": round(self._anti_loop_total, 3),
+            "invalid_interact_count": self._invalid_interact_count,
+            "invalid_interact_penalty_total": round(self._invalid_interact_total, 3),
+            "invalid_shoot_count": self._invalid_shoot_count,
+            "invalid_shoot_penalty_total": round(self._invalid_shoot_total, 3),
+            "novelty_bonus_total": round(self._novelty_bonus_total, 3),
         }
-
-    def _player_rect(self, x: Optional[float] = None, y: Optional[float] = None) -> pygame.Rect:
-        return pygame.Rect(
-            int(self.player_x if x is None else x),
-            int(self.player_y if y is None else y),
-            self.PLAYER_WIDTH,
-            self.PLAYER_HEIGHT,
-        )
-
-    def _player_tile(self) -> Tuple[int, int]:
-        return (
-            int((self.player_x + self.PLAYER_WIDTH / 2) // self.TILE_SIZE),
-            int((self.player_y + self.PLAYER_HEIGHT / 2) // self.TILE_SIZE),
-        )
-
-    def _player_center(self) -> Tuple[float, float]:
-        return (
-            self.player_x + self.PLAYER_WIDTH / 2,
-            self.player_y + self.PLAYER_HEIGHT / 2,
-        )
-
-    def _tile_center(self, tile: Tuple[int, int]) -> Tuple[float, float]:
-        col, row = tile
-        return (
-            col * self.TILE_SIZE + self.TILE_SIZE / 2,
-            row * self.TILE_SIZE + self.TILE_SIZE / 2,
-        )
-
-    def _tile_rect(self, tile: Tuple[int, int]) -> pygame.Rect:
-        col, row = tile
-        return pygame.Rect(
-            col * self.TILE_SIZE, row * self.TILE_SIZE, self.TILE_SIZE, self.TILE_SIZE
-        )
-
-    def _tiles_for_rect(self, rect: pygame.Rect) -> Set[Tuple[int, int]]:
-        left = rect.left // self.TILE_SIZE
-        right = (rect.right - 1) // self.TILE_SIZE
-        top = rect.top // self.TILE_SIZE
-        bottom = (rect.bottom - 1) // self.TILE_SIZE
-        return {(col, row) for row in range(top, bottom + 1) for col in range(left, right + 1)}
-
-    def _rect_collides_solid(self, rect: pygame.Rect) -> bool:
-        if any(self._solid_at(col, row) for col, row in self._tiles_for_rect(rect)):
-            return True
-        return any(rect.colliderect(er) for er in self._elevator_solid)
-
-    @property
-    def doors_open(self) -> bool:
-        """True once every lever has been thrown (all colour-keyed doors open).
-        Kept as a read-only view for dashboards and target-phase logic; the
-        authoritative state is ``open_colors`` (which colours are open)."""
-        return not (self.switches - self.used_switches)
-
-    def _door_open(self, tile: Tuple[int, int]) -> bool:
-        return self.door_color.get(tile, "red") in self.open_colors
-
-    def _solid_at(self, col: int, row: int) -> bool:
-        if col < 0 or row < 0 or col >= self.level_cols or row >= self.level_rows:
-            return True
-        if self.grid[row][col] == self.SOLID:
-            return True
-        return (col, row) in self.doors and not self._door_open((col, row))
-
-    def _is_on_surface(self) -> bool:
-        rect = self._player_rect()
-        rect.y += self.gravity_dir
-        return self._rect_collides_solid(rect)
-
-    def _refresh_elevator_rects(self) -> None:
-        ts = self.TILE_SIZE
-        self._elevator_solid = [
-            pygame.Rect(e.col * ts, int(e.pos * ts), ts, ts) for e in self.elevators
-        ]
-
-    def _update_elevators(self) -> None:
-        """Advance each lift platform (oscillating between its run's top and
-        bottom). A *rising* platform is pushed up under the player who's standing
-        on it; descent needs no special handling — gravity keeps the player glued
-        to the platform top each frame. Called before the player's own physics."""
-        if not self.elevators:
-            return
-        for e in self.elevators:
-            e.pos += self.ELEVATOR_SPEED * e.direction
-            if e.pos >= e.bottom:
-                e.pos = float(e.bottom)
-                e.direction = -1
-            elif e.pos <= e.top:
-                e.pos = float(e.top)
-                e.direction = 1
-        self._refresh_elevator_rects()
-        prect = self._player_rect()
-        for er in self._elevator_solid:
-            # if a platform rose into the player from below their middle, lift
-            # them so they rest on its top (carry-up)
-            if prect.colliderect(er) and prect.centery < er.centery:
-                self.player_y = er.top - self.PLAYER_HEIGHT
-                self.vy = 0.0
-                prect = self._player_rect()
-
-    def _code_grid(self) -> np.ndarray:
-        """Vectorized whole-level tile-code grid — the numpy equivalent of calling
-        ``_tile_code`` on every cell, built by painting entity layers in reverse
-        priority order (lowest first, so higher-priority layers overwrite). Slicing
-        a window out of this is ~10x faster than the per-cell Python loop, and a
-        bit-equivalence test pins it to ``_tile_code``. Indexing is grid[row, col]
-        while the entity sets store (col, row)."""
-        tc = self.TILE_CODES
-        grid = np.full((self.level_rows, self.level_cols), tc[self.EMPTY], dtype=np.float32)
-
-        for c, r in self.air_tanks:
-            grid[r, c] = tc[self.AIR_TANK]
-        for (c, r), power in self.powerups.items():
-            grid[r, c] = tc[power]
-        for c, r in self.treasures:
-            grid[r, c] = tc[self.TREASURE]
-        for c, r in self.ammo_pickups:
-            grid[r, c] = tc[self.AMMO]
-        for c, r in self.switches:
-            grid[r, c] = tc[self.SWITCH]
-        ec, er = self.exit_pos
-        grid[er, ec] = tc[self.EXIT] if self.exit_unlocked else 0.38
-        for c, r in self.crystals:
-            grid[r, c] = tc[self.CRYSTAL]
-        for c, r in self.hazards:
-            grid[r, c] = tc[self.hazard_kinds.get((c, r), self.SPIKE)]
-        grid[self._elevator_mask] = tc[self.ELEVATOR]
-        grid[self._wall_mask] = tc[self.SOLID]
-        # Closed doors are solid (show DOOR); open doors fall through to whatever
-        # is underneath, so they are left unpainted here.
-        for c, r in self.doors:
-            if not self._door_open((c, r)):
-                grid[r, c] = tc[self.DOOR]
-        for enemy in self.enemies:
-            if enemy.alive:
-                c, r = self._tile_for_enemy(enemy)
-                if 0 <= r < self.level_rows and 0 <= c < self.level_cols:
-                    grid[r, c] = tc[self.FLYER if enemy.kind == "flyer" else self.CRAWLER]
-        return grid
-
-    def _fill_window(self, player_col: int, player_row: int) -> np.ndarray:
-        """The WINDOW_ROWS x WINDOW_COLS perception window centered on the player,
-        sliced from the vectorized code grid with out-of-bounds cells = SOLID
-        (matching ``_tile_code``'s out-of-bounds rule)."""
-        half_c = self.WINDOW_COLS // 2
-        half_r = self.WINDOW_ROWS // 2
-        code_grid = self._code_grid()
-        window = np.full(
-            (self.WINDOW_ROWS, self.WINDOW_COLS),
-            self.TILE_CODES[self.SOLID],
-            dtype=np.float32,
-        )
-        r0, r1 = player_row - half_r, player_row + half_r + 1
-        c0, c1 = player_col - half_c, player_col + half_c + 1
-        sr0, sr1 = max(0, r0), min(self.level_rows, r1)
-        sc0, sc1 = max(0, c0), min(self.level_cols, c1)
-        if sr0 < sr1 and sc0 < sc1:
-            window[sr0 - r0 : sr1 - r0, sc0 - c0 : sc1 - c0] = code_grid[sr0:sr1, sc0:sc1]
-        return window
-
-    def _tile_code(self, col: int, row: int) -> float:
-        if col < 0 or row < 0 or col >= self.level_cols or row >= self.level_rows:
-            return self.TILE_CODES[self.SOLID]
-
-        tile = (col, row)
-        for enemy in self.enemies:
-            if enemy.alive and self._tile_for_enemy(enemy) == tile:
-                return self.TILE_CODES[self.FLYER if enemy.kind == "flyer" else self.CRAWLER]
-
-        if self._solid_at(col, row):
-            return self.TILE_CODES[self.DOOR] if tile in self.doors else self.TILE_CODES[self.SOLID]
-        if self.grid[row][col] == self.ELEVATOR:
-            return self.TILE_CODES[self.ELEVATOR]
-        if tile in self.hazards:
-            return self.TILE_CODES[self.hazard_kinds.get(tile, self.SPIKE)]
-        if tile in self.crystals:
-            return self.TILE_CODES[self.CRYSTAL]
-        if tile == self.exit_pos:
-            return self.TILE_CODES[self.EXIT] if self.exit_unlocked else 0.38
-        if tile in self.switches:
-            return self.TILE_CODES[self.SWITCH]
-        if tile in self.ammo_pickups:
-            return self.TILE_CODES[self.AMMO]
-        if tile in self.treasures:
-            return self.TILE_CODES[self.TREASURE]
-        if tile in self.powerups:
-            return self.TILE_CODES[self.powerups[tile]]
-        if tile in self.air_tanks:
-            return self.TILE_CODES[self.AIR_TANK]
-        return self.TILE_CODES[self.EMPTY]
-
-    def _tile_for_enemy(self, enemy: Enemy) -> Tuple[int, int]:
-        return (
-            int((enemy.x + enemy.width / 2) // self.TILE_SIZE),
-            int((enemy.y + enemy.height / 2) // self.TILE_SIZE),
-        )
-
-    @staticmethod
-    def _normalize_signed(value: float, max_abs: float) -> float:
-        return float(np.clip((value / max_abs + 1.0) * 0.5, 0.0, 1.0))

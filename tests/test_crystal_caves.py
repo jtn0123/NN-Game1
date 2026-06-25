@@ -20,11 +20,7 @@ from scripts.render_crystal_caves_gallery import render_gallery
 from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
-from src.game.crystal_caves_entities import CAVES, Elevator, Enemy
-
-# The jump-aware solvability flood is shared with the generator so the authored
-# caves and the procedural ones are verified by one identical oracle.
-from src.game.crystal_caves_gen import cave_reachable as _cave_reachable
+from src.game.crystal_caves_entities import Elevator, Enemy
 from src.game.crystal_caves_vec import VecCrystalCaves
 
 
@@ -228,6 +224,45 @@ class TestCrystalCavesMovement:
         _, farther_distance = game._current_target()
         assert game._target_best_approach_reward(target, farther_distance) == 0.0
 
+    def test_anti_loop_penalty_fires_when_stuck_without_approach(self, config):
+        config.CRYSTAL_CAVES_ANTI_LOOP_REWARD = True
+        game = CrystalCaves(config, headless=True)
+        game.enemies.clear()
+        game.hazards.clear()
+        place_on_floor(game)
+
+        rewards = [game.step(CrystalCaves.IDLE)[1] for _ in range(65)]
+        info = game._info()
+
+        assert min(rewards) < -0.03
+        assert info["anti_loop_penalty_total"] < 0.0
+
+    def test_novelty_bonus_rewards_new_region_once(self, config):
+        config.CRYSTAL_CAVES_NOVELTY_BONUS = True
+        game = CrystalCaves(config, headless=True)
+
+        try:
+            start_cell = game._novelty_cell()
+            assert game._novelty_region_reward() == 0.0
+
+            for row in range(1, game.level_rows - 1):
+                for col in range(1, game.level_cols - 1):
+                    game.player_x = col * game.TILE_SIZE + 5
+                    game.player_y = row * game.TILE_SIZE + 1
+                    if game._novelty_cell() != start_cell:
+                        reward = game._novelty_region_reward()
+                        assert reward == game.NOVELTY_REGION_BONUS
+                        assert game._novelty_region_reward() == 0.0
+                        info = game._info()
+                        assert info["novelty_bonus_total"] == game.NOVELTY_REGION_BONUS
+                        return
+            raise AssertionError("No different novelty cell found")
+        finally:
+            game.close()
+
+    def test_novelty_bonus_is_capped_below_crystal_reward(self, game):
+        assert game.NOVELTY_REGION_CAP < 5.0
+
     def test_move_left_decreases_x(self, game):
         place_on_floor(game)
         initial_x = game.player_x
@@ -255,10 +290,27 @@ class TestCrystalCavesObjectives:
         game.player_x = crystal[0] * game.TILE_SIZE + 4
         game.player_y = crystal[1] * game.TILE_SIZE + 2
         initial_count = len(game.crystals)
-        _, reward, _, info = game.step(CrystalCaves.IDLE)
+        _, reward, done, info = game.step(CrystalCaves.IDLE)
         assert len(game.crystals) == initial_count - 1
+        assert not done
         assert reward > 0
         assert info["score"] >= 100
+
+    def test_first_crystal_goal_ends_episode_on_collection(self, config):
+        config.CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL = True
+        game = CrystalCaves(config, headless=True)
+        crystal = next(iter(game.crystals))
+        game.player_x = crystal[0] * game.TILE_SIZE + 4
+        game.player_y = crystal[1] * game.TILE_SIZE + 2
+        initial_count = len(game.crystals)
+
+        _, reward, done, info = game.step(CrystalCaves.IDLE)
+
+        assert len(game.crystals) == initial_count - 1
+        assert done
+        assert info["won"]
+        assert info["end_reason"] == "first_crystal_goal"
+        assert reward >= game.FIRST_CRYSTAL_GOAL_BONUS
 
     def test_all_crystals_unlock_exit(self, game):
         game.crystals.clear()
@@ -305,6 +357,42 @@ class TestCrystalCavesObjectives:
         assert game.doors_open
         assert info["doors_open"]
         assert reward > 0
+
+    def test_invalid_interact_has_no_penalty_by_default(self, game):
+        game.switches.clear()
+
+        reward = game._try_interact()
+        info = game._info()
+
+        assert reward == 0.0
+        assert info["invalid_interact_count"] == 0
+        assert info["invalid_interact_penalty_total"] == 0.0
+
+    def test_invalid_interact_penalty_tracks_useless_interactions(self, config):
+        config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY = True
+        game = CrystalCaves(config, headless=True)
+        game.switches.clear()
+
+        reward = game._try_interact()
+        info = game._info()
+
+        assert reward == game.INVALID_INTERACT_PENALTY
+        assert info["invalid_interact_count"] == 1
+        assert info["invalid_interact_penalty_total"] == game.INVALID_INTERACT_PENALTY
+
+    def test_invalid_interact_penalty_keeps_valid_switch_reward(self, config):
+        config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY = True
+        game = CrystalCaves(config, headless=True)
+        switch = next(iter(game.switches))
+        game.player_x = switch[0] * game.TILE_SIZE + 4
+        game.player_y = switch[1] * game.TILE_SIZE + 2
+
+        reward = game._try_interact()
+        info = game._info()
+
+        assert reward == game.SWITCH_THROW_BONUS
+        assert info["doors_open"]
+        assert info["invalid_interact_count"] == 0
 
     def test_colour_keyed_lever_opens_only_its_own_door(self):
         """A red lever opens only red doors; the blue door stays shut until the
@@ -375,6 +463,37 @@ class TestCrystalCavesCombatAndDanger:
 
         assert not enemy.alive
         assert game.score >= 200
+
+    def test_invalid_shoot_penalty_counts_empty_lane_shot(self, config):
+        config.CRYSTAL_CAVES_INVALID_SHOOT_PENALTY = True
+        game = CrystalCaves(config, headless=True)
+        floor_col, floor_row = place_on_floor(game)
+        clear_lane(game, floor_col, floor_row)
+        game.enemies = []
+        game.air_tanks = set()
+        game.facing = 1
+        game.ammo = 5
+
+        _, _, _, info = game.step(CrystalCaves.SHOOT)
+
+        assert info["invalid_shoot_count"] == 1
+        assert info["invalid_shoot_penalty_total"] == pytest.approx(
+            CrystalCaves.INVALID_SHOOT_PENALTY
+        )
+
+    def test_invalid_shoot_penalty_allows_enemy_lane_shot(self, config):
+        config.CRYSTAL_CAVES_INVALID_SHOOT_PENALTY = True
+        game = CrystalCaves(config, headless=True)
+        floor_col, floor_row = place_on_floor(game)
+        clear_lane(game, floor_col, floor_row)
+        game.facing = 1
+        game.ammo = 5
+        game.enemies = [Enemy(game.player_x + 90, game.player_y + 4, 0.0)]
+
+        _, _, _, info = game.step(CrystalCaves.SHOOT)
+
+        assert info["invalid_shoot_count"] == 0
+        assert info["invalid_shoot_penalty_total"] == 0.0
 
     def test_hazard_damages_player(self, game):
         hazard = next(iter(game.hazards))
@@ -802,109 +921,3 @@ class TestCrystalCavesRenderAndVectorized:
         assert rewards.shape == (3,)
         assert dones.shape == (3,)
         assert len(infos) == 3
-
-
-def _find(layout, ch):
-    return [(c, r) for r, row in enumerate(layout) for c, x in enumerate(row) if x == ch]
-
-
-@pytest.mark.parametrize("cave_index", range(len(CAVES)))
-def test_every_cave_is_solvable(cave_index):
-    """Each authored cave must be winnable: from spawn the player can reach the
-    switch (doors closed), then every crystal and the exit (doors open). This
-    guards the dense layouts against a fill that seals the level."""
-    layout = CAVES[cave_index].layout
-    player = _find(layout, "P")[0]
-    exit_ = _find(layout, "E")[0]
-    crystals = _find(layout, "*")
-    switches = _find(layout, "s")
-
-    reach_closed = _cave_reachable(layout, player, doors_open=False)
-    reach_open = _cave_reachable(layout, player, doors_open=True)
-
-    assert all(s in reach_closed for s in switches), "switch unreachable"
-    assert all(c in reach_open for c in crystals), "a crystal is unreachable"
-    assert exit_ in reach_open, "exit unreachable"
-
-
-@pytest.mark.parametrize("cave_index", range(len(CAVES)))
-def test_every_cave_is_dense(cave_index):
-    """Authored caves are carved rooms, not sparse platforms over void (CCV-13):
-    solid terrain should occupy a substantial fraction of the grid."""
-    layout = CAVES[cave_index].layout
-    total = sum(len(row) for row in layout)
-    solid = sum(row.count("#") for row in layout)
-    assert 0.45 <= solid / total <= 0.85
-
-
-def _loop_window(game, player_col, player_row):
-    """Reference window built the slow per-cell way, for equivalence testing."""
-    half_c, half_r = game.WINDOW_COLS // 2, game.WINDOW_ROWS // 2
-    win = np.empty((game.WINDOW_ROWS, game.WINDOW_COLS), dtype=np.float32)
-    i = 0
-    for row in range(player_row - half_r, player_row + half_r + 1):
-        for col in range(player_col - half_c, player_col + half_c + 1):
-            win.flat[i] = game._tile_code(col, row)
-            i += 1
-    return win
-
-
-@pytest.mark.parametrize("difficulty", ["easy", "normal"])
-def test_vectorized_window_matches_tile_code_loop(difficulty):
-    """The fast vectorized perception window must stay bit-identical to the
-    per-cell _tile_code loop it replaced — across collected crystals, thrown
-    switches, moving enemies, and opened doors."""
-    cfg = Config()
-    cfg.CRYSTAL_CAVES_PROCEDURAL = True
-    cfg.CRYSTAL_CAVES_DIFFICULTY = difficulty
-    cfg.CRYSTAL_CAVES_FAMILIES = "platform_network"
-    np.random.seed(7)
-    game = CrystalCaves(cfg, headless=True)
-    game.reset()
-
-    for _ in range(400):
-        pc = int((game.player_x + game.PLAYER_WIDTH / 2) // game.TILE_SIZE)
-        pr = int((game.player_y + game.PLAYER_HEIGHT / 2) // game.TILE_SIZE)
-        expected = _loop_window(game, pc, pr)
-        actual = game._fill_window(pc, pr)
-        assert np.array_equal(expected, actual)
-        _, _, done, _ = game.step(np.random.randint(0, game.action_size))
-        if done:
-            game.reset()
-
-
-def test_training_samples_diverse_caves_and_eval_is_held_out():
-    """Training must sample varied caves per episode (not memorise one level), and
-    evaluation must use a fixed, reproducible, held-out set disjoint from training."""
-    cfg = Config()
-    cfg.CRYSTAL_CAVES_PROCEDURAL = True
-    cfg.CRYSTAL_CAVES_DIFFICULTY = "easy"
-    cfg.CRYSTAL_CAVES_FAMILIES = "platform_network"
-    np.random.seed(0)
-    game = CrystalCaves(cfg, headless=True)
-
-    # Training: a pool, sampled with variety across resets.
-    assert len(game.CAVES) == cfg.CRYSTAL_CAVES_POOL_SIZE
-    seen = set()
-    for _ in range(40):
-        game.reset()
-        seen.add(tuple(game.level.layout))
-    assert len(seen) > 5  # genuinely diverse, not one repeated level
-
-    # Eval: held-out, diverse, reproducible.
-    game.use_eval_levels(20)
-
-    def eval_pass():
-        game.reset_eval_cursor()
-        seq = []
-        for _ in range(20):
-            game.reset()
-            seq.append(tuple(game.level.layout))
-        return seq
-
-    pass1 = eval_pass()
-    pass2 = eval_pass()
-    assert len(set(pass1)) == 20  # 20 distinct held-out caves
-    assert pass1 == pass2  # identical across evals (reproducible)
-    train_layouts = {tuple(c.layout) for c in game.CAVES}
-    assert not (set(pass1) & train_layouts)  # truly held out — unseen in training

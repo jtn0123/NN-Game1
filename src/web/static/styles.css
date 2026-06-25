@@ -1,6 +1,8 @@
 /* Neural Network AI - Training Dashboard Styles */
 /* Split into focused files to keep each stylesheet small and reviewable. */
 @import url("./styles_layout.css");
+@import url("./styles_preview.css");
+@import url("./styles_crystal_eval.css");
 @import url("./styles_controls.css");
 @import url("./styles_tooltips.css");
 @import url("./styles_models_nn.css");

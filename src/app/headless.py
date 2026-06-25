@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sys
 import time
@@ -17,6 +16,7 @@ from src.ai.evaluator import Evaluator
 from src.ai.trainer import calculate_progress_count
 from src.app.game_factory import create_training_environment
 from src.app.headless_dashboard import HeadlessDashboardMixin
+from src.app.headless_helpers import HeadlessRuntimeHelpersMixin
 from src.app.model_service import ModelService as AppModelService
 from src.app.training_runtime import (
     build_nn_snapshot,
@@ -44,7 +44,7 @@ except ImportError:
 __all__ = ["HeadlessTrainer", "build_nn_snapshot", "emit_nn_snapshot_to_dashboard"]
 
 
-class HeadlessTrainer(HeadlessDashboardMixin):
+class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
     """
     Lightweight headless trainer that skips pygame entirely.
 
@@ -514,439 +514,326 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         if self.web_dashboard:
             self.web_dashboard.log("✅ Training complete!", "success")
 
-    def _eval_win_rate_regressed(self, eval_results: Any) -> bool:
-        """Return whether the held-out win rate has fallen well below its best.
-
-        Used to distinguish a genuine collapse (win rate cratering past the peak)
-        from a plateau, so the exploration boost is not fired at a policy that is
-        already regressing.
-        """
-        if self.evaluator is None or self.evaluator.best_eval_win_rate <= 0.0:
-            return False
-        frac = getattr(self.config, "EVAL_BOOST_WIN_REGRESSION_FRAC", 0.7)
-        return eval_results.win_rate < frac * self.evaluator.best_eval_win_rate
-
-    def _restore_eval_best(self) -> bool:
-        """Reload the eval-best checkpoint's weights into the live policy.
-
-        Weights-only (keeps the current training position) so the in-memory policy
-        matches the kept-best checkpoint after early-stop. Returns False if no
-        eval-best checkpoint exists yet.
-        """
-        eval_best_path = os.path.join(
-            self.config.GAME_MODEL_DIR, f"{self.config.GAME_NAME}_eval_best.pth"
-        )
-        restored = self.agent.load_weights_only(eval_best_path)
-        if restored and self.web_dashboard:
-            self.web_dashboard.log("↩️ Rolled live policy back to eval-best", "info")
-        return restored
-
-    def train_vectorized(self) -> None:
-        """
-        Run headless training with vectorized environments for parallel execution.
-
-        This method runs N games simultaneously, collecting N experiences per step
-        and performing batched action selection for improved throughput.
-        """
-        # This method is only called when num_envs > 1, so vec_env is always set
-        assert self.vec_env is not None, "train_vectorized requires vec_env to be initialized"
+    def _emit_vectorized_episode_metrics(
+        self,
+        *,
+        episode: int,
+        info: dict[str, Any],
+        score: int,
+        won: bool,
+        reward: float,
+        episode_steps: int,
+        state: np.ndarray,
+        action: int,
+        avg_loss: float,
+        avg_q_value: float,
+        is_new_best: bool,
+    ) -> None:
+        dashboard = self.web_dashboard
+        if dashboard is None or not should_emit_episode_metrics(episode, is_new_best):
+            return
 
         config = self.config
-        num_envs = self.num_envs
+        dashboard.emit_metrics(
+            episode=episode,
+            score=score,
+            epsilon=self.agent.epsilon,
+            loss=avg_loss,
+            total_steps=self.total_steps,
+            won=won,
+            reward=reward,
+            memory_size=len(self.agent.memory),
+            avg_q_value=avg_q_value,
+            exploration_actions=self.exploration_actions,
+            exploitation_actions=self.exploitation_actions,
+            target_updates=self.target_updates,
+            bricks_broken=calculate_progress_count(info, config),
+            episode_length=episode_steps,
+            game_name=config.GAME_NAME,
+            cc_info=(info if config.GAME_NAME == "crystal_caves" else None),
+        )
+        dashboard.publisher.state.learn_every = config.LEARN_EVERY
+        dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
+        dashboard.publisher.state.batch_size = config.BATCH_SIZE
+        dashboard.publisher.state.cc_difficulty = getattr(config, "CRYSTAL_CAVES_DIFFICULTY", "")
+        self._emit_nn_visualization(state, action)
 
-        # Calculate starting episode (may be resuming from loaded model)
-        start_episode = self.current_episode
+    def _maybe_save_vectorized_periodic_checkpoint(self) -> None:
+        config = self.config
+        if self.current_episode % config.SAVE_EVERY != 0 or self.current_episode <= 0:
+            return
+        self._save_model(
+            f"{self.config.GAME_NAME}_ep{self.current_episode}.pth",
+            save_reason="periodic",
+            save_replay_buffer=False,
+        )
+        self._cleanup_old_periodic_saves(keep_last=5)
 
-        print("\n" + "=" * 70)
-        print("🚀 VECTORIZED HEADLESS TRAINING - Maximum Performance Mode")
+    def _handle_vectorized_eval_best(self, eval_results: Any) -> None:
+        if self.evaluator is None or not is_new_best_eval(self.evaluator, eval_results.mean_score):
+            return
+
+        eval_best_filename = f"{self.config.GAME_NAME}_eval_best.pth"
+        self._save_model(
+            eval_best_filename,
+            save_reason="eval_best",
+            quiet=True,
+            save_replay_buffer=False,
+        )
+        write_eval_best_baseline(
+            self.config.GAME_MODEL_DIR,
+            self.config.GAME_NAME,
+            episode=self.current_episode,
+            mean_score=eval_results.mean_score,
+            checkpoint=eval_best_filename,
+        )
         if self.web_dashboard:
-            print("🌐 Web dashboard enabled")
-        print("=" * 70)
-        print(f"   Environments:    {num_envs} parallel games")
-        eps_str = "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
-        print(f"   Episodes:        {start_episode} → {eps_str}")
-        print(f"   Device:          {config.DEVICE}")
-        print(f"   Batch size:      {config.BATCH_SIZE}")
-        print(f"   Learn every:     {config.LEARN_EVERY} steps")
-        print(f"   Gradient steps:  {config.GRADIENT_STEPS}")
-        print(f"   torch.compile:   {config.USE_TORCH_COMPILE}")
-        if self.best_score > 0:
-            print(f"   Resumed best:    {self.best_score}")
-        print("=" * 70 + "\n")
-
-        # Training timing
-        self.training_start_time = time.time()
-        last_report_time = self.training_start_time
-        steps_since_report = 0
-
-        # Per-environment episode tracking
-        env_episode_rewards = np.zeros(
-            num_envs, dtype=np.float64
-        )  # Use float64 to prevent precision loss
-        env_episode_steps = np.zeros(num_envs, dtype=np.int64)
-        episodes_completed = 0
-
-        # Initialize all environments
-        states = (
-            self.vec_env.reset().copy()
-        )  # Shape: (num_envs, state_size) - copy to avoid aliasing
-
-        # Track last completed episode info for reporting
-        last_score = 0
-        last_logged_episode = start_episode - 1  # Track last logged episode to prevent duplicates
-
-        # MAX_EPISODES == 0 means unlimited (train until manually stopped)
-        while self.running and (
-            config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES
-        ):
-            # Handle pause (only if web dashboard is active)
-            while self.running and self.paused:
-                time.sleep(0.1)
-            if not self.running:
-                break
-
-            # Batch action selection for all environments
-            actions, num_explored, num_exploited = self.agent.select_actions_batch(
-                states, training=True
+            self.web_dashboard.log(
+                f"🎯 New held-out eval best: {eval_results.mean_score:.0f}",
+                "success",
             )
-            self.exploration_actions += num_explored
-            self.exploitation_actions += num_exploited
 
-            # Step all environments simultaneously
-            next_states, rewards, dones, infos = self.vec_env.step_no_copy(actions)
+    def _record_vectorized_eval_on_dashboard(self, eval_results: Any) -> None:
+        if not self.web_dashboard:
+            return
+        self.web_dashboard.publisher.record_eval(
+            episode=self.current_episode,
+            mean_score=eval_results.mean_score,
+            std_score=eval_results.std_score,
+            median_score=eval_results.median_score,
+            win_rate=eval_results.win_rate,
+            num_games=eval_results.num_games,
+            crystal_frac=eval_results.mean_crystal_frac,
+            switch_rate=eval_results.mean_switch_rate,
+            depth_frac=eval_results.mean_depth_frac,
+            end_reason_counts=eval_results.end_reason_counts,
+        )
 
-            # Store experiences from all environments
-            self.agent.remember_batch(states, actions, rewards, next_states, dones)
+    def _handle_vectorized_eval_control_flow(self, eval_results: Any) -> None:
+        if self.evaluator is None:
+            return
 
-            # Learn (agent handles LEARN_EVERY and GRADIENT_STEPS internally)
-            self.agent.learn()
+        config = self.config
+        early_patience = getattr(config, "EARLY_STOP_PATIENCE", 4)
+        if (
+            getattr(config, "EARLY_STOP_ON_PLATEAU", False)
+            and self.evaluator.evals_since_improvement >= early_patience
+        ):
+            print(
+                f"\n⏹️  Early stop: eval plateaued "
+                f"({self.evaluator.evals_since_improvement} evals without "
+                f"improvement). Best checkpoint holds the peak.\n"
+            )
+            if self.web_dashboard:
+                self.web_dashboard.log("⏹️ Early stop: eval plateaued", "warning")
+            self.running = False
+            self._restore_eval_best()
+            return
 
-            # Update per-environment tracking
-            env_episode_rewards += rewards
-            env_episode_steps += 1
-            self.total_steps += num_envs
-            steps_since_report += num_envs
-
-            # Handle completed episodes
-            for i, done in enumerate(dones):
-                if done:
-                    # Episode completed for environment i
-                    score = infos[i].get("score", 0)
-                    self.scores.append(score)
-
-                    won = infos[i].get("won", False)
-                    self.wins.append(won)
-
-                    level = infos[i].get("level", 1)
-                    self.levels.append(level)
-
-                    self.progresses.append(float(infos[i].get("progress", 0.0)))
-                    self.end_reasons.append(str(infos[i].get("end_reason", "")))
-                    parts = infos[i].get("progress_parts")
-                    if isinstance(parts, dict):
-                        self.progress_parts.append(parts)
-
-                    # Track metrics for persistence (used by save)
-                    avg_loss = self.agent.get_average_loss(100)
-                    q_values_arr = self.agent.get_q_values(states[i])
-                    avg_q_value = float(np.mean(q_values_arr))
-                    self.q_values.append(avg_q_value)
-                    self.losses.append(avg_loss)
-                    self.epsilons.append(self.agent.epsilon)
-                    self.rewards.append(float(env_episode_rewards[i]))
-
-                    is_new_best = is_new_best_score(score, self.best_score)
-
-                    # Track best score
-                    if is_new_best:
-                        self.best_score = score
-                        self._save_model(
-                            f"{self.config.GAME_NAME}_best.pth",
-                            save_reason="best",
-                            quiet=True,
-                        )
-                        if self.web_dashboard:
-                            self.web_dashboard.log(
-                                f"🏆 New best score: {self.best_score}", "success"
-                            )
-
-                    # Track target updates (for persistence, independent of dashboard)
-                    if self.agent.steps > self.last_target_update_step + config.TARGET_UPDATE:
-                        self.target_updates += 1
-                        self.last_target_update_step = self.agent.steps
-
-                    # Update web dashboard metrics (throttled to every 5 episodes for performance)
-                    # Always emit on: first 10 episodes, new best score, or every 5th episode
-                    dashboard = self.web_dashboard
-                    if dashboard is not None and (
-                        should_emit_episode_metrics(self.current_episode, is_new_best)
-                    ):
-                        bricks_broken = calculate_progress_count(infos[i], config)
-
-                        dashboard.emit_metrics(
-                            episode=self.current_episode,
-                            score=score,
-                            epsilon=self.agent.epsilon,
-                            loss=avg_loss,
-                            total_steps=self.total_steps,
-                            won=won,
-                            reward=float(env_episode_rewards[i]),
-                            memory_size=len(self.agent.memory),
-                            avg_q_value=avg_q_value,
-                            exploration_actions=self.exploration_actions,
-                            exploitation_actions=self.exploitation_actions,
-                            target_updates=self.target_updates,
-                            bricks_broken=bricks_broken,
-                            episode_length=int(env_episode_steps[i]),
-                            game_name=config.GAME_NAME,
-                            cc_info=(infos[i] if config.GAME_NAME == "crystal_caves" else None),
-                        )
-                        # Update performance settings in dashboard state
-                        dashboard.publisher.state.learn_every = config.LEARN_EVERY
-                        dashboard.publisher.state.gradient_steps = config.GRADIENT_STEPS
-                        dashboard.publisher.state.batch_size = config.BATCH_SIZE
-                        dashboard.publisher.state.cc_difficulty = getattr(
-                            config, "CRYSTAL_CAVES_DIFFICULTY", ""
-                        )
-
-                        # Emit NN visualization data (throttled by server to ~10 FPS)
-                        # Convert numpy int64 to Python int for JSON serialization
-                        self._emit_nn_visualization(states[i], int(actions[i]))
-
-                    # Store for reporting
-                    last_score = score
-
-                    # Reset per-environment tracking
-                    env_episode_rewards[i] = 0.0
-                    env_episode_steps[i] = 0
-
-                    # Increment episode counter
-                    episodes_completed += 1
-                    self.current_episode += 1
-
-                    # Save checkpoints (no replay buffer for periodic saves - saves disk space)
-                    if self.current_episode % config.SAVE_EVERY == 0 and self.current_episode > 0:
-                        self._save_model(
-                            f"{self.config.GAME_NAME}_ep{self.current_episode}.pth",
-                            save_reason="periodic",
-                            save_replay_buffer=False,  # Periodic saves are lightweight
-                        )
-                        self._cleanup_old_periodic_saves(keep_last=5)
-
-                    # Run deterministic evaluation periodically
-                    if (
-                        self.evaluator is not None
-                        and config.EVAL_EVERY > 0
-                        and self.current_episode % config.EVAL_EVERY == 0
-                        and self.current_episode > 0
-                    ):
-                        eval_results = self.evaluator.evaluate(
-                            num_episodes=config.EVAL_EPISODES,
-                            max_steps=config.EVAL_MAX_STEPS,
-                            episode_num=self.current_episode,
-                        )
-                        self.evaluator.log_results(eval_results)
-
-                        if is_new_best_eval(self.evaluator, eval_results.mean_score):
-                            eval_best_filename = f"{self.config.GAME_NAME}_eval_best.pth"
-                            self._save_model(
-                                eval_best_filename,
-                                save_reason="eval_best",
-                                quiet=True,
-                                save_replay_buffer=False,
-                            )
-                            write_eval_best_baseline(
-                                self.config.GAME_MODEL_DIR,
-                                self.config.GAME_NAME,
-                                episode=self.current_episode,
-                                mean_score=eval_results.mean_score,
-                                checkpoint=eval_best_filename,
-                            )
-                            if self.web_dashboard:
-                                self.web_dashboard.log(
-                                    f"🎯 New held-out eval best: {eval_results.mean_score:.0f}",
-                                    "success",
-                                )
-
-                        # Surface the held-out eval on the dashboard (the trustworthy
-                        # generalisation number, distinct from the training win rate).
-                        if self.web_dashboard:
-                            self.web_dashboard.publisher.record_eval(
-                                episode=self.current_episode,
-                                mean_score=eval_results.mean_score,
-                                std_score=eval_results.std_score,
-                                median_score=eval_results.median_score,
-                                win_rate=eval_results.win_rate,
-                                num_games=eval_results.num_games,
-                                crystal_frac=eval_results.mean_crystal_frac,
-                                switch_rate=eval_results.mean_switch_rate,
-                                depth_frac=eval_results.mean_depth_frac,
-                                end_reason_counts=eval_results.end_reason_counts,
-                            )
-
-                        # Early-stop: end the stage once eval has plateaued, instead
-                        # of training the live policy past its peak into collapse
-                        # (the best checkpoint already holds the peak). Uses its own
-                        # patience and pre-empts the exploration boost below.
-                        early_patience = getattr(config, "EARLY_STOP_PATIENCE", 4)
-                        if (
-                            getattr(config, "EARLY_STOP_ON_PLATEAU", False)
-                            and self.evaluator.evals_since_improvement >= early_patience
-                        ):
-                            print(
-                                f"\n⏹️  Early stop: eval plateaued "
-                                f"({self.evaluator.evals_since_improvement} evals without "
-                                f"improvement). Best checkpoint holds the peak.\n"
-                            )
-                            if self.web_dashboard:
-                                self.web_dashboard.log("⏹️ Early stop: eval plateaued", "warning")
-                            self.running = False
-                            # True rollback: make the live policy match the eval-best
-                            # checkpoint so the stage ends on the peak (not the
-                            # post-peak/collapsed weights), and any subsequent gate
-                            # eval or _final.pth reflects the kept-best policy.
-                            self._restore_eval_best()
-
-                        # Auto-exploration boost: when plateau detected, increase epsilon.
-                        # Skipped when the boost is disabled (e.g. full-objective stages)
-                        # or when the win rate has regressed below the best — that is a
-                        # collapse, not a plateau, and randomness only deepens it.
-                        elif (
-                            self.evaluator.is_plateau()
-                            and not self._exploration_boost_active
-                            and not getattr(config, "DISABLE_EXPLORATION_BOOST", False)
-                            and not self._eval_win_rate_regressed(eval_results)
-                        ):
-                            self._exploration_boost_active = True
-                            self._exploration_boost_end_episode = (
-                                self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES
-                            )
-                            old_epsilon = self.agent.epsilon
-                            self.agent.epsilon = config.EVAL_PLATEAU_EPSILON_BOOST
-                            print(
-                                f"\n🚀 PLATEAU DETECTED! Boosting exploration: "
-                                f"ε {old_epsilon:.3f} → {self.agent.epsilon:.3f} "
-                                f"for {config.EVAL_PLATEAU_BOOST_EPISODES} episodes\n"
-                            )
-                            if self.web_dashboard:
-                                self.web_dashboard.log(
-                                    f"🚀 Exploration boost activated! ε → {self.agent.epsilon:.2f}",
-                                    "warning",
-                                )
-
-                        # Log to web dashboard if available
-                        if self.web_dashboard:
-                            plateau_str = (
-                                " ⚠️ PLATEAU DETECTED" if self.evaluator.is_plateau() else ""
-                            )
-                            self.web_dashboard.log(
-                                f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
-                                f"max level {eval_results.max_level}, "
-                                f"{eval_results.win_rate*100:.0f}% wins, "
-                                f"{eval_results.mean_crystal_frac*100:.0f}% crystals"
-                                f"{plateau_str}",
-                                ("info" if not self.evaluator.is_plateau() else "warning"),
-                            )
-
-            # Decay epsilon once per step if any episodes completed
-            # (NOT per environment - that would decay too fast with many parallel envs)
-            if np.any(dones):
-                # Check if exploration boost period has ended
-                if (
-                    self._exploration_boost_active
-                    and self.current_episode >= self._exploration_boost_end_episode
-                ):
-                    self._exploration_boost_active = False
-                    # Reset epsilon to minimum and let it decay normally
-                    self.agent.epsilon = config.EPSILON_END
-                    print(
-                        f"\n✓ Exploration boost ended. Resuming normal ε={self.agent.epsilon:.3f}\n"
-                    )
-                    if self.web_dashboard:
-                        self.web_dashboard.log(
-                            f"✓ Exploration boost ended, ε → {self.agent.epsilon:.3f}",
-                            "info",
-                        )
-                    # Reset plateau counter so we can detect new plateaus
-                    if self.evaluator:
-                        self.evaluator.evals_since_improvement = 0
-
-                # Only decay epsilon if not in boost mode
-                if not self._exploration_boost_active:
-                    self.agent.decay_epsilon(
-                        max(0, self.current_episode - self.epsilon_episode_offset)
-                    )
-                self.agent.step_scheduler()  # Step learning rate scheduler
-                self._apply_lr_decay(start_episode, self.current_episode)
-
-            # Update states for next iteration (vector envs auto-reset completed games)
-            states = next_states.copy()
-
-            # Progress reporting (terminal) - only log when new episodes complete
-            # Check if we should log: either LOG_EVERY episodes completed OR time interval passed
-            current_time = time.time()
-            elapsed_since_report = current_time - last_report_time
-
-            # Handle fresh start: if current_episode < last_logged_episode, a reset occurred
-            if last_logged_episode > self.current_episode:
-                last_logged_episode = -1  # Reset so logging can resume
-                last_report_time = current_time
-                steps_since_report = 0
-                episodes_completed = 0  # Reset episodes count for accurate ep/hr
-
-            should_log_by_episode = (self.current_episode - last_logged_episode) >= config.LOG_EVERY
-            should_log_by_time = elapsed_since_report >= config.REPORT_INTERVAL_SECONDS
-
-            # Only log if we have new episodes AND (LOG_EVERY condition OR time interval)
-            if self.current_episode > last_logged_episode and (
-                should_log_by_episode or should_log_by_time
-            ):
-                steps_per_sec = (
-                    steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
-                )
-                avg_score = np.mean(self.scores[-100:]) if self.scores else 0
-                avg_loss = self.agent.get_average_loss(100)
-                avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
-
-                # Completion-progress (Crystal Caves): rolling mean and best-so-far
-                # of info["progress"]. This is the signal that should climb before
-                # win-rate does, so surface it directly in the training log.
-                progress_str = ""
-                if self.progresses:
-                    avg_prog = float(np.mean(self.progresses[-100:]))
-                    best_prog = float(np.max(self.progresses))
-                    progress_str = f"Φ completion: {avg_prog:.3f} (best {best_prog:.3f}) | "
-
-                lr_str = ""
-                if getattr(self.config, "LR_DECAY", False):
-                    lr_str = f"lr: {self.agent.get_learning_rate():.1e} | "
-
-                progress_msg = (
-                    f"Ep {self.current_episode:5d} | "
-                    f"Score: {last_score:4d} | "
-                    f"Avg: {avg_score:6.1f} | "
-                    f"{progress_str}"
-                    f"Loss: {avg_loss:.4f} | "
-                    f"Q: {avg_q:.2f} | "
-                    f"{lr_str}"
-                    f"ε: {self.agent.epsilon:.3f} | "
-                    f"⚡ {steps_per_sec:,.0f} steps/s"
+        if (
+            self.evaluator.is_plateau()
+            and not self._exploration_boost_active
+            and not getattr(config, "DISABLE_EXPLORATION_BOOST", False)
+            and not self._eval_win_rate_regressed(eval_results)
+        ):
+            self._exploration_boost_active = True
+            self._exploration_boost_end_episode = (
+                self.current_episode + config.EVAL_PLATEAU_BOOST_EPISODES
+            )
+            old_epsilon = self.agent.epsilon
+            self.agent.epsilon = config.EVAL_PLATEAU_EPSILON_BOOST
+            print(
+                f"\n🚀 PLATEAU DETECTED! Boosting exploration: "
+                f"ε {old_epsilon:.3f} → {self.agent.epsilon:.3f} "
+                f"for {config.EVAL_PLATEAU_BOOST_EPISODES} episodes\n"
+            )
+            if self.web_dashboard:
+                self.web_dashboard.log(
+                    f"🚀 Exploration boost activated! ε → {self.agent.epsilon:.2f}",
+                    "warning",
                 )
 
-                print(progress_msg)
+    def _log_vectorized_eval(self, eval_results: Any) -> None:
+        if self.web_dashboard is None or self.evaluator is None:
+            return
+        plateau_str = " ⚠️ PLATEAU DETECTED" if self.evaluator.is_plateau() else ""
+        self.web_dashboard.log(
+            f"📊 EVAL: {eval_results.mean_score:.0f} avg, "
+            f"max level {eval_results.max_level}, "
+            f"{eval_results.win_rate*100:.0f}% wins, "
+            f"{eval_results.mean_crystal_frac*100:.0f}% crystals"
+            f"{plateau_str}",
+            ("info" if not self.evaluator.is_plateau() else "warning"),
+        )
 
-                # Also log to web dashboard console
-                if self.web_dashboard:
-                    self.web_dashboard.log(progress_msg, "metric")
+    def _maybe_run_vectorized_eval(self) -> None:
+        config = self.config
+        evaluator = self.evaluator
+        if (
+            evaluator is None
+            or config.EVAL_EVERY <= 0
+            or self.current_episode % config.EVAL_EVERY != 0
+            or self.current_episode <= 0
+        ):
+            return
 
-                last_logged_episode = self.current_episode
-                last_report_time = current_time
-                steps_since_report = 0
+        eval_results = evaluator.evaluate(
+            num_episodes=config.EVAL_EPISODES,
+            max_steps=config.EVAL_MAX_STEPS,
+            episode_num=self.current_episode,
+        )
+        evaluator.log_results(eval_results)
+        self._handle_vectorized_eval_best(eval_results)
+        self._record_vectorized_eval_on_dashboard(eval_results)
+        self._handle_vectorized_eval_control_flow(eval_results)
+        self._log_vectorized_eval(eval_results)
 
-        # Final save
-        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")
+    def _complete_vectorized_episode(
+        self,
+        env_index: int,
+        info: dict[str, Any],
+        states: np.ndarray,
+        actions: np.ndarray,
+        env_episode_rewards: np.ndarray,
+        env_episode_steps: np.ndarray,
+    ) -> int:
+        score = int(info.get("score", 0) or 0)
+        self.scores.append(score)
 
-        # Summary
+        won = bool(info.get("won", False))
+        self.wins.append(won)
+        self.levels.append(int(info.get("level", 1) or 1))
+        self.progresses.append(float(info.get("progress", 0.0) or 0.0))
+        self.end_reasons.append(str(info.get("end_reason", "")))
+        parts = info.get("progress_parts")
+        if isinstance(parts, dict):
+            self.progress_parts.append(parts)
+
+        avg_loss = self.agent.get_average_loss(100)
+        q_values_arr = self.agent.get_q_values(states[env_index])
+        avg_q_value = float(np.mean(q_values_arr))
+        self.q_values.append(avg_q_value)
+        self.losses.append(avg_loss)
+        self.epsilons.append(self.agent.epsilon)
+        self.rewards.append(float(env_episode_rewards[env_index]))
+
+        is_new_best = is_new_best_score(score, self.best_score)
+        if is_new_best:
+            self.best_score = score
+            self._save_model(
+                f"{self.config.GAME_NAME}_best.pth",
+                save_reason="best",
+                quiet=True,
+            )
+            if self.web_dashboard:
+                self.web_dashboard.log(f"🏆 New best score: {self.best_score}", "success")
+
+        if self.agent.steps > self.last_target_update_step + self.config.TARGET_UPDATE:
+            self.target_updates += 1
+            self.last_target_update_step = self.agent.steps
+
+        self._emit_vectorized_episode_metrics(
+            episode=self.current_episode,
+            info=info,
+            score=score,
+            won=won,
+            reward=float(env_episode_rewards[env_index]),
+            episode_steps=int(env_episode_steps[env_index]),
+            state=states[env_index],
+            action=int(actions[env_index]),
+            avg_loss=avg_loss,
+            avg_q_value=avg_q_value,
+            is_new_best=is_new_best,
+        )
+
+        env_episode_rewards[env_index] = 0.0
+        env_episode_steps[env_index] = 0
+        self.current_episode += 1
+
+        self._maybe_save_vectorized_periodic_checkpoint()
+        self._maybe_run_vectorized_eval()
+        return score
+
+    def _update_vectorized_after_completed_episodes(self, start_episode: int) -> None:
+        config = self.config
+        if (
+            self._exploration_boost_active
+            and self.current_episode >= self._exploration_boost_end_episode
+        ):
+            self._exploration_boost_active = False
+            self.agent.epsilon = config.EPSILON_END
+            print(f"\n✓ Exploration boost ended. Resuming normal ε={self.agent.epsilon:.3f}\n")
+            if self.web_dashboard:
+                self.web_dashboard.log(
+                    f"✓ Exploration boost ended, ε → {self.agent.epsilon:.3f}",
+                    "info",
+                )
+            if self.evaluator:
+                self.evaluator.evals_since_improvement = 0
+
+        if not self._exploration_boost_active:
+            self.agent.decay_epsilon(max(0, self.current_episode - self.epsilon_episode_offset))
+        self.agent.step_scheduler()
+        self._apply_lr_decay(start_episode, self.current_episode)
+
+    def _maybe_log_vectorized_progress(
+        self,
+        *,
+        start_episode: int,
+        last_score: int,
+        last_logged_episode: int,
+        last_report_time: float,
+        steps_since_report: int,
+    ) -> tuple[int, float, int]:
+        config = self.config
+        current_time = time.time()
+        elapsed_since_report = current_time - last_report_time
+
+        if last_logged_episode > self.current_episode:
+            last_logged_episode = -1
+            last_report_time = current_time
+            steps_since_report = 0
+
+        should_log_by_episode = (self.current_episode - last_logged_episode) >= config.LOG_EVERY
+        should_log_by_time = elapsed_since_report >= config.REPORT_INTERVAL_SECONDS
+        if self.current_episode <= last_logged_episode or not (
+            should_log_by_episode or should_log_by_time
+        ):
+            return last_logged_episode, last_report_time, steps_since_report
+
+        steps_per_sec = steps_since_report / elapsed_since_report if elapsed_since_report > 0 else 0
+        avg_score = np.mean(self.scores[-100:]) if self.scores else 0
+        avg_loss = self.agent.get_average_loss(100)
+        avg_q = np.mean(self.q_values[-100:]) if self.q_values else 0.0
+
+        progress_str = ""
+        if self.progresses:
+            avg_prog = float(np.mean(self.progresses[-100:]))
+            best_prog = float(np.max(self.progresses))
+            progress_str = f"Φ completion: {avg_prog:.3f} (best {best_prog:.3f}) | "
+
+        lr_str = ""
+        if getattr(self.config, "LR_DECAY", False):
+            lr_str = f"lr: {self.agent.get_learning_rate():.1e} | "
+
+        progress_msg = (
+            f"Ep {self.current_episode:5d} | "
+            f"Score: {last_score:4d} | "
+            f"Avg: {avg_score:6.1f} | "
+            f"{progress_str}"
+            f"Loss: {avg_loss:.4f} | "
+            f"Q: {avg_q:.2f} | "
+            f"{lr_str}"
+            f"ε: {self.agent.epsilon:.3f} | "
+            f"⚡ {steps_per_sec:,.0f} steps/s"
+        )
+        print(progress_msg)
+        if self.web_dashboard:
+            self.web_dashboard.log(progress_msg, "metric")
+
+        return self.current_episode, current_time, 0
+
+    def _print_vectorized_training_summary(self, start_episode: int, num_envs: int) -> None:
         total_time = time.time() - self.training_start_time
         print("\n" + "=" * 70)
         print("✅ VECTORIZED TRAINING COMPLETE!")
@@ -970,64 +857,92 @@ class HeadlessTrainer(HeadlessDashboardMixin):
         if self.web_dashboard:
             self.web_dashboard.log("✅ Vectorized training complete!", "success")
 
-    def _apply_lr_decay(self, start_episode: int, current_episode: int) -> None:
-        """Cosine-decay the learning rate from LEARNING_RATE to LR_MIN over this
-        run's episodes (start_episode..MAX_EPISODES). Early LR matches the old
-        constant rate; late LR approaches zero, freezing the policy near its peak
-        so the live win rate stops oscillating. No-op unless LR_DECAY is set and
-        the run has a finite episode target."""
-        if not getattr(self.config, "LR_DECAY", False):
-            return
-        target = self.config.MAX_EPISODES
-        if target <= 0:
-            return  # unlimited run -> no horizon to decay over
-        lr0 = self.config.LEARNING_RATE
-        lr_min = getattr(self.config, "LR_MIN", 1e-5)
-        span = max(1, target - start_episode)
-        frac = min(1.0, max(0.0, (current_episode - start_episode) / span))
-        lr = lr_min + 0.5 * (lr0 - lr_min) * (1.0 + math.cos(math.pi * frac))
-        self.agent.set_learning_rate(lr)
-
-    @staticmethod
-    def _fmt_eta(seconds: float) -> str:
-        """Human-friendly time-remaining, e.g. '3m', '1h12m', '45s'."""
-        s = int(max(0, seconds))
-        if s >= 3600:
-            return f"{s // 3600}h{(s % 3600) // 60:02d}m"
-        if s >= 60:
-            return f"{s // 60}m"
-        return f"{s}s"
-
-    def _print_progress_breakdown(self, window: int = 100) -> None:
-        """CA-03: print where the agent stalls — the end-reason mix and the mean
-        completion-progress components over the last `window` episodes. This
-        pinpoints the gate (crystals vs switch vs depth) the agent gets stuck on.
+    def train_vectorized(self) -> None:
         """
-        if not self.end_reasons and not self.progress_parts:
-            return
+        Run headless training with vectorized environments for parallel execution.
 
-        recent_reasons = self.end_reasons[-window:]
-        if recent_reasons:
-            counts: dict[str, int] = {}
-            for reason in recent_reasons:
-                counts[reason] = counts.get(reason, 0) + 1
-            total = len(recent_reasons)
-            mix = ", ".join(
-                f"{name} {count / total * 100:.0f}%"
-                for name, count in sorted(counts.items(), key=lambda kv: -kv[1])
-            )
-            print(f"   End reasons:      {mix}")
+        This method runs N games simultaneously, collecting N experiences per step
+        and performing batched action selection for improved throughput.
+        """
+        assert self.vec_env is not None, "train_vectorized requires vec_env to be initialized"
 
-        recent_parts = self.progress_parts[-window:]
-        if recent_parts:
-            keys = ("crystal_frac", "switch_done", "depth_frac", "won")
-            means = {
-                key: float(np.mean([float(p.get(key, 0.0)) for p in recent_parts])) for key in keys
-            }
-            print(
-                "   Phi@death parts:  "
-                f"crystals {means['crystal_frac']:.2f} | "
-                f"switch {means['switch_done']:.2f} | "
-                f"depth {means['depth_frac']:.2f} | "
-                f"won {means['won']:.2f}"
+        config = self.config
+        num_envs = self.num_envs
+        start_episode = self.current_episode
+
+        print("\n" + "=" * 70)
+        print("🚀 VECTORIZED HEADLESS TRAINING - Maximum Performance Mode")
+        if self.web_dashboard:
+            print("🌐 Web dashboard enabled")
+        print("=" * 70)
+        print(f"   Environments:    {num_envs} parallel games")
+        eps_str = "∞ (Unlimited)" if config.MAX_EPISODES == 0 else str(config.MAX_EPISODES)
+        print(f"   Episodes:        {start_episode} → {eps_str}")
+        print(f"   Device:          {config.DEVICE}")
+        print(f"   Batch size:      {config.BATCH_SIZE}")
+        print(f"   Learn every:     {config.LEARN_EVERY} steps")
+        print(f"   Gradient steps:  {config.GRADIENT_STEPS}")
+        print(f"   torch.compile:   {config.USE_TORCH_COMPILE}")
+        if self.best_score > 0:
+            print(f"   Resumed best:    {self.best_score}")
+        print("=" * 70 + "\n")
+
+        self.training_start_time = time.time()
+        last_report_time = self.training_start_time
+        steps_since_report = 0
+        env_episode_rewards = np.zeros(num_envs, dtype=np.float64)
+        env_episode_steps = np.zeros(num_envs, dtype=np.int64)
+        states = self.vec_env.reset().copy()
+        last_score = 0
+        last_logged_episode = start_episode - 1
+
+        while self.running and (
+            config.MAX_EPISODES == 0 or self.current_episode < config.MAX_EPISODES
+        ):
+            while self.running and self.paused:
+                time.sleep(0.1)
+            if not self.running:
+                break
+
+            actions, num_explored, num_exploited = self.agent.select_actions_batch(
+                states, training=True
             )
+            self.exploration_actions += num_explored
+            self.exploitation_actions += num_exploited
+
+            next_states, rewards, dones, infos = self.vec_env.step_no_copy(actions)
+            self.agent.remember_batch(states, actions, rewards, next_states, dones)
+            self.agent.learn()
+
+            env_episode_rewards += rewards
+            env_episode_steps += 1
+            self.total_steps += num_envs
+            steps_since_report += num_envs
+
+            for i, done in enumerate(dones):
+                if done:
+                    last_score = self._complete_vectorized_episode(
+                        i,
+                        infos[i],
+                        states,
+                        actions,
+                        env_episode_rewards,
+                        env_episode_steps,
+                    )
+
+            if np.any(dones):
+                self._update_vectorized_after_completed_episodes(start_episode)
+
+            states = next_states.copy()
+            last_logged_episode, last_report_time, steps_since_report = (
+                self._maybe_log_vectorized_progress(
+                    start_episode=start_episode,
+                    last_score=last_score,
+                    last_logged_episode=last_logged_episode,
+                    last_report_time=last_report_time,
+                    steps_since_report=steps_since_report,
+                )
+            )
+
+        self._save_model(f"{self.config.GAME_NAME}_final.pth", save_reason="final")
+        self._print_vectorized_training_summary(start_episode, num_envs)
