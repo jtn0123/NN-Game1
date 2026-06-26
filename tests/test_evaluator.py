@@ -392,7 +392,7 @@ class TestSelectionScoreKeepBest:
 
         assert evaluator._selection_score(deep_progress) > evaluator._selection_score(shallow_wins)
 
-    def test_selection_score_breaks_exit_unlock_ties_on_win_rate(self, config):
+    def test_selection_score_breaks_exit_unlock_ties_on_win_rate(self, config: Config) -> None:
         """Among policies that both unlock the exit, the one that wins is preferred."""
         evaluator = self._evaluator(config)
         winner = _eval_results(

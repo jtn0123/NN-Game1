@@ -11,6 +11,7 @@ Usage:
     print(cfg.LEARNING_RATE)
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -752,6 +753,11 @@ class Config:
         self._require(0 < self.PER_BETA_START <= 1, "PER_BETA_START must be in (0, 1]")
         self._require(self.PER_BETA_FRAMES > 0, "PER_BETA_FRAMES must be positive")
         self._require(self.N_STEP_SIZE > 0, "N_STEP_SIZE must be positive")
+        self._require(
+            math.isfinite(self.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT)
+            and self.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT >= 0,
+            "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT must be finite and non-negative",
+        )
         self._require(self.SCREEN_WIDTH > 0, "Screen width must be positive")
         self._require(self.SCREEN_HEIGHT > 0, "Screen height must be positive")
         self._require(self.BALL_SPEED > 0, "Ball speed must be positive")
