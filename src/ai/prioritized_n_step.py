@@ -101,11 +101,30 @@ class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
                     break
 
             _, _, _, n_step_next_state, n_step_done = buffer[actual_final_idx]
+            n_step_length = actual_final_idx - i + 1
             PrioritizedReplayBuffer.push(
-                self, state, action, n_step_reward, n_step_next_state, n_step_done
+                self,
+                state,
+                action,
+                n_step_reward,
+                n_step_next_state,
+                n_step_done,
+                n_step_length,
             )
 
         buffer.clear()
+
+    def sample(self, batch_size: int):
+        """Sample prioritized N-step transitions with actual bootstrap spans."""
+        result = super().sample(batch_size)
+        indices = result[5]
+        return (*result, self.n_step_lengths[indices].copy())
+
+    def sample_no_copy(self, batch_size: int):
+        """Sample prioritized N-step transitions without copying transition arrays."""
+        result = super().sample_no_copy(batch_size)
+        indices = result[5]
+        return (*result, self.n_step_lengths[indices])
 
     def __len__(self) -> int:
         """Return stored plus pending experiences, capped at capacity."""

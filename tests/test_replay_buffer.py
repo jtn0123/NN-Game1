@@ -488,6 +488,18 @@ class TestNStepReplayBuffer:
             buffer.next_states[0], expected_next_state
         ), "Without early termination, should use N-th step's next_state"
 
+    def test_n_step_records_actual_bootstrap_span(self, state_size):
+        """Tail transitions in a flushed N-step block bootstrap over fewer than N steps."""
+        buffer = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.9)
+
+        for i in range(3):
+            state = np.ones(state_size, dtype=np.float32) * i
+            next_state = np.ones(state_size, dtype=np.float32) * (i + 1)
+            buffer.push(state, i, 1.0, next_state, False)
+
+        assert buffer._size == 3
+        assert buffer.n_step_lengths[:3].tolist() == [3, 2, 1]
+
     def test_n_step_multiple_episodes(self, state_size):
         """Buffer should handle multiple episodes correctly."""
         buffer = NStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3, gamma=0.99)

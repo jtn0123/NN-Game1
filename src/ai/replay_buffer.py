@@ -79,12 +79,20 @@ class ReplayBuffer:
         self.rewards = np.empty(self.capacity, dtype=np.float32)
         self.next_states = np.empty((self.capacity, state_size), dtype=np.float32)
         self.dones = np.empty(self.capacity, dtype=np.float32)
+        self.n_step_lengths = np.ones(self.capacity, dtype=np.int64)
         self._initialized = True
 
     @staticmethod
     def _validate_batch_size(batch_size: int) -> None:
         if batch_size <= 0:
             raise ValueError(f"batch_size must be positive, got {batch_size}")
+
+    @staticmethod
+    def _validate_n_step_length(n_step_length: int) -> int:
+        n_step_length = int(n_step_length)
+        if n_step_length <= 0:
+            raise ValueError(f"n_step_length must be positive, got {n_step_length}")
+        return n_step_length
 
     def push(
         self,
@@ -93,6 +101,7 @@ class ReplayBuffer:
         reward: float,
         next_state: np.ndarray,
         done: bool,
+        n_step_length: int = 1,
     ) -> None:
         """
         Add an experience to the buffer.
@@ -123,6 +132,7 @@ class ReplayBuffer:
         self.rewards[self._position] = reward
         np.copyto(self.next_states[self._position], next_state)
         self.dones[self._position] = float(done)
+        self.n_step_lengths[self._position] = self._validate_n_step_length(n_step_length)
 
         # Update position and size
         self._position = (self._position + 1) % self.capacity
@@ -135,6 +145,7 @@ class ReplayBuffer:
         rewards: np.ndarray,
         next_states: np.ndarray,
         dones: np.ndarray,
+        n_step_lengths: np.ndarray | None = None,
     ) -> None:
         """
         Add multiple experiences to the buffer at once (vectorized for speed).
@@ -154,6 +165,10 @@ class ReplayBuffer:
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
+        if n_step_lengths is None:
+            n_step_lengths = np.ones(len(states), dtype=np.int64)
+        else:
+            n_step_lengths = np.asarray(n_step_lengths)
         batch_size = len(states)
         if batch_size <= 0:
             raise ValueError("push_batch requires at least one experience")
@@ -167,6 +182,7 @@ class ReplayBuffer:
             ("actions", actions),
             ("rewards", rewards),
             ("dones", dones),
+            ("n_step_lengths", n_step_lengths),
         ]:
             actual_length = values.shape[0] if values.ndim >= 1 else 0
             if values.ndim != 1 or actual_length != batch_size:
@@ -191,14 +207,13 @@ class ReplayBuffer:
         self.rewards[indices] = rewards
         self.next_states[indices] = next_states
         self.dones[indices] = dones.astype(float)
+        self.n_step_lengths[indices] = n_step_lengths.astype(np.int64)
 
         # Update position and size
         self._position = (self._position + batch_size) % self.capacity
         self._size = min(self._size + batch_size, self.capacity)
 
-    def sample(
-        self, batch_size: int
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def sample(self, batch_size: int) -> Tuple[np.ndarray, ...]:
         """
         Sample a random batch of experiences using vectorized numpy indexing.
 
@@ -230,9 +245,7 @@ class ReplayBuffer:
             self.dones[indices].copy(),
         )
 
-    def sample_no_copy(
-        self, batch_size: int
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def sample_no_copy(self, batch_size: int) -> Tuple[np.ndarray, ...]:
         """
         Sample without copying (faster but arrays are views into buffer).
 
@@ -311,6 +324,7 @@ class ReplayBuffer:
             "rewards": self.rewards[: self._size].copy(),
             "next_states": self.next_states[: self._size].copy(),
             "dones": self.dones[: self._size].copy(),
+            "n_step_lengths": self.n_step_lengths[: self._size].copy(),
         }
 
     def load_from_dict(self, data: dict) -> bool:
@@ -348,6 +362,10 @@ class ReplayBuffer:
             self.rewards[:load_size] = data["rewards"][:load_size]
             self.next_states[:load_size] = data["next_states"][:load_size]
             self.dones[:load_size] = data["dones"][:load_size]
+            self.n_step_lengths[:load_size] = data.get(
+                "n_step_lengths",
+                np.ones(saved_size, dtype=np.int64),
+            )[:load_size]
         else:
             # Saved buffer is larger - take most recent experiences
             offset = saved_size - self.capacity
@@ -356,6 +374,8 @@ class ReplayBuffer:
             self.rewards[:load_size] = data["rewards"][offset : offset + load_size]
             self.next_states[:load_size] = data["next_states"][offset : offset + load_size]
             self.dones[:load_size] = data["dones"][offset : offset + load_size]
+            n_step_lengths = data.get("n_step_lengths", np.ones(saved_size, dtype=np.int64))
+            self.n_step_lengths[:load_size] = n_step_lengths[offset : offset + load_size]
 
         self._size = load_size
         self._position = load_size % self.capacity
@@ -428,6 +448,7 @@ class PrioritizedReplayBuffer:
         self.rewards = np.empty(self.capacity, dtype=np.float32)
         self.next_states = np.empty((self.capacity, state_size), dtype=np.float32)
         self.dones = np.empty(self.capacity, dtype=np.float32)
+        self.n_step_lengths = np.ones(self.capacity, dtype=np.int64)
         self._initialized = True
 
     @staticmethod
@@ -442,6 +463,7 @@ class PrioritizedReplayBuffer:
         reward: float,
         next_state: np.ndarray,
         done: bool,
+        n_step_length: int = 1,
     ) -> None:
         """Add experience with maximum priority."""
         if not self._initialized:
@@ -459,6 +481,7 @@ class PrioritizedReplayBuffer:
         self.rewards[self._position] = reward
         np.copyto(self.next_states[self._position], next_state)
         self.dones[self._position] = float(done)
+        self.n_step_lengths[self._position] = ReplayBuffer._validate_n_step_length(n_step_length)
         self.priorities[self._position] = self.max_priority
 
         self._position = (self._position + 1) % self.capacity
@@ -649,6 +672,7 @@ class PrioritizedReplayBuffer:
             "rewards": self.rewards[: self._size].copy(),
             "next_states": self.next_states[: self._size].copy(),
             "dones": self.dones[: self._size].copy(),
+            "n_step_lengths": self.n_step_lengths[: self._size].copy(),
             "priorities": self.priorities[: self._size].copy(),
             "max_priority": self.max_priority,
             "frame_count": self._frame_count,
@@ -682,6 +706,10 @@ class PrioritizedReplayBuffer:
             self.rewards[:load_size] = data["rewards"][:load_size]
             self.next_states[:load_size] = data["next_states"][:load_size]
             self.dones[:load_size] = data["dones"][:load_size]
+            self.n_step_lengths[:load_size] = data.get(
+                "n_step_lengths",
+                np.ones(saved_size, dtype=np.int64),
+            )[:load_size]
         else:
             # Saved buffer is larger - take most recent experiences
             offset = saved_size - self.capacity
@@ -690,6 +718,8 @@ class PrioritizedReplayBuffer:
             self.rewards[:load_size] = data["rewards"][offset : offset + load_size]
             self.next_states[:load_size] = data["next_states"][offset : offset + load_size]
             self.dones[:load_size] = data["dones"][offset : offset + load_size]
+            n_step_lengths = data.get("n_step_lengths", np.ones(saved_size, dtype=np.int64))
+            self.n_step_lengths[:load_size] = n_step_lengths[offset : offset + load_size]
 
         # Restore priorities
         if "priorities" in data:
@@ -833,7 +863,15 @@ class NStepReplayBuffer(ReplayBuffer):
             # Use the actual final index to get the correct next state and done flag
             _, _, _, n_step_next_state, n_step_done = buffer[actual_final_idx]
 
-            self._store_transition(state, action, n_step_reward, n_step_next_state, n_step_done)
+            n_step_length = actual_final_idx - i + 1
+            self._store_transition(
+                state,
+                action,
+                n_step_reward,
+                n_step_next_state,
+                n_step_done,
+                n_step_length,
+            )
 
         buffer.clear()
 
@@ -844,13 +882,54 @@ class NStepReplayBuffer(ReplayBuffer):
         reward: float,
         next_state: np.ndarray,
         done: bool,
+        n_step_length: int,
     ) -> None:
         """Store a computed N-step transition in the backing replay buffer.
 
         Subclasses can override this hook to attach metadata such as priorities
         while reusing the same N-step accumulation logic.
         """
-        ReplayBuffer.push(self, state, action, reward, next_state, done)
+        ReplayBuffer.push(self, state, action, reward, next_state, done, n_step_length)
+
+    def sample(
+        self, batch_size: int
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Sample N-step transitions and return their actual bootstrap spans."""
+        self._validate_batch_size(batch_size)
+        if not self._initialized:
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+        if self._size == 0:
+            raise RuntimeError("Cannot sample from empty buffer.")
+
+        indices = np.random.choice(self._size, size=batch_size, replace=True)
+        return (
+            self.states[indices].copy(),
+            self.actions[indices].copy(),
+            self.rewards[indices].copy(),
+            self.next_states[indices].copy(),
+            self.dones[indices].copy(),
+            self.n_step_lengths[indices].copy(),
+        )
+
+    def sample_no_copy(
+        self, batch_size: int
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Sample N-step transitions without copying the main transition arrays."""
+        self._validate_batch_size(batch_size)
+        if not self._initialized:
+            raise RuntimeError("Cannot sample from uninitialized buffer. Call push() first.")
+        if self._size == 0:
+            raise RuntimeError("Cannot sample from empty buffer.")
+
+        indices = np.random.choice(self._size, size=batch_size, replace=True)
+        return (
+            self.states[indices],
+            self.actions[indices],
+            self.rewards[indices],
+            self.next_states[indices],
+            self.dones[indices],
+            self.n_step_lengths[indices],
+        )
 
     def _flush_n_step_buffer(self, done: bool) -> None:
         """Backward-compatible wrapper: flush the single-env push() trajectory buffer."""
@@ -869,70 +948,3 @@ class NStepReplayBuffer(ReplayBuffer):
         for buf in self._env_buffers:
             buf.clear()
         self._env_buffers = []
-
-
-# Testing
-if __name__ == "__main__":
-    print("Testing ReplayBuffer (contiguous numpy storage)...")
-
-    # Create buffer
-    buffer = ReplayBuffer(capacity=100)
-
-    # Add some experiences
-    state_size = 10
-    for i in range(50):
-        state = np.random.randn(state_size).astype(np.float32)
-        action = np.random.randint(0, 3)
-        reward = np.random.randn()
-        next_state = np.random.randn(state_size).astype(np.float32)
-        done = np.random.random() > 0.9
-
-        buffer.push(state, action, reward, next_state, done)
-
-    print(f"Buffer size: {len(buffer)}")
-    print(f"Is ready for batch of 32: {buffer.is_ready(32)}")
-
-    # Sample a batch
-    states, actions, rewards, next_states, dones = buffer.sample(32)
-
-    print("\nSampled batch shapes:")
-    print(f"  States: {states.shape}")
-    print(f"  Actions: {actions.shape}")
-    print(f"  Rewards: {rewards.shape}")
-    print(f"  Next states: {next_states.shape}")
-    print(f"  Dones: {dones.shape}")
-
-    # Test circular buffer behavior
-    print("\nTesting circular buffer...")
-    for i in range(100):  # Overflow capacity
-        state = np.random.randn(state_size).astype(np.float32)
-        buffer.push(state, 0, 0.0, state, False)
-
-    print(f"Buffer size after overflow: {len(buffer)} (capacity: {buffer.capacity})")
-
-    # Test PrioritizedReplayBuffer
-    print("\n" + "=" * 50)
-    print("Testing PrioritizedReplayBuffer...")
-
-    per_buffer = PrioritizedReplayBuffer(capacity=100, alpha=0.6, beta_start=0.4)
-
-    for i in range(50):
-        state = np.random.randn(state_size).astype(np.float32)
-        action = np.random.randint(0, 3)
-        reward = np.random.randn()
-        next_state = np.random.randn(state_size).astype(np.float32)
-        done = np.random.random() > 0.9
-
-        per_buffer.push(state, action, reward, next_state, done)
-
-    states, actions, rewards, next_states, dones, indices, weights = per_buffer.sample(32)
-    print(f"PER sample shapes: states={states.shape}, weights={weights.shape}")
-    print(f"Indices range: {indices.min()} - {indices.max()}")
-    print(f"Weights range: {weights.min():.4f} - {weights.max():.4f}")
-
-    # Update priorities
-    td_errors = np.random.rand(32).astype(np.float32)
-    per_buffer.update_priorities(indices, td_errors)
-    print(f"Max priority after update: {per_buffer.max_priority:.4f}")
-
-    print("\n✓ All ReplayBuffer tests passed!")

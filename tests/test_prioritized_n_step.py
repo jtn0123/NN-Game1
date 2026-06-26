@@ -48,7 +48,9 @@ class TestPrioritizedNStepReplayBuffer:
         assert buffer.rewards[0] == pytest.approx(3.0)
         assert np.all(buffer.priorities[:3] == 1.0)
 
-        states, actions, rewards, next_states, dones, indices, weights = buffer.sample(5)
+        states, actions, rewards, next_states, dones, indices, weights, n_step_lengths = (
+            buffer.sample(5)
+        )
         assert states.shape == (5, state_size)
         assert actions.shape == (5,)
         assert rewards.shape == (5,)
@@ -56,6 +58,7 @@ class TestPrioritizedNStepReplayBuffer:
         assert dones.shape == (5,)
         assert indices.shape == (5,)
         assert weights.shape == (5,)
+        assert n_step_lengths.shape == (5,)
         assert np.all(weights <= 1.0 + 1e-5)
 
     def test_prioritized_n_step_push_batch_tracks_envs_independently(self, state_size):
@@ -85,7 +88,25 @@ class TestPrioritizedNStepReplayBuffer:
         assert buffer._size == 6
         expected = np.sort([1.0, 1.9, 2.71, 10.0, 19.0, 27.1])
         assert np.allclose(np.sort(buffer.rewards[:6]), expected)
+        assert np.allclose(np.sort(buffer.n_step_lengths[:6]), np.sort([3, 2, 1, 3, 2, 1]))
         assert np.all(buffer.priorities[:6] == 1.0)
+
+    def test_prioritized_n_step_records_actual_bootstrap_span(self, state_size):
+        """Prioritized N-step stores the actual bootstrap span for each transition."""
+        buffer = PrioritizedNStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.9,
+        )
+
+        for i in range(3):
+            state = np.ones(state_size, dtype=np.float32) * i
+            next_state = np.ones(state_size, dtype=np.float32) * (i + 1)
+            buffer.push(state, i, 1.0, next_state, False)
+
+        assert buffer._size == 3
+        assert buffer.n_step_lengths[:3].tolist() == [3, 2, 1]
 
     def test_prioritized_n_step_updates_priorities(self, state_size):
         """Priority updates should work for computed N-step transitions."""

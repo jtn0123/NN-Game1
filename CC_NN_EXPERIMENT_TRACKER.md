@@ -94,6 +94,177 @@ This replaces the older A1-A8 backlog. Several items from that list have now bee
 implemented and rejected, so the active list should route future work away from repeated
 correction/option variants.
 
+## 2026-06-25 N-Step Discount And Eval-Cap Validation
+
+**N-step discount fix:** implemented and kept as a correctness fix. The replay buffers now
+record each flushed transition's actual bootstrap span (`n_step_lengths`), and the agent
+uses that per-sample span for both standard DQN targets and C51 projection. Focused tests
+cover uniform n-step replay, prioritized n-step replay, per-sample DQN targets, and
+per-sample C51 projection:
+
+```bash
+/Users/justin/.pyenv/versions/3.12.11/bin/python -m pytest \
+  tests/test_replay_buffer.py::TestNStepReplayBuffer::test_n_step_records_actual_bootstrap_span \
+  tests/test_prioritized_n_step.py::TestPrioritizedNStepReplayBuffer::test_prioritized_n_step_records_actual_bootstrap_span \
+  tests/test_agent.py::TestQValueComputation::test_q_values_use_actual_n_step_bootstrap_span \
+  tests/test_agent.py::TestLearning::test_distributional_projection_accepts_per_sample_gamma -q
+```
+
+Result: `4 passed`. Full local gate also passed after the fix (`1190` pytest tests plus
+black, ruff, mypy, JS dashboard tests, perf smoke, hygiene, and size checks).
+
+**Short learning smoke:** compared the fixed per-sample target against a monkeypatched
+legacy scalar `gamma ** N_STEP_SIZE` target on the B3s recipe shape, seed `0`, `50`
+episodes, selected eval `8` games. This was not promotion-level evidence.
+
+| Arm | Artifact | Train score100 | Train progress100 | Selected wins | Selected crystals | Selected depth | Selection score |
+|---|---|---:|---:|---:|---:|---:|---:|
+| fixed actual span | `.Codex/artifacts/cc_sessions/20260625_204532_nstep_actual_fixed_50_seed0` | 116.0 | 0.513 | 2/8 | 25.0% | 29.5% | 0.3025 |
+| legacy scalar gamma | `.Codex/artifacts/cc_sessions/20260625_205249_nstep_legacy_scalar_gamma50_seed0` | 96.5 | 0.490 | 2/8 | 25.0% | 39.3% | 0.3025 |
+
+Decision: keep the fix because the original target was mathematically wrong and the
+primary held-out smoke metrics tied. Do not claim a learning gain from this run; it is
+mixed and underpowered.
+
+**Eval-cap probe (#2a):** validated before changing config. `config.EVAL_MAX_STEPS` is
+`5000` and `MAX_STEPS_PER_EPISODE` is `10000`, but Crystal Caves has its own internal
+episode timeout: `src/game/crystal_caves.py` sets `MAX_STEPS = 3000` and terminates in
+`step()` when that is reached. Therefore `EVAL_MAX_STEPS=5000` is already non-binding
+for Crystal Caves.
+
+Direct cap probe on the B3s selected checkpoint, same seed, `8` held-out games:
+
+| Eval cap | Wins | Score | Depth | Max observed steps | End reasons |
+|---:|---:|---:|---:|---:|---|
+| 5000 | 3/8 | 46.875 | 60.7% | 3000 | stalled 4, first_crystal_goal 3, timeout 1 |
+| 10000 | 3/8 | 46.875 | 60.7% | 3000 | stalled 4, first_crystal_goal 3, timeout 1 |
+
+Decision: do not treat #2a as a meaningful Crystal Caves diagnostic unless the game's
+internal `MAX_STEPS` is also intentionally changed. Move next to #2b/#2c: best-checkpoint
+handoff and continuous selection score.
+
+**Best-checkpoint preservation (#2b):** validated both handoff paths.
+
+- App curriculum: `run_crystal_curriculum()` trains each stage, runs a held-out gate eval,
+  restores `crystal_caves_eval_best.pth`, and snapshots that eval-best file for the next
+  stage. Fixed the only weak edge: `_snapshot_stage_eval_best()` no longer falls back to
+  `crystal_caves_best.pth` when eval-best is absent, because score-best is not the
+  argmax-on-held-out checkpoint.
+- Status-session recipes: B3/B-series runners keep in-memory `best_snapshot` /
+  `best_weights` from held-out source eval, load those weights for selected eval and
+  selected-checkpoint save, then restore final weights afterward. Existing helper tests
+  cover best snapshot selection and final-weight restoration.
+
+Focused validation:
+
+```bash
+/Users/justin/.pyenv/versions/3.12.11/bin/python -m pytest tests/test_crystal_curriculum.py -q
+/Users/justin/.pyenv/versions/3.12.11/bin/python -m pytest \
+  tests/test_cc_status_helpers.py::test_demo_source_snapshot_training_selects_best_training_snapshot \
+  tests/test_cc_status_helpers.py::test_selected_checkpoint_eval_saves_evidence_and_restores_final_weights \
+  tests/test_cc_status_helpers.py::test_selected_checkpoint_eval_restores_final_weights_when_eval_fails -q
+```
+
+Result: `10 passed` and `3 passed`.
+
+**Continuous selection score (#2c):** implemented for normal `Evaluator.evaluate()`, not
+only trace diagnostics. Eval payloads now include:
+
+- `mean_target_distance_progress`: per-episode `1 - min_target_dist / initial_dist`,
+  averaged across eval games when the game exposes `_current_target()`.
+- `mean_exit_unlocked_rate`: fraction of eval games that unlocked the exit.
+- `selection_score`: for Crystal Caves progress telemetry,
+  `0.5 * crystal_frac + 0.3 * depth_frac + 0.2 * target_distance_progress
+  + 1.0 * exit_unlocked_rate`.
+
+Raw win rate is no longer part of the Crystal Caves keep-best score; it remains available
+as a confirmatory metric. Non-Crystal-Caves evals keep the older win/score fallback. The
+eval-best sidecar now persists `selection_score`, so resumed training can preserve the
+same keep-best ordering instead of reconstructing it from mean score.
+
+Smoke artifact:
+`.Codex/artifacts/cc_sessions/20260625_211545_eval_selection_score_smoke`
+
+One held-out B3s checkpoint game produced `0/1` wins and `0.0%` crystals, but still exposed
+the continuous progress signal: `85.7%` depth, `53.8%` target-distance progress, and
+`selection_score 0.365`. Artifact validation passed.
+
+**Paired multi-seed A/B harness (#2d):** added `paired-ab` to
+`experiments/cc_status_session.py`. It evaluates two selected checkpoints over the same
+held-out level order for each seed, writes per-arm `rows.jsonl`, writes paired
+per-`(seed, level_index)` `paired_rows.jsonl`, and aggregates the surrogate with IQM plus
+stratified-bootstrap confidence intervals. The paired delta is reported as B minus A.
+
+Smoke command:
+
+```bash
+/Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py paired-ab \
+  --a-checkpoint .Codex/artifacts/cc_sessions/20260624_120002_tutorial_demo_conservative_recovery_pool512_select30_300/tutorial_demo_conservative/models/crystal_caves/tutorial_demo_conservative_selected_ep300.pth \
+  --b-checkpoint .Codex/artifacts/cc_sessions/20260624_120002_tutorial_demo_conservative_recovery_pool512_select30_300/tutorial_demo_conservative/models/crystal_caves/tutorial_demo_conservative_selected_ep300.pth \
+  --a-label b3s_a --b-label b3s_b --seeds 0 --games 1 --bootstrap-samples 20 \
+  --label paired_ab_same_checkpoint_smoke
+```
+
+Smoke artifact:
+`.Codex/artifacts/cc_sessions/20260625_212800_paired_ab_same_checkpoint_smoke`
+
+Result: same-checkpoint control produced identical rows and paired `selection_score` IQM
+delta `0.0000 [0.0000, 0.0000]`, as expected. Evaluator logs are scoped under
+the artifact per arm/seed. Focused tests cover IQM trimming, deterministic stratified
+bootstrap, and paired row construction.
+
+## 2026-06-25 PBRS Stage 1: Replace Progress Ratchet Only
+
+**Change:** replaced the additive monotonic completion-progress ratchet with PBRS:
+`shaping = gamma * Phi(s') - Phi(s)`. For this first stage only, `Phi` still uses the
+existing completion-progress scalar rather than a new geodesic objective. `Phi` is scaled
+by `PROGRESS_REWARD_SCALE`, normalized so reset `Phi=0`, and forced to `0` at terminal
+states. The visible `info["progress"]` remains the raw completion progress so diagnostics
+do not collapse to zero at episode end.
+
+Not changed in this slice: geodesic/BFS potential, exit phase switch, locked-exit state-map
+unhide, objective-region bonus, novelty bonus, target-approach reward, or anti-loop penalty.
+This keeps the A/B attributable to ratchet -> PBRS only.
+
+Focused tests:
+
+```bash
+/Users/justin/.pyenv/versions/3.12.11/bin/python -m pytest tests/test_crystal_caves.py -q
+/Users/justin/.pyenv/versions/3.12.11/bin/python -m pytest \
+  tests/test_crystal_caves.py tests/test_evaluator.py \
+  tests/test_agent.py::TestQValueComputation::test_q_values_use_actual_n_step_bootstrap_span \
+  tests/test_agent.py::TestLearning::test_distributional_projection_accepts_per_sample_gamma \
+  tests/test_cc_status_paired_ab.py -q
+```
+
+Results: `67 passed`, then `97 passed`. New tests assert terminal `Phi=0` and that the
+discounted PBRS shaping sum telescopes to zero when reset and terminal potentials are zero.
+
+**Short learning smoke:** reran the same B3s-style 50-episode seed-0 shape used for the
+n-step smoke, now with PBRS. This is not promotion evidence.
+
+PBRS artifact:
+`.Codex/artifacts/cc_sessions/20260625_213447_pbrs_progress_50_seed0`
+
+Comparison against the pre-PBRS fixed-target smoke
+`.Codex/artifacts/cc_sessions/20260625_204532_nstep_actual_fixed_50_seed0`:
+
+| Arm | Selected wins | Crystals | Depth | Mean min target dist | Best target delta | Train score100 | Train progress100 | Route/contact score |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| pre-PBRS ratchet | 2/8 | 25.0% | 29.5% | 5.39 tiles | 6.11 tiles | 116.0 | 0.513 | 1.107 |
+| PBRS stage 1 | 2/8 | 25.0% | 37.5% | 4.83 tiles | 6.66 tiles | 142.2 | 0.481 | 1.188 |
+
+Paired checkpoint eval under the new surrogate:
+`.Codex/artifacts/cc_sessions/20260625_214249_pbrs_vs_ratchet_selected50_seed0_eval8`
+
+Result: same wins (`2/8`), same end reasons (`4 stalled`, `2 first_crystal_goal`,
+`2 timeout`), PBRS average `selection_score 0.3497` vs ratchet `0.3178`, depth `37.5%`
+vs `29.5%`, target-distance progress `56.1%` vs `52.2%`. Paired IQM delta was only
+`+0.0006` with 95% CI `[0.0000, 0.0642]` because the IQM trims the one large improved
+level. Decision: keep this stage as a correctness/neutral-to-slightly-positive change,
+but do not claim a real learning gain yet. The next #3 substage still needs its own
+A/B; do not bundle geodesic and exit phase-switch together.
+
 ## Next Recommendation
 
 **Current top recommendation:** use B10 as the promoted eval-time controller baseline,

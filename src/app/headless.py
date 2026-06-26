@@ -249,17 +249,21 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
             )
             if eval_best_baseline is not None:
                 self.evaluator.best_eval_score = eval_best_baseline
-                # Seed the win-rate-aware selection baseline from the restored score
-                # (the sidecar does not store win rate). Treating the baseline as
-                # zero-win is conservative: a genuinely winning eval still beats it.
-                self.evaluator.best_eval_selection = eval_best_baseline * getattr(
-                    config, "EVAL_SELECTION_W_SCORE", 0.0001
+                eval_best_record = read_eval_best_record(
+                    config.GAME_MODEL_DIR,
+                    config.GAME_NAME,
+                )
+                restored_selection = (
+                    eval_best_record.get("selection_score")
+                    if eval_best_record is not None
+                    else None
+                )
+                self.evaluator.best_eval_selection = (
+                    float(restored_selection)
+                    if restored_selection is not None
+                    else eval_best_baseline * getattr(config, "EVAL_SELECTION_W_SCORE", 0.0001)
                 )
                 if self.web_dashboard:
-                    eval_best_record = read_eval_best_record(
-                        config.GAME_MODEL_DIR,
-                        config.GAME_NAME,
-                    )
                     baseline_episode = (
                         int(eval_best_record.get("episode", 0))
                         if eval_best_record is not None
@@ -586,6 +590,7 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
             episode=self.current_episode,
             mean_score=eval_results.mean_score,
             checkpoint=eval_best_filename,
+            selection_score=eval_results.selection_score,
         )
         if self.web_dashboard:
             self.web_dashboard.log(

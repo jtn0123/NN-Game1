@@ -237,6 +237,36 @@ class TestCrystalCavesMovement:
         )
         assert receding < 0
 
+    def test_progress_pbrs_potential_is_zero_at_terminal(self, game):
+        game._progress_initial = 0.2
+        game.game_over = True
+
+        assert game._progress_pbrs_potential(raw_progress=0.9) == 0.0
+        assert game._progress_pbrs_potential(raw_progress=0.9, terminal=True) == 0.0
+
+    def test_progress_pbrs_discounted_sum_telescopes(self, config):
+        config.GAMMA = 0.9
+        game = CrystalCaves(config, headless=True)
+        game._progress_initial = 0.2
+        gamma = config.GAMMA
+        phi_start = game._progress_pbrs_potential(raw_progress=0.2, terminal=False)
+        phi_mid = game._progress_pbrs_potential(raw_progress=0.45, terminal=False)
+        phi_late = game._progress_pbrs_potential(raw_progress=0.75, terminal=False)
+
+        shaping_rewards = [
+            gamma * phi_mid - phi_start,
+            gamma * phi_late - phi_mid,
+            gamma * 0.0 - phi_late,
+        ]
+        discounted_total = sum(
+            (gamma**step) * reward for step, reward in enumerate(shaping_rewards)
+        )
+
+        assert phi_start == 0.0
+        assert phi_mid > phi_start
+        assert phi_late > phi_mid
+        assert discounted_total == pytest.approx(0.0, abs=1e-6)
+
     def test_new_closest_approach_to_crystal_gets_nonfarmable_bonus(self, game):
         game.switches.clear()
         crystal = next(iter(game.crystals))

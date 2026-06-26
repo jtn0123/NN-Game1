@@ -39,6 +39,11 @@ if len(sys.argv) > 1 and sys.argv[1] == "metric-audit":
 
     raise SystemExit(metric_audit_main(sys.argv[2:]))
 
+if len(sys.argv) > 1 and sys.argv[1] == "paired-ab":
+    from experiments.cc_status.paired_ab import paired_ab_main  # noqa: E402
+
+    raise SystemExit(paired_ab_main(sys.argv[2:]))
+
 from experiments.cc_status.config_helpers import *  # noqa: F401,F403,E402
 from experiments.cc_status.artifacts import *  # noqa: F401,F403,E402
 from experiments.cc_status.contact_head import *  # noqa: F401,F403,E402
@@ -50,6 +55,7 @@ from experiments.cc_status.demo_planners import *  # noqa: F401,F403,E402
 from experiments.cc_status.evals import *  # noqa: F401,F403,E402
 from experiments.cc_status.io_utils import *  # noqa: F401,F403,E402
 from experiments.cc_status.metric_audit import *  # noqa: F401,F403,E402
+from experiments.cc_status.paired_ab import *  # noqa: F401,F403,E402
 from experiments.cc_status.promotion import *  # noqa: F401,F403,E402
 from experiments.cc_status.recipes import *  # noqa: F401,F403,E402
 from experiments.cc_status.reports import *  # noqa: F401,F403,E402

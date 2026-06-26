@@ -10,16 +10,6 @@ Key Components:
     3. Replay Buffer   - Stores experiences for training
     4. Epsilon-Greedy  - Balances exploration vs exploitation
 
-Training Algorithm (DQN):
-    1. Observe state s
-    2. Choose action a (epsilon-greedy)
-    3. Execute action, observe reward r and next state s'
-    4. Store (s, a, r, s', done) in replay buffer
-    5. Sample mini-batch from replay buffer
-    6. Calculate target: y = r + γ * max_a' Q_target(s', a')
-    7. Update policy network: minimize (Q(s,a) - y)²
-    8. Periodically sync target network with policy network
-
 References:
     Mnih et al., 2015 - "Human-level control through deep reinforcement learning"
 """
@@ -588,25 +578,48 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         batch_size = self.config.BATCH_SIZE
 
         # Sample batch - different path for PER vs uniform
+        n_step_lengths_np = None
         if self._use_per:
             # PER sampling returns indices and importance sampling weights
             assert isinstance(self.memory, (PrioritizedReplayBuffer, PrioritizedNStepReplayBuffer))
-            (
-                states_np,
-                actions_np,
-                rewards_np,
-                next_states_np,
-                dones_np,
-                indices,
-                weights_np,
-            ) = self.memory.sample_no_copy(batch_size)
+            per_batch = self.memory.sample_no_copy(batch_size)
+            if len(per_batch) == 8:
+                (
+                    states_np,
+                    actions_np,
+                    rewards_np,
+                    next_states_np,
+                    dones_np,
+                    indices,
+                    weights_np,
+                    n_step_lengths_np,
+                ) = per_batch
+            else:
+                (
+                    states_np,
+                    actions_np,
+                    rewards_np,
+                    next_states_np,
+                    dones_np,
+                    indices,
+                    weights_np,
+                ) = per_batch
             weights = torch.from_numpy(weights_np).to(self.device)
         else:
             # Uniform sampling (no-copy is safe since we consume immediately)
             assert isinstance(self.memory, ReplayBuffer)
-            states_np, actions_np, rewards_np, next_states_np, dones_np = (
-                self.memory.sample_no_copy(batch_size)
-            )
+            replay_batch = self.memory.sample_no_copy(batch_size)
+            if len(replay_batch) == 6:
+                (
+                    states_np,
+                    actions_np,
+                    rewards_np,
+                    next_states_np,
+                    dones_np,
+                    n_step_lengths_np,
+                ) = replay_batch
+            else:
+                states_np, actions_np, rewards_np, next_states_np, dones_np = replay_batch
             indices = None
             weights = None
 
@@ -642,6 +655,11 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         rewards = self._batch_rewards
         next_states = self._batch_next_states
         dones = self._batch_dones
+        n_step_lengths = (
+            torch.from_numpy(n_step_lengths_np).to(self.device)
+            if n_step_lengths_np is not None
+            else None
+        )
 
         # Clip negative rewards to prevent extreme gradients (if enabled)
         # Only clip negative side to preserve win bonus signal (REWARD_WIN = 100)
@@ -656,7 +674,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
 
         if self._use_distributional_dqn:
             element_loss, td_errors = self._compute_distributional_loss(
-                states, actions, rewards, next_states, dones
+                states, actions, rewards, next_states, dones, n_step_lengths=n_step_lengths
             )
             if self._use_per and weights is not None:
                 loss = (element_loss * weights).mean()
@@ -668,13 +686,13 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
                 # Only forward passes use float16; loss computed in float32 for numerical stability.
                 with torch.autocast(device_type=self._autocast_device, dtype=torch.float16):
                     current_q, target_q = self._compute_q_values(
-                        states, actions, rewards, next_states, dones
+                        states, actions, rewards, next_states, dones, n_step_lengths=n_step_lengths
                     )
                 current_q = current_q.float()
                 target_q = target_q.float()
             else:
                 current_q, target_q = self._compute_q_values(
-                    states, actions, rewards, next_states, dones
+                    states, actions, rewards, next_states, dones, n_step_lengths=n_step_lengths
                 )
 
             # Compute element-wise TD errors for PER priority updates.
@@ -740,6 +758,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         rewards: torch.Tensor,
         next_states: torch.Tensor,
         dones: torch.Tensor,
+        n_step_lengths: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute current and target Q-values using Double DQN.
@@ -758,17 +777,21 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
             # Step 2: Use TARGET network to evaluate those actions
             next_q = self.target_net(next_states).gather(1, best_actions).squeeze(1)
 
-            # Compute TD target (adjust gamma for N-step returns)
-            use_n_step = getattr(self.config, "USE_N_STEP_RETURNS", False)
-            if use_n_step:
-                n_steps = getattr(self.config, "N_STEP_SIZE", 3)
-                effective_gamma = self.config.GAMMA**n_steps
-            else:
-                effective_gamma = self.config.GAMMA
-
-            target_q = rewards + (1 - dones) * effective_gamma * next_q
+            gamma_pow = self._target_gamma(rewards, n_step_lengths)
+            target_q = rewards + (1 - dones) * gamma_pow * next_q
 
         return current_q, target_q
+
+    def _target_gamma(
+        self,
+        rewards: torch.Tensor,
+        n_step_lengths: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if n_step_lengths is not None:
+            lengths = n_step_lengths.to(device=rewards.device, dtype=rewards.dtype)
+            base = torch.full_like(lengths, float(self.config.GAMMA))
+            return torch.pow(base, lengths)
+        return torch.full_like(rewards, self._effective_gamma())
 
     def _effective_gamma(self) -> float:
         use_n_step = getattr(self.config, "USE_N_STEP_RETURNS", False)
@@ -807,6 +830,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         rewards: torch.Tensor,
         next_states: torch.Tensor,
         dones: torch.Tensor,
+        n_step_lengths: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute per-sample C51 cross-entropy loss and scalar TD errors."""
         support = self._distributional_support()
@@ -825,7 +849,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
                 rewards=rewards,
                 dones=dones,
                 support=support,
-                gamma=self._effective_gamma(),
+                gamma=self._target_gamma(rewards, n_step_lengths),
             )
 
         log_probs = F.log_softmax(chosen_logits, dim=1)
@@ -844,7 +868,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         rewards: torch.Tensor,
         dones: torch.Tensor,
         support: torch.Tensor,
-        gamma: float,
+        gamma: float | torch.Tensor,
     ) -> torch.Tensor:
         """Project Bellman-updated atom masses back onto the fixed C51 support."""
         batch_size, num_atoms = next_dist.shape
@@ -852,8 +876,20 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         v_max = float(support[-1].item())
         delta_z = (v_max - v_min) / float(num_atoms - 1)
 
-        target_atoms = rewards.unsqueeze(1) + (1.0 - dones.unsqueeze(1)) * gamma * support.view(
-            1, num_atoms
+        if isinstance(gamma, torch.Tensor):
+            gamma_values = gamma.to(device=support.device, dtype=rewards.dtype)
+            if gamma_values.ndim == 0:
+                gamma_values = gamma_values.expand(batch_size)
+            gamma_values = gamma_values.view(batch_size, 1)
+        else:
+            gamma_values = torch.full(
+                (batch_size, 1),
+                float(gamma),
+                dtype=rewards.dtype,
+                device=support.device,
+            )
+        target_atoms = rewards.unsqueeze(1) + (
+            (1.0 - dones.unsqueeze(1)) * gamma_values * support.view(1, num_atoms)
         )
         target_atoms = target_atoms.clamp(v_min, v_max)
         b = (target_atoms - v_min) / delta_z

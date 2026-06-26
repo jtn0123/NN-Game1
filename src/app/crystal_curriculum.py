@@ -359,8 +359,7 @@ def _snapshot_stage_eval_best(
 ) -> Optional[str]:
     eval_best = os.path.join(config.GAME_MODEL_DIR, f"{config.GAME_NAME}_eval_best.pth")
     if not os.path.exists(eval_best):
-        best = os.path.join(config.GAME_MODEL_DIR, f"{config.GAME_NAME}_best.pth")
-        return best if os.path.exists(best) else None
+        return None
 
     snapshot_name = f"{config.GAME_NAME}_stage{stage_index:02d}_{stage.stage_id}_eval_best.pth"
     snapshot_path = os.path.join(config.GAME_MODEL_DIR, snapshot_name)
@@ -449,9 +448,8 @@ def _run_stage_gate_eval(
     if trainer.evaluator is None:
         return None
 
-    # Keep-best is win-rate-aware: save the eval-best on the selection score (which
-    # win_rate dominates), not raw mean score, so the gate does not preserve a
-    # high-score/low-win policy over a winning one.
+    # Keep-best is driven by selection score, not raw mean score, so the gate does
+    # not preserve a high-score/low-progress policy over better chain progress.
     previous_best_selection = trainer.evaluator.best_eval_selection
     # The gate eval uses a different (larger) sample than the in-loop evals and must
     # not perturb the plateau/early-stop counter the vectorized trainer reads. Snapshot
@@ -488,6 +486,7 @@ def _run_stage_gate_eval(
             episode=trainer.current_episode,
             mean_score=results.mean_score,
             checkpoint=eval_best_filename,
+            selection_score=results.selection_score,
         )
 
     if dashboard:
