@@ -22,7 +22,6 @@ no-ops there. Pick ``easy`` (or harder) when A/B-testing those levers.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -30,9 +29,9 @@ from typing import Any
 
 import numpy as np
 
-_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from config import Config  # noqa: E402
 from experiments.cc_status.config_helpers import set_seed  # noqa: E402
@@ -90,7 +89,7 @@ PER_ARM_METRICS = (
     "depth_frac",
     "target_distance_progress",
     "exit_unlocked_rate",
-    "win",
+    "won",
     "steps",
 )
 
@@ -419,6 +418,10 @@ def run_lever_ab(
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows_path = out_dir / "rows.jsonl"
+    # Start each sweep from a clean rows file so a reused --out can't mix in stale
+    # rows (the summary only reflects this run's in-memory rows).
+    if rows_path.exists():
+        rows_path.unlink()
 
     rows_by_arm: dict[str, list[dict[str, Any]]] = {arm: [] for arm in arms}
     for seed in seeds:
@@ -483,10 +486,10 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         parser.error(f"unknown arms: {unknown}. Known: {sorted(ARMS)}")
     if BASELINE_ARM not in arms:
-        arms = [BASELINE_ARM] + arms
+        arms = [BASELINE_ARM, *arms]
     else:
         # Ensure baseline is first so it's trained/printed before comparisons.
-        arms = [BASELINE_ARM] + [a for a in arms if a != BASELINE_ARM]
+        arms = [BASELINE_ARM, *[a for a in arms if a != BASELINE_ARM]]
 
     seeds = _parse_seeds(opts.seeds)
     if not seeds:
