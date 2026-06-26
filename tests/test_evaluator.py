@@ -392,6 +392,30 @@ class TestSelectionScoreKeepBest:
 
         assert evaluator._selection_score(deep_progress) > evaluator._selection_score(shallow_wins)
 
+    def test_selection_score_breaks_exit_unlock_ties_on_win_rate(self, config):
+        """Among policies that both unlock the exit, the one that wins is preferred."""
+        evaluator = self._evaluator(config)
+        winner = _eval_results(
+            win_rate=0.3,
+            mean_score=100,
+            crystal_frac=1.0,
+            depth_frac=0.95,
+            target_distance_progress=0.9,
+            exit_unlocked_rate=1.0,
+        )
+        unlocks_but_times_out = _eval_results(
+            win_rate=0.0,
+            mean_score=100,
+            crystal_frac=1.0,
+            depth_frac=0.95,
+            target_distance_progress=0.9,
+            exit_unlocked_rate=1.0,
+        )
+
+        assert evaluator._selection_score(winner) > evaluator._selection_score(
+            unlocks_but_times_out
+        )
+
     def test_update_history_keeps_winning_policy_over_higher_score(self, config):
         evaluator = self._evaluator(config)
         winning = _eval_results(win_rate=0.18, mean_score=100)

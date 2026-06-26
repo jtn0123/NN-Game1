@@ -267,6 +267,113 @@ class TestCrystalCavesMovement:
         assert phi_late > phi_mid
         assert discounted_total == pytest.approx(0.0, abs=1e-6)
 
+    def test_target_closeness_increases_as_player_approaches(self, game):
+        game.switches.clear()
+        crystal = next(iter(game.crystals))
+        game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE * 5
+        game.player_y = crystal[1] * game.TILE_SIZE
+        far = game._target_closeness()
+
+        game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE * 1
+        near = game._target_closeness()
+
+        assert 0.0 <= far <= near <= 1.0
+        assert near > far
+
+    def test_geodesic_potential_telescopes_to_zero(self, config):
+        config.GAMMA = 0.9
+        config.CRYSTAL_CAVES_GEODESIC_POTENTIAL = True
+        config.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT = 0.3
+        game = CrystalCaves(config, headless=True)
+        gamma = config.GAMMA
+
+        # Reset captured an initial base+closeness, so Phi(start) must be 0.
+        phi_start = game._progress_phi
+        assert phi_start == pytest.approx(0.0, abs=1e-6)
+
+        # Walk toward the current objective for a few steps, accumulating the PBRS
+        # shaping the same way step() does, then end the episode (terminal Phi=0).
+        target, _ = game._current_target()
+        assert target is not None
+        col, row = target[1], target[2]
+        shaping_rewards = []
+        prev_phi = phi_start
+        for offset in (5, 3, 1):
+            game.player_x = col * game.TILE_SIZE - game.TILE_SIZE * offset
+            game.player_y = row * game.TILE_SIZE
+            next_phi = game._progress_pbrs_potential()
+            shaping_rewards.append(gamma * next_phi - prev_phi)
+            prev_phi = next_phi
+        # Terminal step: Phi(terminal) = 0.
+        shaping_rewards.append(gamma * 0.0 - prev_phi)
+
+        discounted_total = sum(
+            (gamma**step) * reward for step, reward in enumerate(shaping_rewards)
+        )
+        assert discounted_total == pytest.approx(0.0, abs=1e-6)
+
+    def test_geodesic_potential_zero_at_terminal(self, config):
+        config.CRYSTAL_CAVES_GEODESIC_POTENTIAL = True
+        game = CrystalCaves(config, headless=True)
+        game.game_over = True
+        assert game._progress_pbrs_potential(raw_progress=0.9) == 0.0
+
+    def test_geodesic_flag_disables_additive_approach_reward(self, config):
+        config.CRYSTAL_CAVES_GEODESIC_POTENTIAL = True
+        game = CrystalCaves(config, headless=True)
+        game.switches.clear()
+        crystal = next(iter(game.crystals))
+        game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE * 4
+        game.player_y = crystal[1] * game.TILE_SIZE
+        target, distance = game._current_target()
+
+        game.steps_since_progress = 50
+        game.player_x += game.TILE_SIZE  # genuine approach
+        _, closer = game._current_target()
+        reward = game._target_progress_reward(target, distance)
+
+        # No additive approach reward when the geodesic potential supplies it...
+        assert reward == 0.0
+        # ...but the stall timer is still reset on real approach.
+        assert game.steps_since_progress == 0
+
+    def test_locked_exit_hidden_in_global_map_by_default(self, config):
+        config.CRYSTAL_CAVES_SHOW_LOCKED_EXIT = False
+        game = CrystalCaves(config, headless=True)
+        assert not game.exit_unlocked
+        gc, gr = game.GLOBAL_MAP_COLS, game.GLOBAL_MAP_ROWS
+        start = game.WINDOW_ROWS * game.WINDOW_COLS
+        state = game.get_state()
+        gmap = state[start : start + gc * gr]
+        cw = max(1.0, game.level_cols / gc)
+        ch = max(1.0, game.level_rows / gr)
+        ex = min(gc - 1, int(game.exit_pos[0] / cw))
+        ey = min(gr - 1, int(game.exit_pos[1] / ch))
+        exit_cell = gmap[ey * gc + ex]
+        # The exit cell should not carry the unlocked-exit marker while locked.
+        assert exit_cell != pytest.approx(0.9)
+
+    def test_locked_exit_visible_when_flag_enabled(self, config):
+        config.CRYSTAL_CAVES_SHOW_LOCKED_EXIT = True
+        game = CrystalCaves(config, headless=True)
+        # Move the exit to an empty cell so no crystal/switch overrides its marker.
+        game.crystals = {c for c in game.crystals}
+        gc, gr = game.GLOBAL_MAP_COLS, game.GLOBAL_MAP_ROWS
+        start = game.WINDOW_ROWS * game.WINDOW_COLS
+        cw = max(1.0, game.level_cols / gc)
+        ch = max(1.0, game.level_rows / gr)
+        ex = min(gc - 1, int(game.exit_pos[0] / cw))
+        ey = min(gr - 1, int(game.exit_pos[1] / ch))
+        # Skip if an objective shares the exit's coarse cell (it would dominate).
+        occupied = set()
+        for c, r in game.crystals | (game.switches - game.used_switches):
+            occupied.add((min(gc - 1, int(c / cw)), min(gr - 1, int(r / ch))))
+        if (ex, ey) in occupied:
+            pytest.skip("exit shares a coarse cell with an objective in this cave")
+        state = game.get_state()
+        gmap = state[start : start + gc * gr]
+        assert gmap[ey * gc + ex] == pytest.approx(0.2)
+
     def test_new_closest_approach_to_crystal_gets_nonfarmable_bonus(self, game):
         game.switches.clear()
         crystal = next(iter(game.crystals))

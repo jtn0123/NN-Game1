@@ -349,6 +349,7 @@ class CrystalCaves(
         self._max_depth_row = 0
         self._progress = 0.0
         self._progress_initial = 0.0
+        self._closeness_initial = 0.0
         self._progress_phi = 0.0
         self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
         self._obj_region_total = 0.0  # AI-2
@@ -498,6 +499,9 @@ class CrystalCaves(
         self._max_depth_row = self._player_tile()[1]
         self._progress = self._progress_potential()[0]
         self._progress_initial = self._progress
+        # Capture initial closeness BEFORE the first PBRS potential so the geodesic
+        # term (like the base term) telescopes to exactly 0 over a full episode.
+        self._closeness_initial = self._target_closeness()
         self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
         self._end_reason = "running"
         self._visited_obj_cells = set()
@@ -623,7 +627,24 @@ class CrystalCaves(
         if is_terminal:
             return 0.0
         progress = self._progress_potential()[0] if raw_progress is None else raw_progress
-        return self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
+        phi = self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
+        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+            weight = float(getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT", 0.3))
+            closeness = self._target_closeness()
+            phi += self.PROGRESS_REWARD_SCALE * weight * (closeness - self._closeness_initial)
+        return phi
+
+    def _target_closeness(self) -> float:
+        """Normalized 0..1 closeness to the current objective (1 = on top of it).
+
+        Uses the same phase-ordered target as the compass (switch -> crystals ->
+        exit), so as objectives are cleared the closeness re-aims automatically. A
+        deterministic function of state, which keeps the potential PBRS-valid."""
+        target, distance = self._current_target()
+        if target is None or not np.isfinite(distance):
+            return 0.0
+        diagonal = max(1.0, float(np.hypot(self.level_width, self.level_height)))
+        return float(1.0 - np.clip(distance / diagonal, 0.0, 1.0))
 
     def _progress_shaping_reward(self, previous_phi: float) -> float:
         raw_progress = self._progress_potential()[0]
@@ -748,6 +769,11 @@ class CrystalCaves(
             mark(c, r, 0.6)
         if self.exit_unlocked:
             mark(self.exit_pos[0], self.exit_pos[1], 0.9)
+        elif getattr(self.config, "CRYSTAL_CAVES_SHOW_LOCKED_EXIT", False):
+            # Reveal the still-locked exit at a distinct, lower value so the agent can
+            # learn its route before the last crystal is collected. mark() keeps the
+            # higher value per cell, so a co-located crystal/switch still dominates.
+            mark(self.exit_pos[0], self.exit_pos[1], 0.2)
 
         self._state_array[start : start + gc * gr] = np.array(cells, dtype=np.float32)
 
