@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.0 (2026-06-26)
+
+### Features
+
+- Add Crystal Caves NN experiment architecture
+  ([`19c1394`](https://github.com/jtn0123/NN-Game1/commit/19c139443b61181c63717dd51faa8b480691f865))
+
+
 ## v0.4.0 (2026-06-25)
 
 ### Documentation
