@@ -149,6 +149,12 @@ class Config:
     # Fraction of training resets that use a mid-solution start (in [0, 1]). A trainer
     # may anneal this toward 0 via CrystalCaves.set_reverse_curriculum_p().
     CRYSTAL_CAVES_REVERSE_CURRICULUM_P: float = 0.5
+    # Linear anneal of the reverse-curriculum probability down to 0.0 over the first
+    # N training episodes (then held at 0). A fixed p hurt held-out performance because
+    # half of training never saw the full-from-spawn task; annealing p -> 0 lets the
+    # policy finish on full-length episodes. 0 = no annealing (constant p, the legacy
+    # behaviour). Only takes effect when CRYSTAL_CAVES_REVERSE_CURRICULUM is on.
+    CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES: int = 0
     # Reverse-curriculum follow-up: also RELOCATE the player toward the remaining
     # objectives on a mid-solution start, shortening the navigation horizon. The
     # destination is verified with the jump-aware reachability oracle so every
@@ -783,6 +789,10 @@ class Config:
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_CURRICULUM_P <= 1.0,
             "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES >= 0,
+            "CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES must be non-negative",
         )
         self._require(
             math.isfinite(self.CRYSTAL_CAVES_NGU_BETA) and self.CRYSTAL_CAVES_NGU_BETA >= 0,

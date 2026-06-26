@@ -41,7 +41,29 @@ except ImportError:
     WEB_AVAILABLE = False
     WebDashboard = None
 
-__all__ = ["HeadlessTrainer", "build_nn_snapshot", "emit_nn_snapshot_to_dashboard"]
+__all__ = [
+    "HeadlessTrainer",
+    "build_nn_snapshot",
+    "emit_nn_snapshot_to_dashboard",
+    "reverse_curriculum_p_for_episode",
+]
+
+
+def reverse_curriculum_p_for_episode(start_p: float, episode: int, anneal_episodes: int) -> float:
+    """Linear anneal of the reverse-curriculum probability over training.
+
+    Returns ``start_p`` at episode 0 and linearly decays to 0.0 across the first
+    ``anneal_episodes`` episodes, clamped at 0.0 thereafter. ``anneal_episodes == 0``
+    disables annealing and keeps ``start_p`` constant (the legacy behaviour).
+
+    This is a pure function so the schedule can be unit-tested without a trainer.
+    """
+    if anneal_episodes <= 0:
+        return start_p
+    if episode >= anneal_episodes:
+        return 0.0
+    frac = 1.0 - (episode / anneal_episodes)
+    return start_p * frac
 
 
 class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
@@ -324,6 +346,7 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
             if not self.running:
                 break
 
+            self._apply_reverse_curriculum_schedule()
             state = self.game.reset()
             episode_reward = 0.0
             episode_steps = 0
@@ -862,6 +885,33 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
         if self.web_dashboard:
             self.web_dashboard.log("✅ Vectorized training complete!", "success")
 
+    def _crystal_caves_envs(self) -> list[Any]:
+        """Return the live training CrystalCaves instances (single or vectorized),
+        or an empty list for non-crystal games / setups without such envs."""
+        if self.config.GAME_NAME != "crystal_caves":
+            return []
+        if self.vec_env is not None:
+            return list(getattr(self.vec_env, "envs", []))
+        return [self.game] if self.game is not None else []
+
+    def _apply_reverse_curriculum_schedule(self) -> None:
+        """Once per episode, set every training CrystalCaves env's reverse-curriculum
+        probability from the linear anneal schedule. No-op unless the reverse
+        curriculum is enabled AND an anneal horizon is configured; otherwise p is left
+        constant (current behaviour), and it is always a no-op for non-crystal games."""
+        config = self.config
+        if not getattr(config, "CRYSTAL_CAVES_REVERSE_CURRICULUM", False):
+            return
+        anneal_episodes = int(
+            getattr(config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES", 0) or 0
+        )
+        if anneal_episodes <= 0:
+            return
+        start_p = float(getattr(config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_P", 0.0))
+        p = reverse_curriculum_p_for_episode(start_p, self.current_episode, anneal_episodes)
+        for env in self._crystal_caves_envs():
+            env.set_reverse_curriculum_p(p)
+
     def train_vectorized(self) -> None:
         """
         Run headless training with vectorized environments for parallel execution.
@@ -897,6 +947,7 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
         steps_since_report = 0
         env_episode_rewards = np.zeros(num_envs, dtype=np.float64)
         env_episode_steps = np.zeros(num_envs, dtype=np.int64)
+        self._apply_reverse_curriculum_schedule()
         states = self.vec_env.reset().copy()
         last_score = 0
         last_logged_episode = start_episode - 1
@@ -908,6 +959,11 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
                 time.sleep(0.1)
             if not self.running:
                 break
+
+            # Anneal the reverse-curriculum probability on every training env before
+            # stepping, so env auto-resets (which happen inside step_no_copy) use the
+            # schedule value for the current episode count. No-op when off / non-crystal.
+            self._apply_reverse_curriculum_schedule()
 
             actions, num_explored, num_exploited = self.agent.select_actions_batch(
                 states, training=True

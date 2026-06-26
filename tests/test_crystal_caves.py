@@ -8,6 +8,7 @@ training support.
 
 import os
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pygame
@@ -17,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from scripts.render_crystal_caves_gallery import render_gallery
+from src.app.headless import HeadlessTrainer, reverse_curriculum_p_for_episode
 from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
@@ -1167,6 +1169,118 @@ class TestReverseCurriculum:
         assert game._reverse_curriculum_p == 1.0
         game.set_reverse_curriculum_p(-1.0)
         assert game._reverse_curriculum_p == 0.0
+
+
+class TestReverseCurriculumAnnealSchedule:
+    """The pure linear-anneal schedule for the reverse-curriculum probability."""
+
+    def test_starts_at_start_p(self) -> None:
+        assert reverse_curriculum_p_for_episode(0.5, 0, 100) == pytest.approx(0.5)
+
+    def test_zero_at_and_after_anneal_episodes(self) -> None:
+        assert reverse_curriculum_p_for_episode(0.5, 100, 100) == pytest.approx(0.0)
+        assert reverse_curriculum_p_for_episode(0.5, 250, 100) == pytest.approx(0.0)
+
+    def test_monotonically_decreasing_in_between(self) -> None:
+        values = [reverse_curriculum_p_for_episode(0.8, ep, 100) for ep in range(0, 101, 10)]
+        assert all(later <= earlier for earlier, later in zip(values, values[1:]))
+        # Strictly decreasing while annealing (no flat plateau before the end).
+        assert all(later < earlier for earlier, later in zip(values[:-1], values[1:]))
+
+    def test_midpoint_is_half_start_p(self) -> None:
+        assert reverse_curriculum_p_for_episode(0.6, 50, 100) == pytest.approx(0.3)
+
+    def test_anneal_episodes_zero_keeps_constant(self) -> None:
+        for ep in (0, 5, 1000):
+            assert reverse_curriculum_p_for_episode(0.5, ep, 0) == pytest.approx(0.5)
+
+    def test_config_validates_non_negative_anneal_episodes(self) -> None:
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES = -1
+        with pytest.raises(ValueError, match="ANNEAL_EPISODES"):
+            cfg.__post_init__()
+
+
+class TestReverseCurriculumTrainerHook:
+    """The trainer's per-episode hook anneals every env's reverse-curriculum p."""
+
+    def _make_trainer(self, config: Config, vec_envs: int) -> "HeadlessTrainer":
+        config.GAME_NAME = "crystal_caves"
+        config.MAX_EPISODES = 1
+        config.EVAL_EVERY = 0  # skip the evaluator (no extra game instance / I/O)
+        config.USE_NOISY_NETWORKS = False
+        args = SimpleNamespace(
+            lr=None,
+            episodes=None,
+            learn_every=None,
+            gradient_steps=None,
+            batch_size=None,
+            torch_compile=False,
+            turbo=False,
+            vec_envs=vec_envs,
+            model=None,
+            web=False,
+            port=0,
+            host="127.0.0.1",
+        )
+        return HeadlessTrainer(config, args)
+
+    def test_hook_anneals_each_vec_env_over_episodes(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 0.5
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES = 10
+        trainer = self._make_trainer(config, vec_envs=4)
+        assert trainer.vec_env is not None
+
+        trainer.current_episode = 0
+        trainer._apply_reverse_curriculum_schedule()
+        assert all(env._reverse_curriculum_p == pytest.approx(0.5) for env in trainer.vec_env.envs)
+
+        trainer.current_episode = 5
+        trainer._apply_reverse_curriculum_schedule()
+        assert all(env._reverse_curriculum_p == pytest.approx(0.25) for env in trainer.vec_env.envs)
+
+        trainer.current_episode = 10
+        trainer._apply_reverse_curriculum_schedule()
+        assert all(env._reverse_curriculum_p == pytest.approx(0.0) for env in trainer.vec_env.envs)
+
+    def test_hook_is_noop_when_anneal_disabled(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 0.5
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES = 0
+        trainer = self._make_trainer(config, vec_envs=2)
+        assert trainer.vec_env is not None
+
+        for env in trainer.vec_env.envs:
+            env.set_reverse_curriculum_p(0.5)
+        trainer.current_episode = 100
+        trainer._apply_reverse_curriculum_schedule()
+        # p left constant (no annealing) when ANNEAL_EPISODES == 0.
+        assert all(env._reverse_curriculum_p == pytest.approx(0.5) for env in trainer.vec_env.envs)
+
+    def test_hook_is_noop_for_non_crystal_game(self) -> None:
+        cfg = Config()
+        cfg.GAME_NAME = "breakout"
+        cfg.MAX_EPISODES = 1
+        cfg.EVAL_EVERY = 0
+        args = SimpleNamespace(
+            lr=None,
+            episodes=None,
+            learn_every=None,
+            gradient_steps=None,
+            batch_size=None,
+            torch_compile=False,
+            turbo=False,
+            vec_envs=1,
+            model=None,
+            web=False,
+            port=0,
+            host="127.0.0.1",
+        )
+        trainer = HeadlessTrainer(cfg, args)
+        # No crystal envs -> empty list, hook does nothing and must not raise.
+        assert trainer._crystal_caves_envs() == []
+        trainer._apply_reverse_curriculum_schedule()
 
 
 class TestReverseCurriculumRelocation:
