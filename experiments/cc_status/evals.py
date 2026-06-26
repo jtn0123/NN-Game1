@@ -378,6 +378,7 @@ def first_objective_near_miss_eval(
     episode: int,
     games: int,
     max_steps: int,
+    action_selector: Any | None = None,
 ) -> dict[str, Any] | None:
     if games <= 0:
         return None
@@ -426,7 +427,10 @@ def first_objective_near_miss_eval(
                             first_close_step = step
                 target_kind_counts[str(objective.get("target_kind") or "none")] += 1
 
-                action = agent.select_action(state, training=False)
+                if action_selector is None:
+                    action = agent.select_action(state, training=False)
+                else:
+                    action = int(action_selector(agent, state, game, info, step, action_labels))
                 action_label = _action_label(action_labels, action)
                 if (
                     target_distance is not None

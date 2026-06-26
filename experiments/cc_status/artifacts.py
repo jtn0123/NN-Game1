@@ -101,6 +101,15 @@ def _validate_run(
     for key in ("episodes", "train_seconds", "steps_per_second", "config", "eval_history"):
         if key not in run:
             errors.append(_issue(out_dir / "summary.json", f"run '{label}' missing '{key}'"))
+    is_partial = bool(run.get("partial") or run.get("interrupted"))
+    if is_partial:
+        warnings.append(
+            _issue(
+                out_dir / "summary.json",
+                f"run '{label}' is an interrupted partial run",
+                severity="warning",
+            )
+        )
 
     if require_live_metrics:
         _require_file(run_path / "live_metrics.json", errors, "missing live_metrics.json")
@@ -130,9 +139,9 @@ def _validate_run(
         if config.get("drills"):
             if "drill_eval" not in run:
                 errors.append(_issue(out_dir / "summary.json", f"run '{label}' missing drill_eval"))
-        elif "final_eval" not in run:
+        elif "final_eval" not in run and not is_partial:
             errors.append(_issue(out_dir / "summary.json", f"run '{label}' missing final_eval"))
-        else:
+        elif "final_eval" in run:
             _validate_eval_payload(run_path, run["final_eval"], f"run '{label}' final_eval", errors)
 
     selected_games = int(run.get("selected_checkpoint_eval_games", 0) or 0)

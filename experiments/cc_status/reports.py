@@ -1,7 +1,9 @@
 # ruff: noqa: F401,F403,F405,I001
 from .common import *
 from .config_helpers import *
+from .contact_head import contact_action_head_report_lines
 from .io_utils import *
+from .scorecard import *
 from .snapshots import *
 from .stats import *
 
@@ -16,6 +18,7 @@ def summarize_trainer(
 ) -> dict[str, Any]:
     config = trainer.config
     progress_parts = trainer.progress_parts[-100:]
+    source_stats = trainer_source_stats(trainer)
     summary: dict[str, Any] = {
         "label": label,
         "episodes": trainer.current_episode,
@@ -48,6 +51,14 @@ def summarize_trainer(
         "avg_correction_action_accuracy_100": float(
             trainer.agent.get_average_correction_action_accuracy(100)
         ),
+        "avg_contact_action_loss_100": float(trainer.agent.get_average_contact_action_loss(100)),
+        "avg_contact_action_accuracy_100": float(
+            trainer.agent.get_average_contact_action_accuracy(100)
+        ),
+        "avg_policy_anchor_loss_100": float(trainer.agent.get_average_policy_anchor_loss(100)),
+        "avg_policy_anchor_accuracy_100": float(
+            trainer.agent.get_average_policy_anchor_accuracy(100)
+        ),
         "correction_action_enabled": bool(
             getattr(config, "CRYSTAL_CAVES_CORRECTION_ACTION_LOSS", False)
         ),
@@ -55,6 +66,18 @@ def summarize_trainer(
             trainer.agent.get_correction_action_transition_count()
         ),
         "correction_action_samples_100": int(trainer.agent.get_correction_action_metric_count(100)),
+        "contact_action_head_enabled": bool(
+            getattr(config, "CRYSTAL_CAVES_CONTACT_ACTION_HEAD", False)
+        ),
+        "contact_action_weight": float(getattr(config, "CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT", 0.0)),
+        "contact_action_transitions": int(trainer.agent.get_contact_action_transition_count()),
+        "contact_action_samples_100": int(trainer.agent.get_contact_action_metric_count(100)),
+        "policy_anchor_enabled": bool(getattr(config, "CRYSTAL_CAVES_POLICY_ANCHOR_LOSS", False)),
+        "policy_anchor_weight": float(getattr(config, "CRYSTAL_CAVES_POLICY_ANCHOR_WEIGHT", 0.0)),
+        "policy_anchor_min_target_distance_norm": float(
+            getattr(config, "CRYSTAL_CAVES_POLICY_ANCHOR_MIN_TARGET_DISTANCE_NORM", 0.0)
+        ),
+        "policy_anchor_samples_100": int(trainer.agent.get_policy_anchor_metric_count(100)),
         "avg_q_100": mean_tail(trainer.q_values),
         "avg_score_100": mean_tail([float(score) for score in trainer.scores]),
         "win_rate_100": float(np.mean(trainer.wins[-100:])) if trainer.wins else 0.0,
@@ -74,14 +97,16 @@ def summarize_trainer(
             result.to_dict()
             for result in (trainer.evaluator.eval_history if trainer.evaluator else [])
         ],
-        "source_stats": trainer_source_stats(trainer),
+        "source_stats": source_stats,
         "reverse_start_stats": trainer_reverse_start_stats(trainer),
         "archive_stats": trainer_archive_stats(trainer),
     }
+    summary.update(contact_interleave_metric_aliases(source_stats))
     if final_eval_payload is not None:
         summary["final_eval"] = final_eval_payload
     if extra:
         summary.update(extra)
+    summary["route_contact_scorecard"] = build_route_contact_scorecard(summary)
     return summary
 
 
@@ -100,6 +125,10 @@ def config_snapshot(config: Config) -> dict[str, Any]:
         "n_step_size": config.N_STEP_SIZE,
         "use_prioritized_replay": config.USE_PRIORITIZED_REPLAY,
         "use_noisy_networks": config.USE_NOISY_NETWORKS,
+        "use_distributional_dqn": config.USE_DISTRIBUTIONAL_DQN,
+        "c51_num_atoms": config.C51_NUM_ATOMS,
+        "c51_v_min": config.C51_V_MIN,
+        "c51_v_max": config.C51_V_MAX,
         "epsilon_start": config.EPSILON_START,
         "epsilon_end": config.EPSILON_END,
         "epsilon_decay": config.EPSILON_DECAY,
@@ -114,6 +143,11 @@ def config_snapshot(config: Config) -> dict[str, Any]:
         "procedural": config.CRYSTAL_CAVES_PROCEDURAL,
         "drills": config.CRYSTAL_CAVES_DRILLS,
         "bridges": exp_config.CRYSTAL_CAVES_BRIDGES,
+        "contact_levels": exp_config.CRYSTAL_CAVES_CONTACT_LEVELS,
+        "contact_pool_size": exp_config.CRYSTAL_CAVES_CONTACT_POOL_SIZE,
+        "contact_pool_seed": exp_config.CRYSTAL_CAVES_CONTACT_POOL_SEED,
+        "history_state": exp_config.CRYSTAL_CAVES_HISTORY_STATE,
+        "history_steps": exp_config.CRYSTAL_CAVES_HISTORY_STEPS,
         "anti_loop_reward": exp_config.CRYSTAL_CAVES_ANTI_LOOP_REWARD,
         "first_crystal_goal": exp_config.CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL,
         "invalid_interact_penalty": exp_config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY,
@@ -137,6 +171,16 @@ def config_snapshot(config: Config) -> dict[str, Any]:
         "correction_action_weight": exp_config.CRYSTAL_CAVES_CORRECTION_ACTION_WEIGHT,
         "correction_action_margin": exp_config.CRYSTAL_CAVES_CORRECTION_ACTION_MARGIN,
         "correction_action_batch_size": exp_config.CRYSTAL_CAVES_CORRECTION_ACTION_BATCH_SIZE,
+        "contact_action_head": exp_config.CRYSTAL_CAVES_CONTACT_ACTION_HEAD,
+        "contact_action_weight": exp_config.CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT,
+        "contact_action_batch_size": exp_config.CRYSTAL_CAVES_CONTACT_ACTION_BATCH_SIZE,
+        "contact_action_distance_norm": exp_config.CRYSTAL_CAVES_CONTACT_ACTION_DISTANCE_NORM,
+        "policy_anchor_loss": exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_LOSS,
+        "policy_anchor_weight": exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_WEIGHT,
+        "policy_anchor_temperature": exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_TEMPERATURE,
+        "policy_anchor_min_target_distance_norm": (
+            exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_MIN_TARGET_DISTANCE_NORM
+        ),
         "rich_state": config.CRYSTAL_CAVES_RICH_STATE,
         "cnn_state": config.USE_CNN_STATE,
         "force_cpu": config.FORCE_CPU,
@@ -246,10 +290,16 @@ def _append_run_report(lines: list[str], run: dict[str, Any]) -> None:
     _append_run_summary_lines(lines, run)
     _append_final_eval_lines(lines, run)
     _append_selected_policy_lines(lines, run)
+    _append_route_contact_scorecard_lines(lines, run)
     _append_route_checkpoint_lines(lines, run)
     _append_correction_lines(lines, run)
+    _append_contact_action_head_lines(lines, run)
+    _append_contact_label_audit_lines(lines, run)
+    _append_policy_anchor_lines(lines, run)
+    _append_final_contact_option_lines(lines, run)
     _append_transfer_demo_lines(lines, run)
     _append_mixed_training_lines(lines, run)
+    _append_contact_pool_eval_lines(lines, run)
     _append_failure_diagnostics_lines(lines, run)
     _append_selected_failure_diagnostics_lines(lines, run)
     _append_source_stats_table(lines, run)
@@ -271,8 +321,32 @@ def _append_run_summary_lines(lines: list[str], run: dict[str, Any]) -> None:
         ]
     )
     run_config = run.get("config") or {}
+    if run.get("partial") or run.get("interrupted"):
+        target = int(run.get("target_episodes", 0) or 0)
+        target_text = f" / target {target}" if target else ""
+        lines.append(
+            f"- Status: interrupted partial run at episode {run.get('episodes', 0)}"
+            f"{target_text}"
+        )
     if run_config.get("first_crystal_goal"):
         lines.append("- Objective mode: first crystal terminal success")
+    contact_metric_keys = (
+        "contact_lane_win_rate_100",
+        "contact_lane_crystal_rate_100",
+        "contact_lane_exit_rate_100",
+        "full_lane_progress_100",
+        "full_lane_first_crystal_rate_100",
+    )
+    if any(key in run for key in contact_metric_keys):
+        lines.append(
+            "- Contact lane metrics: "
+            f"contact win/crystal/exit "
+            f"{100 * run.get('contact_lane_win_rate_100', 0):.0f}%/"
+            f"{100 * run.get('contact_lane_crystal_rate_100', 0):.0f}%/"
+            f"{100 * run.get('contact_lane_exit_rate_100', 0):.0f}%, "
+            f"full progress {run.get('full_lane_progress_100', 0):.3f}, "
+            f"full first-crystal {100 * run.get('full_lane_first_crystal_rate_100', 0):.0f}%"
+        )
 
 
 def _append_final_eval_lines(lines: list[str], run: dict[str, Any]) -> None:
@@ -335,6 +409,32 @@ def _append_selected_policy_lines(lines: list[str], run: dict[str, Any]) -> None
     )
 
 
+def _append_route_contact_scorecard_lines(lines: list[str], run: dict[str, Any]) -> None:
+    scorecard = run.get("route_contact_scorecard")
+    if not isinstance(scorecard, dict) or not scorecard.get("has_eval"):
+        scorecard = build_route_contact_scorecard(run)
+    if not scorecard.get("has_eval"):
+        return
+    metrics = scorecard.get("metrics") or {}
+    risks = scorecard.get("risks") or []
+    risk_text = "; ".join(str(risk) for risk in risks[:3]) if risks else "none"
+    lines.extend(
+        [
+            f"- Route/contact scorecard: {scorecard.get('score', 0.0):.3f} "
+            f"({scorecard.get('verdict', 'insufficient evidence')}, "
+            f"source `{scorecard.get('eval_source', '')}`)",
+            f"- Route/contact profile: first-objective "
+            f"{100 * metrics.get('first_crystal_rate', 0):.1f}%, "
+            f"crystals {100 * metrics.get('crystal_frac', 0):.1f}%, "
+            f"depth {100 * metrics.get('depth_frac', 0):.1f}%, "
+            f"close-zone {100 * metrics.get('close_zone_rate', 0):.1f}%, "
+            f"loop-after-close {100 * metrics.get('loop_after_close_rate', 0):.1f}%, "
+            f"stall {100 * metrics.get('stall_rate', 0):.1f}%",
+            f"- Route/contact risks: {risk_text}",
+        ]
+    )
+
+
 def _append_route_checkpoint_lines(lines: list[str], run: dict[str, Any]) -> None:
     route_curriculum = run.get("route_curriculum") or {}
     if route_curriculum:
@@ -367,12 +467,21 @@ def _append_correction_lines(lines: list[str], run: dict[str, Any]) -> None:
                 f"- Correction dataset: {correction_dataset.get('kept_examples', 0)} "
                 f"kept states from {correction_dataset.get('games_completed', 0)} games "
                 f"({100 * correction_dataset.get('disagreement_rate', 0):.1f}% policy/label disagreement)",
+                f"- Correction label mode: {correction_dataset.get('label_mode', 'standard')}",
                 f"- Correction triggers: `{correction_dataset.get('trigger_counts', {})}`",
                 f"- Correction actions: `{correction_dataset.get('label_action_counts', {})}`",
                 f"- Correction arrays: `{correction_dataset.get('states_path', '')}`",
                 f"- Correction rows: `{correction_dataset.get('rows_path', '')}`",
             ]
         )
+        if correction_dataset.get("label_mode") == "advantage_gate":
+            lines.append(
+                "- Correction advantage gate: "
+                f"{correction_dataset.get('gate_rejections', 0)}/"
+                f"{correction_dataset.get('gate_evaluations', 0)} rejected "
+                f"({100 * correction_dataset.get('gate_rejection_rate', 0):.1f}%), "
+                f"mean advantage {correction_dataset.get('mean_gate_option_advantage', 0):.1f}"
+            )
     correction_training = run.get("correction_training") or {}
     if correction_training:
         lines.extend(
@@ -389,6 +498,101 @@ def _append_correction_lines(lines: list[str], run: dict[str, Any]) -> None:
                 f"samples {run.get('correction_action_samples_100', 0)}",
             ]
         )
+
+
+def _append_contact_action_head_lines(lines: list[str], run: dict[str, Any]) -> None:
+    lines.extend(contact_action_head_report_lines(run))
+
+
+def _append_contact_label_audit_lines(lines: list[str], run: dict[str, Any]) -> None:
+    audit = run.get("contact_label_audit") or {}
+    if not audit:
+        return
+    state_conflicts = audit.get("state_conflicts") or {}
+    semantic = audit.get("semantic_ambiguity") or {}
+    direction = audit.get("direction_alignment") or {}
+    flips = audit.get("adjacent_label_flips") or {}
+    lines.extend(
+        [
+            f"- Contact label audit: {audit.get('source_dataset_count', 0)} sources, "
+            f"actions `{audit.get('label_action_counts', {})}`",
+            f"- Contact label duplicate-state conflicts: "
+            f"{state_conflicts.get('conflict_groups', 0)} groups / "
+            f"{state_conflicts.get('conflict_examples', 0)} examples "
+            f"(rounded {state_conflicts.get('round_decimals', 0)} decimals)",
+            f"- Contact label semantic ambiguity: "
+            f"{semantic.get('ambiguous_groups', 0)} groups / "
+            f"{semantic.get('ambiguous_examples', 0)} examples",
+            f"- Contact label direction mismatches: "
+            f"{direction.get('mismatches', 0)}/{direction.get('checked', 0)} "
+            f"({100 * direction.get('mismatch_rate', 0):.1f}%), "
+            f"counts `{direction.get('mismatch_counts', {})}`",
+            f"- Contact label adjacent flips: "
+            f"{flips.get('flips', 0)}/{flips.get('checked_pairs', 0)} "
+            f"({100 * flips.get('flip_rate', 0):.1f}%), "
+            f"pairs `{flips.get('flip_counts', {})}`",
+        ]
+    )
+
+
+def _append_policy_anchor_lines(lines: list[str], run: dict[str, Any]) -> None:
+    anchor_training = run.get("policy_anchor_training") or {}
+    if not anchor_training:
+        return
+    mask_bits = ""
+    min_distance_tiles = anchor_training.get("min_target_distance_tiles")
+    if min_distance_tiles is not None and float(min_distance_tiles) > 0:
+        mask_bits = (
+            f", route mask >= {float(min_distance_tiles):.1f} target tiles "
+            f"(norm {anchor_training.get('min_target_distance_norm', 0):.3f})"
+        )
+    lines.extend(
+        [
+            f"- Policy anchor: enabled `{anchor_training.get('enabled', False)}`, "
+            f"weight {anchor_training.get('weight', 0):.3f}, "
+            f"temperature {anchor_training.get('temperature', 1):.2f}{mask_bits}",
+            f"- Policy anchor metrics avg100: "
+            f"loss {run.get('avg_policy_anchor_loss_100', 0):.4f}, "
+            f"teacher-action match "
+            f"{100 * run.get('avg_policy_anchor_accuracy_100', 0):.1f}%, "
+            f"samples {run.get('policy_anchor_samples_100', 0)}",
+        ]
+    )
+
+
+def _append_final_contact_option_lines(lines: list[str], run: dict[str, Any]) -> None:
+    option = run.get("final_contact_option") or {}
+    if not option:
+        final_eval_payload = run.get("final_eval") or {}
+        option = final_eval_payload.get("final_contact_option") or {}
+    if not option:
+        return
+    lines.extend(
+        [
+            f"- Final-contact option: {option.get('option_triggers', 0)} triggers "
+            f"({100 * option.get('option_trigger_rate', 0):.1f}% of eval steps), "
+            f"{option.get('policy_actions', 0)} policy actions, "
+            f"{option.get('option_target_completed', 0)} simulated target completions, "
+            f"commit {option.get('commit_steps', 0)} steps, "
+            f"cancel outside close zone: {bool(option.get('cancel_outside_close_zone', False))}, "
+            f"cancelled {option.get('option_cancelled_actions', 0)} queued actions "
+            f"across {option.get('option_cancelled_plans', 0)} plans",
+            f"- Final-contact option actions: `{option.get('option_action_counts', {})}`; "
+            f"reasons `{option.get('option_reason_counts', {})}`",
+        ]
+    )
+    if option.get("policy_advantage_gate_enabled"):
+        lines.append(
+            "- Final-contact advantage gate: "
+            f"{option.get('option_gate_rejections', 0)}/"
+            f"{option.get('option_gate_evaluations', 0)} rejected "
+            f"({100 * option.get('option_gate_rejection_rate', 0):.1f}%), "
+            f"min advantage {option.get('min_option_advantage', 0):.1f}, "
+            f"mean advantage {option.get('mean_option_advantage', 0):.1f}"
+        )
+    rows_path = option.get("rows_path")
+    if rows_path:
+        lines.append(f"- Final-contact option rows: `{rows_path}`")
 
 
 def _append_transfer_demo_lines(lines: list[str], run: dict[str, Any]) -> None:
@@ -425,6 +629,14 @@ def _append_transfer_source_lines(lines: list[str], run: dict[str, Any]) -> None
             f"- Transfer source: route-demo BC policy "
             f"ep {transfer_source.get('source_episode', 0)} "
             f"({100 * transfer_source.get('source_win_rate', 0):.0f}% route-floor source win)"
+        )
+    elif source_kind == SELECTED_WEIGHT_SNAPSHOT_KIND:
+        source_eval = transfer_source.get("source_eval") or {}
+        lines.append(
+            f"- Transfer source: selected checkpoint "
+            f"{transfer_source.get('source_label', 'unknown')} "
+            f"ep {transfer_source.get('source_episode', 0)} "
+            f"({source_eval.get('wins', 0)}/{source_eval.get('num_games', 0)} source wins)"
         )
     else:
         lines.extend(
@@ -566,8 +778,38 @@ def _append_mixed_training_lines(lines: list[str], run: dict[str, Any]) -> None:
                 f"({100 * mix.get('skill_ratio', 0):.0f}% {source} lanes)",
             ]
         )
+        if source == "contact":
+            lines.append(
+                f"- Contact pool: train {mix.get('contact_pool_size', 0)} generated levels, "
+                f"held-out contact eval {mix.get('contact_eval_pool_size', 0)} levels"
+            )
     _append_reverse_start_lines(lines, run)
     _append_archive_start_lines(lines, run)
+
+
+def _append_contact_pool_eval_lines(lines: list[str], run: dict[str, Any]) -> None:
+    contact_rollup = run.get("contact_eval_rollup") or {}
+    if contact_rollup:
+        lines.append(
+            "- Contact-pool eval: "
+            f"{100 * contact_rollup.get('mean_win_rate', 0):.0f}% win, "
+            f"{100 * contact_rollup.get('mean_any_crystal_rate', 0):.0f}% any crystal, "
+            f"{100 * contact_rollup.get('mean_all_crystals_rate', 0):.0f}% all crystals, "
+            f"progress {contact_rollup.get('mean_progress', 0):.3f}, "
+            f"solved {contact_rollup.get('solved_levels', 0)}/"
+            f"{contact_rollup.get('levels', 0)}"
+        )
+    selected_rollup = run.get("selected_contact_eval_rollup") or {}
+    if selected_rollup:
+        lines.append(
+            "- Selected checkpoint contact-pool eval: "
+            f"{100 * selected_rollup.get('mean_win_rate', 0):.0f}% win, "
+            f"{100 * selected_rollup.get('mean_any_crystal_rate', 0):.0f}% any crystal, "
+            f"{100 * selected_rollup.get('mean_all_crystals_rate', 0):.0f}% all crystals, "
+            f"progress {selected_rollup.get('mean_progress', 0):.3f}, "
+            f"solved {selected_rollup.get('solved_levels', 0)}/"
+            f"{selected_rollup.get('levels', 0)}"
+        )
 
 
 def _append_reverse_start_lines(lines: list[str], run: dict[str, Any]) -> None:
@@ -696,7 +938,9 @@ def _append_source_stats_table(lines: list[str], run: dict[str, Any]) -> None:
             f"| {source} | {stats.get('episodes', 0)} | "
             f"{stats.get('avg_score_100', 0):.1f} | "
             f"{100 * stats.get('win_rate_100', 0):.0f}% | "
-            f"{stats.get('avg_progress_100', 0):.3f} | "
+            f"{stats.get('avg_progress_100', 0):.3f} "
+            f"(crystal {100 * stats.get('crystal_rate_100', 0):.0f}%, "
+            f"exit {100 * stats.get('exit_rate_100', 0):.0f}%) | "
             f"`{stats.get('end_reason_counts_100', {})}` |"
         )
 

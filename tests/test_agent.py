@@ -229,6 +229,101 @@ class TestLearning:
         assert loss is not None
         assert isinstance(loss, float)
 
+    def test_distributional_dqn_projection_preserves_probability_mass(self, config):
+        """C51 Bellman projection should keep each target distribution normalized."""
+        config.USE_DISTRIBUTIONAL_DQN = True
+        config.C51_NUM_ATOMS = 5
+        config.C51_V_MIN = -2.0
+        config.C51_V_MAX = 2.0
+        config.USE_PRIORITIZED_REPLAY = False
+        config.USE_N_STEP_RETURNS = False
+        config.USE_NOISY_NETWORKS = False
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
+        support = torch.linspace(-2.0, 2.0, 5, device=agent.device)
+        next_dist = torch.full((3, 5), 0.2, device=agent.device)
+        rewards = torch.tensor([0.0, 1.0, -1.0], dtype=torch.float32, device=agent.device)
+        dones = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32, device=agent.device)
+
+        projected = agent._project_distribution(
+            next_dist=next_dist,
+            rewards=rewards,
+            dones=dones,
+            support=support,
+            gamma=0.9,
+        )
+
+        assert projected.shape == next_dist.shape
+        assert torch.all(projected >= 0.0)
+        assert torch.allclose(projected.sum(dim=1), torch.ones(3, device=agent.device))
+
+    def test_distributional_dqn_learning_with_enough_samples(self, config):
+        """A C51-enabled agent should execute a finite optimization step."""
+        config.USE_DISTRIBUTIONAL_DQN = True
+        config.C51_NUM_ATOMS = 7
+        config.C51_V_MIN = -5.0
+        config.C51_V_MAX = 15.0
+        config.USE_PRIORITIZED_REPLAY = False
+        config.USE_N_STEP_RETURNS = False
+        config.USE_NOISY_NETWORKS = False
+        config.MEMORY_MIN = 8
+        config.BATCH_SIZE = 4
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
+        for _ in range(config.MEMORY_MIN + 4):
+            state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            next_state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            agent.remember(
+                state,
+                np.random.randint(0, config.ACTION_SIZE),
+                float(np.random.randn()),
+                next_state,
+                False,
+            )
+
+        loss = None
+        for _ in range(getattr(config, "LEARN_EVERY", 1)):
+            loss = agent.learn()
+            if loss is not None:
+                break
+
+        assert loss is not None
+        assert np.isfinite(loss)
+
+    def test_distributional_dqn_learns_with_prioritized_n_step_replay(self, config):
+        """The Crystal Caves default replay stack should work with C51 loss."""
+        config.USE_DISTRIBUTIONAL_DQN = True
+        config.C51_NUM_ATOMS = 7
+        config.C51_V_MIN = -5.0
+        config.C51_V_MAX = 15.0
+        config.USE_PRIORITIZED_REPLAY = True
+        config.USE_N_STEP_RETURNS = True
+        config.N_STEP_SIZE = 3
+        config.USE_NOISY_NETWORKS = False
+        config.MEMORY_MIN = 8
+        config.BATCH_SIZE = 4
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
+        for index in range(config.MEMORY_MIN + config.N_STEP_SIZE + 6):
+            state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            next_state = np.random.randn(config.STATE_SIZE).astype(np.float32)
+            agent.remember(
+                state,
+                np.random.randint(0, config.ACTION_SIZE),
+                float(np.random.randn()),
+                next_state,
+                index % 7 == 6,
+            )
+
+        loss = None
+        for _ in range(getattr(config, "LEARN_EVERY", 1)):
+            loss = agent.learn()
+            if loss is not None:
+                break
+
+        assert loss is not None
+        assert np.isfinite(loss)
+
     def test_epsilon_decay(self, config):
         """Epsilon should decay correctly (when not using NoisyNets)."""
         # Disable NoisyNets to test epsilon-greedy decay

@@ -32,6 +32,44 @@ import torch.nn.functional as F
 from config import Config
 
 
+def _distributional_enabled(config: Config) -> bool:
+    return bool(getattr(config, "USE_DISTRIBUTIONAL_DQN", False))
+
+
+def _distributional_num_atoms(config: Config) -> int:
+    return int(getattr(config, "C51_NUM_ATOMS", 51))
+
+
+def _distributional_support(config: Config) -> torch.Tensor:
+    return torch.linspace(
+        float(getattr(config, "C51_V_MIN", -20.0)),
+        float(getattr(config, "C51_V_MAX", 120.0)),
+        _distributional_num_atoms(config),
+    )
+
+
+def _expected_q_from_logits(logits: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
+    probs = F.softmax(logits, dim=2)
+    return torch.sum(probs * support.view(1, 1, -1), dim=2)
+
+
+def _distributional_action_weight(
+    layer: nn.Module,
+    *,
+    action_size: int,
+    num_atoms: int,
+) -> np.ndarray:
+    if isinstance(layer, NoisyLinear):
+        weight = layer.visualization_weight()
+    elif isinstance(layer, nn.Linear):
+        weight = layer.weight.detach().cpu().numpy()
+    else:
+        raise TypeError(f"Unsupported layer type for visualization: {type(layer)!r}")
+    if weight.shape[0] == action_size * num_atoms:
+        return weight.reshape(action_size, num_atoms, -1).mean(axis=1)
+    return weight
+
+
 class NoisyLinear(nn.Module):
     """
     Linear layer with learnable parameter noise for exploration.
@@ -145,6 +183,9 @@ class DQN(nn.Module):
         self.config = config or Config()
         self.state_size = state_size
         self.action_size = action_size
+        self.distributional = _distributional_enabled(self.config)
+        self.num_atoms = _distributional_num_atoms(self.config)
+        self.register_buffer("support", _distributional_support(self.config), persistent=False)
 
         # Use provided hidden layers or config
         self.hidden_sizes = hidden_layers or self.config.HIDDEN_LAYERS
@@ -170,7 +211,8 @@ class DQN(nn.Module):
 
     def _build_network(self) -> None:
         """Construct the neural network layers."""
-        layer_sizes = [self.state_size] + self.hidden_sizes + [self.action_size]
+        output_size = self.action_size * self.num_atoms if self.distributional else self.action_size
+        layer_sizes = [self.state_size] + self.hidden_sizes + [output_size]
 
         for i in range(len(layer_sizes) - 1):
             layer = nn.Linear(layer_sizes[i], layer_sizes[i + 1])
@@ -211,6 +253,26 @@ class DQN(nn.Module):
         for i, layer in enumerate(self.layers):
             layer.register_forward_hook(get_activation(f"layer_{i}"))
 
+    def _raw_output(self, state: torch.Tensor) -> torch.Tensor:
+        x = state
+
+        # Apply hidden layers with activation (use cached function for speed)
+        for i, layer in enumerate(self.layers[:-1]):
+            x = self._activation_fn(layer(x))
+
+        # Output layer (no activation - raw Q-values)
+        return self.layers[-1](x)
+
+    def distributional_logits(self, state: torch.Tensor) -> torch.Tensor:
+        """Return raw C51 logits shaped (batch, actions, atoms)."""
+        if not self.distributional:
+            raise RuntimeError("distributional DQN head is disabled")
+        return self._raw_output(state).view(-1, self.action_size, self.num_atoms)
+
+    def distributional_probs(self, state: torch.Tensor) -> torch.Tensor:
+        """Return normalized C51 probabilities shaped (batch, actions, atoms)."""
+        return F.softmax(self.distributional_logits(state), dim=2)
+
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the network.
@@ -219,18 +281,13 @@ class DQN(nn.Module):
             state: Input state tensor of shape (batch_size, state_size)
 
         Returns:
-            Q-values tensor of shape (batch_size, action_size)
+            Expected Q-values tensor of shape (batch_size, action_size)
         """
-        x = state
-
-        # Apply hidden layers with activation (use cached function for speed)
-        for i, layer in enumerate(self.layers[:-1]):
-            x = self._activation_fn(layer(x))
-
-        # Output layer (no activation - raw Q-values)
-        x = self.layers[-1](x)
-
-        return x
+        raw = self._raw_output(state)
+        if self.distributional:
+            logits = raw.view(-1, self.action_size, self.num_atoms)
+            return _expected_q_from_logits(logits, cast(torch.Tensor, self.support))
+        return raw
 
     def get_layer_info(self) -> List[Dict]:
         """
@@ -254,8 +311,8 @@ class DQN(nn.Module):
                 }
             )
 
-        # Output layer
-        info.append({"name": "Output", "neurons": self.action_size, "type": "output"})
+        output_name = "Output (C51 Q)" if self.distributional else "Output"
+        info.append({"name": output_name, "neurons": self.action_size, "type": "output"})
 
         return info
 
@@ -267,9 +324,18 @@ class DQN(nn.Module):
             List of weight matrices (for visualization)
         """
         weights = []
-        for layer in self.layers:
+        for index, layer in enumerate(self.layers):
             if isinstance(layer, nn.Linear):
-                weights.append(layer.weight.detach().cpu().numpy())
+                if self.distributional and index == len(self.layers) - 1:
+                    weights.append(
+                        _distributional_action_weight(
+                            layer,
+                            action_size=self.action_size,
+                            num_atoms=self.num_atoms,
+                        )
+                    )
+                else:
+                    weights.append(layer.weight.detach().cpu().numpy())
         return weights
 
     def get_activations(self) -> Dict[str, np.ndarray]:
@@ -325,6 +391,9 @@ class DuelingDQN(nn.Module):
         self.config = config or Config()
         self.state_size = state_size
         self.action_size = action_size
+        self.distributional = _distributional_enabled(self.config)
+        self.num_atoms = _distributional_num_atoms(self.config)
+        self.register_buffer("support", _distributional_support(self.config), persistent=False)
 
         # Use provided hidden layers or config
         self.hidden_sizes = hidden_layers or self.config.HIDDEN_LAYERS
@@ -375,13 +444,19 @@ class DuelingDQN(nn.Module):
 
         # Final output layers - use NoisyLinear if enabled
         use_noisy = getattr(self.config, "USE_NOISY_NETWORKS", False)
+        value_output_size = self.num_atoms if self.distributional else 1
+        advantage_output_size = (
+            self.action_size * self.num_atoms if self.distributional else self.action_size
+        )
         if use_noisy:
             noisy_std = getattr(self.config, "NOISY_STD_INIT", 0.5)
-            self.value_output = NoisyLinear(stream_hidden_size, 1, noisy_std)
-            self.advantage_output = NoisyLinear(stream_hidden_size, self.action_size, noisy_std)
+            self.value_output = NoisyLinear(stream_hidden_size, value_output_size, noisy_std)
+            self.advantage_output = NoisyLinear(
+                stream_hidden_size, advantage_output_size, noisy_std
+            )
         else:
-            self.value_output = nn.Linear(stream_hidden_size, 1)  # type: ignore[assignment]
-            self.advantage_output = nn.Linear(stream_hidden_size, self.action_size)  # type: ignore[assignment]
+            self.value_output = nn.Linear(stream_hidden_size, value_output_size)  # type: ignore[assignment]
+            self.advantage_output = nn.Linear(stream_hidden_size, advantage_output_size)  # type: ignore[assignment]
 
         # For compatibility with DQN interface, create a layers list
         self.layers = nn.ModuleList(
@@ -433,21 +508,16 @@ class DuelingDQN(nn.Module):
         self.value_output.register_forward_hook(get_activation("value_output"))
         self.advantage_output.register_forward_hook(get_activation("advantage_output"))
 
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the dueling network.
-
-        Args:
-            state: Input state tensor of shape (batch_size, state_size)
-
-        Returns:
-            Q-values tensor of shape (batch_size, action_size)
-        """
+    def _shared_features(self, state: torch.Tensor) -> torch.Tensor:
         x = state
 
         # Pass through shared feature layers (use cached activation fn for speed)
         for layer in self.feature_layers:
             x = self._activation_fn(layer(x))
+        return x
+
+    def _dueling_outputs(self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self._shared_features(state)
 
         # Value stream
         value = self._activation_fn(self.value_hidden(x))
@@ -457,6 +527,38 @@ class DuelingDQN(nn.Module):
         advantage = self._activation_fn(self.advantage_hidden(x))
         advantage = self.advantage_output(advantage)  # Shape: (batch, action_size)
 
+        return value, advantage
+
+    def distributional_logits(self, state: torch.Tensor) -> torch.Tensor:
+        """Return raw C51 logits shaped (batch, actions, atoms)."""
+        if not self.distributional:
+            raise RuntimeError("distributional DQN head is disabled")
+        value, advantage = self._dueling_outputs(state)
+        value = value.view(-1, 1, self.num_atoms)
+        advantage = advantage.view(-1, self.action_size, self.num_atoms)
+        return value + (advantage - advantage.mean(dim=1, keepdim=True))
+
+    def distributional_probs(self, state: torch.Tensor) -> torch.Tensor:
+        """Return normalized C51 probabilities shaped (batch, actions, atoms)."""
+        return F.softmax(self.distributional_logits(state), dim=2)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the dueling network.
+
+        Args:
+            state: Input state tensor of shape (batch_size, state_size)
+
+        Returns:
+            Expected Q-values tensor of shape (batch_size, action_size)
+        """
+        if self.distributional:
+            return _expected_q_from_logits(
+                self.distributional_logits(state),
+                cast(torch.Tensor, self.support),
+            )
+
+        value, advantage = self._dueling_outputs(state)
         # Combine streams: Q = V + (A - mean(A))
         # Subtracting mean ensures identifiability and stability
         q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
@@ -511,7 +613,8 @@ class DuelingDQN(nn.Module):
         )
 
         # Output layer
-        info.append({"name": "Output (Q)", "neurons": self.action_size, "type": "output"})
+        output_name = "Output (C51 Q)" if self.distributional else "Output (Q)"
+        info.append({"name": output_name, "neurons": self.action_size, "type": "output"})
 
         return info
 
@@ -523,10 +626,22 @@ class DuelingDQN(nn.Module):
             List of weight matrices (for visualization)
         """
 
-        def layer_weight(layer: nn.Module) -> np.ndarray:
+        def layer_weight(layer: nn.Module, *, distributional_output: bool = False) -> np.ndarray:
             if isinstance(layer, NoisyLinear):
+                if distributional_output:
+                    return _distributional_action_weight(
+                        layer,
+                        action_size=self.action_size,
+                        num_atoms=self.num_atoms,
+                    )
                 return layer.visualization_weight()
             if isinstance(layer, nn.Linear):
+                if distributional_output:
+                    return _distributional_action_weight(
+                        layer,
+                        action_size=self.action_size,
+                        num_atoms=self.num_atoms,
+                    )
                 return layer.weight.detach().cpu().numpy()
             raise TypeError(f"Unsupported layer type for visualization: {type(layer)!r}")
 
@@ -537,7 +652,9 @@ class DuelingDQN(nn.Module):
         weights.append(layer_weight(self.value_hidden))
         weights.append(layer_weight(self.advantage_hidden))
         weights.append(layer_weight(self.value_output))
-        weights.append(layer_weight(self.advantage_output))
+        weights.append(
+            layer_weight(self.advantage_output, distributional_output=self.distributional)
+        )
         return weights
 
     def get_activations(self) -> Dict[str, np.ndarray]:
@@ -588,6 +705,12 @@ class SpatialDQN(nn.Module):
         self.meta_size = layout["meta"]
         self.dueling = bool(getattr(self.config, "USE_DUELING", True))
         self.route_aux_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_LOSS", False))
+        self.contact_action_head_enabled = bool(
+            getattr(self.config, "CRYSTAL_CAVES_CONTACT_ACTION_HEAD", False)
+        )
+        self.distributional = _distributional_enabled(self.config)
+        self.num_atoms = _distributional_num_atoms(self.config)
+        self.register_buffer("support", _distributional_support(self.config), persistent=False)
 
         # Structured exploration: like DuelingDQN, put NoisyNets on the OUTPUT
         # layers (the Rainbow placement) so the conv net actually explores via
@@ -606,12 +729,19 @@ class SpatialDQN(nn.Module):
         merged = conv_out + self.gmap_size + self.meta_size
         self.fc = nn.Linear(merged, hidden)
         if self.dueling:
-            self.value = out_layer(hidden, 1)
-            self.adv = out_layer(hidden, action_size)
+            value_output_size = self.num_atoms if self.distributional else 1
+            advantage_output_size = (
+                action_size * self.num_atoms if self.distributional else action_size
+            )
+            self.value = out_layer(hidden, value_output_size)
+            self.adv = out_layer(hidden, advantage_output_size)
         else:
-            self.head = out_layer(hidden, action_size)
+            output_size = action_size * self.num_atoms if self.distributional else action_size
+            self.head = out_layer(hidden, output_size)
         if self.route_aux_enabled:
             self.route_aux_head = nn.Linear(hidden, 9)
+        if self.contact_action_head_enabled:
+            self.contact_action_head = nn.Linear(hidden, action_size)
         # Xavier-init the plain conv/linear layers; NoisyLinear self-inits.
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
@@ -641,18 +771,50 @@ class SpatialDQN(nn.Module):
         if self.dueling:
             v = self.value(x)
             a = self.adv(x)
-            q = v + (a - a.mean(dim=1, keepdim=True))
+            if self.distributional:
+                v = v.view(-1, 1, self.num_atoms)
+                a = a.view(-1, self.action_size, self.num_atoms)
+                logits = v + (a - a.mean(dim=1, keepdim=True))
+                q = _expected_q_from_logits(logits, cast(torch.Tensor, self.support))
+            else:
+                q = v + (a - a.mean(dim=1, keepdim=True))
         else:
-            q = self.head(x)
+            raw = self.head(x)
+            if self.distributional:
+                logits = raw.view(-1, self.action_size, self.num_atoms)
+                q = _expected_q_from_logits(logits, cast(torch.Tensor, self.support))
+            else:
+                q = raw
         if self.capture_activations:
             self.activations["layer_2"] = q.detach()
         return q
+
+    def distributional_logits(self, state: torch.Tensor) -> torch.Tensor:
+        """Return raw C51 logits shaped (batch, actions, atoms)."""
+        if not self.distributional:
+            raise RuntimeError("distributional DQN head is disabled")
+        x = self._features(state)
+        if self.dueling:
+            v = self.value(x).view(-1, 1, self.num_atoms)
+            a = self.adv(x).view(-1, self.action_size, self.num_atoms)
+            return v + (a - a.mean(dim=1, keepdim=True))
+        return self.head(x).view(-1, self.action_size, self.num_atoms)
+
+    def distributional_probs(self, state: torch.Tensor) -> torch.Tensor:
+        """Return normalized C51 probabilities shaped (batch, actions, atoms)."""
+        return F.softmax(self.distributional_logits(state), dim=2)
 
     def route_aux_logits(self, state: torch.Tensor) -> torch.Tensor:
         """Predict one of 9 coarse objective directions from shared features."""
         if not self.route_aux_enabled:
             raise RuntimeError("route auxiliary head is disabled")
         return self.route_aux_head(self._features(state))
+
+    def contact_action_logits(self, state: torch.Tensor) -> torch.Tensor:
+        """Predict a close-zone action without updating the shared route trunk."""
+        if not self.contact_action_head_enabled:
+            raise RuntimeError("contact action head is disabled")
+        return self.contact_action_head(self._features(state).detach())
 
     def reset_noise(self) -> None:
         """Resample exploration noise on the output layers (no-op when NoisyNets
@@ -679,7 +841,11 @@ class SpatialDQN(nn.Module):
             {"name": "Input", "neurons": self.state_size, "type": "input"},
             {"name": "Conv", "neurons": self.conv2.out_channels, "type": "hidden"},
             {"name": "Dense", "neurons": hidden, "type": "hidden"},
-            {"name": "Output (Q)", "neurons": self.action_size, "type": "output"},
+            {
+                "name": "Output (C51 Q)" if self.distributional else "Output (Q)",
+                "neurons": self.action_size,
+                "type": "output",
+            },
         ]
 
     def get_weights(self) -> List[np.ndarray]:
@@ -696,7 +862,15 @@ class SpatialDQN(nn.Module):
         conv_w = self.conv2.weight.detach().cpu().numpy()
         conv_w = conv_w.reshape(conv_w.shape[0], -1)
         out_layer = self.adv if self.dueling else self.head
-        return [conv_w, matrix(self.fc), matrix(out_layer)]
+        if self.distributional:
+            output_weight = _distributional_action_weight(
+                out_layer,
+                action_size=self.action_size,
+                num_atoms=self.num_atoms,
+            )
+        else:
+            output_weight = matrix(out_layer)
+        return [conv_w, matrix(self.fc), output_weight]
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

@@ -2,16 +2,28 @@
 from .common import *
 from .artifacts import validate_status_session_artifacts
 from .cli_args import add_status_session_arguments
+from .contact_head import parse_contact_head_action_thresholds
+from .contact_label_audit import *
+from .cli_label_modes import run_label_dataset_mode
+from .correction_calibration import *
 from .config_helpers import *
 from .corrections import *
+from .cli_helpers import (
+    append_interrupted_run_from_live_metrics,
+    close_zone_route_demo_variants,
+    tutorial_demo_bc_kwargs,
+)
 from .io_utils import *
 from .recipes import expand_recipe_argv, format_recipe_list
 from .reports import *
+from .scorecard import *
 from .runs_baseline import *
 from .runs_demo import *
 from .runs_mixed import *
 from .runs_route import *
 from .runs_transfer import *
+
+_append_interrupted_run_from_live_metrics = append_interrupted_run_from_live_metrics
 
 
 def _configure_line_buffering() -> None:
@@ -67,8 +79,21 @@ def _new_status_session_payload(opts: argparse.Namespace) -> tuple[Path, dict[st
 
 def _requires_live_metrics(opts: argparse.Namespace, payload: dict[str, Any]) -> bool:
     return opts.heartbeat_seconds > 0 and any(
-        float(run.get("train_seconds", 0.0) or 0.0) > 0 for run in payload["runs"]
+        _run_requires_live_metrics(run) for run in payload["runs"] if isinstance(run, dict)
     )
+
+
+def _run_requires_live_metrics(run: dict[str, Any]) -> bool:
+    if any(
+        key in run
+        for key in (
+            "contact_action_head_calibration",
+            "contact_label_audit",
+            "contact_label_filter",
+        )
+    ):
+        return False
+    return float(run.get("train_seconds", 0.0) or 0.0) > 0
 
 
 def _write_status_session_outputs(
@@ -121,6 +146,26 @@ def _run_checkpoint_correction_mode(
             )
         )
         return True
+    if opts.mode == "eval-final-contact-option":
+        if not opts.checkpoint:
+            parser.error("eval-final-contact-option requires --checkpoint")
+        payload["runs"].append(
+            run_eval_final_contact_option(
+                out_dir,
+                checkpoint_path=Path(opts.checkpoint),
+                seed=opts.seed,
+                eval_games=opts.eval_games,
+                log_every=opts.log_every,
+                report_seconds=opts.report_seconds,
+                close_zone_distance_tiles=opts.final_contact_distance,
+                final_contact_commit_steps=opts.final_contact_commit_steps,
+                cancel_option_outside_close_zone=opts.final_contact_cancel_outside,
+                gate_policy_advantage=opts.final_contact_policy_advantage_gate,
+                min_option_advantage=opts.final_contact_min_option_advantage,
+                label=opts.label or "eval_final_contact_option",
+            )
+        )
+        return True
     if opts.mode == "collect-corrections":
         if not opts.checkpoint:
             parser.error("collect-corrections requires --checkpoint")
@@ -139,6 +184,54 @@ def _run_checkpoint_correction_mode(
                 correction_keep_agreements=opts.correction_keep_agreements,
                 log_every=opts.log_every,
                 report_seconds=opts.report_seconds,
+                correction_label_mode=(
+                    "advantage_gate" if opts.final_contact_policy_advantage_gate else "standard"
+                ),
+                final_contact_distance=opts.final_contact_distance,
+                final_contact_commit_steps=opts.final_contact_commit_steps,
+                final_contact_min_option_advantage=opts.final_contact_min_option_advantage,
+                label=opts.label or "collect_corrections",
+            )
+        )
+        return True
+    if opts.mode == "collect-contact-head-corrections":
+        if not opts.checkpoint:
+            parser.error("collect-contact-head-corrections requires --checkpoint")
+        if not opts.correction_dataset:
+            parser.error("collect-contact-head-corrections requires --correction-dataset")
+        payload["runs"].append(
+            run_collect_contact_head_corrections(
+                out_dir,
+                checkpoint_path=Path(opts.checkpoint),
+                correction_dataset_path=Path(opts.correction_dataset),
+                seed=opts.seed,
+                correction_games=opts.correction_games,
+                correction_max_steps=opts.correction_max_steps,
+                correction_max_examples=opts.correction_max_examples,
+                correction_sample_every=opts.correction_sample_every,
+                correction_max_examples_per_game=opts.correction_max_examples_per_game,
+                correction_stale_steps=opts.correction_stale_steps,
+                correction_loop_tile_visits=opts.correction_loop_tile_visits,
+                correction_keep_agreements=opts.correction_keep_agreements,
+                log_every=opts.log_every,
+                report_seconds=opts.report_seconds,
+                correction_label_mode=(
+                    "advantage_gate" if opts.final_contact_policy_advantage_gate else "standard"
+                ),
+                final_contact_distance=opts.final_contact_distance,
+                final_contact_commit_steps=opts.final_contact_commit_steps,
+                final_contact_min_option_advantage=opts.final_contact_min_option_advantage,
+                contact_action_batch_size=opts.contact_action_batch_size,
+                contact_action_distance_tiles=opts.contact_action_distance,
+                contact_head_offline_steps=opts.contact_head_offline_steps,
+                contact_head_learning_rate=opts.contact_head_learning_rate,
+                contact_head_confidence=opts.contact_head_confidence,
+                contact_head_jump_confidence=opts.contact_head_jump_confidence,
+                contact_head_action_thresholds=parse_contact_head_action_thresholds(
+                    opts.contact_head_action_thresholds
+                ),
+                contact_head_balance_classes=opts.contact_head_balance_classes,
+                label=opts.label or "collect_contact_head_corrections",
             )
         )
         return True
@@ -165,6 +258,92 @@ def _run_checkpoint_correction_mode(
                 correction_action_weight=opts.correction_action_weight,
                 correction_action_margin=opts.correction_action_margin,
                 correction_action_batch_size=opts.correction_action_batch_size,
+                policy_anchor_weight=opts.policy_anchor_weight,
+                policy_anchor_temperature=opts.policy_anchor_temperature,
+                policy_anchor_min_distance_tiles=opts.policy_anchor_min_distance_tiles,
+                label=opts.label or "correction_finetune",
+            )
+        )
+        return True
+    if opts.mode == "contact-head-finetune":
+        if not opts.checkpoint:
+            parser.error("contact-head-finetune requires --checkpoint")
+        if not opts.correction_dataset:
+            parser.error("contact-head-finetune requires --correction-dataset")
+        payload["runs"].append(
+            run_contact_head_finetune(
+                out_dir,
+                checkpoint_path=Path(opts.checkpoint),
+                correction_dataset_path=Path(opts.correction_dataset),
+                episodes=opts.episodes,
+                seed=opts.seed,
+                eval_games=opts.eval_games,
+                train_eval_games=opts.train_eval_games,
+                eval_every=opts.eval_every,
+                log_every=opts.log_every,
+                report_seconds=opts.report_seconds,
+                heartbeat_seconds=opts.heartbeat_seconds,
+                vec_envs=opts.vec_envs,
+                save_checkpoints=opts.save_checkpoints,
+                contact_action_weight=opts.contact_action_weight,
+                contact_action_batch_size=opts.contact_action_batch_size,
+                contact_action_distance_tiles=opts.contact_action_distance,
+                label=opts.label or "contact_head_finetune",
+            )
+        )
+        return True
+    if opts.mode == "contact-head-offline":
+        if not opts.checkpoint:
+            parser.error("contact-head-offline requires --checkpoint")
+        if not opts.correction_dataset:
+            parser.error("contact-head-offline requires --correction-dataset")
+        payload["runs"].append(
+            run_contact_head_offline(
+                out_dir,
+                checkpoint_path=Path(opts.checkpoint),
+                correction_dataset_path=Path(opts.correction_dataset),
+                seed=opts.seed,
+                eval_games=opts.eval_games,
+                log_every=opts.log_every,
+                report_seconds=opts.report_seconds,
+                contact_action_batch_size=opts.contact_action_batch_size,
+                contact_action_distance_tiles=opts.contact_action_distance,
+                contact_head_offline_steps=opts.contact_head_offline_steps,
+                contact_head_learning_rate=opts.contact_head_learning_rate,
+                contact_head_confidence=opts.contact_head_confidence,
+                contact_head_jump_confidence=opts.contact_head_jump_confidence,
+                contact_head_action_thresholds=parse_contact_head_action_thresholds(
+                    opts.contact_head_action_thresholds
+                ),
+                contact_head_balance_classes=opts.contact_head_balance_classes,
+                label=opts.label or "contact_head_offline",
+            )
+        )
+        return True
+    if opts.mode == "contact-head-calibrate":
+        if not opts.checkpoint:
+            parser.error("contact-head-calibrate requires --checkpoint")
+        correction_dataset_paths = parse_correction_dataset_paths(opts.correction_datasets)
+        if not correction_dataset_paths:
+            parser.error("contact-head-calibrate requires --correction-datasets")
+        payload["runs"].append(
+            run_contact_head_calibration(
+                out_dir,
+                checkpoint_path=Path(opts.checkpoint),
+                correction_dataset_paths=correction_dataset_paths,
+                seed=opts.seed,
+                log_every=opts.log_every,
+                report_seconds=opts.report_seconds,
+                contact_action_batch_size=opts.contact_action_batch_size,
+                contact_action_distance_tiles=opts.contact_action_distance,
+                contact_head_offline_steps=opts.contact_head_offline_steps,
+                contact_head_learning_rate=opts.contact_head_learning_rate,
+                contact_head_balance_classes=opts.contact_head_balance_classes,
+                calibration_frac=opts.contact_head_calibration_frac,
+                calibration_seed=opts.contact_head_calibration_seed,
+                min_calibration_accuracy=opts.contact_head_min_calibration_accuracy,
+                min_class_examples=opts.contact_head_min_class_examples,
+                label=opts.label or "contact_head_calibration",
             )
         )
         return True
@@ -291,6 +470,7 @@ def _run_baseline_diagnostic_mode(
 
 
 def _run_mixed_reset_mode(
+    parser: argparse.ArgumentParser,
     opts: argparse.Namespace,
     out_dir: Path,
     payload: dict[str, Any],
@@ -337,6 +517,38 @@ def _run_mixed_reset_mode(
                 save_checkpoints=opts.save_checkpoints,
                 selected_eval_games=opts.selected_eval_games,
                 first_crystal_goal=opts.interleave_first_crystal_goal,
+            )
+        )
+        return True
+    if opts.mode == "contact-interleaved":
+        if not opts.checkpoint:
+            parser.error("contact-interleaved requires --checkpoint")
+        payload["runs"].append(
+            run_contact_interleaved(
+                out_dir,
+                checkpoint_path=Path(opts.checkpoint),
+                episodes=opts.episodes,
+                seed=opts.seed,
+                eval_games=opts.eval_games,
+                cave_pool_size=opts.cave_pool_size,
+                trace_games=opts.trace_eval_games,
+                trace_max_steps=opts.trace_max_steps,
+                trace_sample_every=opts.trace_sample_every,
+                trace_tail_steps=opts.trace_tail_steps,
+                train_eval_games=opts.train_eval_games,
+                eval_every=opts.eval_every,
+                log_every=opts.log_every,
+                report_seconds=opts.report_seconds,
+                heartbeat_seconds=opts.heartbeat_seconds,
+                vec_envs=opts.vec_envs,
+                contact_ratio=opts.interleave_contact_ratio,
+                contact_envs_override=opts.interleave_contact_envs,
+                contact_pool_size=opts.contact_pool_size,
+                contact_eval_pool_size=opts.contact_eval_pool_size,
+                save_checkpoints=opts.save_checkpoints,
+                save_selected_checkpoint=opts.save_selected_checkpoint,
+                selected_eval_games=opts.selected_eval_games,
+                label=opts.label or "contact_interleaved",
             )
         )
         return True
@@ -610,47 +822,6 @@ def _run_route_mode(
     return False
 
 
-def _tutorial_demo_bc_kwargs(
-    opts: argparse.Namespace,
-    route_demo_variants: tuple[str, ...],
-) -> dict[str, Any]:
-    return {
-        "episodes": opts.episodes,
-        "seed": opts.seed,
-        "eval_games": opts.eval_games,
-        "trace_games": opts.trace_eval_games,
-        "trace_max_steps": opts.trace_max_steps,
-        "trace_sample_every": opts.trace_sample_every,
-        "trace_tail_steps": opts.trace_tail_steps,
-        "train_eval_games": opts.train_eval_games,
-        "eval_every": opts.eval_every,
-        "log_every": opts.log_every,
-        "report_seconds": opts.report_seconds,
-        "heartbeat_seconds": opts.heartbeat_seconds,
-        "vec_envs": opts.vec_envs,
-        "save_checkpoints": opts.save_checkpoints,
-        "save_selected_checkpoint": opts.save_selected_checkpoint,
-        "cave_pool_size": opts.cave_pool_size,
-        "selected_eval_games": opts.selected_eval_games,
-        "route_demo_levels": opts.route_demo_levels,
-        "route_demo_max_steps": opts.route_demo_max_steps,
-        "route_demo_variants": route_demo_variants,
-        "demo_selection_mode": opts.demo_selection_mode,
-        "bc_epochs": opts.bc_epochs,
-        "bc_batch_size": opts.bc_batch_size,
-        "demo_repeat": opts.demo_repeat,
-    }
-
-
-def _close_zone_route_demo_variants(
-    opts: argparse.Namespace,
-    route_demo_variants: tuple[str, ...],
-) -> tuple[str, ...]:
-    if opts.route_demo_variants == "direct":
-        return ("direct", "recovery")
-    return route_demo_variants
-
-
 def _run_tutorial_demo_mode(
     opts: argparse.Namespace,
     out_dir: Path,
@@ -661,7 +832,7 @@ def _run_tutorial_demo_mode(
         payload["runs"].append(
             run_tutorial_demo_bc(
                 out_dir,
-                **_tutorial_demo_bc_kwargs(opts, route_demo_variants),
+                **tutorial_demo_bc_kwargs(opts, route_demo_variants),
                 invalid_shoot_penalty=opts.invalid_shoot_penalty,
             )
         )
@@ -670,7 +841,7 @@ def _run_tutorial_demo_mode(
         payload["runs"].append(
             run_tutorial_demo_bc(
                 out_dir,
-                **_tutorial_demo_bc_kwargs(opts, route_demo_variants),
+                **tutorial_demo_bc_kwargs(opts, route_demo_variants),
                 demo_action_weight=opts.demo_action_weight,
                 demo_action_margin=opts.demo_action_margin,
                 demo_action_batch_size=opts.demo_action_batch_size,
@@ -684,7 +855,7 @@ def _run_tutorial_demo_mode(
         payload["runs"].append(
             run_tutorial_demo_bc(
                 out_dir,
-                **_tutorial_demo_bc_kwargs(opts, route_demo_variants),
+                **tutorial_demo_bc_kwargs(opts, route_demo_variants),
                 demo_action_weight=opts.demo_action_weight,
                 demo_action_margin=opts.demo_action_margin,
                 demo_action_batch_size=opts.demo_action_batch_size,
@@ -698,9 +869,9 @@ def _run_tutorial_demo_mode(
         payload["runs"].append(
             run_tutorial_demo_bc(
                 out_dir,
-                **_tutorial_demo_bc_kwargs(
+                **tutorial_demo_bc_kwargs(
                     opts,
-                    _close_zone_route_demo_variants(opts, route_demo_variants),
+                    close_zone_route_demo_variants(opts, route_demo_variants),
                 ),
                 demo_action_weight=opts.demo_action_weight or 0.03,
                 demo_action_margin=opts.demo_action_margin,
@@ -720,9 +891,9 @@ def _run_tutorial_demo_mode(
         payload["runs"].append(
             run_tutorial_demo_bc(
                 out_dir,
-                **_tutorial_demo_bc_kwargs(
+                **tutorial_demo_bc_kwargs(
                     opts,
-                    _close_zone_route_demo_variants(opts, route_demo_variants),
+                    close_zone_route_demo_variants(opts, route_demo_variants),
                 ),
                 demo_action_weight=opts.demo_action_weight or 0.03,
                 demo_action_margin=opts.demo_action_margin,
@@ -742,7 +913,7 @@ def _run_tutorial_demo_mode(
         payload["runs"].append(
             run_tutorial_demo_bc(
                 out_dir,
-                **_tutorial_demo_bc_kwargs(opts, route_demo_variants),
+                **tutorial_demo_bc_kwargs(opts, route_demo_variants),
                 demo_action_weight=opts.close_zone_demo_action_weight,
                 demo_action_margin=opts.demo_action_margin,
                 demo_action_batch_size=opts.demo_action_batch_size,
@@ -840,21 +1011,30 @@ def main() -> None:
     parser, opts, route_demo_variants = _parse_status_session_args()
     out_dir, payload = _new_status_session_payload(opts)
 
-    if _run_checkpoint_correction_mode(parser, opts, out_dir, payload):
-        pass
-    elif _run_baseline_diagnostic_mode(opts, out_dir, payload):
-        pass
-    elif _run_mixed_reset_mode(opts, out_dir, payload):
-        pass
-    elif _run_skill_transfer_mode(opts, out_dir, payload):
-        pass
-    elif _run_route_mode(opts, out_dir, payload, route_demo_variants):
-        pass
-    elif _run_tutorial_demo_mode(opts, out_dir, payload, route_demo_variants):
-        pass
-    elif _run_baseline_and_transfer_mode(opts, out_dir, payload):
-        pass
+    try:
+        if run_label_dataset_mode(parser, opts, out_dir, payload):
+            pass
+        elif _run_checkpoint_correction_mode(parser, opts, out_dir, payload):
+            pass
+        elif _run_baseline_diagnostic_mode(opts, out_dir, payload):
+            pass
+        elif _run_mixed_reset_mode(parser, opts, out_dir, payload):
+            pass
+        elif _run_skill_transfer_mode(opts, out_dir, payload):
+            pass
+        elif _run_route_mode(opts, out_dir, payload, route_demo_variants):
+            pass
+        elif _run_tutorial_demo_mode(opts, out_dir, payload, route_demo_variants):
+            pass
+        elif _run_baseline_and_transfer_mode(opts, out_dir, payload):
+            pass
+        else:
+            raise AssertionError(f"unhandled status-session mode: {opts.mode}")
+    except KeyboardInterrupt:
+        wrote_partial = append_interrupted_run_from_live_metrics(out_dir, payload)
+        if wrote_partial:
+            print("\nInterrupted; writing partial status-session artifacts.", file=sys.stderr)
+            _write_status_session_outputs(out_dir, opts, payload)
+        raise SystemExit(130) from None
     else:
-        raise AssertionError(f"unhandled status-session mode: {opts.mode}")
-
-    _write_status_session_outputs(out_dir, opts, payload)
+        _write_status_session_outputs(out_dir, opts, payload)

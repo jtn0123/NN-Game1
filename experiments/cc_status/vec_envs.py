@@ -58,6 +58,8 @@ class InterleavedCrystalCavesVec:
                 "scores": deque(maxlen=100),
                 "wins": deque(maxlen=100),
                 "progresses": deque(maxlen=100),
+                "crystal_fracs": deque(maxlen=100),
+                "exit_unlocked": deque(maxlen=100),
                 "end_reasons": deque(maxlen=100),
             }
             for source in sorted(set(self.sources))
@@ -129,6 +131,9 @@ class InterleavedCrystalCavesVec:
         history["scores"].append(float(info.get("score", 0) or 0))
         history["wins"].append(bool(info.get("won", False)))
         history["progresses"].append(float(info.get("progress", 0.0) or 0.0))
+        progress_parts = info.get("progress_parts") or {}
+        history["crystal_fracs"].append(float(progress_parts.get("crystal_frac", 0.0) or 0.0))
+        history["exit_unlocked"].append(bool(info.get("exit_unlocked", False)))
         reason = str(info.get("end_reason", "") or "")
         if not reason or reason == "running":
             reason = "won" if info.get("won", False) else "ended"
@@ -264,6 +269,8 @@ class ReverseStartCrystalCavesVec:
                 "scores": deque(maxlen=100),
                 "wins": deque(maxlen=100),
                 "progresses": deque(maxlen=100),
+                "crystal_fracs": deque(maxlen=100),
+                "exit_unlocked": deque(maxlen=100),
                 "end_reasons": deque(maxlen=100),
             }
             for source in sorted(set(self.sources))
@@ -362,6 +369,9 @@ class ReverseStartCrystalCavesVec:
         history["scores"].append(float(info.get("score", 0) or 0))
         history["wins"].append(bool(info.get("won", False)))
         history["progresses"].append(float(info.get("progress", 0.0) or 0.0))
+        progress_parts = info.get("progress_parts") or {}
+        history["crystal_fracs"].append(float(progress_parts.get("crystal_frac", 0.0) or 0.0))
+        history["exit_unlocked"].append(bool(info.get("exit_unlocked", False)))
         reason = str(info.get("end_reason", "") or "")
         if not reason or reason == "running":
             reason = "won" if info.get("won", False) else "ended"
@@ -422,6 +432,8 @@ class ArchiveStartCrystalCavesVec:
                 "scores": deque(maxlen=100),
                 "wins": deque(maxlen=100),
                 "progresses": deque(maxlen=100),
+                "crystal_fracs": deque(maxlen=100),
+                "exit_unlocked": deque(maxlen=100),
                 "end_reasons": deque(maxlen=100),
             }
             for source in sorted(set(self.sources))
@@ -559,6 +571,9 @@ class ArchiveStartCrystalCavesVec:
         history["scores"].append(float(info.get("score", 0) or 0))
         history["wins"].append(bool(info.get("won", False)))
         history["progresses"].append(float(info.get("progress", 0.0) or 0.0))
+        progress_parts = info.get("progress_parts") or {}
+        history["crystal_fracs"].append(float(progress_parts.get("crystal_frac", 0.0) or 0.0))
+        history["exit_unlocked"].append(bool(info.get("exit_unlocked", False)))
         reason = str(info.get("end_reason", "") or "")
         if not reason or reason == "running":
             reason = "won" if info.get("won", False) else "ended"
@@ -570,11 +585,18 @@ def source_stat_snapshot(history: dict[str, deque[Any]], total_episodes: int) ->
     scores = [float(value) for value in history["scores"]]
     wins = [bool(value) for value in history["wins"]]
     progresses = [float(value) for value in history["progresses"]]
+    crystal_fracs = [float(value) for value in history.get("crystal_fracs", ())]
+    exits = [bool(value) for value in history.get("exit_unlocked", ())]
     return {
         "episodes": total_episodes,
         "window_episodes": len(scores),
         "avg_score_100": mean_tail(scores),
         "win_rate_100": float(np.mean(wins)) if wins else 0.0,
+        "crystal_rate_100": (
+            float(np.mean([value > 0 for value in crystal_fracs])) if crystal_fracs else 0.0
+        ),
+        "avg_crystal_frac_100": mean_tail(crystal_fracs),
+        "exit_rate_100": float(np.mean(exits)) if exits else 0.0,
         "avg_progress_100": mean_tail(progresses),
         "best_progress_100": max_or_zero(progresses),
         "end_reason_counts_100": dict(Counter(str(value) for value in history["end_reasons"])),
@@ -650,7 +672,9 @@ def make_interleaved_drill_config(full_config: Config) -> Config:
         setattr(drill_config, key, value)
     drill_config.CRYSTAL_CAVES_PROCEDURAL = False
     drill_config.CRYSTAL_CAVES_DRILLS = True
-    cc_experiment_config(drill_config).CRYSTAL_CAVES_BRIDGES = False
+    exp_config = cc_experiment_config(drill_config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = False
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = False
     return drill_config
 
 
@@ -660,8 +684,22 @@ def make_interleaved_bridge_config(full_config: Config) -> Config:
         setattr(bridge_config, key, value)
     bridge_config.CRYSTAL_CAVES_PROCEDURAL = False
     bridge_config.CRYSTAL_CAVES_DRILLS = False
-    cc_experiment_config(bridge_config).CRYSTAL_CAVES_BRIDGES = True
+    exp_config = cc_experiment_config(bridge_config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = True
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = False
     return bridge_config
+
+
+def make_interleaved_contact_config(full_config: Config) -> Config:
+    contact_config = Config()
+    for key, value in vars(full_config).items():
+        setattr(contact_config, key, value)
+    contact_config.CRYSTAL_CAVES_PROCEDURAL = False
+    contact_config.CRYSTAL_CAVES_DRILLS = False
+    exp_config = cc_experiment_config(contact_config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = False
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = True
+    return contact_config
 
 
 def install_interleaved_vec_env(

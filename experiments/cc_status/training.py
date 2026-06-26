@@ -13,13 +13,14 @@ def prepare_trainer(
     episodes: int,
     vec_envs: int,
     transfer_weights: dict[str, dict[str, torch.Tensor]] | None = None,
+    strict_transfer: bool = True,
     save_checkpoints: bool = False,
 ) -> HeadlessTrainer:
     trainer = HeadlessTrainer(config, trainer_args(episodes=episodes, vec_envs=vec_envs))
     if not save_checkpoints:
         disable_checkpoint_writes(trainer)
     if transfer_weights is not None:
-        load_weight_snapshot(trainer.agent, transfer_weights)
+        load_weight_snapshot(trainer.agent, transfer_weights, strict=strict_transfer)
     if trainer.agent.epsilon < TUTORIAL_MIN_EPSILON:
         trainer.agent.epsilon = TUTORIAL_MIN_EPSILON
     return trainer
@@ -51,11 +52,16 @@ def capture_weight_snapshot(agent: Any) -> dict[str, dict[str, torch.Tensor]]:
     }
 
 
-def load_weight_snapshot(agent: Any, snapshot: dict[str, dict[str, torch.Tensor]]) -> None:
+def load_weight_snapshot(
+    agent: Any,
+    snapshot: dict[str, dict[str, torch.Tensor]],
+    *,
+    strict: bool = True,
+) -> None:
     policy = {key: value.to(agent.device) for key, value in snapshot["policy"].items()}
     target = {key: value.to(agent.device) for key, value in snapshot["target"].items()}
-    agent.policy_net.load_state_dict(policy)
-    agent.target_net.load_state_dict(target)
+    agent.policy_net.load_state_dict(policy, strict=strict)
+    agent.target_net.load_state_dict(target, strict=strict)
 
 
 class LiveRunMonitor:
@@ -138,7 +144,8 @@ def live_snapshot(
     avg_progress = mean_tail(trainer.progresses)
     best_progress = max_or_zero(trainer.progresses)
     win_rate = float(np.mean(trainer.wins[-100:])) if trainer.wins else 0.0
-    return {
+    source_stats = trainer_source_stats(trainer)
+    snapshot = {
         "label": label,
         "status": status,
         "episode": episode,
@@ -170,6 +177,14 @@ def live_snapshot(
         "avg_correction_action_accuracy_100": float(
             trainer.agent.get_average_correction_action_accuracy(100)
         ),
+        "avg_contact_action_loss_100": float(trainer.agent.get_average_contact_action_loss(100)),
+        "avg_contact_action_accuracy_100": float(
+            trainer.agent.get_average_contact_action_accuracy(100)
+        ),
+        "avg_policy_anchor_loss_100": float(trainer.agent.get_average_policy_anchor_loss(100)),
+        "avg_policy_anchor_accuracy_100": float(
+            trainer.agent.get_average_policy_anchor_accuracy(100)
+        ),
         "correction_action_enabled": bool(
             getattr(trainer.config, "CRYSTAL_CAVES_CORRECTION_ACTION_LOSS", False)
         ),
@@ -177,6 +192,28 @@ def live_snapshot(
             trainer.agent.get_correction_action_transition_count()
         ),
         "correction_action_samples_100": int(trainer.agent.get_correction_action_metric_count(100)),
+        "contact_action_head_enabled": bool(
+            getattr(trainer.config, "CRYSTAL_CAVES_CONTACT_ACTION_HEAD", False)
+        ),
+        "contact_action_weight": float(
+            getattr(trainer.config, "CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT", 0.0)
+        ),
+        "contact_action_transitions": int(trainer.agent.get_contact_action_transition_count()),
+        "contact_action_samples_100": int(trainer.agent.get_contact_action_metric_count(100)),
+        "policy_anchor_enabled": bool(
+            getattr(trainer.config, "CRYSTAL_CAVES_POLICY_ANCHOR_LOSS", False)
+        ),
+        "policy_anchor_weight": float(
+            getattr(trainer.config, "CRYSTAL_CAVES_POLICY_ANCHOR_WEIGHT", 0.0)
+        ),
+        "policy_anchor_min_target_distance_norm": float(
+            getattr(
+                trainer.config,
+                "CRYSTAL_CAVES_POLICY_ANCHOR_MIN_TARGET_DISTANCE_NORM",
+                0.0,
+            )
+        ),
+        "policy_anchor_samples_100": int(trainer.agent.get_policy_anchor_metric_count(100)),
         "avg_q_100": mean_tail(trainer.q_values),
         "avg_score_100": mean_tail(scores),
         "last_score": scores[-1] if scores else 0.0,
@@ -192,10 +229,12 @@ def live_snapshot(
         ),
         "eval_count": len(eval_history),
         "latest_eval": latest_eval,
-        "source_stats": trainer_source_stats(trainer),
+        "source_stats": source_stats,
         "reverse_start_stats": trainer_reverse_start_stats(trainer),
         "archive_stats": trainer_archive_stats(trainer),
     }
+    snapshot.update(contact_interleave_metric_aliases(source_stats))
+    return snapshot
 
 
 def live_status_line(snapshot: dict[str, Any]) -> str:
@@ -236,6 +275,25 @@ def live_status_line(snapshot: dict[str, Any]) -> str:
             f" | corr {snapshot['avg_correction_action_loss_100']:.3f}/"
             f"{100 * snapshot.get('avg_correction_action_accuracy_100', 0):.0f}%"
             f" n={snapshot.get('correction_action_samples_100', 0)}"
+        )
+    if (
+        snapshot.get("contact_action_head_enabled", False)
+        or snapshot.get("contact_action_transitions", 0) > 0
+        or snapshot.get("contact_action_samples_100", 0) > 0
+    ):
+        demo_bits += (
+            f" | head {snapshot['avg_contact_action_loss_100']:.3f}/"
+            f"{100 * snapshot.get('avg_contact_action_accuracy_100', 0):.0f}%"
+            f" n={snapshot.get('contact_action_samples_100', 0)}"
+        )
+    if (
+        snapshot.get("policy_anchor_enabled", False)
+        or snapshot.get("policy_anchor_samples_100", 0) > 0
+    ):
+        demo_bits += (
+            f" | anchor {snapshot['avg_policy_anchor_loss_100']:.3f}/"
+            f"{100 * snapshot.get('avg_policy_anchor_accuracy_100', 0):.0f}%"
+            f" n={snapshot.get('policy_anchor_samples_100', 0)}"
         )
     return (
         f"[live {snapshot['label']}] ep {snapshot['episode']}/{snapshot['total_episodes']} "

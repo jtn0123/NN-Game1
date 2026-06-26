@@ -44,44 +44,17 @@ class CrystalCaves(
     CrystalCavesGeometryMixin,
     BaseGame,
 ):
-    """
-    Puzzle platform game tailored for DQN training.
-
-    Actions:
-        0 = IDLE
-        1 = LEFT
-        2 = RIGHT
-        3 = JUMP
-        4 = LEFT_JUMP
-        5 = RIGHT_JUMP
-        6 = SHOOT
-        7 = LEFT_SHOOT
-        8 = RIGHT_SHOOT
-        9 = INTERACT
-
-    State representation:
-        - 11x9 local tile window around the player (99 features)
-        - 20 normalized metadata features
-    """
+    """Puzzle platform game tailored for DQN training."""
 
     IDLE = 0
-
     LEFT = 1
-
     RIGHT = 2
-
     JUMP = 3
-
     LEFT_JUMP = 4
-
     RIGHT_JUMP = 5
-
     SHOOT = 6
-
     LEFT_SHOOT = 7
-
     RIGHT_SHOOT = 8
-
     INTERACT = 9
 
     ACTION_LABELS = [
@@ -98,17 +71,13 @@ class CrystalCaves(
     ]
 
     TILE_SIZE = 32
-
     HUD_HEIGHT = 38
-
     PLAYER_WIDTH = 22
-
     PLAYER_HEIGHT = 30
 
     # Local perception window — sized to roughly what a 1991 Crystal Caves player
     # saw on screen (~20x10 tiles), not the old tiny 11x9 sliver. (AI-1)
     WINDOW_COLS = 19
-
     WINDOW_ROWS = 11
 
     # Coarse global objective map: the level downsampled to GLOBAL_MAP_COLS x
@@ -116,19 +85,14 @@ class CrystalCaves(
     # in that region (crystal/switch/exit). Gives the agent a memory of where the
     # objectives are beyond its window — the fix for local-window blindness. (AI-1)
     GLOBAL_MAP_COLS = 11
-
     GLOBAL_MAP_ROWS = 6
-
-    METADATA_SIZE = 20
-
+    BASE_METADATA_SIZE = 20
+    METADATA_SIZE = BASE_METADATA_SIZE
+    HISTORY_FEATURES_PER_STEP = 7
     MAX_HEALTH = 3
-
     MAX_AMMO_FOR_STATE = 20
-
     MAX_STEPS = 3000
-
     MAX_STEPS_WITHOUT_PROGRESS = 720
-
     MAX_POWER_TIMER = 420
 
     # Completion-progress potential (0..1) for reward shaping + info["progress"].
@@ -183,67 +147,38 @@ class CrystalCaves(
     APPROACH_REWARD_CLIP_NEG = -0.03
 
     MOVE_SPEED = 4.2
-
     AIR_SPEED = 3.3
-
     JUMP_SPEED = 10.5
-
     GRAVITY = 0.52
-
     MAX_FALL_SPEED = 10.0
-
     FRICTION = 0.82
-
     BULLET_SPEED = 9.0
-
     SHOOT_COOLDOWN = 14
-
     INVULN_FRAMES = 70
 
     SHAKE_FRAMES = 16  # screen-shake duration on taking damage (render-only juice)
 
     EMPTY = "."
-
     SOLID = "#"
-
     CRYSTAL = "*"
-
     EXIT = "E"
-
     DOOR = "D"
-
     SWITCH = "s"
-
     DOOR2 = "d"  # second colour-keyed door
-
     SWITCH2 = "S"  # second colour-keyed lever
-
     AMMO = "A"
-
     TREASURE = "$"
-
     POWER_SHOT = "p"
-
     GRAVITY_POWER = "g"
-
     FREEZE_POWER = "z"
-
     AIR_TANK = "O"
-
     CRAWLER = "M"
-
     FLYER = "F"
-
     SPIKE = "^"
-
     ACID = "~"
-
     ELEVATOR = "="
-
     PLAYER = "P"
-
     CAVES: Tuple[CaveSpec, ...] = _CAVES
-
     CAVE_DRESSING: Dict[int, Tuple[DressingPiece, ...]] = _CAVE_DRESSING
 
     TILE_CODES: Dict[str, float] = {
@@ -297,6 +232,17 @@ class CrystalCaves(
             self.GLOBAL_MAP_COLS = 0
             self.GLOBAL_MAP_ROWS = 0
 
+        self._history_state_enabled = bool(
+            getattr(self.config, "CRYSTAL_CAVES_HISTORY_STATE", False)
+        )
+        self._history_steps = (
+            max(0, int(getattr(self.config, "CRYSTAL_CAVES_HISTORY_STEPS", 4) or 0))
+            if self._history_state_enabled
+            else 0
+        )
+        self._history_metadata_size = self._history_steps * self.HISTORY_FEATURES_PER_STEP
+        self.METADATA_SIZE = self.BASE_METADATA_SIZE + self._history_metadata_size
+
         # Publish the spatial layout so a convolutional network (USE_CNN_STATE) can
         # reshape the flat state into the perception window + global map + metadata.
         self.config.STATE_LAYOUT = {
@@ -333,6 +279,27 @@ class CrystalCaves(
             self.CAVES = BRIDGE_CAVES
             self.CAVE_DRESSING = {i: () for i in range(len(BRIDGE_CAVES))}
             self._randomize_levels = len(BRIDGE_CAVES) > 1
+        # Contact mode: tiny final-objective rooms used only for interleaved
+        # training lanes. This stays separate from the game-faithful final caves.
+        elif getattr(self.config, "CRYSTAL_CAVES_CONTACT_LEVELS", False):
+            from .crystal_caves_drills import CONTACT_CAVES, contact_pool_caves
+
+            contact_pool_size = int(getattr(self.config, "CRYSTAL_CAVES_CONTACT_POOL_SIZE", 0) or 0)
+            if contact_pool_size > 0:
+                contact_seed = int(
+                    getattr(
+                        self.config,
+                        "CRYSTAL_CAVES_CONTACT_POOL_SEED",
+                        getattr(self.config, "CRYSTAL_CAVES_SEED", 0),
+                    )
+                    or 0
+                )
+                contact_caves = contact_pool_caves(contact_pool_size, seed=contact_seed)
+            else:
+                contact_caves = CONTACT_CAVES
+            self.CAVES = contact_caves
+            self.CAVE_DRESSING = {i: () for i in range(len(contact_caves))}
+            self._randomize_levels = len(contact_caves) > 1
         # Procedural mode: replace the authored caves with freshly generated ones.
         # Authored dressing is cleared since generated caves have none.
         elif getattr(self.config, "CRYSTAL_CAVES_PROCEDURAL", False):
@@ -431,6 +398,7 @@ class CrystalCaves(
         self._elevator_solid: List[pygame.Rect] = []  # platform collision rects
         self.bullets: List[Bullet] = []
         self.visual_events: List[VisualEvent] = []
+        self._action_history: Deque[Tuple[int, float]] = deque(maxlen=max(1, self._history_steps))
 
         self._state_array: np.ndarray = np.zeros(self.state_size, dtype=np.float32)
         self._font: Optional[pygame.font.Font]
@@ -564,6 +532,7 @@ class CrystalCaves(
         self._invalid_interact_total = 0.0
         self._invalid_shoot_count = 0
         self._invalid_shoot_total = 0.0
+        self._reset_history_state()
 
         return self.get_state()
 
@@ -641,6 +610,7 @@ class CrystalCaves(
             self._end_reason = "stalled"
             reward -= 6.0
 
+        self._record_history_step(action, previous_target, previous_distance)
         return self.get_state(), float(reward), self.game_over, self._info()
 
     def _progress_potential(self) -> Tuple[float, Dict[str, float]]:
@@ -709,8 +679,53 @@ class CrystalCaves(
             target_kind,
             min(1.0, self.steps_since_progress / self.MAX_STEPS_WITHOUT_PROGRESS),
         ]
+        if self._history_state_enabled:
+            metadata.extend(self._history_metadata())
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)
         return self._state_array.copy()
+
+    def _reset_history_state(self) -> None:
+        self._action_history.clear()
+
+    def _record_history_step(
+        self,
+        action: int,
+        previous_target: Optional[Tuple[str, int, int]],
+        previous_distance: float,
+    ) -> None:
+        if not self._history_state_enabled or self._history_steps <= 0:
+            return
+        progress_delta = 0.5
+        current_target, current_distance = self._current_target()
+        if (
+            current_target == previous_target
+            and previous_target is not None
+            and np.isfinite(previous_distance)
+            and np.isfinite(current_distance)
+        ):
+            delta_tiles = (previous_distance - current_distance) / self.TILE_SIZE
+            progress_delta = self._normalize_signed(delta_tiles, 1.0)
+        self._action_history.append((int(action), progress_delta))
+
+    def _history_metadata(self) -> list[float]:
+        features: list[float] = []
+        missing = self._history_steps - len(self._action_history)
+        for _ in range(max(0, missing)):
+            features.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5])
+        for action, progress_delta in self._action_history:
+            features.extend(self._history_action_features(action, progress_delta))
+        return features
+
+    def _history_action_features(self, action: int, progress_delta: float) -> list[float]:
+        return [
+            1.0 if action == self.IDLE else 0.0,
+            1.0 if action in (self.LEFT, self.LEFT_JUMP, self.LEFT_SHOOT) else 0.0,
+            1.0 if action in (self.RIGHT, self.RIGHT_JUMP, self.RIGHT_SHOOT) else 0.0,
+            1.0 if action in (self.JUMP, self.LEFT_JUMP, self.RIGHT_JUMP) else 0.0,
+            1.0 if action in (self.SHOOT, self.LEFT_SHOOT, self.RIGHT_SHOOT) else 0.0,
+            1.0 if action == self.INTERACT else 0.0,
+            float(np.clip(progress_delta, 0.0, 1.0)),
+        ]
 
     def _fill_global_map(self, start: int) -> None:
         """Write a coarse GLOBAL_MAP_COLS x GLOBAL_MAP_ROWS map of remaining

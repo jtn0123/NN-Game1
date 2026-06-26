@@ -67,7 +67,9 @@ def full_tutorial_config(
     )
     config.CRYSTAL_CAVES_PROCEDURAL = True
     config.CRYSTAL_CAVES_DRILLS = False
-    cc_experiment_config(config).CRYSTAL_CAVES_BRIDGES = False
+    exp_config = cc_experiment_config(config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = False
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = False
     config.CRYSTAL_CAVES_DIFFICULTY = "tutorial"
     config.CRYSTAL_CAVES_FAMILIES = "platform_network"
     return config
@@ -103,6 +105,37 @@ def apply_cave_pool_override(config: Config, cave_pool_size: int | None) -> None
         if cave_pool_size <= 0:
             raise ValueError("cave_pool_size must be positive")
         config.CRYSTAL_CAVES_POOL_SIZE = cave_pool_size
+
+
+def apply_history_state_override(
+    config: Config,
+    *,
+    history_state: bool,
+    history_steps: int,
+) -> None:
+    if history_steps <= 0:
+        raise ValueError("history_steps must be positive")
+    exp_config = cc_experiment_config(config)
+    exp_config.CRYSTAL_CAVES_HISTORY_STATE = bool(history_state)
+    exp_config.CRYSTAL_CAVES_HISTORY_STEPS = int(history_steps)
+
+
+def apply_distributional_dqn_override(
+    config: Config,
+    *,
+    distributional_dqn: bool,
+    c51_atoms: int,
+    c51_v_min: float,
+    c51_v_max: float,
+) -> None:
+    if c51_atoms < 2:
+        raise ValueError("c51_atoms must be at least 2")
+    if c51_v_min >= c51_v_max:
+        raise ValueError("c51_v_min must be less than c51_v_max")
+    config.USE_DISTRIBUTIONAL_DQN = bool(distributional_dqn)
+    config.C51_NUM_ATOMS = int(c51_atoms)
+    config.C51_V_MIN = float(c51_v_min)
+    config.C51_V_MAX = float(c51_v_max)
 
 
 def apply_route_aux_override(
@@ -191,6 +224,51 @@ def apply_correction_action_override(
         exp_config.CRYSTAL_CAVES_CORRECTION_ACTION_BATCH_SIZE = correction_action_batch_size
 
 
+def apply_policy_anchor_override(
+    config: Config,
+    *,
+    policy_anchor_weight: float,
+    policy_anchor_temperature: float,
+    policy_anchor_min_distance_tiles: float = 0.0,
+) -> None:
+    if policy_anchor_weight < 0:
+        raise ValueError("policy_anchor_weight must be non-negative")
+    if policy_anchor_temperature <= 0:
+        raise ValueError("policy_anchor_temperature must be positive")
+    if policy_anchor_min_distance_tiles < 0:
+        raise ValueError("policy_anchor_min_distance_tiles must be non-negative")
+    if policy_anchor_weight > 0:
+        exp_config = cc_experiment_config(config)
+        exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_LOSS = True
+        exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_WEIGHT = policy_anchor_weight
+        exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_TEMPERATURE = policy_anchor_temperature
+        exp_config.CRYSTAL_CAVES_POLICY_ANCHOR_MIN_TARGET_DISTANCE_NORM = float(
+            policy_anchor_min_distance_tiles / TUTORIAL_LEVEL_DIAGONAL_TILES
+        )
+
+
+def apply_contact_action_head_override(
+    config: Config,
+    *,
+    contact_action_weight: float,
+    contact_action_batch_size: int,
+    contact_action_distance_tiles: float,
+) -> None:
+    if contact_action_weight < 0:
+        raise ValueError("contact_action_weight must be non-negative")
+    if contact_action_batch_size <= 0:
+        raise ValueError("contact_action_batch_size must be positive")
+    if contact_action_distance_tiles <= 0:
+        raise ValueError("contact_action_distance_tiles must be positive")
+    exp_config = cc_experiment_config(config)
+    exp_config.CRYSTAL_CAVES_CONTACT_ACTION_HEAD = True
+    exp_config.CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT = float(contact_action_weight)
+    exp_config.CRYSTAL_CAVES_CONTACT_ACTION_BATCH_SIZE = int(contact_action_batch_size)
+    exp_config.CRYSTAL_CAVES_CONTACT_ACTION_DISTANCE_NORM = float(
+        contact_action_distance_tiles / TUTORIAL_LEVEL_DIAGONAL_TILES
+    )
+
+
 def parse_route_demo_variants(raw: str) -> tuple[str, ...]:
     variants = tuple(part.strip() for part in raw.split(",") if part.strip())
     if not variants:
@@ -240,7 +318,38 @@ def drill_config(
     )
     config.CRYSTAL_CAVES_PROCEDURAL = False
     config.CRYSTAL_CAVES_DRILLS = True
-    cc_experiment_config(config).CRYSTAL_CAVES_BRIDGES = False
+    exp_config = cc_experiment_config(config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = False
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = False
+    config.EVAL_EVERY = 0
+    config.MAX_EPISODES = episodes
+    return config
+
+
+def contact_config(
+    out_dir: Path,
+    *,
+    episodes: int,
+    seed: int,
+    eval_every: int,
+    train_eval_games: int,
+    log_every: int,
+    report_seconds: float,
+) -> Config:
+    config = base_config(
+        out_dir,
+        episodes=episodes,
+        seed=seed,
+        eval_every=eval_every,
+        train_eval_games=train_eval_games,
+        log_every=log_every,
+        report_seconds=report_seconds,
+    )
+    config.CRYSTAL_CAVES_PROCEDURAL = False
+    config.CRYSTAL_CAVES_DRILLS = False
+    exp_config = cc_experiment_config(config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = False
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = True
     config.EVAL_EVERY = 0
     config.MAX_EPISODES = episodes
     return config
@@ -267,7 +376,9 @@ def bridge_config(
     )
     config.CRYSTAL_CAVES_PROCEDURAL = False
     config.CRYSTAL_CAVES_DRILLS = False
-    cc_experiment_config(config).CRYSTAL_CAVES_BRIDGES = True
+    exp_config = cc_experiment_config(config)
+    exp_config.CRYSTAL_CAVES_BRIDGES = True
+    exp_config.CRYSTAL_CAVES_CONTACT_LEVELS = False
     config.EVAL_EVERY = 0
     config.MAX_EPISODES = episodes
     return config

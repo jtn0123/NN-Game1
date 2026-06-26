@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from experiments.cc_status_session import (  # noqa: E402
     classify_trace_failure,
+    final_contact_option_eval,
     first_crystal_config,
     first_objective_near_miss_eval,
     first_objective_near_miss_rollup,
@@ -84,6 +85,84 @@ def test_markdown_report_includes_bridge_eval_history(tmp_path):
     assert "| 50 | 20% | 40% | 20% | 0.330 | 1/5 |" in report
 
 
+def test_markdown_report_marks_interrupted_partial_run(tmp_path):
+    report_path = tmp_path / "report.md"
+    write_markdown_report(
+        report_path,
+        {
+            "run_id": "test",
+            "seed": 0,
+            "created_at": "now",
+            "runs": [
+                {
+                    "label": "contact_interleaved",
+                    "partial": True,
+                    "interrupted": True,
+                    "episodes": 150,
+                    "target_episodes": 300,
+                    "device": "unknown",
+                    "steps_per_second": 1.0,
+                    "avg_score_100": 0.0,
+                    "avg_progress_100": 0.0,
+                    "best_progress": 0.0,
+                }
+            ],
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "- Status: interrupted partial run at episode 150 / target 300" in report
+
+
+def test_markdown_report_includes_route_contact_scorecard(tmp_path):
+    report_path = tmp_path / "report.md"
+    write_markdown_report(
+        report_path,
+        {
+            "run_id": "test",
+            "seed": 0,
+            "created_at": "now",
+            "runs": [
+                {
+                    "label": "candidate",
+                    "episodes": 300,
+                    "device": "cpu",
+                    "steps_per_second": 1.0,
+                    "avg_score_100": 0.0,
+                    "avg_progress_100": 0.0,
+                    "best_progress": 0.0,
+                    "selected_checkpoint_eval": {
+                        "wins": 6,
+                        "num_games": 30,
+                        "win_rate": 0.2,
+                        "mean_crystal_frac": 0.2,
+                        "mean_depth_frac": 0.52,
+                        "end_reason_counts": {
+                            "stalled": 10,
+                            "timeout": 14,
+                            "first_crystal_goal": 6,
+                        },
+                    },
+                    "selected_checkpoint_near_miss_eval": {
+                        "rollup": {
+                            "near_miss_rate_3": 0.5,
+                            "mean_close_zone_jump_rate": 0.0,
+                            "stuck_after_close_rate": 0.1,
+                            "loop_after_close_rate": 0.3,
+                        }
+                    },
+                }
+            ],
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "- Route/contact scorecard:" in report
+    assert "source `selected_checkpoint_eval`" in report
+    assert "- Route/contact profile: first-objective 20.0%" in report
+    assert "contact regression" in report
+
+
 def test_markdown_report_includes_selected_bridge_policy(tmp_path):
     """Bridge-transfer reports should identify which bridge checkpoint was used."""
     report_path = tmp_path / "report.md"
@@ -130,6 +209,40 @@ def test_markdown_report_includes_selected_bridge_policy(tmp_path):
     report = report_path.read_text(encoding="utf-8")
     assert "- Selected bridge policy: ep 350 (60% win, 3/5 solved)" in report
     assert "- Transfer source: bridge ep 350 (60% bridge win)" in report
+
+
+def test_markdown_report_marks_selected_checkpoint_transfer_source(tmp_path):
+    """B6-style runs should not describe selected-weight checkpoints as bridge evals."""
+    report_path = tmp_path / "report.md"
+    write_markdown_report(
+        report_path,
+        {
+            "run_id": "test",
+            "seed": 0,
+            "created_at": "now",
+            "runs": [
+                {
+                    "label": "contact_interleaved",
+                    "episodes": 20,
+                    "device": "cpu",
+                    "steps_per_second": 1.0,
+                    "avg_score_100": 0.0,
+                    "avg_progress_100": 0.0,
+                    "best_progress": 0.0,
+                    "transfer_source": {
+                        "kind": "cc_status_selected_weights_v1",
+                        "source_label": "b3s",
+                        "source_episode": 300,
+                        "source_eval": {"wins": 10, "num_games": 30},
+                    },
+                },
+            ],
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "- Transfer source: selected checkpoint b3s ep 300 (10/30 source wins)" in report
+    assert "bridge win" not in report
 
 
 def test_markdown_report_marks_first_crystal_transfer_source(tmp_path):
@@ -310,6 +423,11 @@ def test_markdown_report_includes_correction_dataset(tmp_path):
                         "kept_examples": 12,
                         "games_completed": 3,
                         "disagreement_rate": 0.75,
+                        "label_mode": "advantage_gate",
+                        "gate_evaluations": 20,
+                        "gate_rejections": 8,
+                        "gate_rejection_rate": 0.4,
+                        "mean_gate_option_advantage": 123.45,
                         "trigger_counts": {"close_zone": 8, "stale": 4},
                         "label_action_counts": {"RIGHT_JUMP": 6, "LEFT": 6},
                         "states_path": "/tmp/corrections.npz",
@@ -326,6 +444,8 @@ def test_markdown_report_includes_correction_dataset(tmp_path):
         in report
     )
     assert "- Correction triggers: `{'close_zone': 8, 'stale': 4}`" in report
+    assert "- Correction label mode: advantage_gate" in report
+    assert "- Correction advantage gate: 8/20 rejected (40.0%)" in report
     assert "- Correction arrays: `/tmp/corrections.npz`" in report
 
 
@@ -350,12 +470,22 @@ def test_markdown_report_includes_correction_training(tmp_path):
                     "avg_correction_action_loss_100": 0.1234,
                     "avg_correction_action_accuracy_100": 0.75,
                     "correction_action_samples_100": 5,
+                    "avg_policy_anchor_loss_100": 0.0025,
+                    "avg_policy_anchor_accuracy_100": 0.875,
+                    "policy_anchor_samples_100": 5,
                     "correction_training": {
                         "dataset_path": "/tmp/correction_examples.npz",
                         "correction_action_transitions": 12,
                         "weight": 0.02,
                         "margin": 0.6,
                         "batch_size": 8,
+                    },
+                    "policy_anchor_training": {
+                        "enabled": True,
+                        "weight": 0.02,
+                        "temperature": 1.5,
+                        "min_target_distance_tiles": 3.0,
+                        "min_target_distance_norm": 0.063,
                     },
                 }
             ],
@@ -368,6 +498,68 @@ def test_markdown_report_includes_correction_training(tmp_path):
         "batch 8, dataset `/tmp/correction_examples.npz`" in report
     )
     assert "- Correction action metrics avg100: loss 0.1234, accuracy 75.0%, samples 5" in report
+    assert (
+        "- Policy anchor: enabled `True`, weight 0.020, temperature 1.50, "
+        "route mask >= 3.0 target tiles (norm 0.063)" in report
+    )
+    assert (
+        "- Policy anchor metrics avg100: loss 0.0025, teacher-action match 87.5%, samples 5"
+        in report
+    )
+
+
+def test_markdown_report_includes_contact_label_audit(tmp_path):
+    report_path = tmp_path / "report.md"
+    write_markdown_report(
+        report_path,
+        {
+            "run_id": "test",
+            "seed": 0,
+            "created_at": "now",
+            "runs": [
+                {
+                    "label": "label_audit",
+                    "episodes": 0,
+                    "device": "offline",
+                    "steps_per_second": 0.0,
+                    "avg_score_100": 0.0,
+                    "avg_progress_100": 0.0,
+                    "best_progress": 0.0,
+                    "contact_label_audit": {
+                        "source_dataset_count": 2,
+                        "label_action_counts": {"LEFT": 3, "LEFT_JUMP": 4},
+                        "state_conflicts": {
+                            "conflict_groups": 1,
+                            "conflict_examples": 2,
+                            "round_decimals": 3,
+                        },
+                        "semantic_ambiguity": {
+                            "ambiguous_groups": 2,
+                            "ambiguous_examples": 8,
+                        },
+                        "direction_alignment": {
+                            "mismatches": 1,
+                            "checked": 7,
+                            "mismatch_rate": 1 / 7,
+                            "mismatch_counts": {"LEFT": 1},
+                        },
+                        "adjacent_label_flips": {
+                            "flips": 3,
+                            "checked_pairs": 10,
+                            "flip_rate": 0.3,
+                            "flip_counts": {"LEFT->LEFT_JUMP": 3},
+                        },
+                    },
+                }
+            ],
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "- Contact label audit: 2 sources, actions `{'LEFT': 3, 'LEFT_JUMP': 4}`" in report
+    assert "- Contact label duplicate-state conflicts: 1 groups / 2 examples" in report
+    assert "- Contact label semantic ambiguity: 2 groups / 8 examples" in report
+    assert "- Contact label adjacent flips: 3/10 (30.0%)" in report
 
 
 def test_markdown_report_includes_demo_replay_source(tmp_path):
@@ -834,6 +1026,51 @@ def test_first_objective_near_miss_eval_writes_per_level_rows(tmp_path):
     assert '"close_zone_action_counts"' in row
 
 
+def test_final_contact_option_eval_writes_rows_and_option_counts(tmp_path):
+    """The eval-only option path should produce comparable final_eval evidence."""
+
+    class IdleAgent:
+        def __init__(self) -> None:
+            self.epsilon = 0.0
+
+        def select_action(self, state, training=False):  # noqa: ANN001, ANN202
+            return 0
+
+    cfg = first_crystal_config(
+        tmp_path / "run",
+        episodes=1,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+    cfg.CRYSTAL_CAVES_PROCEDURAL = False
+    cfg.EVAL_MAX_STEPS = 5
+
+    summary = final_contact_option_eval(
+        cfg,
+        IdleAgent(),
+        out_dir=tmp_path,
+        label="smoke",
+        episode=0,
+        games=1,
+        max_steps=5,
+        close_zone_distance_tiles=99.0,
+    )
+
+    assert summary["num_games"] == 1
+    assert "wins" in summary
+    option = summary["final_contact_option"]
+    assert option["option_triggers"] > 0
+    assert option["option_trigger_rate"] > 0
+    rows_path = tmp_path / "final_contact_option_eval" / "smoke" / "per_level_eval.jsonl"
+    summary_path = tmp_path / "final_contact_option_eval" / "smoke" / "summary.json"
+    assert rows_path.exists()
+    assert summary_path.exists()
+    assert '"final_contact_option"' in rows_path.read_text(encoding="utf-8")
+
+
 def test_classify_trace_failure_identifies_exit_unlock_timeout():
     """A policy that collects every crystal but times out at the exit gets its own mode."""
     modes = classify_trace_failure(
@@ -993,3 +1230,152 @@ def test_markdown_report_includes_near_miss_eval(tmp_path):
     assert (
         "- Selected checkpoint per-level near-miss rows: `near_miss/per_level_eval.jsonl`" in report
     )
+
+
+def test_markdown_report_includes_final_contact_option(tmp_path):
+    """Reports should show whether the close-zone option actually took over."""
+    report_path = tmp_path / "report.md"
+    write_markdown_report(
+        report_path,
+        {
+            "run_id": "test",
+            "seed": 0,
+            "created_at": "now",
+            "runs": [
+                {
+                    "label": "eval_final_contact_option",
+                    "episodes": 0,
+                    "device": "cpu",
+                    "steps_per_second": 0.0,
+                    "avg_score_100": 0.0,
+                    "avg_progress_100": 0.0,
+                    "best_progress": 0.0,
+                    "final_eval": {
+                        "wins": 1,
+                        "num_games": 2,
+                        "win_rate": 0.5,
+                        "mean_crystal_frac": 0.5,
+                        "mean_depth_frac": 0.5,
+                        "mean_score": 10.0,
+                        "end_reason_counts": {"first_crystal_goal": 1, "timeout": 1},
+                    },
+                    "final_contact_option": {
+                        "option_triggers": 12,
+                        "option_trigger_rate": 0.1,
+                        "policy_actions": 108,
+                        "option_target_completed": 2,
+                        "cancel_outside_close_zone": True,
+                        "option_cancelled_actions": 5,
+                        "option_cancelled_plans": 2,
+                        "policy_advantage_gate_enabled": True,
+                        "min_option_advantage": 250.0,
+                        "option_gate_evaluations": 20,
+                        "option_gate_rejections": 8,
+                        "option_gate_rejection_rate": 0.4,
+                        "mean_option_advantage": 123.45,
+                        "option_action_counts": {"RIGHT_JUMP": 8, "RIGHT": 4},
+                        "option_reason_counts": {"ok": 12},
+                        "rows_path": "option/per_level_eval.jsonl",
+                    },
+                }
+            ],
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "- Final-contact option: 12 triggers (10.0% of eval steps)" in report
+    assert "cancel outside close zone: True, cancelled 5 queued actions" in report
+    assert "- Final-contact advantage gate: 8/20 rejected (40.0%)" in report
+    assert "- Final-contact option rows: `option/per_level_eval.jsonl`" in report
+
+
+def test_markdown_report_includes_contact_action_head(tmp_path):
+    report_path = tmp_path / "report.md"
+    write_markdown_report(
+        report_path,
+        {
+            "run_id": "test",
+            "seed": 0,
+            "created_at": "now",
+            "runs": [
+                {
+                    "label": "contact_head_finetune",
+                    "episodes": 5,
+                    "device": "cpu",
+                    "steps_per_second": 10.0,
+                    "avg_score_100": 0.0,
+                    "avg_progress_100": 0.0,
+                    "best_progress": 0.0,
+                    "avg_contact_action_loss_100": 0.1234,
+                    "avg_contact_action_accuracy_100": 0.75,
+                    "contact_action_samples_100": 12,
+                    "final_eval": {
+                        "wins": 1,
+                        "num_games": 2,
+                        "win_rate": 0.5,
+                        "mean_crystal_frac": 0.5,
+                        "mean_depth_frac": 0.5,
+                        "mean_score": 10.0,
+                        "end_reason_counts": {"first_crystal_goal": 1, "timeout": 1},
+                    },
+                    "contact_action_head_training": {
+                        "mode": "offline_head_only",
+                        "contact_action_transitions": 162,
+                        "weight": 0.02,
+                        "batch_size": 32,
+                        "distance_tiles": 3.0,
+                        "learning_rate": 0.001,
+                        "offline_steps": 500,
+                        "confidence_threshold": 0.75,
+                        "jump_confidence_threshold": 0.85,
+                        "dataset_path": "correction_examples.npz",
+                        "dataset_stats": {
+                            "action_counts": {"JUMP": 100, "RIGHT": 62},
+                        },
+                        "offline_training": {
+                            "steps": 500,
+                            "learning_rate": 0.001,
+                            "balance_classes": True,
+                            "route_max_abs_delta": 0.0,
+                            "head_max_abs_delta": 0.12,
+                            "dataset_eval": {"accuracy": 0.8},
+                        },
+                    },
+                    "contact_action_head_eval": {
+                        "head_actions": 9,
+                        "policy_actions": 91,
+                        "unavailable_actions": 0,
+                        "confidence_rejected_actions": 7,
+                        "mean_head_confidence": 0.82,
+                        "head_action_counts": {"JUMP": 2, "RIGHT": 7},
+                    },
+                    "contact_action_head_calibration": {
+                        "train_examples": 300,
+                        "calibration_examples": 84,
+                        "decision": {"verdict": "pass", "reasons": []},
+                        "calibration_eval": {
+                            "accuracy": 0.82,
+                            "mean_confidence": 0.76,
+                            "per_class_accuracy": {"JUMP": 0.8, "RIGHT": 0.9},
+                            "per_class_mean_confidence": {"JUMP": 0.7, "RIGHT": 0.8},
+                        },
+                    },
+                }
+            ],
+        },
+    )
+
+    report = report_path.read_text(encoding="utf-8")
+    assert "- Contact action head: 162 states, offline/head-only" in report
+    assert "confidence >= 0.75" in report
+    assert "jump >= 0.85" in report
+    assert "active <= 3.0 target tiles" in report
+    assert "- Contact head metrics avg100: loss 0.1234, accuracy 75.0%, samples 12" in report
+    assert "- Contact head offline fit: steps 500, lr 0.0010" in report
+    assert "- Contact head dataset action counts: {'JUMP': 100, 'RIGHT': 62}" in report
+    assert "- Contact head eval selector: 9 head actions, 91 policy actions" in report
+    assert "7 confidence rejects" in report
+    assert "- Contact head eval action counts: {'JUMP': 2, 'RIGHT': 7}" in report
+    assert "- Contact head calibration: 300 train / 84 held-out labels" in report
+    assert "decision `pass` (none)" in report
+    assert "- Contact head calibration per-class accuracy: {'JUMP': 0.8, 'RIGHT': 0.9}" in report

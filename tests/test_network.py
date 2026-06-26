@@ -442,6 +442,13 @@ class TestSpatialDQN:
         out = net(torch.zeros(2, size))
         assert out.shape == (2, 10)
 
+    def test_handles_expanded_history_metadata(self):
+        layout = {"window": (11, 19), "gmap": (6, 11), "meta": 48}
+        size = 11 * 19 + 6 * 11 + 48
+        net = SpatialDQN(size, 10, Config(), layout)
+        out = net(torch.zeros(3, size))
+        assert out.shape == (3, 10)
+
     def test_route_auxiliary_head_predicts_direction_bins_when_enabled(self):
         layout = self._layout()
         size = 11 * 19 + 6 * 11 + 20
@@ -454,6 +461,30 @@ class TestSpatialDQN:
 
         assert out.shape == (4, 10)
         assert logits.shape == (4, 9)
+
+    def test_contact_action_head_predicts_actions_when_enabled(self):
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_CONTACT_ACTION_HEAD = True
+        net = SpatialDQN(size, 10, cfg, layout)
+
+        logits = net.contact_action_logits(torch.zeros(4, size))
+
+        assert logits.shape == (4, 10)
+
+    def test_contact_action_head_detaches_shared_features(self):
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_CONTACT_ACTION_HEAD = True
+        net = SpatialDQN(size, 10, cfg, layout)
+        loss = net.contact_action_logits(torch.zeros(4, size)).sum()
+
+        loss.backward()
+
+        assert net.contact_action_head.weight.grad is not None
+        assert net.fc.weight.grad is None
 
     def test_agent_uses_cnn_when_enabled(self):
         from src.ai.agent import Agent
@@ -516,6 +547,57 @@ class TestSpatialDQN:
         plain.eval()
         plain.reset_noise()  # no-op
         assert torch.allclose(plain(x), plain(x))
+
+
+class TestDistributionalDQN:
+    """C51-style heads should expose distributions while forward() returns Q-values."""
+
+    def _config(self):
+        cfg = Config()
+        cfg.USE_DISTRIBUTIONAL_DQN = True
+        cfg.C51_NUM_ATOMS = 7
+        cfg.C51_V_MIN = -3.0
+        cfg.C51_V_MAX = 9.0
+        cfg.USE_NOISY_NETWORKS = False
+        return cfg
+
+    def _assert_distributional_forward(self, net, x, action_size: int, num_atoms: int):
+        q_values = net(x)
+        logits = net.distributional_logits(x)
+        probs = net.distributional_probs(x)
+
+        assert q_values.shape == (x.shape[0], action_size)
+        assert logits.shape == (x.shape[0], action_size, num_atoms)
+        assert probs.shape == logits.shape
+        assert torch.allclose(probs.sum(dim=2), torch.ones(x.shape[0], action_size))
+        expected_q = (probs * net.support.view(1, 1, num_atoms)).sum(dim=2)
+        assert torch.allclose(q_values, expected_q, atol=1e-5)
+
+    def test_plain_dqn_distributional_head_returns_expected_q_values(self):
+        cfg = self._config()
+        net = DQN(state_size=12, action_size=4, config=cfg, hidden_layers=[16])
+        self._assert_distributional_forward(net, torch.zeros(3, 12), 4, cfg.C51_NUM_ATOMS)
+
+    def test_dueling_dqn_distributional_head_returns_expected_q_values(self):
+        cfg = self._config()
+        net = DuelingDQN(state_size=12, action_size=4, config=cfg, hidden_layers=[16, 8])
+        self._assert_distributional_forward(net, torch.zeros(3, 12), 4, cfg.C51_NUM_ATOMS)
+
+    def test_spatial_dqn_distributional_head_returns_expected_q_values(self):
+        cfg = self._config()
+        layout = {"window": (11, 19), "gmap": (6, 11), "meta": 20}
+        size = 11 * 19 + 6 * 11 + 20
+        net = SpatialDQN(size, 10, cfg, layout)
+        self._assert_distributional_forward(net, torch.zeros(2, size), 10, cfg.C51_NUM_ATOMS)
+
+    def test_distributional_support_is_checkpoint_compatible_buffer(self):
+        cfg = self._config()
+        layout = {"window": (11, 19), "gmap": (6, 11), "meta": 20}
+        size = 11 * 19 + 6 * 11 + 20
+        net = SpatialDQN(size, 10, cfg, layout)
+
+        assert hasattr(net, "support")
+        assert "support" not in net.state_dict()
 
 
 if __name__ == "__main__":
