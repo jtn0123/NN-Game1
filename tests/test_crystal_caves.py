@@ -1266,8 +1266,31 @@ class TestNGUBonus:
         # After a fresh episode the same state is novel again.
         assert game._ngu_bonus() == pytest.approx(0.1)
 
-    def test_negative_beta_rejected(self) -> None:
+    def test_step_reward_includes_ngu_bonus(self) -> None:
+        """The bonus must actually flow through the public step() reward, not just
+        _ngu_bonus(). Same level + action + RNG, so the only delta is the bonus."""
+
+        def first_step_reward(ngu_on: bool) -> float:
+            cfg = Config()
+            cfg.CRYSTAL_CAVES_NGU_BONUS = ngu_on
+            cfg.CRYSTAL_CAVES_NGU_BETA = 0.1
+            game = CrystalCaves(cfg, headless=True)
+            game._randomize_levels = False
+            game.level_index = 0
+            np.random.seed(0)
+            game.reset()
+            np.random.seed(0)  # match any per-step RNG across both runs
+            _, reward, _, _ = game.step(CrystalCaves.IDLE)
+            return reward
+
+        reward_off = first_step_reward(False)
+        reward_on = first_step_reward(True)
+        # First visit of the post-step (tile x progress) cell -> beta / sqrt(1).
+        assert reward_on == pytest.approx(reward_off + 0.1)
+
+    @pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf"), float("-inf")])
+    def test_invalid_beta_rejected(self, value: float) -> None:
         cfg = Config()
-        cfg.CRYSTAL_CAVES_NGU_BETA = -1.0
+        cfg.CRYSTAL_CAVES_NGU_BETA = value
         with pytest.raises(ValueError, match="CRYSTAL_CAVES_NGU_BETA"):
             cfg.__post_init__()
