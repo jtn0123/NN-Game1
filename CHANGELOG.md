@@ -1,6 +1,43 @@
 # CHANGELOG
 
 
+## v0.7.0 (2026-06-26)
+
+### Features
+
+- **crystal-caves**: Reverse-curriculum mid-solution starts (roadmap #4, v1)
+  ([`611e534`](https://github.com/jtn0123/NN-Game1/commit/611e5348cedd7e13e934e678b0f8a84e2bc53bb0))
+
+Adds an opt-in reverse curriculum: on a fraction `p` of TRAINING resets (never in eval), the episode
+  begins from a valid mid-solution state so the agent gets dense reps of finishing the collect ->
+  ... -> exit chain instead of only ever seeing it from scratch (the documented full-game wall).
+
+v1 (safe, no player relocation): pre-collect a random subset of crystals (those farthest from the
+  exit) and open every gate, leaving the player at the level spawn. This is solvability-preserving
+  by construction — a subset of the objectives with all doors open stays reachable from a spawn that
+  could already clear the full level — so it never creates an unwinnable start. exit_unlocked is set
+  consistent with the remaining crystals.
+
+- config: CRYSTAL_CAVES_REVERSE_CURRICULUM (bool, default off) + CRYSTAL_CAVES_REVERSE_CURRICULUM_P
+  (float in [0,1], validated in __post_init__). - CrystalCaves.set_reverse_curriculum_p() lets a
+  trainer anneal p toward 0 over training so the policy finishes on full-length episodes. - Applied
+  before the progress/closeness baselines so PBRS reflects the start; skipped entirely in eval mode
+  so held-out eval always measures the full task.
+
+Deferred to a follow-up (the oracle-verified part the reviewers flagged as the riskier infra):
+  relocating the player toward the remaining objectives to also shorten the navigation horizon.
+
+Off by default — an attributable A/B lever on the chain-progress surrogate.
+
+Tests: off-by-default/p=0 keep the full start; p=1 pre-collects a strict non-empty subset, opens all
+  gates, keeps state normalized; eval mode is unaffected; the p setter clamps to [0,1]. Full suite:
+  1097 passed, 115 skipped. ruff/black/mypy clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+
 ## v0.6.0 (2026-06-26)
 
 ### Bug Fixes

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nn-game1"
-version = "0.6.0"
+version = "0.7.0"
 description = "Deep Q-learning agents for classic arcade games with a live training dashboard."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -65,6 +65,8 @@ nn-game = "main:main"
 
 
 
+
+
 [tool.setuptools]
 py-modules = ["main", "config", "benchmark", "evaluate_checkpoints", "experiment_runner"]
 
@@ -96,7 +98,7 @@ version_toml = [
     "pyproject.toml:project.version",
     "pyproject.toml:tool.semantic_release.version",
 ]
-version = "0.6.0"
+version = "0.7.0"
 branch = "main"
 tag_format = "v{version}"
 upload_to_pypi = false
