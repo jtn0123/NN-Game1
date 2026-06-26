@@ -267,18 +267,28 @@ class TestCrystalCavesMovement:
         assert phi_late > phi_mid
         assert discounted_total == pytest.approx(0.0, abs=1e-6)
 
-    def test_target_closeness_increases_as_player_approaches(self, game: CrystalCaves) -> None:
-        game.switches.clear()
-        crystal = next(iter(game.crystals))
-        game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE * 5
-        game.player_y = crystal[1] * game.TILE_SIZE
-        far = game._target_closeness()
+    @staticmethod
+    def _place_at_tile(game: CrystalCaves, tile: tuple[int, int]) -> None:
+        """Center the player on a tile so ``_player_tile()`` returns it exactly."""
+        col, row = tile
+        game.player_x = col * game.TILE_SIZE + game.TILE_SIZE / 2 - game.PLAYER_WIDTH / 2
+        game.player_y = row * game.TILE_SIZE + game.TILE_SIZE / 2 - game.PLAYER_HEIGHT / 2
 
-        game.player_x = crystal[0] * game.TILE_SIZE - game.TILE_SIZE * 1
+    def test_target_closeness_increases_as_player_approaches(self, game: CrystalCaves) -> None:
+        # Geodesic closeness is a route distance over the BFS field, so derive the
+        # near/far tiles from the field itself to guarantee they are connected.
+        field = game._geodesic_distance_field()
+        assert field
+        near_tile = min(field, key=lambda t: field[t])  # an objective tile (dist 0)
+        far_tile = max(field, key=lambda t: field[t])
+        assert field[far_tile] > field[near_tile]
+
+        self._place_at_tile(game, far_tile)
+        far = game._target_closeness()
+        self._place_at_tile(game, near_tile)
         near = game._target_closeness()
 
-        assert 0.0 <= far <= near <= 1.0
-        assert near > far
+        assert 0.0 <= far < near <= 1.0
 
     def test_geodesic_potential_telescopes_to_zero(self, config: Config) -> None:
         config.GAMMA = 0.9
@@ -291,22 +301,28 @@ class TestCrystalCavesMovement:
         phi_start = game._progress_phi
         assert phi_start == pytest.approx(0.0, abs=1e-6)
 
-        # Walk toward the current objective for a few steps, accumulating the PBRS
-        # shaping the same way step() does, then end the episode (terminal Phi=0).
-        target, _ = game._current_target()
-        assert target is not None
-        col, row = target[1], target[2]
+        # Approach the objective over connected field tiles (distinct distances,
+        # decreasing) without collecting it, accumulating PBRS shaping like step()
+        # does, then end the episode (terminal Phi=0). PBRS telescopes the discounted
+        # shaping to gamma^N*Phi(terminal) - Phi(start) = 0 for any such path.
+        field = game._geodesic_distance_field()
+        by_distance = sorted({d: t for t, d in field.items()}.items(), reverse=True)
+        path = [tile for _, tile in by_distance[:3]]
+        assert len(path) >= 2
+
         shaping_rewards = []
         prev_phi = phi_start
-        for offset in (5, 3, 1):
-            game.player_x = col * game.TILE_SIZE - game.TILE_SIZE * offset
-            game.player_y = row * game.TILE_SIZE
+        closeness_seen = []
+        for tile in path:
+            self._place_at_tile(game, tile)
+            closeness_seen.append(game._target_closeness())
             next_phi = game._progress_pbrs_potential()
             shaping_rewards.append(gamma * next_phi - prev_phi)
             prev_phi = next_phi
-        # Terminal step: Phi(terminal) = 0.
-        shaping_rewards.append(gamma * 0.0 - prev_phi)
+        shaping_rewards.append(gamma * 0.0 - prev_phi)  # terminal Phi = 0
 
+        # Sanity: approaching really did raise closeness (the shaping is non-trivial).
+        assert closeness_seen[-1] > closeness_seen[0]
         discounted_total = sum(
             (gamma**step) * reward for step, reward in enumerate(shaping_rewards)
         )
