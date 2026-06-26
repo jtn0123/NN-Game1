@@ -93,6 +93,9 @@ class CrystalCaves(
     MAX_AMMO_FOR_STATE = 20
     MAX_STEPS = 3000
     MAX_STEPS_WITHOUT_PROGRESS = 720
+    # Most candidate standing tiles to oracle-verify when relocating the player for the
+    # reverse curriculum (closest-to-objective first); bounds the per-reset BFS cost.
+    REVERSE_RELOCATE_MAX_CANDIDATES = 48
     MAX_POWER_TIMER = 420
 
     # Completion-progress potential (0..1); shaping uses PBRS with terminal Phi=0.
@@ -244,6 +247,9 @@ class CrystalCaves(
         self._reverse_curriculum_p = float(
             getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_P", 0.0)
         )
+        # Per-episode NGU episodic-novelty visit counts, keyed by
+        # (tile_x, tile_y, crystals_remaining, switches_used).
+        self._ngu_visits: Dict[Tuple[int, int, int, int], int] = {}
         self._eval_mode = False
         self._eval_caves: Tuple[CaveSpec, ...] = ()
         self._eval_cursor = 0
@@ -525,6 +531,7 @@ class CrystalCaves(
         self._obj_region_total = 0.0
         self._visited_novelty_cells = set()
         self._novelty_bonus_total = 0.0
+        self._ngu_visits = {}
         self._remember_current_novelty_cell()
         self._target_best_distances: Dict[Tuple[str, int, int], float] = {}
         self._anti_loop_tile = None
@@ -607,6 +614,7 @@ class CrystalCaves(
             reward -= 6.0
 
         reward += self._progress_shaping_reward(previous_progress_phi)
+        reward += self._ngu_bonus()
 
         self._record_history_step(action, previous_target, previous_distance)
         return self.get_state(), float(reward), self.game_over, self._info()
@@ -754,6 +762,73 @@ class CrystalCaves(
         self.used_switches = set(self.switches)
         self.open_colors = set(self.door_color.values())
         self.exit_unlocked = not self.crystals
+
+        # Follow-up lever: also relocate the player toward the remaining objectives to
+        # shorten the navigation horizon (oracle-verified so the start stays solvable).
+        if getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE", False):
+            self._relocate_player_for_curriculum()
+
+    def _oracle_reachable(self, start: Tuple[int, int]) -> Set[Tuple[int, int]]:
+        """Jump-aware tiles reachable from ``start`` under the engine's physics, via the
+        generator's solvability oracle. Builds a char grid from the live tiles with the
+        current door state so the check matches what the agent can actually traverse."""
+        from .crystal_caves_gen import cave_reachable
+
+        rows: List[str] = []
+        for r in range(self.level_rows):
+            chars: List[str] = []
+            for c in range(self.level_cols):
+                tile = self.grid[r][c]
+                if tile == self.SOLID:
+                    chars.append("#")
+                elif tile == self.ELEVATOR:
+                    chars.append("=")
+                elif (c, r) in self.doors and not self._door_open((c, r)):
+                    chars.append("#")
+                else:
+                    chars.append(".")
+            rows.append("".join(chars))
+        return cave_reachable(rows, start, doors_open=True)
+
+    def _relocate_player_for_curriculum(self) -> None:
+        """Move the player to the standing tile closest to a remaining objective from
+        which the oracle confirms every remaining crystal AND the exit are reachable.
+        Falls back to the spawn (no move) if no such tile is found, so the start is
+        always solvable."""
+        targets = set(self.crystals) | {self.exit_pos}
+
+        def nearest_objective_sq(tile: Tuple[int, int]) -> int:
+            return min((tile[0] - oc) ** 2 + (tile[1] - orow) ** 2 for oc, orow in targets)
+
+        candidates = [
+            (c, r)
+            for r in range(self.level_rows)
+            for c in range(self.level_cols)
+            if not self._solid_at(c, r) and self._solid_at(c, r + 1)  # a standing tile
+        ]
+        candidates.sort(key=nearest_objective_sq)
+
+        for col, row in candidates[: self.REVERSE_RELOCATE_MAX_CANDIDATES]:
+            if targets <= self._oracle_reachable((col, row)):
+                self.player_x = col * self.TILE_SIZE + 5
+                self.player_y = row * self.TILE_SIZE + 1
+                return
+
+    def _ngu_bonus(self) -> float:
+        """NGU-style episodic novelty: a small reward for reaching a
+        (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen this
+        episode, decaying as beta/sqrt(visits). Encodes position x task-progress so
+        re-reaching a tile after collecting a crystal counts as new."""
+        if not getattr(self.config, "CRYSTAL_CAVES_NGU_BONUS", False):
+            return 0.0
+        beta = float(getattr(self.config, "CRYSTAL_CAVES_NGU_BETA", 0.0))
+        if beta <= 0.0:
+            return 0.0
+        col, row = self._player_tile()
+        key = (col, row, len(self.crystals), len(self.used_switches))
+        count = self._ngu_visits.get(key, 0) + 1
+        self._ngu_visits[key] = count
+        return beta / (float(count) ** 0.5)
 
     def _progress_shaping_reward(self, previous_phi: float) -> float:
         raw_progress = self._progress_potential()[0]

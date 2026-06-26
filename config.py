@@ -149,6 +149,19 @@ class Config:
     # Fraction of training resets that use a mid-solution start (in [0, 1]). A trainer
     # may anneal this toward 0 via CrystalCaves.set_reverse_curriculum_p().
     CRYSTAL_CAVES_REVERSE_CURRICULUM_P: float = 0.5
+    # Reverse-curriculum follow-up: also RELOCATE the player toward the remaining
+    # objectives on a mid-solution start, shortening the navigation horizon. The
+    # destination is verified with the jump-aware reachability oracle so every
+    # relocated start can still reach all remaining objectives + the exit (falls back
+    # to the spawn if no verified tile is found). Requires REVERSE_CURRICULUM on.
+    # Separate flag so it can be A/B'd independently of the base reverse curriculum.
+    CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE: bool = False
+    # NGU-style episodic novelty bonus: a small per-step intrinsic reward for reaching
+    # a (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen THIS
+    # episode, decaying as 1/sqrt(visits). Attacks the "stops reaching new cells ->
+    # times out" failure. Off by default; an experiment lever (flows through n-step).
+    CRYSTAL_CAVES_NGU_BONUS: bool = False
+    CRYSTAL_CAVES_NGU_BETA: float = 0.02
 
     # =========================================================================
     # SCREEN SETTINGS
@@ -770,6 +783,10 @@ class Config:
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_CURRICULUM_P <= 1.0,
             "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
+        )
+        self._require(
+            math.isfinite(self.CRYSTAL_CAVES_NGU_BETA) and self.CRYSTAL_CAVES_NGU_BETA >= 0,
+            "CRYSTAL_CAVES_NGU_BETA must be finite and non-negative",
         )
         self._require(self.SCREEN_WIDTH > 0, "Screen width must be positive")
         self._require(self.SCREEN_HEIGHT > 0, "Screen height must be positive")

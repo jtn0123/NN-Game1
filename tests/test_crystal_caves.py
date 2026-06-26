@@ -1167,3 +1167,107 @@ class TestReverseCurriculum:
         assert game._reverse_curriculum_p == 1.0
         game.set_reverse_curriculum_p(-1.0)
         assert game._reverse_curriculum_p == 0.0
+
+
+class TestReverseCurriculumRelocation:
+    """Oracle-verified player relocation toward the remaining objectives (#4 follow-up)."""
+
+    def _vanilla_spawn_tile(self) -> tuple[int, int]:
+        game = CrystalCaves(Config(), headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+        return game._player_tile()
+
+    def test_relocation_off_keeps_spawn(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE = False
+        game = CrystalCaves(config, headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+        assert game._player_tile() == self._vanilla_spawn_tile()
+
+    def test_relocation_keeps_objectives_oracle_reachable(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE = True
+        game = CrystalCaves(config, headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+
+        # Safety invariant: from the relocated start, every remaining crystal AND the
+        # exit are still reachable under the jump-aware oracle (start stays solvable).
+        targets = set(game.crystals) | {game.exit_pos}
+        assert targets <= game._oracle_reachable(game._player_tile())
+
+    def test_relocation_does_not_move_farther_from_objectives(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE = True
+        game = CrystalCaves(config, headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+
+        targets = set(game.crystals) | {game.exit_pos}
+
+        def nearest_sq(tile: tuple[int, int]) -> int:
+            return min((tile[0] - oc) ** 2 + (tile[1] - orow) ** 2 for oc, orow in targets)
+
+        spawn = self._vanilla_spawn_tile()
+        # The relocated start is at least as close to an objective as the spawn.
+        assert nearest_sq(game._player_tile()) <= nearest_sq(spawn)
+
+
+class TestNGUBonus:
+    """NGU-style episodic novelty bonus (#5)."""
+
+    def test_off_returns_zero(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_NGU_BONUS is False
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert game._ngu_bonus() == 0.0
+
+    def test_decays_with_revisits(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_NGU_BONUS = True
+        config.CRYSTAL_CAVES_NGU_BETA = 0.1
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+
+        first = game._ngu_bonus()
+        second = game._ngu_bonus()
+        third = game._ngu_bonus()
+        assert first == pytest.approx(0.1)
+        assert second == pytest.approx(0.1 / (2**0.5))
+        assert third == pytest.approx(0.1 / (3**0.5))
+        assert first > second > third
+
+    def test_progress_change_is_novel_again(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_NGU_BONUS = True
+        config.CRYSTAL_CAVES_NGU_BETA = 0.1
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+
+        assert game._ngu_bonus() == pytest.approx(0.1)  # first visit at this state
+        # Simulate collecting a crystal: the (pos x progress) key changes -> novel.
+        game.crystals.pop()
+        assert game._ngu_bonus() == pytest.approx(0.1)
+
+    def test_reset_clears_visit_counts(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_NGU_BONUS = True
+        config.CRYSTAL_CAVES_NGU_BETA = 0.1
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        game._ngu_bonus()
+        game.reset()
+        # After a fresh episode the same state is novel again.
+        assert game._ngu_bonus() == pytest.approx(0.1)
+
+    def test_negative_beta_rejected(self) -> None:
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_NGU_BETA = -1.0
+        with pytest.raises(ValueError, match="CRYSTAL_CAVES_NGU_BETA"):
+            cfg.__post_init__()
