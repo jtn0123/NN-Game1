@@ -159,6 +159,7 @@ def read_eval_best_record(model_dir: str, game_name: str) -> Optional[Dict[str, 
         "episode": episode,
         "mean_score": mean_score,
         "checkpoint": str(raw.get("checkpoint", "") or ""),
+        "selection_score": _optional_float(raw.get("selection_score")),
     }
 
 
@@ -175,6 +176,7 @@ def write_eval_best_baseline(
     episode: int,
     mean_score: float,
     checkpoint: str,
+    selection_score: Optional[float] = None,
 ) -> None:
     """Persist the current held-out eval-best score next to its checkpoint."""
     path = eval_best_sidecar_path(model_dir, game_name)
@@ -183,9 +185,18 @@ def write_eval_best_baseline(
         "mean_score": float(mean_score),
         "checkpoint": checkpoint,
     }
+    if selection_score is not None:
+        payload["selection_score"] = float(selection_score)
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
         handle.write("\n")
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def should_emit_episode_metrics(

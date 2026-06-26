@@ -591,14 +591,14 @@ class Config:
     # rather than inject more randomness into an already-collapsing policy.
     EVAL_BOOST_WIN_REGRESSION_FRAC: float = 0.7
 
-    # Held-out "keep-best" selection score. The eval-best checkpoint and the plateau /
-    # early-stop signal key on a win-rate-dominated blend rather than raw mean score,
-    # because on full Crystal Caves the mean score can stay flat (or rise from longer
-    # timeout episodes) while the win rate collapses. win_rate dominates; crystal
-    # fraction is a strong secondary; mean score is only a faint tiebreaker. For games
-    # with no wins/crystals this reduces to mean-score ordering, preserving behavior.
+    # Held-out "keep-best" selection score. Crystal Caves uses continuous progress
+    # signals rather than raw win rate so eval-best / plateau can see improvements
+    # before wins appear. Other games keep the older win/score fallback.
     EVAL_SELECTION_W_WIN: float = 1.0
-    EVAL_SELECTION_W_CRYSTAL: float = 0.2
+    EVAL_SELECTION_W_CRYSTAL: float = 0.5
+    EVAL_SELECTION_W_DEPTH: float = 0.3
+    EVAL_SELECTION_W_TARGET_DISTANCE: float = 0.2
+    EVAL_SELECTION_W_EXIT_UNLOCKED: float = 1.0
     EVAL_SELECTION_W_SCORE: float = 0.0001
 
     # Render every N episodes during training (0 = never)

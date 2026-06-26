@@ -63,11 +63,13 @@ class EvalResults:
     mean_crystal_frac: float = 0.0
     mean_switch_rate: float = 0.0
     mean_depth_frac: float = 0.0
+    mean_target_distance_progress: float = 0.0
+    mean_exit_unlocked_rate: float = 0.0
     end_reason_counts: Dict[str, int] = field(default_factory=dict)
 
-    # Win-rate-dominated "keep-best" score (set by Evaluator.evaluate). Drives the
-    # eval-best checkpoint and the plateau / early-stop signal so a high-score but
-    # low-win policy does not get kept over a winning one.
+    # Continuous "keep-best" score (set by Evaluator.evaluate). Drives the eval-best
+    # checkpoint and the plateau / early-stop signal so a high-score but low-progress
+    # policy does not get kept over a better chain-progress policy.
     selection_score: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -113,7 +115,7 @@ class Evaluator:
         self.eval_history: List[EvalResults] = []
         self.best_eval_score: float = 0.0
         self.evals_since_improvement: int = 0
-        # Win-rate-aware keep-best / regression signals (see EVAL_SELECTION_* config).
+        # Keep-best / win-regression signals (see EVAL_SELECTION_* config).
         self.best_eval_selection: float = 0.0
         self.best_eval_win_rate: float = 0.0
 
@@ -158,6 +160,8 @@ class Evaluator:
         crystal_fracs = []
         switch_rates = []
         depth_fracs = []
+        target_distance_progress = []
+        exit_unlocked_rates = []
         end_reasons = []
         wins = 0
 
@@ -167,11 +171,18 @@ class Evaluator:
                 done = False
                 steps = 0
                 info = {"score": 0, "level": 1, "won": False}
+                target_distances = []
+                initial_target_distance = self._target_distance_tiles()
+                if initial_target_distance is not None:
+                    target_distances.append(initial_target_distance)
 
                 while not done and steps < max_steps:
                     action = self.agent.select_action(state, training=False)
                     state, _, done, info = self.game.step(action)
                     steps += 1
+                    target_distance = self._target_distance_tiles()
+                    if target_distance is not None:
+                        target_distances.append(target_distance)
 
                 score = info.get("score", 0)
                 level = info.get("level", 1)
@@ -181,6 +192,15 @@ class Evaluator:
                     crystal_fracs.append(float(parts.get("crystal_frac", 0.0) or 0.0))
                     switch_rates.append(float(parts.get("switch_done", 0.0) or 0.0))
                     depth_fracs.append(float(parts.get("depth_frac", 0.0) or 0.0))
+                exit_unlocked_rates.append(1.0 if info.get("exit_unlocked", False) else 0.0)
+                if target_distances:
+                    initial_distance = target_distances[0]
+                    min_distance = min(target_distances)
+                    if initial_distance > 1e-6:
+                        progress = 1.0 - min_distance / initial_distance
+                        target_distance_progress.append(float(np.clip(progress, 0.0, 1.0)))
+                    else:
+                        target_distance_progress.append(1.0 if min_distance <= 1e-6 else 0.0)
                 reason = str(info.get("end_reason", "") or "")
                 if not reason or reason == "running":
                     reason = "won" if won else ("timeout" if steps >= max_steps else "ended")
@@ -227,6 +247,12 @@ class Evaluator:
             mean_crystal_frac=float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
             mean_switch_rate=float(np.mean(switch_rates)) if switch_rates else 0.0,
             mean_depth_frac=float(np.mean(depth_fracs)) if depth_fracs else 0.0,
+            mean_target_distance_progress=(
+                float(np.mean(target_distance_progress)) if target_distance_progress else 0.0
+            ),
+            mean_exit_unlocked_rate=(
+                float(np.mean(exit_unlocked_rates)) if exit_unlocked_rates else 0.0
+            ),
             end_reason_counts=dict(Counter(end_reasons)),
         )
 
@@ -238,29 +264,54 @@ class Evaluator:
         return results
 
     def _selection_score(self, results: EvalResults) -> float:
-        """Win-rate-dominated keep-best score (see EVAL_SELECTION_* config).
+        """Continuous keep-best score (see EVAL_SELECTION_* config).
 
-        win_rate is weighted to dominate, crystal fraction is a strong secondary,
-        and mean_score is only a faint tiebreaker. For games that report neither
-        wins nor crystals this reduces to mean-score ordering, so non-Crystal-Caves
-        keep-best behavior is unchanged.
+        Crystal Caves uses dense chain-progress signals so keep-best / plateau can
+        see progress before wins appear. Non-Crystal-Caves evaluations keep the
+        older win/score behavior.
         """
-        w_win = getattr(self.config, "EVAL_SELECTION_W_WIN", 1.0)
-        w_crystal = getattr(self.config, "EVAL_SELECTION_W_CRYSTAL", 0.2)
-        w_score = getattr(self.config, "EVAL_SELECTION_W_SCORE", 0.0001)
-        return (
-            results.win_rate * w_win
-            + results.mean_crystal_frac * w_crystal
-            + results.mean_score * w_score
+        has_chain_progress = (
+            results.mean_crystal_frac > 0.0
+            or results.mean_depth_frac > 0.0
+            or results.mean_target_distance_progress > 0.0
+            or results.mean_exit_unlocked_rate > 0.0
         )
+        if has_chain_progress:
+            w_crystal = getattr(self.config, "EVAL_SELECTION_W_CRYSTAL", 0.5)
+            w_depth = getattr(self.config, "EVAL_SELECTION_W_DEPTH", 0.3)
+            w_target = getattr(self.config, "EVAL_SELECTION_W_TARGET_DISTANCE", 0.2)
+            w_exit = getattr(self.config, "EVAL_SELECTION_W_EXIT_UNLOCKED", 1.0)
+            return (
+                results.mean_crystal_frac * w_crystal
+                + results.mean_depth_frac * w_depth
+                + results.mean_target_distance_progress * w_target
+                + results.mean_exit_unlocked_rate * w_exit
+            )
+
+        w_win = getattr(self.config, "EVAL_SELECTION_W_WIN", 1.0)
+        w_score = getattr(self.config, "EVAL_SELECTION_W_SCORE", 0.0001)
+        return results.win_rate * w_win + results.mean_score * w_score
+
+    def _target_distance_tiles(self) -> float | None:
+        current_target = getattr(self.game, "_current_target", None)
+        if not callable(current_target):
+            return None
+        try:
+            _, distance = current_target()
+        except Exception:
+            return None
+        if not np.isfinite(distance):
+            return None
+        tile_size = float(getattr(self.game, "TILE_SIZE", 1.0) or 1.0)
+        return float(distance) / max(1.0, tile_size)
 
     def _update_history(self, results: EvalResults) -> None:
         """Update evaluation history and check for plateau.
 
-        Improvement is measured on selection_score (win-rate dominated), not raw
-        mean_score, so a high-score/low-win policy does not reset the plateau
-        counter or get treated as a new best. best_eval_score still tracks the
-        mean score of the current selection-best eval for display/back-compat.
+        Improvement is measured on selection_score, not raw mean_score, so a
+        high-score/low-progress policy does not reset the plateau counter or get
+        treated as a new best. best_eval_score still tracks the mean score of the
+        current selection-best eval for display/back-compat.
         """
         self.eval_history.append(results)
         self.best_eval_win_rate = max(self.best_eval_win_rate, results.win_rate)

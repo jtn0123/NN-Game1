@@ -95,53 +95,32 @@ class CrystalCaves(
     MAX_STEPS_WITHOUT_PROGRESS = 720
     MAX_POWER_TIMER = 420
 
-    # Completion-progress potential (0..1) for reward shaping + info["progress"].
-    # Monotonic components so the potential-based reward is always >= 0 (it never
-    # penalises exploration). Weights sum to 1.0.
+    # Completion-progress potential (0..1); shaping uses PBRS with terminal Phi=0.
     PROGRESS_W_CRYSTAL = 0.56  # fraction of crystals collected
     PROGRESS_W_SWITCH = 0.15  # every required switch thrown
     PROGRESS_W_DEPTH = 0.09  # deepest row reached (how far into the cave)
     PROGRESS_W_WIN = 0.20  # reached the exit
-    # Total dense shaping reward earned across a full clear. Raised from 6.0:
-    # policies plateaued at ~61% completion (2/3 crystals + switch) because the
-    # final stretch (last crystal + exit) was under-rewarded relative to its
-    # difficulty. A stronger potential-based pull up the progress gradient keeps a
-    # continuous signal toward the full clear, every step. Potential-based, so it
-    # does not change the optimal policy — only how fast it is found.
+    # Potential scale for completion-progress shaping.
     PROGRESS_REWARD_SCALE = 10.0
 
-    # AI-2: a small, one-time, capped bonus for first reaching a coarse global-map
-    # region that holds an uncollected objective. Turns the AI-1 objective map from
-    # passive knowledge into action — rewards actually navigating toward the
-    # crystals/switches it can "see" globally. Per-region and capped, so it can't
-    # be farmed and never out-weighs collecting the objective itself.
+    # Capped one-time bonuses for reaching objective/new coarse map regions.
     OBJECTIVE_REGION_BONUS = 0.4
     OBJECTIVE_REGION_CAP = 4.0
     NOVELTY_REGION_BONUS = 0.08
     NOVELTY_REGION_CAP = 3.0
 
-    # TS-01: discrete one-time bonus the step the gating switch is thrown
-    # (closed->open). The switch is the causal crux of a clear yet was rewarded
-    # less than a single crystal (+3 vs +5); reward it sharply on top of the
-    # continuous progress shaping.
+    # Discrete bonuses for causal objective milestones.
     SWITCH_THROW_BONUS = 8.0
     ALL_CRYSTALS_COLLECTED_BONUS = 16.0
     FIRST_CRYSTAL_GOAL_BONUS = 20.0
     INVALID_INTERACT_PENALTY = -0.05
     INVALID_SHOOT_PENALTY = -0.04
 
-    # Monotonic dense reward for getting closer than ever to the current
-    # objective. This gives the agent a clearer gradient toward the first
-    # tutorial crystal without rewarding back-and-forth dithering.
+    # Nonfarmable closest-approach bonus for the current objective.
     TARGET_BEST_APPROACH_SCALE = 0.18
     TARGET_BEST_APPROACH_CAP = 0.18
 
-    # Per-frame approach reward (delta-distance to the active objective). Must clear
-    # the per-step living penalty (-0.01) so closing distance is a clearly-positive
-    # gradient: at full MOVE_SPEED (4.2/32 tiles/step) this yields ~+0.0197/step, net
-    # ~+0.0097 vs the living penalty. (Raised from 0.08/0.06: the old gradient was
-    # ~+0.0005/step net — below noise — so the greedy policy idled until the stall
-    # timer fired instead of committing to the final approach.)
+    # Per-frame delta-distance reward, tuned to clear the -0.01 living penalty.
     APPROACH_REWARD_SCALE = 0.15
     APPROACH_REWARD_CLIP_POS = 0.12
     APPROACH_REWARD_CLIP_NEG = -0.03
@@ -369,6 +348,8 @@ class CrystalCaves(
         self._end_reason = "running"
         self._max_depth_row = 0
         self._progress = 0.0
+        self._progress_initial = 0.0
+        self._progress_phi = 0.0
         self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
         self._obj_region_total = 0.0  # AI-2
         self._visited_novelty_cells: Set[Tuple[int, int]] = set()
@@ -513,9 +494,11 @@ class CrystalCaves(
         self.bullets.clear()
         self.visual_events.clear()
 
-        # Completion-progress tracker (deepest row reached + last potential).
+        # Completion-progress tracker (deepest row reached + PBRS potential).
         self._max_depth_row = self._player_tile()[1]
         self._progress = self._progress_potential()[0]
+        self._progress_initial = self._progress
+        self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
         self._end_reason = "running"
         self._visited_obj_cells = set()
         self._obj_region_total = 0.0
@@ -545,6 +528,7 @@ class CrystalCaves(
         reward = -0.01
         self.steps += 1
         self.steps_since_progress += 1
+        previous_progress_phi = self._progress_phi
         self.invuln_timer = max(0, self.invuln_timer - 1)
         self.shake_timer = max(0, self.shake_timer - 1)
         self.shoot_cooldown = max(0, self.shoot_cooldown - 1)
@@ -580,16 +564,7 @@ class CrystalCaves(
         reward += self._target_progress_reward(previous_target, previous_distance)
         reward += self._anti_loop_penalty(previous_target, previous_distance)
 
-        # Completion-progress shaping (PT-01/PT-02): reward any increase in the
-        # monotonic progress potential — deeper into the cave, more crystals, the
-        # switch thrown, or the exit reached. Potential-based, so it stays >= 0
-        # and gives the agent dense credit on the long path to a full clear.
         self._max_depth_row = max(self._max_depth_row, self._player_tile()[1])
-        new_progress = self._progress_potential()[0]
-        if new_progress > self._progress:
-            reward += self.PROGRESS_REWARD_SCALE * (new_progress - self._progress)
-            self._progress = new_progress
-            self._mark_progress()
 
         # AI-2: reward reaching a new region that holds a known uncollected objective
         region_bonus = self._objective_region_reward()
@@ -609,6 +584,8 @@ class CrystalCaves(
             self.game_over = True
             self._end_reason = "stalled"
             reward -= 6.0
+
+        reward += self._progress_shaping_reward(previous_progress_phi)
 
         self._record_history_step(action, previous_target, previous_distance)
         return self.get_state(), float(reward), self.game_over, self._info()
@@ -635,6 +612,28 @@ class CrystalCaves(
             "depth_frac": round(depth_frac, 3),
             "won": won,
         }
+
+    def _progress_pbrs_potential(
+        self,
+        raw_progress: float | None = None,
+        *,
+        terminal: bool | None = None,
+    ) -> float:
+        is_terminal = self.game_over if terminal is None else terminal
+        if is_terminal:
+            return 0.0
+        progress = self._progress_potential()[0] if raw_progress is None else raw_progress
+        return self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
+
+    def _progress_shaping_reward(self, previous_phi: float) -> float:
+        raw_progress = self._progress_potential()[0]
+        if raw_progress > self._progress + 1e-9:
+            self._mark_progress()
+        self._progress = raw_progress
+        next_phi = self._progress_pbrs_potential(raw_progress=raw_progress)
+        self._progress_phi = next_phi
+        gamma = float(getattr(self.config, "GAMMA", 0.99))
+        return gamma * next_phi - previous_phi
 
     def get_state(self) -> np.ndarray:
         """Return a normalized local state vector for DQN training."""
@@ -728,12 +727,7 @@ class CrystalCaves(
         ]
 
     def _fill_global_map(self, start: int) -> None:
-        """Write a coarse GLOBAL_MAP_COLS x GLOBAL_MAP_ROWS map of remaining
-        objectives into the state at ``start``. Each cell holds the highest-
-        priority remaining objective in that region of the cave: an uncollected
-        crystal (0.4), an unthrown switch (0.6), or the unlocked exit (0.9).
-        Combined with the player's normalized position in the metadata, this lets
-        the agent steer toward objectives outside its local perception window."""
+        """Write a coarse global map of remaining objectives into the state."""
         gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
         if gc * gr == 0:  # legacy state: no global map
             return
@@ -758,10 +752,7 @@ class CrystalCaves(
         self._state_array[start : start + gc * gr] = np.array(cells, dtype=np.float32)
 
     def _objective_region_reward(self) -> float:
-        """AI-2: a small one-time bonus the first time the player reaches a coarse
-        global-map region that still holds an uncollected objective. Densifies the
-        navigate-toward-known-objectives signal; per-region + capped so it can't be
-        farmed and never rivals collecting the objective."""
+        """One-time bonus for entering a coarse region with a remaining objective."""
         gc, gr = self.GLOBAL_MAP_COLS, self.GLOBAL_MAP_ROWS
         if gc * gr == 0 or self._obj_region_total >= self.OBJECTIVE_REGION_CAP:
             return 0.0  # legacy state has no map -> no region bonus
@@ -800,13 +791,7 @@ class CrystalCaves(
         self._visited_novelty_cells.add(self._novelty_cell())
 
     def _novelty_region_reward(self) -> float:
-        """Opt-in one-time bonus for entering new coarse regions.
-
-        This is broader than the objective-region bonus: it rewards coverage of
-        the real full cave, not only cells that already contain a visible
-        objective. It is capped below a crystal pickup so it can encourage
-        exploration without replacing the objective.
-        """
+        """Opt-in one-time bonus for entering new coarse regions."""
         if not getattr(self.config, "CRYSTAL_CAVES_NOVELTY_BONUS", False):
             return 0.0
         if self.game_over or self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS == 0:

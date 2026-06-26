@@ -62,6 +62,7 @@ def test_eval_best_sidecar_round_trips_score(tmp_path):
         episode=600,
         mean_score=90.0,
         checkpoint="crystal_caves_eval_best.pth",
+        selection_score=0.735,
     )
 
     assert eval_best_sidecar_path(model_dir, "crystal_caves").endswith(
@@ -72,6 +73,7 @@ def test_eval_best_sidecar_round_trips_score(tmp_path):
         "episode": 600,
         "mean_score": 90.0,
         "checkpoint": "crystal_caves_eval_best.pth",
+        "selection_score": 0.735,
     }
 
 

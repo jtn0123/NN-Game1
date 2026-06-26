@@ -1,11 +1,14 @@
 """Tests for the Crystal Caves staged curriculum runner."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from src.ai.evaluator import EvalResults
 from src.app.crystal_curriculum import (
     DEFAULT_CRYSTAL_CURRICULUM,
     StageGateResult,
+    _snapshot_stage_eval_best,
     evaluate_stage_gate,
     planned_stage_episodes,
     stage_epsilon_decay,
@@ -123,3 +126,31 @@ def test_stage_epsilon_decay_returns_no_decay_for_degenerate_inputs():
     assert stage_epsilon_decay(0.35, 0, 0.1) == 1.0  # no budget
     assert stage_epsilon_decay(0.1, 300, 0.2) == 1.0  # end >= start
     assert stage_epsilon_decay(0.0, 300, 0.1) == 1.0  # non-positive start
+
+
+def test_snapshot_stage_eval_best_copies_held_out_best(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    eval_best = model_dir / "crystal_caves_eval_best.pth"
+    eval_best.write_bytes(b"held-out-best")
+    stage = DEFAULT_CRYSTAL_CURRICULUM[0]
+    config = SimpleNamespace(GAME_MODEL_DIR=str(model_dir), GAME_NAME="crystal_caves")
+
+    snapshot_path = _snapshot_stage_eval_best(config, stage, 1)
+
+    assert snapshot_path is not None
+    assert snapshot_path.endswith(f"stage01_{stage.stage_id}_eval_best.pth")
+    assert (model_dir / f"crystal_caves_stage01_{stage.stage_id}_eval_best.pth").read_bytes() == (
+        b"held-out-best"
+    )
+
+
+def test_snapshot_stage_eval_best_does_not_fall_back_to_score_best(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    (model_dir / "crystal_caves_best.pth").write_bytes(b"training-score-best")
+    config = SimpleNamespace(GAME_MODEL_DIR=str(model_dir), GAME_NAME="crystal_caves")
+
+    snapshot_path = _snapshot_stage_eval_best(config, DEFAULT_CRYSTAL_CURRICULUM[0], 1)
+
+    assert snapshot_path is None

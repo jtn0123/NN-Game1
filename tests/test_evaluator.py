@@ -42,6 +42,41 @@ class StaticEvalAgent:
         return 0
 
 
+class TargetDistanceEvalGame:
+    state_size = 2
+    action_size = 1
+    TILE_SIZE = 10
+
+    def reset(self):
+        self._step = 0
+        self._distances = [50.0, 30.0, 20.0]
+        return [0.0, 0.0]
+
+    def _current_target(self):
+        return ("crystal", 0, 0), self._distances[min(self._step, len(self._distances) - 1)]
+
+    def step(self, action):
+        self._step += 1
+        done = self._step >= 2
+        return (
+            [0.0, 0.0],
+            0.0,
+            done,
+            {
+                "score": 25,
+                "level": 1,
+                "won": False,
+                "exit_unlocked": True,
+                "end_reason": "timeout",
+                "progress_parts": {
+                    "crystal_frac": 0.25,
+                    "switch_done": 1.0,
+                    "depth_frac": 0.5,
+                },
+            },
+        )
+
+
 @pytest.fixture
 def config():
     """Create a test configuration."""
@@ -190,6 +225,23 @@ class TestEvaluate:
             assert results.mean_depth_frac == 0.75
             assert results.end_reason_counts == {"timeout": 3}
 
+    def test_evaluate_records_target_distance_progress_and_exit_unlock(self, config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            evaluator = Evaluator(
+                TargetDistanceEvalGame(),
+                StaticEvalAgent(),
+                config,
+                log_dir=tmpdir,
+            )
+
+            results = evaluator.evaluate(num_episodes=2, max_steps=3)
+
+            assert results.mean_target_distance_progress == pytest.approx(0.6)
+            assert results.mean_exit_unlocked_rate == 1.0
+            assert results.selection_score == pytest.approx(
+                0.5 * 0.25 + 0.3 * 0.5 + 0.2 * 0.6 + 1.0
+            )
+
 
 class TestPlateauDetection:
     """Test plateau detection."""
@@ -275,7 +327,15 @@ class TestGetSummary:
         assert "is_plateau" in summary
 
 
-def _eval_results(*, win_rate, mean_score, crystal_frac=0.0):
+def _eval_results(
+    *,
+    win_rate,
+    mean_score,
+    crystal_frac=0.0,
+    depth_frac=0.0,
+    target_distance_progress=0.0,
+    exit_unlocked_rate=0.0,
+):
     return EvalResults(
         timestamp="now",
         episode=1,
@@ -295,11 +355,14 @@ def _eval_results(*, win_rate, mean_score, crystal_frac=0.0):
         mean_steps=100.0,
         max_steps=100,
         mean_crystal_frac=crystal_frac,
+        mean_depth_frac=depth_frac,
+        mean_target_distance_progress=target_distance_progress,
+        mean_exit_unlocked_rate=exit_unlocked_rate,
     )
 
 
 class TestSelectionScoreKeepBest:
-    """Win-rate-aware keep-best: selection_score must dominate raw mean score."""
+    """Continuous keep-best should preserve progress before wins appear."""
 
     def _evaluator(self, config):
         return Evaluator(StaticEvalGame({}), StaticEvalAgent(), config, log_dir=tempfile.mkdtemp())
@@ -310,6 +373,24 @@ class TestSelectionScoreKeepBest:
         high_score = _eval_results(win_rate=0.04, mean_score=400, crystal_frac=0.2)
 
         assert evaluator._selection_score(winning) > evaluator._selection_score(high_score)
+
+    def test_selection_score_prefers_chain_progress_over_raw_win_rate(self, config):
+        evaluator = self._evaluator(config)
+        deep_progress = _eval_results(
+            win_rate=0.0,
+            mean_score=50,
+            crystal_frac=0.5,
+            depth_frac=0.8,
+            target_distance_progress=0.7,
+        )
+        shallow_wins = _eval_results(
+            win_rate=0.2,
+            mean_score=400,
+            crystal_frac=0.05,
+            depth_frac=0.05,
+        )
+
+        assert evaluator._selection_score(deep_progress) > evaluator._selection_score(shallow_wins)
 
     def test_update_history_keeps_winning_policy_over_higher_score(self, config):
         evaluator = self._evaluator(config)

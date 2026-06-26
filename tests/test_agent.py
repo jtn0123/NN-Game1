@@ -257,6 +257,34 @@ class TestLearning:
         assert torch.all(projected >= 0.0)
         assert torch.allclose(projected.sum(dim=1), torch.ones(3, device=agent.device))
 
+    def test_distributional_projection_accepts_per_sample_gamma(self, config):
+        """C51 projection should use each sampled N-step span's gamma."""
+        config.USE_DISTRIBUTIONAL_DQN = True
+        config.C51_NUM_ATOMS = 5
+        config.C51_V_MIN = -2.0
+        config.C51_V_MAX = 2.0
+        config.USE_PRIORITIZED_REPLAY = False
+        config.USE_N_STEP_RETURNS = False
+        config.USE_NOISY_NETWORKS = False
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+
+        support = torch.linspace(-2.0, 2.0, 5, device=agent.device)
+        next_dist = torch.full((3, 5), 0.2, device=agent.device)
+        rewards = torch.tensor([0.0, 1.0, -1.0], dtype=torch.float32, device=agent.device)
+        dones = torch.zeros(3, dtype=torch.float32, device=agent.device)
+        gamma = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float32, device=agent.device)
+
+        projected = agent._project_distribution(
+            next_dist=next_dist,
+            rewards=rewards,
+            dones=dones,
+            support=support,
+            gamma=gamma,
+        )
+
+        assert projected.shape == next_dist.shape
+        assert torch.allclose(projected.sum(dim=1), torch.ones(3, device=agent.device))
+
     def test_distributional_dqn_learning_with_enough_samples(self, config):
         """A C51-enabled agent should execute a finite optimization step."""
         config.USE_DISTRIBUTIONAL_DQN = True
@@ -617,6 +645,54 @@ class TestQValueComputation:
         assert (
             target_q[2] != 1.0 or target_q[3] != 1.0
         ), "Non-terminal states should have future Q-value component (unlikely both equal 1.0)"
+
+    def test_q_values_use_actual_n_step_bootstrap_span(self, config):
+        """N-step targets should discount bootstrap Q by each transition's true span."""
+
+        class FixedQ(torch.nn.Module):
+            def forward(self, x):
+                values = torch.zeros((x.shape[0], 2), dtype=x.dtype, device=x.device)
+                values[:, 1] = 10.0
+                return values
+
+        targets = []
+        for configured_n in (3, 6):
+            config.USE_N_STEP_RETURNS = True
+            config.N_STEP_SIZE = configured_n
+            config.USE_PRIORITIZED_REPLAY = False
+            config.USE_NOISY_NETWORKS = False
+            config.USE_DUELING = False
+            agent = Agent(state_size=2, action_size=2, config=config)
+            agent.policy_net = FixedQ()
+            agent.target_net = FixedQ()
+
+            states = torch.zeros((3, 2), device=agent.device)
+            actions = torch.zeros(3, dtype=torch.long, device=agent.device)
+            rewards = torch.tensor([0.0, 0.0, 7.0], device=agent.device)
+            next_states = torch.zeros((3, 2), device=agent.device)
+            dones = torch.tensor([0.0, 0.0, 1.0], device=agent.device)
+            n_step_lengths = torch.tensor([1, 2, 1], dtype=torch.int64, device=agent.device)
+
+            _, target_q = agent._compute_q_values(
+                states,
+                actions,
+                rewards,
+                next_states,
+                dones,
+                n_step_lengths=n_step_lengths,
+            )
+            targets.append(target_q)
+
+        expected = torch.tensor(
+            [
+                config.GAMMA * 10.0,
+                (config.GAMMA**2) * 10.0,
+                7.0,
+            ],
+            device=targets[0].device,
+        )
+        for target_q in targets:
+            assert torch.allclose(target_q, expected)
 
     def test_get_q_values_returns_all_actions(self, agent, config):
         """get_q_values should return Q-values for all actions."""
