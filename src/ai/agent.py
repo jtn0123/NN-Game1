@@ -32,6 +32,7 @@ from typing import Any, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import _LRScheduler
 
@@ -154,6 +155,18 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
 
         # Track if using NoisyNets for exploration (disables epsilon-greedy)
         self._use_noisy_nets = getattr(self.config, "USE_NOISY_NETWORKS", False)
+        self._use_distributional_dqn = bool(getattr(self.config, "USE_DISTRIBUTIONAL_DQN", False))
+        if self._use_distributional_dqn:
+            if not callable(getattr(self.policy_net, "distributional_logits", None)):
+                raise RuntimeError(
+                    "USE_DISTRIBUTIONAL_DQN requires networks with distributional_logits()"
+                )
+            print(
+                "✓ Distributional DQN enabled "
+                f"(atoms={getattr(self.config, 'C51_NUM_ATOMS', 51)}, "
+                f"v=[{getattr(self.config, 'C51_V_MIN', -20.0)}, "
+                f"{getattr(self.config, 'C51_V_MAX', 120.0)}])"
+            )
 
         # Replay buffer
         use_n_step = getattr(self.config, "USE_N_STEP_RETURNS", False)
@@ -239,6 +252,10 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         self.close_zone_demo_action_accuracies: deque[float] = deque(maxlen=10000)
         self.correction_action_losses: deque[float] = deque(maxlen=10000)
         self.correction_action_accuracies: deque[float] = deque(maxlen=10000)
+        self.contact_action_losses: deque[float] = deque(maxlen=10000)
+        self.contact_action_accuracies: deque[float] = deque(maxlen=10000)
+        self.policy_anchor_losses: deque[float] = deque(maxlen=10000)
+        self.policy_anchor_accuracies: deque[float] = deque(maxlen=10000)
         self._losses_lock = threading.Lock()  # Thread safety for concurrent reads/writes
         self._demo_action_states: Optional[torch.Tensor] = None
         self._demo_action_actions: Optional[torch.Tensor] = None
@@ -246,6 +263,8 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         self._close_zone_demo_action_actions: Optional[torch.Tensor] = None
         self._correction_action_states: Optional[torch.Tensor] = None
         self._correction_action_actions: Optional[torch.Tensor] = None
+        self._contact_action_states: Optional[torch.Tensor] = None
+        self._contact_action_actions: Optional[torch.Tensor] = None
         self._extra_auxiliary_loss_providers: list[AuxiliaryLossProvider] = []
 
         # Track whether last action was exploration (for accurate metrics)
@@ -635,30 +654,38 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
             self.policy_net.reset_noise()  # type: ignore[operator]
             self.target_net.reset_noise()  # type: ignore[operator]
 
-        # Use mixed precision autocast if enabled (significant speedup on MPS/CUDA)
-        # Only forward passes use float16; loss computed in float32 for numerical stability
-        if self._use_mixed_precision:
-            with torch.autocast(device_type=self._autocast_device, dtype=torch.float16):
+        if self._use_distributional_dqn:
+            element_loss, td_errors = self._compute_distributional_loss(
+                states, actions, rewards, next_states, dones
+            )
+            if self._use_per and weights is not None:
+                loss = (element_loss * weights).mean()
+            else:
+                loss = element_loss.mean()
+        else:
+            if self._use_mixed_precision:
+                # Use mixed precision autocast if enabled (significant speedup on MPS/CUDA).
+                # Only forward passes use float16; loss computed in float32 for numerical stability.
+                with torch.autocast(device_type=self._autocast_device, dtype=torch.float16):
+                    current_q, target_q = self._compute_q_values(
+                        states, actions, rewards, next_states, dones
+                    )
+                current_q = current_q.float()
+                target_q = target_q.float()
+            else:
                 current_q, target_q = self._compute_q_values(
                     states, actions, rewards, next_states, dones
                 )
-            current_q = current_q.float()
-            target_q = target_q.float()
-        else:
-            current_q, target_q = self._compute_q_values(
-                states, actions, rewards, next_states, dones
-            )
 
-        # Compute element-wise TD errors for PER priority updates
-        td_errors = (current_q - target_q).detach()
+            # Compute element-wise TD errors for PER priority updates.
+            td_errors = (current_q - target_q).detach()
 
-        # Compute loss with importance sampling weights if using PER
-        if self._use_per and weights is not None:
-            # Weighted element-wise loss
-            element_loss = nn.SmoothL1Loss(reduction="none")(current_q, target_q)
-            loss = (element_loss * weights).mean()
-        else:
-            loss = nn.SmoothL1Loss()(current_q, target_q)
+            # Compute loss with importance sampling weights if using PER.
+            if self._use_per and weights is not None:
+                element_loss = nn.SmoothL1Loss(reduction="none")(current_q, target_q)
+                loss = (element_loss * weights).mean()
+            else:
+                loss = nn.SmoothL1Loss()(current_q, target_q)
 
         auxiliary_contributions = self._auxiliary_loss_contributions(states)
         for contribution in auxiliary_contributions:
@@ -743,6 +770,117 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
 
         return current_q, target_q
 
+    def _effective_gamma(self) -> float:
+        use_n_step = getattr(self.config, "USE_N_STEP_RETURNS", False)
+        if use_n_step:
+            n_steps = getattr(self.config, "N_STEP_SIZE", 3)
+            return float(self.config.GAMMA**n_steps)
+        return float(self.config.GAMMA)
+
+    def _distributional_logits(self, net: Any, states: torch.Tensor) -> torch.Tensor:
+        logits_fn = getattr(net, "distributional_logits", None)
+        if not callable(logits_fn):
+            raise RuntimeError("distributional network must define distributional_logits()")
+        return logits_fn(states)
+
+    def _distributional_probs(self, net: Any, states: torch.Tensor) -> torch.Tensor:
+        probs_fn = getattr(net, "distributional_probs", None)
+        if not callable(probs_fn):
+            raise RuntimeError("distributional network must define distributional_probs()")
+        return probs_fn(states)
+
+    def _distributional_support(self) -> torch.Tensor:
+        support = getattr(self.policy_net, "support", None)
+        if not isinstance(support, torch.Tensor):
+            support = torch.linspace(
+                float(getattr(self.config, "C51_V_MIN", -20.0)),
+                float(getattr(self.config, "C51_V_MAX", 120.0)),
+                int(getattr(self.config, "C51_NUM_ATOMS", 51)),
+                device=self.device,
+            )
+        return support.to(self.device)
+
+    def _compute_distributional_loss(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        next_states: torch.Tensor,
+        dones: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute per-sample C51 cross-entropy loss and scalar TD errors."""
+        support = self._distributional_support()
+        num_atoms = support.numel()
+        batch_size = states.shape[0]
+
+        current_logits = self._distributional_logits(self.policy_net, states)
+        chosen_logits = current_logits[torch.arange(batch_size, device=self.device), actions]
+
+        with torch.no_grad():
+            best_actions = self.policy_net(next_states).argmax(dim=1)
+            next_probs = self._distributional_probs(self.target_net, next_states)
+            next_dist = next_probs[torch.arange(batch_size, device=self.device), best_actions]
+            target_dist = self._project_distribution(
+                next_dist=next_dist,
+                rewards=rewards,
+                dones=dones,
+                support=support,
+                gamma=self._effective_gamma(),
+            )
+
+        log_probs = F.log_softmax(chosen_logits, dim=1)
+        element_loss = -(target_dist * log_probs).sum(dim=1)
+
+        current_probs = F.softmax(chosen_logits, dim=1)
+        current_expected = (current_probs * support.view(1, num_atoms)).sum(dim=1)
+        target_expected = (target_dist * support.view(1, num_atoms)).sum(dim=1)
+        td_errors = (current_expected - target_expected).detach()
+        return element_loss, td_errors
+
+    def _project_distribution(
+        self,
+        *,
+        next_dist: torch.Tensor,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+        support: torch.Tensor,
+        gamma: float,
+    ) -> torch.Tensor:
+        """Project Bellman-updated atom masses back onto the fixed C51 support."""
+        batch_size, num_atoms = next_dist.shape
+        v_min = float(support[0].item())
+        v_max = float(support[-1].item())
+        delta_z = (v_max - v_min) / float(num_atoms - 1)
+
+        target_atoms = rewards.unsqueeze(1) + (1.0 - dones.unsqueeze(1)) * gamma * support.view(
+            1, num_atoms
+        )
+        target_atoms = target_atoms.clamp(v_min, v_max)
+        b = (target_atoms - v_min) / delta_z
+        lower = b.floor().long().clamp(0, num_atoms - 1)
+        upper = b.ceil().long().clamp(0, num_atoms - 1)
+
+        lower_weight = (upper.float() - b).clamp(min=0.0)
+        upper_weight = (b - lower.float()).clamp(min=0.0)
+        same_bin = lower == upper
+        lower_weight = torch.where(same_bin, torch.ones_like(lower_weight), lower_weight)
+        upper_weight = torch.where(same_bin, torch.zeros_like(upper_weight), upper_weight)
+
+        projected = torch.zeros_like(next_dist)
+        offset = (
+            torch.arange(batch_size, device=next_dist.device, dtype=torch.long)
+            .unsqueeze(1)
+            .expand(batch_size, num_atoms)
+            * num_atoms
+        )
+        projected.view(-1).index_add_(
+            0, (lower + offset).reshape(-1), (next_dist * lower_weight).reshape(-1)
+        )
+        projected.view(-1).index_add_(
+            0, (upper + offset).reshape(-1), (next_dist * upper_weight).reshape(-1)
+        )
+        return projected
+
     def update_target_network(self) -> None:
         """Hard update: Copy policy network weights to target network."""
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -809,8 +947,6 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
     def get_learning_rate(self) -> float:
         return float(self.optimizer.param_groups[0]["lr"])
 
-    @staticmethod
-    @staticmethod
     def get_network_activations(self) -> dict:
         """Get current network activations for visualization."""
         return self.policy_net.get_activations()
@@ -825,41 +961,3 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
             recent_losses = list(self.losses)[-count:]
             # Compute average inside lock for full thread safety
             return sum(recent_losses) / count if count > 0 else 0.0
-
-
-# Testing
-if __name__ == "__main__":
-    print("Testing DQN Agent...")
-
-    config = Config()
-    agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
-
-    print("\n📊 Agent Configuration:")
-    print(f"   State size: {agent.state_size}")
-    print(f"   Action size: {agent.action_size}")
-    print(f"   Device: {agent.device}")
-    print(f"   Epsilon: {agent.epsilon}")
-
-    # Test action selection
-    state = np.random.randn(config.STATE_SIZE).astype(np.float32)
-    action = agent.select_action(state)
-    print("\n🎮 Test action selection:")
-    print(f"   State shape: {state.shape}")
-    print(f"   Selected action: {action}")
-
-    # Test Q-value computation
-    q_values = agent.get_q_values(state)
-    print(f"   Q-values: {q_values}")
-
-    # Test experience storage
-    for _ in range(100):
-        s = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        a = np.random.randint(0, config.ACTION_SIZE)
-        r = np.random.randn()
-        s2 = np.random.randn(config.STATE_SIZE).astype(np.float32)
-        d = False
-        agent.remember(s, a, r, s2, d)
-
-    print(f"\n📦 Memory buffer size: {len(agent.memory)}")
-
-    print("\n✓ Agent tests passed!")

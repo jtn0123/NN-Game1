@@ -1,6 +1,7 @@
 # ruff: noqa: F401,F403,F405,I001
 from .common import *
 from .evals import *
+from .scorecard import route_contact_source_snapshot_score
 
 
 def bridge_eval_snapshot(
@@ -75,15 +76,8 @@ def source_eval_snapshot(
     }
 
 
-def source_snapshot_score(snapshot: dict[str, Any]) -> tuple[float, float, float, float, int]:
-    eval_payload = snapshot.get("source_eval") or {}
-    return (
-        float(eval_payload.get("win_rate", 0.0) or 0.0),
-        float(eval_payload.get("mean_crystal_frac", 0.0) or 0.0),
-        float(eval_payload.get("mean_depth_frac", 0.0) or 0.0),
-        float(eval_payload.get("mean_score", 0.0) or 0.0),
-        int(snapshot.get("episode", 0) or 0),
-    )
+def source_snapshot_score(snapshot: dict[str, Any]) -> tuple[float, float, float, int]:
+    return route_contact_source_snapshot_score(snapshot)
 
 
 def source_snapshot_line(snapshot: dict[str, Any]) -> str:

@@ -64,6 +64,48 @@ def test_status_session_artifact_validator_accepts_selected_run(tmp_path):
     assert result.to_dict()["errors"] == []
 
 
+def test_status_session_artifact_validator_accepts_interrupted_partial_run(tmp_path):
+    out_dir = tmp_path / "session"
+    run_dir = out_dir / "contact_interleaved"
+    run_dir.mkdir(parents=True)
+    _write_json(run_dir / "live_metrics.json", {"status": "interrupted"})
+    (run_dir / "live_metrics.jsonl").write_text(
+        '{"status":"interrupted"}\n',
+        encoding="utf-8",
+    )
+    (out_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    _write_json(
+        out_dir / "summary.json",
+        {
+            "run_id": "run",
+            "mode": "contact-interleaved",
+            "seed": 0,
+            "created_at": "2026-06-25T00:00:00",
+            "out_dir": str(out_dir),
+            "interrupted": True,
+            "runs": [
+                {
+                    "label": "contact_interleaved",
+                    "partial": True,
+                    "interrupted": True,
+                    "episodes": 150,
+                    "train_seconds": 12.5,
+                    "steps_per_second": 1000.0,
+                    "config": {},
+                    "eval_history": [],
+                    "source_stats": {},
+                }
+            ],
+        },
+    )
+
+    result = validate_status_session_artifacts(out_dir, require_live_metrics=True)
+
+    assert result.ok is True
+    assert result.to_dict()["errors"] == []
+    assert "interrupted partial run" in result.to_dict()["warnings"][0]["message"]
+
+
 def test_status_session_artifact_validator_rejects_missing_selected_evidence(tmp_path):
     out_dir = tmp_path / "session"
     run_dir = out_dir / "tutorial_demo_conservative"

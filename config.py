@@ -37,6 +37,10 @@ class NetworkSettings:
     activation: str
     use_dueling: bool
     use_noisy_networks: bool
+    use_distributional_dqn: bool
+    c51_num_atoms: int
+    c51_v_min: float
+    c51_v_max: float
 
 
 @dataclass(frozen=True)
@@ -293,6 +297,15 @@ class Config:
     # Use Dueling DQN architecture (separates value and advantage streams)
     # This helps the network learn which states are valuable independent of actions
     USE_DUELING: bool = True
+
+    # Distributional DQN / C51 probe. Disabled by default because it changes the
+    # output head and checkpoint shape. When enabled, networks still return
+    # expected Q-values from forward(), while the agent trains the categorical
+    # value distribution through explicit distributional methods.
+    USE_DISTRIBUTIONAL_DQN: bool = False
+    C51_NUM_ATOMS: int = 51
+    C51_V_MIN: float = -20.0
+    C51_V_MAX: float = 120.0
 
     # =========================================================================
     # TRAINING HYPERPARAMETERS
@@ -651,6 +664,10 @@ class Config:
             activation=self.ACTIVATION,
             use_dueling=self.USE_DUELING,
             use_noisy_networks=self.USE_NOISY_NETWORKS,
+            use_distributional_dqn=self.USE_DISTRIBUTIONAL_DQN,
+            c51_num_atoms=self.C51_NUM_ATOMS,
+            c51_v_min=self.C51_V_MIN,
+            c51_v_max=self.C51_V_MAX,
         )
 
     @property
@@ -696,6 +713,8 @@ class Config:
         self._require(self.EPSILON_START >= self.EPSILON_END, "Epsilon start must be >= end")
         self._require(self.LEARN_EVERY >= 1, "LEARN_EVERY must be >= 1")
         self._require(self.GRADIENT_STEPS >= 1, "GRADIENT_STEPS must be >= 1")
+        self._require(self.C51_NUM_ATOMS >= 2, "C51_NUM_ATOMS must be at least 2")
+        self._require(self.C51_V_MIN < self.C51_V_MAX, "C51_V_MIN must be less than C51_V_MAX")
         self._require(self.MAX_EPISODES >= 0, "MAX_EPISODES must be non-negative")
         self._require(self.MAX_STEPS_PER_EPISODE > 0, "MAX_STEPS_PER_EPISODE must be positive")
         self._require(self.SAVE_EVERY > 0, "SAVE_EVERY must be positive")

@@ -34,16 +34,26 @@ if len(sys.argv) > 1 and sys.argv[1] == "compare-artifact":
 
     raise SystemExit(promotion_main(sys.argv[2:]))
 
+if len(sys.argv) > 1 and sys.argv[1] == "metric-audit":
+    from experiments.cc_status.metric_audit import metric_audit_main  # noqa: E402
+
+    raise SystemExit(metric_audit_main(sys.argv[2:]))
+
 from experiments.cc_status.config_helpers import *  # noqa: F401,F403,E402
 from experiments.cc_status.artifacts import *  # noqa: F401,F403,E402
+from experiments.cc_status.contact_head import *  # noqa: F401,F403,E402
+from experiments.cc_status.contact_label_audit import *  # noqa: F401,F403,E402
+from experiments.cc_status.cli_label_modes import *  # noqa: F401,F403,E402
 from experiments.cc_status.corrections import *  # noqa: F401,F403,E402
 from experiments.cc_status.demo_collect import *  # noqa: F401,F403,E402
 from experiments.cc_status.demo_planners import *  # noqa: F401,F403,E402
 from experiments.cc_status.evals import *  # noqa: F401,F403,E402
 from experiments.cc_status.io_utils import *  # noqa: F401,F403,E402
+from experiments.cc_status.metric_audit import *  # noqa: F401,F403,E402
 from experiments.cc_status.promotion import *  # noqa: F401,F403,E402
 from experiments.cc_status.recipes import *  # noqa: F401,F403,E402
 from experiments.cc_status.reports import *  # noqa: F401,F403,E402
+from experiments.cc_status.scorecard import *  # noqa: F401,F403,E402
 from experiments.cc_status.runs_baseline import *  # noqa: F401,F403,E402
 from experiments.cc_status.runs_demo import *  # noqa: F401,F403,E402
 from experiments.cc_status.runs_mixed import *  # noqa: F401,F403,E402

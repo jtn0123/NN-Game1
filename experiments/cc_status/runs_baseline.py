@@ -434,3 +434,276 @@ def run_bridge_interleaved(
         final_eval_payload=eval_payload,
         extra=extra,
     )
+
+
+def run_contact_interleaved(
+    out_dir: Path,
+    *,
+    checkpoint_path: Path,
+    episodes: int,
+    seed: int,
+    eval_games: int,
+    cave_pool_size: int | None,
+    trace_games: int,
+    trace_max_steps: int,
+    trace_sample_every: int,
+    trace_tail_steps: int,
+    train_eval_games: int,
+    eval_every: int,
+    log_every: int,
+    report_seconds: float,
+    heartbeat_seconds: float,
+    vec_envs: int,
+    contact_ratio: float,
+    contact_envs_override: int | None,
+    contact_pool_size: int,
+    contact_eval_pool_size: int,
+    save_checkpoints: bool,
+    save_selected_checkpoint: bool,
+    selected_eval_games: int,
+    label: str = "contact_interleaved",
+) -> dict[str, Any]:
+    set_seed(seed)
+    run_dir = out_dir / label
+    source_snapshot = load_selected_weight_snapshot(checkpoint_path)
+    full_envs, skill_envs = interleave_counts(
+        vec_envs=vec_envs,
+        skill_ratio=contact_ratio,
+        skill_envs=contact_envs_override,
+    )
+    config = full_tutorial_config(
+        run_dir,
+        episodes=episodes,
+        seed=seed,
+        eval_every=eval_every,
+        train_eval_games=train_eval_games,
+        log_every=log_every,
+        report_seconds=report_seconds,
+    )
+    apply_cave_pool_override(config, cave_pool_size)
+    trainer = prepare_trainer(
+        config,
+        episodes=episodes,
+        vec_envs=vec_envs,
+        save_checkpoints=save_checkpoints,
+    )
+    saved_state_size = int(source_snapshot.get("state_size", trainer.agent.state_size) or 0)
+    saved_action_size = int(source_snapshot.get("action_size", trainer.agent.action_size) or 0)
+    if saved_state_size and saved_state_size != trainer.agent.state_size:
+        raise ValueError(
+            f"checkpoint state size {saved_state_size} does not match "
+            f"environment state size {trainer.agent.state_size}"
+        )
+    if saved_action_size and saved_action_size != trainer.agent.action_size:
+        raise ValueError(
+            f"checkpoint action size {saved_action_size} does not match "
+            f"environment action size {trainer.agent.action_size}"
+        )
+    load_weight_snapshot(trainer.agent, source_snapshot["weights"])
+
+    contact_config = make_interleaved_contact_config(config)
+    contact_exp_config = cc_experiment_config(contact_config)
+    contact_exp_config.CRYSTAL_CAVES_CONTACT_POOL_SIZE = int(contact_pool_size)
+    contact_exp_config.CRYSTAL_CAVES_CONTACT_POOL_SEED = int(seed)
+    install_interleaved_vec_env(
+        trainer,
+        run_dir=run_dir,
+        full_envs=full_envs,
+        skill_envs=skill_envs,
+        skill_source="contact",
+        skill_config=contact_config,
+    )
+    print(
+        f"🎯 Contact interleaved training: restored {checkpoint_path} | "
+        f"{full_envs} full tutorial envs + {skill_envs} contact envs "
+        f"({skill_envs / (full_envs + skill_envs):.0%} contact)"
+    )
+    train_seconds, source_eval_history, best_snapshot, best_weights = (
+        run_training_with_source_snapshots(
+            trainer,
+            config,
+            run_dir=run_dir,
+            label=label,
+            total_episodes=episodes,
+            heartbeat_seconds=heartbeat_seconds,
+            source_eval_every=eval_every,
+            eval_games=eval_games,
+        )
+    )
+    if source_eval_history:
+        eval_payload = source_eval_history[-1]["source_eval"]
+    else:
+        eval_payload = final_eval(
+            config,
+            trainer.agent,
+            out_dir=run_dir,
+            label=f"{label}_final",
+            episode=trainer.current_episode,
+            games=eval_games,
+        )
+    if best_snapshot is None:
+        best_snapshot = {
+            "episode": int(trainer.current_episode),
+            "source_eval": eval_payload,
+        }
+    if best_weights is None:
+        best_weights = capture_weight_snapshot(trainer.agent)
+
+    diagnostics = trace_heldout_failures(
+        config,
+        trainer.agent,
+        out_dir=run_dir,
+        label=f"{label}_heldout",
+        games=trace_games,
+        max_steps=trace_max_steps,
+        sample_every=trace_sample_every,
+        tail_steps=trace_tail_steps,
+    )
+    near_miss_eval = first_objective_near_miss_eval(
+        config,
+        trainer.agent,
+        out_dir=run_dir,
+        label=f"{label}_final",
+        episode=trainer.current_episode,
+        games=eval_games,
+        max_steps=config.EVAL_MAX_STEPS,
+    )
+
+    selected_eval_payload: dict[str, Any] | None = None
+    selected_diagnostics: dict[str, Any] | None = None
+    selected_near_miss_eval: dict[str, Any] | None = None
+    selected_contact_eval: list[dict[str, Any]] | None = None
+    selected_checkpoint_path: str | None = None
+    contact_eval = _contact_pool_eval(
+        config,
+        trainer.agent,
+        pool_size=contact_eval_pool_size,
+        seed=seed + 10000,
+        k=1,
+    )
+    if selected_eval_games > 0 and best_weights is not None:
+        final_weights = capture_weight_snapshot(trainer.agent)
+        selected_episode = int(best_snapshot.get("episode", trainer.current_episode) or 0)
+        load_weight_snapshot(trainer.agent, best_weights)
+        if save_checkpoints or save_selected_checkpoint:
+            selected_path = (
+                Path(config.GAME_MODEL_DIR) / f"{label}_selected_ep{selected_episode}.pth"
+            )
+            selected_checkpoint_path = save_selected_weight_snapshot(
+                selected_path,
+                label=label,
+                config_payload=config_snapshot(config),
+                state_size=trainer.agent.state_size,
+                action_size=trainer.agent.action_size,
+                selected_episode=selected_episode,
+                source_eval=best_snapshot.get("source_eval"),
+                weights=best_weights,
+            )
+        selected_eval_payload = final_eval(
+            config,
+            trainer.agent,
+            out_dir=run_dir,
+            label=f"{label}_selected_ep{selected_episode}",
+            episode=selected_episode,
+            games=selected_eval_games,
+        )
+        selected_diagnostics = trace_heldout_failures(
+            config,
+            trainer.agent,
+            out_dir=run_dir,
+            label=f"{label}_selected_ep{selected_episode}_heldout",
+            games=trace_games,
+            max_steps=trace_max_steps,
+            sample_every=trace_sample_every,
+            tail_steps=trace_tail_steps,
+        )
+        selected_near_miss_eval = first_objective_near_miss_eval(
+            config,
+            trainer.agent,
+            out_dir=run_dir,
+            label=f"{label}_selected_ep{selected_episode}",
+            episode=selected_episode,
+            games=selected_eval_games,
+            max_steps=config.EVAL_MAX_STEPS,
+        )
+        selected_contact_eval = _contact_pool_eval(
+            config,
+            trainer.agent,
+            pool_size=contact_eval_pool_size,
+            seed=seed + 10000,
+            k=1,
+        )
+        load_weight_snapshot(trainer.agent, final_weights)
+
+    extra: dict[str, Any] = {
+        "source_eval_history": source_eval_history,
+        "selected_source_episode": best_snapshot.get("episode"),
+        "selected_source_eval": best_snapshot.get("source_eval"),
+        "interleave": {
+            "full_envs": full_envs,
+            "skill_envs": skill_envs,
+            "skill_source": "contact",
+            "skill_ratio": skill_envs / (full_envs + skill_envs),
+            "contact_pool_size": int(contact_pool_size),
+            "contact_eval_pool_size": int(contact_eval_pool_size),
+            "cave_pool_size": cave_pool_size
+            or int(config_snapshot(config).get("cave_pool_size", 0) or 0),
+            "full_lane_goal": "full_level",
+            "contact_lane_goal": "final_objective_contact",
+        },
+        "transfer_checkpoint": str(checkpoint_path),
+        "transfer_source": {
+            "kind": SELECTED_WEIGHT_SNAPSHOT_KIND,
+            "source_label": source_snapshot.get("label", ""),
+            "source_episode": int(source_snapshot.get("episode", 0) or 0),
+            "source_eval": source_snapshot.get("source_eval") or {},
+        },
+        "failure_diagnostics": diagnostics,
+        "near_miss_eval": near_miss_eval,
+    }
+    if contact_eval is not None:
+        extra["contact_eval"] = contact_eval
+        extra["contact_eval_rollup"] = level_eval_rollup(contact_eval)
+    if selected_eval_payload is not None:
+        extra["selected_checkpoint_eval"] = selected_eval_payload
+        extra["selected_checkpoint_eval_games"] = selected_eval_games
+    if selected_checkpoint_path is not None:
+        extra["selected_checkpoint_path"] = selected_checkpoint_path
+    if selected_diagnostics is not None:
+        extra["selected_checkpoint_failure_diagnostics"] = selected_diagnostics
+    if selected_near_miss_eval is not None:
+        extra["selected_checkpoint_near_miss_eval"] = selected_near_miss_eval
+    if selected_contact_eval is not None:
+        extra["selected_contact_eval"] = selected_contact_eval
+        extra["selected_contact_eval_rollup"] = level_eval_rollup(selected_contact_eval)
+    return summarize_trainer(
+        trainer,
+        label=label,
+        train_seconds=train_seconds,
+        final_eval_payload=eval_payload,
+        extra=extra,
+    )
+
+
+def _contact_pool_eval(
+    config: Config,
+    agent: Any,
+    *,
+    pool_size: int,
+    seed: int,
+    k: int,
+) -> list[dict[str, Any]] | None:
+    if pool_size <= 0:
+        return None
+    eval_config = make_interleaved_contact_config(config)
+    exp_config = cc_experiment_config(eval_config)
+    exp_config.CRYSTAL_CAVES_CONTACT_POOL_SIZE = int(pool_size)
+    exp_config.CRYSTAL_CAVES_CONTACT_POOL_SEED = int(seed)
+    specs = contact_pool_caves(pool_size, seed=seed)
+    return level_set_eval(
+        agent,
+        eval_config,
+        specs=specs,
+        k=k,
+        max_steps=config.EVAL_MAX_STEPS,
+    )

@@ -139,6 +139,30 @@ class AgentExperimentMixin:
                 )
             )
 
+        contact_action = self._contact_action_supervised_loss()
+        if contact_action is not None:
+            contact_loss, contact_accuracy = contact_action
+            contributions.append(
+                AuxiliaryLossContribution(
+                    name="contact_action",
+                    loss=contact_loss,
+                    weight=float(
+                        getattr(
+                            self.config,
+                            "CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT",
+                            0.02,
+                        )
+                    ),
+                    metrics=(
+                        AuxiliaryMetric(
+                            "contact_action_losses",
+                            float(contact_loss.detach().item()),
+                        ),
+                        AuxiliaryMetric("contact_action_accuracies", contact_accuracy),
+                    ),
+                )
+            )
+
         for provider in tuple(getattr(self, "_extra_auxiliary_loss_providers", ())):
             contributions.extend(provider.auxiliary_loss_contributions(states))
 
@@ -202,6 +226,17 @@ class AgentExperimentMixin:
         self._correction_action_actions = actions_tensor
         return {"correction_action_transitions": count}
 
+    def set_contact_action_dataset(
+        self: Any, states: np.ndarray, actions: np.ndarray
+    ) -> dict[str, int]:
+        """Install close-zone states/actions for an opt-in detached contact head."""
+        states_tensor, actions_tensor, count = self._prepare_demo_action_tensors(
+            states, actions, label="contact action"
+        )
+        self._contact_action_states = states_tensor
+        self._contact_action_actions = actions_tensor
+        return {"contact_action_transitions": count}
+
     def _demo_action_supervised_loss(
         self: Any,
     ) -> Optional[Tuple[torch.Tensor, float, torch.Tensor | None]]:
@@ -251,6 +286,34 @@ class AgentExperimentMixin:
             return None
         correction_loss, accuracy, _conservative_loss = result
         return correction_loss, accuracy
+
+    def _contact_action_supervised_loss(
+        self: Any,
+    ) -> Optional[Tuple[torch.Tensor, float]]:
+        """Optional cross-entropy loss for a detached close-zone contact head."""
+        if not getattr(self.config, "CRYSTAL_CAVES_CONTACT_ACTION_HEAD", False):
+            return None
+        if self._contact_action_states is None or self._contact_action_actions is None:
+            return None
+        logits_fn = getattr(self.policy_net, "contact_action_logits", None)
+        if not callable(logits_fn):
+            return None
+
+        count = int(self._contact_action_actions.shape[0])
+        if count <= 0:
+            return None
+        batch_size = min(
+            int(getattr(self.config, "CRYSTAL_CAVES_CONTACT_ACTION_BATCH_SIZE", 64)),
+            count,
+        )
+        indices = torch.randint(count, (batch_size,), device=self.device)
+        states = self._contact_action_states.index_select(0, indices)
+        actions = self._contact_action_actions.index_select(0, indices)
+        logits = logits_fn(states)
+        loss = F.cross_entropy(logits, actions)
+        with torch.no_grad():
+            accuracy = float((logits.argmax(dim=1) == actions).float().mean().item())
+        return loss, accuracy
 
     def _demo_action_loss_for_dataset(
         self: Any,
@@ -389,6 +452,22 @@ class AgentExperimentMixin:
     def get_average_correction_action_accuracy(self: Any, n: int = 100) -> float:
         return self._mean_recent(self.correction_action_accuracies, n)
 
+    def get_average_contact_action_loss(self: Any, n: int = 100) -> float:
+        return self._mean_recent(self.contact_action_losses, n)
+
+    def get_average_contact_action_accuracy(self: Any, n: int = 100) -> float:
+        return self._mean_recent(self.contact_action_accuracies, n)
+
+    def get_average_policy_anchor_loss(self: Any, n: int = 100) -> float:
+        return self._mean_recent(self.policy_anchor_losses, n)
+
+    def get_average_policy_anchor_accuracy(self: Any, n: int = 100) -> float:
+        return self._mean_recent(self.policy_anchor_accuracies, n)
+
+    def get_policy_anchor_metric_count(self: Any, n: int = 100) -> int:
+        with self._losses_lock:
+            return min(n, len(self.policy_anchor_losses))
+
     def get_correction_action_transition_count(self: Any) -> int:
         actions = getattr(self, "_correction_action_actions", None)
         return int(actions.shape[0]) if actions is not None else 0
@@ -396,3 +475,11 @@ class AgentExperimentMixin:
     def get_correction_action_metric_count(self: Any, n: int = 100) -> int:
         with self._losses_lock:
             return min(n, len(self.correction_action_losses))
+
+    def get_contact_action_transition_count(self: Any) -> int:
+        actions = getattr(self, "_contact_action_actions", None)
+        return int(actions.shape[0]) if actions is not None else 0
+
+    def get_contact_action_metric_count(self: Any, n: int = 100) -> int:
+        with self._losses_lock:
+            return min(n, len(self.contact_action_losses))

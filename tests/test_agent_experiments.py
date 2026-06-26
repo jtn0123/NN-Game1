@@ -10,6 +10,10 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
+from experiments.cc_status.policy_anchor import (
+    FrozenPolicyAnchorProvider,
+    install_policy_anchor_provider,
+)
 from src.ai.action_margin_loss import sample_action_margin_loss
 from src.ai.agent import Agent
 from src.ai.extension_contracts import AuxiliaryLossContribution, AuxiliaryMetric
@@ -288,6 +292,43 @@ class TestDemoActionSupervision:
         }
         assert all(torch.isfinite(contribution.weighted_loss()) for contribution in contributions)
 
+    def test_contact_action_head_contributes_named_auxiliary_loss(self):
+        cfg = Config()
+        cfg.USE_CNN_STATE = True
+        cfg.STATE_LAYOUT = {"window": (11, 19), "gmap": (6, 11), "meta": 20}
+        cfg.CRYSTAL_CAVES_CONTACT_ACTION_HEAD = True
+        cfg.CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT = 0.02
+        cfg.CRYSTAL_CAVES_CONTACT_ACTION_BATCH_SIZE = 8
+        cfg.USE_PRIORITIZED_REPLAY = False
+        cfg.USE_N_STEP_RETURNS = False
+        size = 11 * 19 + 6 * 11 + 20
+        agent = Agent(state_size=size, action_size=10, config=cfg)
+        states = np.random.randn(16, size).astype(np.float32)
+        actions = np.random.randint(0, 10, size=16).astype(np.int64)
+
+        summary = agent.set_contact_action_dataset(states, actions)
+        contributions = agent._auxiliary_loss_contributions(
+            torch.as_tensor(states[:8], dtype=torch.float32, device=agent.device)
+        )
+
+        assert summary == {"contact_action_transitions": 16}
+        assert [contribution.name for contribution in contributions] == ["contact_action"]
+        assert [contribution.weight for contribution in contributions] == [0.02]
+        metric_histories = {
+            metric.history for contribution in contributions for metric in contribution.metrics
+        }
+        assert metric_histories == {
+            "contact_action_losses",
+            "contact_action_accuracies",
+        }
+        assert all(torch.isfinite(contribution.weighted_loss()) for contribution in contributions)
+        with agent._losses_lock:
+            agent._append_auxiliary_metrics_locked(contributions)
+        assert agent.get_contact_action_transition_count() == 16
+        assert agent.get_contact_action_metric_count(100) == 1
+        assert agent.get_average_contact_action_loss(100) >= 0.0
+        assert 0.0 <= agent.get_average_contact_action_accuracy(100) <= 1.0
+
     def test_external_auxiliary_provider_can_be_registered(self, config):
         config.USE_PRIORITIZED_REPLAY = False
         config.USE_N_STEP_RETURNS = False
@@ -300,6 +341,91 @@ class TestDemoActionSupervision:
         assert [contribution.name for contribution in contributions] == ["external_aux"]
         assert [contribution.weight for contribution in contributions] == [0.25]
         assert all(torch.isfinite(contribution.weighted_loss()) for contribution in contributions)
+
+    def test_policy_anchor_provider_contributes_metrics(self, config):
+        config.USE_PRIORITIZED_REPLAY = False
+        config.USE_N_STEP_RETURNS = False
+        agent = Agent(state_size=config.STATE_SIZE, action_size=config.ACTION_SIZE, config=config)
+        states = torch.randn((4, config.STATE_SIZE), dtype=torch.float32, device=agent.device)
+        teacher_net = agent.policy_net.__class__(
+            config.STATE_SIZE,
+            config.ACTION_SIZE,
+            config,
+        ).to(agent.device)
+        teacher_net.load_state_dict(agent.policy_net.state_dict())
+        teacher_net.eval()
+        for parameter in teacher_net.parameters():
+            parameter.requires_grad_(False)
+
+        agent.register_auxiliary_loss_provider(
+            FrozenPolicyAnchorProvider(
+                policy_net=agent.policy_net,
+                teacher_net=teacher_net,
+                weight=0.02,
+                temperature=1.0,
+            )
+        )
+
+        contributions = agent._auxiliary_loss_contributions(states)
+
+        assert [contribution.name for contribution in contributions] == ["policy_anchor"]
+        assert [contribution.weight for contribution in contributions] == [0.02]
+        metric_histories = {
+            metric.history for contribution in contributions for metric in contribution.metrics
+        }
+        assert metric_histories == {"policy_anchor_losses", "policy_anchor_accuracies"}
+        assert all(torch.isfinite(contribution.weighted_loss()) for contribution in contributions)
+
+        with agent._losses_lock:
+            agent._append_auxiliary_metrics_locked(contributions)
+        assert agent.get_policy_anchor_metric_count(100) == 1
+        assert agent.get_average_policy_anchor_loss(100) >= 0.0
+        assert 0.0 <= agent.get_average_policy_anchor_accuracy(100) <= 1.0
+
+    def test_policy_anchor_provider_can_mask_close_zone_states(self):
+        policy_net = torch.nn.Linear(4, 3)
+        teacher_net = torch.nn.Linear(4, 3)
+        teacher_net.load_state_dict(policy_net.state_dict())
+        provider = FrozenPolicyAnchorProvider(
+            policy_net=policy_net,
+            teacher_net=teacher_net,
+            weight=0.02,
+            temperature=1.0,
+            min_target_distance_norm=0.1,
+            target_distance_index=2,
+        )
+        states = torch.tensor(
+            [
+                [0.0, 0.0, 0.05, 0.0],
+                [0.0, 0.0, 0.20, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+
+        contributions = provider.auxiliary_loss_contributions(states)
+
+        assert [contribution.name for contribution in contributions] == ["policy_anchor"]
+        assert torch.isfinite(contributions[0].weighted_loss())
+
+        close_only = states[:1]
+        assert provider.auxiliary_loss_contributions(close_only) == ()
+
+    def test_install_policy_anchor_summary_includes_distance_mask(self, config):
+        config.USE_PRIORITIZED_REPLAY = False
+        config.USE_N_STEP_RETURNS = False
+        config.STATE_LAYOUT = {"window": (1, 2), "gmap": (1, 1), "meta": 20}
+        agent = Agent(state_size=23, action_size=config.ACTION_SIZE, config=config)
+
+        summary = install_policy_anchor_provider(
+            agent,
+            weight=0.02,
+            temperature=1.0,
+            min_target_distance_norm=0.07,
+        )
+
+        assert summary["enabled"] is True
+        assert summary["min_target_distance_norm"] == 0.07
+        assert summary["target_distance_index"] == 20
 
     def test_register_auxiliary_provider_requires_provider_method(self, config):
         config.USE_PRIORITIZED_REPLAY = False

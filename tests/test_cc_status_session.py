@@ -2,8 +2,10 @@
 
 import argparse
 import ast
+import json
 import os
 import sys
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +15,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import experiments.cc_status.cli as status_cli  # noqa: E402
+import experiments.cc_status.cli_label_modes as label_modes  # noqa: E402
 from experiments.cc_status.cli import _requires_live_metrics  # noqa: E402
 from experiments.cc_status.cli_args import (  # noqa: E402
     STATUS_SESSION_MODES,
@@ -23,8 +26,11 @@ from experiments.cc_status_session import (  # noqa: E402
     InterleavedCrystalCavesVec,
     ReverseStartCrystalCavesVec,
     apply_close_zone_demo_action_override,
+    apply_contact_action_head_override,
     apply_correction_action_override,
     apply_demo_action_override,
+    apply_distributional_dqn_override,
+    apply_policy_anchor_override,
     apply_reverse_start,
     apply_route_aux_override,
     archive_milestone_key,
@@ -33,13 +39,17 @@ from experiments.cc_status_session import (  # noqa: E402
     bridge_config,
     close_zone_oracle_action,
     collect_scripted_route_demonstrations,
+    config_snapshot,
+    contact_config,
     demo_action_arrays,
+    final_contact_option_action,
     first_crystal_config,
     full_tutorial_config,
     interleave_counts,
     level_eval_rollup,
     live_status_line,
     load_selected_weight_snapshot,
+    make_interleaved_contact_config,
     make_interleaved_drill_config,
     parse_route_demo_variants,
     reverse_start_counts,
@@ -51,24 +61,26 @@ from experiments.cc_status_session import (  # noqa: E402
     selected_bridge_snapshot,
 )
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
+from src.game.crystal_caves_drills import CONTACT_CAVES  # noqa: E402
 
 
 def _status_cli_dispatch_modes() -> set[str]:
-    assert status_cli.__file__ is not None
-    tree = ast.parse(Path(status_cli.__file__).read_text(encoding="utf-8"))
     modes: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Compare):
-            continue
-        if not isinstance(node.left, ast.Attribute) or node.left.attr != "mode":
-            continue
-        for op, comparator in zip(node.ops, node.comparators):
-            if (
-                isinstance(op, ast.Eq)
-                and isinstance(comparator, ast.Constant)
-                and isinstance(comparator.value, str)
-            ):
-                modes.add(comparator.value)
+    for module in (status_cli, label_modes):
+        assert module.__file__ is not None
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            if not isinstance(node.left, ast.Attribute) or node.left.attr != "mode":
+                continue
+            for op, comparator in zip(node.ops, node.comparators):
+                if (
+                    isinstance(op, ast.Eq)
+                    and isinstance(comparator, ast.Constant)
+                    and isinstance(comparator.value, str)
+                ):
+                    modes.add(comparator.value)
     return modes
 
 
@@ -82,9 +94,103 @@ def test_live_metrics_requirement_tracks_training_runs_and_heartbeat():
 
     assert _requires_live_metrics(opts, {"runs": [{"train_seconds": 1.0}]}) is True
     assert _requires_live_metrics(opts, {"runs": [{"train_seconds": 0.0}]}) is False
+    assert (
+        _requires_live_metrics(
+            opts,
+            {
+                "runs": [
+                    {
+                        "train_seconds": 1.0,
+                        "contact_action_head_calibration": {"decision": {"passed": True}},
+                    }
+                ]
+            },
+        )
+        is False
+    )
 
     opts.heartbeat_seconds = 0.0
     assert _requires_live_metrics(opts, {"runs": [{"train_seconds": 1.0}]}) is False
+
+
+def test_interrupted_status_session_payload_uses_live_and_source_history(tmp_path):
+    """KeyboardInterrupt fallback should leave comparable partial artifacts behind."""
+    out_dir = tmp_path / "session"
+    run_dir = out_dir / "contact_interleaved"
+    run_dir.mkdir(parents=True)
+    live_payload = {
+        "label": "contact_interleaved",
+        "status": "interrupted",
+        "episode": 150,
+        "total_episodes": 300,
+        "elapsed_seconds": 12.5,
+        "steps_per_second": 1000.0,
+        "total_steps": 12500,
+        "epsilon": 0.2,
+        "memory_size": 4096,
+        "avg_loss_100": 0.1,
+        "avg_q_100": 3.0,
+        "avg_score_100": 10.0,
+        "win_rate_100": 0.25,
+        "avg_progress_100": 0.5,
+        "best_progress": 0.9,
+        "end_reason_counts_100": {"timeout": 3},
+        "latest_eval": {
+            "wins": 0,
+            "num_games": 8,
+            "win_rate": 0.0,
+            "mean_crystal_frac": 0.0,
+            "mean_depth_frac": 0.2,
+            "end_reason_counts": {"timeout": 8},
+        },
+        "source_stats": {"contact": {"win_rate_100": 1.0}},
+        "contact_lane_win_rate_100": 1.0,
+    }
+    (run_dir / "live_metrics.json").write_text(json.dumps(live_payload), encoding="utf-8")
+    (run_dir / "live_metrics.jsonl").write_text(json.dumps(live_payload) + "\n", encoding="utf-8")
+    source_rows = [
+        {
+            "episode": 50,
+            "source_eval": {
+                "wins": 0,
+                "num_games": 16,
+                "win_rate": 0.0,
+                "mean_crystal_frac": 0.1,
+                "mean_depth_frac": 0.3,
+                "mean_score": 40.0,
+                "end_reason_counts": {"timeout": 16},
+            },
+        },
+        {
+            "episode": 100,
+            "source_eval": {
+                "wins": 0,
+                "num_games": 16,
+                "win_rate": 0.0,
+                "mean_crystal_frac": 0.2,
+                "mean_depth_frac": 0.4,
+                "mean_score": 80.0,
+                "end_reason_counts": {"timeout": 16},
+            },
+        },
+    ]
+    (run_dir / "source_eval_history.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in source_rows),
+        encoding="utf-8",
+    )
+    payload = {"runs": []}
+
+    assert status_cli._append_interrupted_run_from_live_metrics(out_dir, payload) is True
+
+    run = payload["runs"][0]
+    assert payload["interrupted"] is True
+    assert run["partial"] is True
+    assert run["episodes"] == 150
+    assert run["final_eval"]["mean_crystal_frac"] == 0.2
+    assert run["selected_source_episode"] == 100
+    assert run["contact_lane_win_rate_100"] == 1.0
+    assert run["route_contact_scorecard"]["eval_source"] == "selected_source_eval"
+    assert run["route_contact_scorecard"]["metrics"]["first_crystal_rate"] == 0.2
 
 
 def test_status_session_parser_preserves_representative_experiment_flags():
@@ -113,14 +219,75 @@ def test_status_session_parser_preserves_representative_experiment_flags():
             "2",
             "--interleave-bridge-envs",
             "1",
+            "--contact-pool-size",
+            "128",
+            "--contact-eval-pool-size",
+            "32",
+            "--history-state",
+            "--history-steps",
+            "4",
+            "--distributional-dqn",
+            "--c51-atoms",
+            "51",
+            "--c51-v-min",
+            "-20",
+            "--c51-v-max",
+            "120",
             "--archive-replay-prob",
             "0.5",
             "--checkpoint",
             "selected.pth",
             "--correction-dataset",
             "correction_examples.npz",
+            "--correction-datasets",
+            "a.npz,b.npz",
             "--correction-action-weight",
             "0.04",
+            "--policy-anchor-weight",
+            "0.02",
+            "--policy-anchor-temperature",
+            "1.5",
+            "--policy-anchor-min-distance-tiles",
+            "3.0",
+            "--contact-action-weight",
+            "0.03",
+            "--contact-action-batch-size",
+            "32",
+            "--contact-action-distance",
+            "2.5",
+            "--contact-head-offline-steps",
+            "123",
+            "--contact-head-learning-rate",
+            "0.002",
+            "--contact-head-confidence",
+            "0.8",
+            "--contact-head-jump-confidence",
+            "0.85",
+            "--contact-head-balance-classes",
+            "--contact-head-calibration-frac",
+            "0.2",
+            "--contact-head-calibration-seed",
+            "19",
+            "--contact-head-min-calibration-accuracy",
+            "0.72",
+            "--contact-head-min-class-examples",
+            "12",
+            "--contact-label-state-decimals",
+            "2",
+            "--contact-label-adjacent-step-window",
+            "3",
+            "--contact-label-top-groups",
+            "7",
+            "--contact-label-filter-majority-threshold",
+            "0.75",
+            "--final-contact-distance",
+            "2.5",
+            "--final-contact-commit-steps",
+            "6",
+            "--final-contact-cancel-outside",
+            "--final-contact-policy-advantage-gate",
+            "--final-contact-min-option-advantage",
+            "250",
             "--save-selected-checkpoint",
             "--no-artifact-validation",
         ]
@@ -136,12 +303,399 @@ def test_status_session_parser_preserves_representative_experiment_flags():
     assert args.eval_games == 9
     assert args.trace_eval_games == 2
     assert args.interleave_bridge_envs == 1
+    assert args.interleave_contact_ratio == 0.25
+    assert args.contact_pool_size == 128
+    assert args.contact_eval_pool_size == 32
+    assert args.history_state is True
+    assert args.history_steps == 4
+    assert args.distributional_dqn is True
+    assert args.c51_atoms == 51
+    assert args.c51_v_min == -20.0
+    assert args.c51_v_max == 120.0
     assert args.archive_replay_prob == 0.5
     assert args.checkpoint == "selected.pth"
     assert args.correction_dataset == "correction_examples.npz"
+    assert args.correction_datasets == "a.npz,b.npz"
     assert args.correction_action_weight == 0.04
+    assert args.policy_anchor_weight == 0.02
+    assert args.policy_anchor_temperature == 1.5
+    assert args.policy_anchor_min_distance_tiles == 3.0
+    assert args.contact_action_weight == 0.03
+    assert args.contact_action_batch_size == 32
+    assert args.contact_action_distance == 2.5
+    assert args.contact_head_offline_steps == 123
+    assert args.contact_head_learning_rate == 0.002
+    assert args.contact_head_confidence == 0.8
+    assert args.contact_head_jump_confidence == 0.85
+    assert args.contact_head_balance_classes is True
+    assert args.contact_head_calibration_frac == 0.2
+    assert args.contact_head_calibration_seed == 19
+    assert args.contact_head_min_calibration_accuracy == 0.72
+    assert args.contact_head_min_class_examples == 12
+    assert args.contact_label_state_decimals == 2
+    assert args.contact_label_adjacent_step_window == 3
+    assert args.contact_label_top_groups == 7
+    assert args.contact_label_filter_majority_threshold == 0.75
+    assert args.final_contact_distance == 2.5
+    assert args.final_contact_commit_steps == 6
+    assert args.final_contact_cancel_outside is True
+    assert args.final_contact_policy_advantage_gate is True
+    assert args.final_contact_min_option_advantage == 250.0
     assert args.save_selected_checkpoint is True
     assert args.no_artifact_validation is True
+
+
+def test_eval_final_contact_option_cli_uses_requested_label(tmp_path, monkeypatch):
+    """The outer session label should also name the inner run summary."""
+    captured: dict[str, object] = {}
+
+    def fake_run_eval_final_contact_option(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        captured.update(kwargs)
+        return {"label": kwargs["label"], "train_seconds": 0.0}
+
+    monkeypatch.setattr(
+        status_cli,
+        "run_eval_final_contact_option",
+        fake_run_eval_final_contact_option,
+    )
+
+    parser = argparse.ArgumentParser()
+    opts = argparse.Namespace(
+        mode="eval-final-contact-option",
+        checkpoint=str(tmp_path / "selected.pth"),
+        seed=3,
+        eval_games=5,
+        log_every=1,
+        report_seconds=1.0,
+        final_contact_distance=1.5,
+        final_contact_commit_steps=4,
+        final_contact_cancel_outside=False,
+        final_contact_policy_advantage_gate=True,
+        final_contact_min_option_advantage=250.0,
+        label="narrow_option_eval",
+    )
+    payload = {"runs": []}
+
+    handled = status_cli._run_checkpoint_correction_mode(
+        parser,
+        opts,
+        tmp_path,
+        payload,
+    )
+
+    assert handled is True
+    assert captured["label"] == "narrow_option_eval"
+    assert captured["cancel_option_outside_close_zone"] is False
+    assert captured["gate_policy_advantage"] is True
+    assert captured["min_option_advantage"] == 250.0
+    assert payload["runs"] == [{"label": "narrow_option_eval", "train_seconds": 0.0}]
+
+
+def test_collect_corrections_cli_uses_requested_label(tmp_path, monkeypatch):
+    """Dataset runs should preserve labels in the inner run summary."""
+    captured: dict[str, object] = {}
+
+    def fake_run_collect_corrections(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        captured.update(kwargs)
+        return {"label": kwargs["label"], "train_seconds": 0.0}
+
+    monkeypatch.setattr(status_cli, "run_collect_corrections", fake_run_collect_corrections)
+
+    parser = argparse.ArgumentParser()
+    opts = argparse.Namespace(
+        mode="collect-corrections",
+        checkpoint=str(tmp_path / "selected.pth"),
+        seed=3,
+        correction_games=5,
+        correction_max_steps=1200,
+        correction_max_examples=512,
+        correction_sample_every=4,
+        correction_max_examples_per_game=64,
+        correction_stale_steps=999999,
+        correction_loop_tile_visits=999999,
+        correction_keep_agreements=False,
+        final_contact_distance=3.0,
+        final_contact_commit_steps=8,
+        final_contact_policy_advantage_gate=True,
+        final_contact_min_option_advantage=250.0,
+        log_every=1,
+        report_seconds=1.0,
+        label="contact_only_collect",
+    )
+    payload = {"runs": []}
+
+    handled = status_cli._run_checkpoint_correction_mode(
+        parser,
+        opts,
+        tmp_path,
+        payload,
+    )
+
+    assert handled is True
+    assert captured["label"] == "contact_only_collect"
+    assert captured["correction_label_mode"] == "advantage_gate"
+    assert captured["final_contact_min_option_advantage"] == 250.0
+    assert payload["runs"] == [{"label": "contact_only_collect", "train_seconds": 0.0}]
+
+
+def test_collect_contact_head_corrections_cli_uses_contact_head_rollout(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_collect_contact_head_corrections(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        captured.update(kwargs)
+        return {"label": kwargs["label"], "train_seconds": 0.0}
+
+    monkeypatch.setattr(
+        status_cli,
+        "run_collect_contact_head_corrections",
+        fake_run_collect_contact_head_corrections,
+    )
+
+    parser = argparse.ArgumentParser()
+    opts = argparse.Namespace(
+        mode="collect-contact-head-corrections",
+        checkpoint=str(tmp_path / "selected.pth"),
+        correction_dataset=str(tmp_path / "contact_labels.npz"),
+        seed=1,
+        correction_games=5,
+        correction_max_steps=1200,
+        correction_max_examples=512,
+        correction_sample_every=1,
+        correction_max_examples_per_game=12,
+        correction_stale_steps=999999,
+        correction_loop_tile_visits=999999,
+        correction_keep_agreements=False,
+        final_contact_distance=3.0,
+        final_contact_commit_steps=8,
+        final_contact_policy_advantage_gate=True,
+        final_contact_min_option_advantage=250.0,
+        contact_action_batch_size=32,
+        contact_action_distance=3.0,
+        contact_head_offline_steps=500,
+        contact_head_learning_rate=0.001,
+        contact_head_confidence=0.75,
+        contact_head_jump_confidence=0.0,
+        contact_head_action_thresholds="LEFT_JUMP:0.90",
+        contact_head_balance_classes=True,
+        log_every=1,
+        report_seconds=1.0,
+        label="b25_collect",
+    )
+    payload = {"runs": []}
+
+    handled = status_cli._run_checkpoint_correction_mode(
+        parser,
+        opts,
+        tmp_path,
+        payload,
+    )
+
+    assert handled is True
+    assert captured["label"] == "b25_collect"
+    assert captured["correction_label_mode"] == "advantage_gate"
+    assert captured["contact_head_action_thresholds"] == {"LEFT_JUMP": 0.9}
+    assert captured["contact_head_balance_classes"] is True
+    assert payload["runs"] == [{"label": "b25_collect", "train_seconds": 0.0}]
+
+
+def test_contact_head_calibrate_cli_uses_dataset_list(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_contact_head_calibration(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        captured.update(kwargs)
+        return {"label": kwargs["label"], "train_seconds": 0.0}
+
+    monkeypatch.setattr(
+        status_cli,
+        "run_contact_head_calibration",
+        fake_run_contact_head_calibration,
+    )
+
+    parser = argparse.ArgumentParser()
+    opts = argparse.Namespace(
+        mode="contact-head-calibrate",
+        checkpoint=str(tmp_path / "selected.pth"),
+        correction_datasets=f"{tmp_path / 'a.npz'},{tmp_path / 'b.npz'}",
+        seed=3,
+        log_every=1,
+        report_seconds=1.0,
+        contact_action_batch_size=32,
+        contact_action_distance=3.0,
+        contact_head_offline_steps=123,
+        contact_head_learning_rate=0.002,
+        contact_head_balance_classes=True,
+        contact_head_calibration_frac=0.2,
+        contact_head_calibration_seed=19,
+        contact_head_min_calibration_accuracy=0.72,
+        contact_head_min_class_examples=12,
+        label="combined_calibration",
+    )
+    payload = {"runs": []}
+
+    handled = status_cli._run_checkpoint_correction_mode(
+        parser,
+        opts,
+        tmp_path,
+        payload,
+    )
+
+    assert handled is True
+    assert captured["label"] == "combined_calibration"
+    assert [path.name for path in captured["correction_dataset_paths"]] == ["a.npz", "b.npz"]
+    assert captured["calibration_frac"] == 0.2
+    assert captured["min_calibration_accuracy"] == 0.72
+    assert captured["min_class_examples"] == 12
+    assert payload["runs"] == [{"label": "combined_calibration", "train_seconds": 0.0}]
+
+
+def test_contact_label_audit_cli_uses_dataset_list(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_contact_label_audit(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        captured.update(kwargs)
+        return {"label": kwargs["label"], "train_seconds": 0.0}
+
+    monkeypatch.setattr(label_modes, "run_contact_label_audit", fake_run_contact_label_audit)
+
+    parser = argparse.ArgumentParser()
+    opts = argparse.Namespace(
+        mode="contact-label-audit",
+        correction_datasets=f"{tmp_path / 'a.npz'},{tmp_path / 'b.npz'}",
+        contact_label_state_decimals=2,
+        contact_label_adjacent_step_window=3,
+        contact_label_top_groups=7,
+        label="label_audit",
+    )
+    payload = {"runs": []}
+
+    handled = label_modes.run_label_dataset_mode(
+        parser,
+        opts,
+        tmp_path,
+        payload,
+    )
+
+    assert handled is True
+    assert captured["label"] == "label_audit"
+    assert [path.name for path in captured["correction_dataset_paths"]] == ["a.npz", "b.npz"]
+    assert captured["state_round_decimals"] == 2
+    assert captured["adjacent_step_window"] == 3
+    assert captured["top_groups"] == 7
+    assert payload["runs"] == [{"label": "label_audit", "train_seconds": 0.0}]
+
+
+def test_contact_label_filter_cli_uses_dataset_list(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_contact_label_filter(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        captured.update(kwargs)
+        return {"label": kwargs["label"], "train_seconds": 0.0}
+
+    monkeypatch.setattr(label_modes, "run_contact_label_filter", fake_run_contact_label_filter)
+
+    parser = argparse.ArgumentParser()
+    opts = argparse.Namespace(
+        mode="contact-label-filter",
+        correction_datasets=f"{tmp_path / 'a.npz'},{tmp_path / 'b.npz'}",
+        contact_label_filter_majority_threshold=0.75,
+        contact_label_adjacent_step_window=3,
+        label="label_filter",
+    )
+    payload = {"runs": []}
+
+    handled = label_modes.run_label_dataset_mode(
+        parser,
+        opts,
+        tmp_path,
+        payload,
+    )
+
+    assert handled is True
+    assert captured["label"] == "label_filter"
+    assert [path.name for path in captured["correction_dataset_paths"]] == ["a.npz", "b.npz"]
+    assert captured["semantic_majority_threshold"] == 0.75
+    assert captured["adjacent_step_window"] == 3
+    assert payload["runs"] == [{"label": "label_filter", "train_seconds": 0.0}]
+
+
+def test_final_contact_option_can_cancel_queue_outside_close_zone(tmp_path):
+    """Committed local macros should be cancellable when the target is no longer close."""
+
+    class FixedAgent:
+        def __init__(self, action: int) -> None:
+            self.action = action
+
+        def select_action(self, state, training=False):  # noqa: ANN001, ANN202
+            return self.action
+
+    cfg = first_crystal_config(
+        tmp_path / "cancel-option",
+        episodes=1,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+    game = CrystalCaves(cfg, headless=True)
+    state = game.reset()
+    info = game._info()
+    queued_actions = deque([game.LEFT, game.LEFT_JUMP])
+
+    action, decision = final_contact_option_action(
+        FixedAgent(game.RIGHT),
+        state,
+        game,
+        info,
+        action_labels=list(game.ACTION_LABELS),
+        close_zone_distance_tiles=0.01,
+        option_queue=queued_actions,
+        cancel_option_outside_close_zone=True,
+    )
+
+    assert action == game.RIGHT
+    assert not queued_actions
+    assert decision["source"] == "policy"
+    assert decision["option_meta"]["cancelled_committed_actions"] == 2
+
+
+def test_final_contact_option_advantage_gate_can_keep_policy_action(tmp_path):
+    """The option should not take over when its simulated advantage is below the gate."""
+
+    class ShootAgent:
+        def select_action(self, state, training=False):  # noqa: ANN001, ANN202
+            return 6
+
+    cfg = first_crystal_config(
+        tmp_path / "advantage-gate",
+        episodes=1,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+    game = CrystalCaves(cfg, headless=True)
+    state = game.reset()
+    info = game._info()
+
+    action, decision = final_contact_option_action(
+        ShootAgent(),
+        state,
+        game,
+        info,
+        action_labels=list(game.ACTION_LABELS),
+        close_zone_distance_tiles=99.0,
+        final_contact_commit_steps=2,
+        gate_policy_advantage=True,
+        min_option_advantage=1_000_000.0,
+    )
+
+    assert action == game.SHOOT
+    assert decision["source"] == "policy"
+    assert decision["option_meta"]["gate_policy_advantage"] is True
+    assert decision["option_meta"]["rejected_by_policy_gate"] is True
+    assert decision["option_meta"]["gate_min_option_advantage"] == 1_000_000.0
 
 
 def test_interleave_counts_defaults_to_two_drill_lanes_for_eight_envs():
@@ -211,6 +765,48 @@ def test_interleaved_vec_env_mixes_full_and_drill_sources(tmp_path):
         stats = vec.source_stats()
         assert stats["full"]["episodes"] == 1
         assert stats["drill"]["episodes"] == 1
+    finally:
+        vec.close()
+
+
+def test_interleaved_vec_env_mixes_full_and_contact_sources(tmp_path):
+    """Contact lanes should reuse the generic source-stats machinery."""
+    full_config = full_tutorial_config(
+        tmp_path / "full",
+        episodes=4,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+    full_config.CRYSTAL_CAVES_POOL_SIZE = 2
+    contact_source_config = make_interleaved_contact_config(full_config)
+
+    vec = InterleavedCrystalCavesVec(
+        full_config=full_config,
+        skill_config=contact_source_config,
+        full_envs=6,
+        skill_envs=2,
+        skill_source="contact",
+        headless=True,
+    )
+    try:
+        states = vec.reset()
+        assert states.shape == (8, vec.state_size)
+        assert vec.sources == ["full"] * 6 + ["contact"] * 2
+        assert vec.envs[6].CAVES == CONTACT_CAVES
+
+        vec.envs[6].game_over = True
+        vec.envs[6].exit_unlocked = True
+        _, _, dones, infos = vec.step_no_copy(np.zeros(vec.num_envs, dtype=np.int64))
+
+        assert dones.tolist()[6] is True
+        assert infos[6]["training_source"] == "contact"
+        stats = vec.source_stats()
+        assert stats["contact"]["episodes"] == 1
+        assert stats["contact"]["exit_rate_100"] == 1.0
+        assert "crystal_rate_100" in stats["contact"]
     finally:
         vec.close()
 
@@ -353,6 +949,24 @@ def test_bridge_config_enables_bridges_without_procedural_or_drills(tmp_path):
         report_seconds=1.0,
     )
     assert cfg.CRYSTAL_CAVES_BRIDGES is True
+    assert cfg.CRYSTAL_CAVES_DRILLS is False
+    assert cfg.CRYSTAL_CAVES_PROCEDURAL is False
+
+
+def test_contact_config_enables_contact_levels_without_procedural_drills_or_bridges(tmp_path):
+    """Contact runs should load only the compact final-objective contact cave set."""
+    cfg = contact_config(
+        tmp_path / "contact",
+        episodes=4,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+    assert cfg.CRYSTAL_CAVES_CONTACT_LEVELS is True
+    assert cfg.CRYSTAL_CAVES_CONTACT_POOL_SIZE == 0
+    assert cfg.CRYSTAL_CAVES_BRIDGES is False
     assert cfg.CRYSTAL_CAVES_DRILLS is False
     assert cfg.CRYSTAL_CAVES_PROCEDURAL is False
 
@@ -514,6 +1128,145 @@ def test_apply_correction_action_override_is_opt_in(tmp_path):
     assert cfg.CRYSTAL_CAVES_CORRECTION_ACTION_BATCH_SIZE == 32
 
 
+def test_apply_policy_anchor_override_is_opt_in(tmp_path):
+    """Policy anchoring should stay disabled unless weight is positive."""
+    cfg = first_crystal_config(
+        tmp_path / "policy-anchor",
+        episodes=4,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+
+    apply_policy_anchor_override(
+        cfg,
+        policy_anchor_weight=0.0,
+        policy_anchor_temperature=1.0,
+        policy_anchor_min_distance_tiles=3.0,
+    )
+    assert cfg.CRYSTAL_CAVES_POLICY_ANCHOR_LOSS is False
+
+    apply_policy_anchor_override(
+        cfg,
+        policy_anchor_weight=0.02,
+        policy_anchor_temperature=1.5,
+        policy_anchor_min_distance_tiles=3.0,
+    )
+    assert cfg.CRYSTAL_CAVES_POLICY_ANCHOR_LOSS is True
+    assert cfg.CRYSTAL_CAVES_POLICY_ANCHOR_WEIGHT == 0.02
+    assert cfg.CRYSTAL_CAVES_POLICY_ANCHOR_TEMPERATURE == 1.5
+    assert cfg.CRYSTAL_CAVES_POLICY_ANCHOR_MIN_TARGET_DISTANCE_NORM > 0.0
+
+    with pytest.raises(ValueError, match="temperature"):
+        apply_policy_anchor_override(
+            cfg,
+            policy_anchor_weight=0.02,
+            policy_anchor_temperature=0.0,
+        )
+
+    with pytest.raises(ValueError, match="distance"):
+        apply_policy_anchor_override(
+            cfg,
+            policy_anchor_weight=0.02,
+            policy_anchor_temperature=1.0,
+            policy_anchor_min_distance_tiles=-1.0,
+        )
+
+
+def test_apply_distributional_dqn_override_is_opt_in(tmp_path):
+    cfg = first_crystal_config(
+        tmp_path / "c51",
+        episodes=4,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+
+    apply_distributional_dqn_override(
+        cfg,
+        distributional_dqn=True,
+        c51_atoms=51,
+        c51_v_min=-20.0,
+        c51_v_max=120.0,
+    )
+    snapshot = config_snapshot(cfg)
+
+    assert cfg.USE_DISTRIBUTIONAL_DQN is True
+    assert snapshot["use_distributional_dqn"] is True
+    assert snapshot["c51_num_atoms"] == 51
+    assert snapshot["c51_v_min"] == -20.0
+    assert snapshot["c51_v_max"] == 120.0
+
+    with pytest.raises(ValueError, match="c51_atoms"):
+        apply_distributional_dqn_override(
+            cfg,
+            distributional_dqn=True,
+            c51_atoms=1,
+            c51_v_min=-20.0,
+            c51_v_max=120.0,
+        )
+    with pytest.raises(ValueError, match="c51_v_min"):
+        apply_distributional_dqn_override(
+            cfg,
+            distributional_dqn=True,
+            c51_atoms=51,
+            c51_v_min=120.0,
+            c51_v_max=120.0,
+        )
+
+
+def test_apply_contact_action_head_override_is_opt_in(tmp_path):
+    config = full_tutorial_config(
+        tmp_path / "contact-head",
+        episodes=10,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+
+    assert not config.CRYSTAL_CAVES_CONTACT_ACTION_HEAD
+
+    apply_contact_action_head_override(
+        config,
+        contact_action_weight=0.02,
+        contact_action_batch_size=32,
+        contact_action_distance_tiles=3.0,
+    )
+
+    assert config.CRYSTAL_CAVES_CONTACT_ACTION_HEAD
+    assert config.CRYSTAL_CAVES_CONTACT_ACTION_WEIGHT == 0.02
+    assert config.CRYSTAL_CAVES_CONTACT_ACTION_BATCH_SIZE == 32
+    assert config.CRYSTAL_CAVES_CONTACT_ACTION_DISTANCE_NORM > 0.0
+
+    with pytest.raises(ValueError, match="contact_action_weight"):
+        apply_contact_action_head_override(
+            config,
+            contact_action_weight=-0.01,
+            contact_action_batch_size=32,
+            contact_action_distance_tiles=3.0,
+        )
+    with pytest.raises(ValueError, match="batch_size"):
+        apply_contact_action_head_override(
+            config,
+            contact_action_weight=0.02,
+            contact_action_batch_size=0,
+            contact_action_distance_tiles=3.0,
+        )
+    with pytest.raises(ValueError, match="distance"):
+        apply_contact_action_head_override(
+            config,
+            contact_action_weight=0.02,
+            contact_action_batch_size=32,
+            contact_action_distance_tiles=0.0,
+        )
+
+
 def test_live_status_line_shows_enabled_zero_loss_correction():
     """Correction live status should show active supervision even after zero hinge loss."""
     line = live_status_line(
@@ -538,6 +1291,31 @@ def test_live_status_line_shows_enabled_zero_loss_correction():
     )
 
     assert "| corr 0.000/0% n=0" in line
+
+
+def test_live_status_line_shows_enabled_policy_anchor():
+    """Anchor live status should show active teacher matching when enabled."""
+    line = live_status_line(
+        {
+            "label": "anchored_correction",
+            "episode": 1,
+            "total_episodes": 10,
+            "episode_pct": 0.1,
+            "avg_score_100": 0.0,
+            "avg_progress_100": 0.0,
+            "best_progress": 0.0,
+            "win_rate_100": 0.0,
+            "avg_loss_100": 0.0,
+            "avg_q_100": 0.0,
+            "steps_per_second": 100.0,
+            "policy_anchor_enabled": True,
+            "policy_anchor_samples_100": 0,
+            "avg_policy_anchor_loss_100": 0.0,
+            "avg_policy_anchor_accuracy_100": 1.0,
+        }
+    )
+
+    assert "| anchor 0.000/100% n=0" in line
 
 
 def test_level_eval_rollup_summarizes_skill_rows():

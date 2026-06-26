@@ -8,6 +8,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from .metric_audit import build_eval_metric_audit, metric_audit_from_artifact
+from .scorecard import build_route_contact_scorecard, route_contact_score
+
 DECISION_PROMOTE = "PROMOTE"
 DECISION_HOLD = "HOLD"
 DECISION_REGRESS = "REGRESS"
@@ -29,11 +32,16 @@ class PromotionSnapshot:
     close_zone_jump_rate: float | None = None
     stuck_after_close_rate: float | None = None
     loop_after_close_rate: float | None = None
+    route_contact_score: float | None = None
+    success_depth_frac: float | None = None
+    non_success_depth_frac: float | None = None
     validation_wins: int | None = None
     validation_games: int | None = None
     validation_win_rate: float | None = None
     validation_crystal_frac: float | None = None
     validation_depth_frac: float | None = None
+    validation_success_depth_frac: float | None = None
+    validation_non_success_depth_frac: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -73,11 +81,23 @@ B3S_PROMOTED_BASELINE = PromotionSnapshot(
     close_zone_jump_rate=0.000,
     stuck_after_close_rate=0.200,
     loop_after_close_rate=0.333,
+    route_contact_score=route_contact_score(
+        first_crystal_rate=10 / 30,
+        crystal_frac=0.333,
+        depth_frac=0.605,
+        close_zone_rate=0.600,
+        loop_after_close_rate=0.333,
+        stall_rate=15 / 30,
+    ),
+    success_depth_frac=0.386,
+    non_success_depth_frac=0.714,
     validation_wins=19,
     validation_games=60,
     validation_win_rate=19 / 60,
     validation_crystal_frac=0.317,
     validation_depth_frac=0.600,
+    validation_success_depth_frac=0.387,
+    validation_non_success_depth_frac=0.699,
 )
 
 
@@ -213,17 +233,32 @@ def gate_candidate(
     min_depth = _fallback_float(baseline.validation_depth_frac, baseline.depth_frac) - 0.03
     validation_depth = _fallback_float(candidate.validation_depth_frac, candidate.depth_frac)
     if validation_depth < min_depth:
-        reasons.append(
-            f"expanded validation depth regressed: {validation_depth:.3f} "
-            f"below required {min_depth:.3f}"
+        route_depth = candidate.validation_non_success_depth_frac
+        min_route_depth = (
+            _first_float(
+                baseline.validation_non_success_depth_frac,
+                baseline.non_success_depth_frac,
+                baseline.validation_depth_frac,
+                baseline.depth_frac,
+            )
+            - 0.03
         )
-        return PromotionGateResult(
-            DECISION_REGRESS,
-            candidate,
-            baseline,
-            tuple(reasons),
-            tuple(improvements),
-            tuple(regressions),
+        if route_depth is None or route_depth < min_route_depth:
+            reasons.append(
+                f"expanded validation depth regressed: {validation_depth:.3f} "
+                f"below required {min_depth:.3f}"
+            )
+            return PromotionGateResult(
+                DECISION_REGRESS,
+                candidate,
+                baseline,
+                tuple(reasons),
+                tuple(improvements),
+                tuple(regressions),
+            )
+        reasons.append(
+            f"raw validation depth {validation_depth:.3f} missed {min_depth:.3f}, "
+            f"but non-success route depth {route_depth:.3f} cleared {min_route_depth:.3f}"
         )
 
     if selected_ties_baseline and len(improvements) < 3:
@@ -261,6 +296,13 @@ def support_metric_changes(
     )
     _compare_higher(
         "depth_frac", candidate.depth_frac, baseline.depth_frac, improvements, regressions
+    )
+    _compare_higher(
+        "non_success_depth_frac",
+        candidate.non_success_depth_frac,
+        baseline.non_success_depth_frac,
+        improvements,
+        regressions,
     )
     _compare_higher(
         "near_miss_rate_3",
@@ -304,6 +346,13 @@ def support_metric_changes(
         improvements,
         regressions,
     )
+    _compare_higher(
+        "route_contact_score",
+        candidate.route_contact_score,
+        baseline.route_contact_score,
+        improvements,
+        regressions,
+    )
     return improvements, regressions
 
 
@@ -313,15 +362,23 @@ def promotion_snapshot_from_artifact(path: Path) -> PromotionSnapshot:
     if not isinstance(payload, dict):
         raise ValueError(f"{summary_path} root must be a JSON object")
     run = _select_run(payload)
-    eval_payload = run.get("selected_checkpoint_eval") or run.get("final_eval")
+    eval_payload = (
+        run.get("selected_checkpoint_eval")
+        or run.get("selected_source_eval")
+        or run.get("final_eval")
+    )
     if not isinstance(eval_payload, dict):
-        raise ValueError(f"{summary_path} has no selected_checkpoint_eval or final_eval")
+        raise ValueError(
+            f"{summary_path} has no selected_checkpoint_eval, selected_source_eval, or final_eval"
+        )
+    scorecard = build_route_contact_scorecard(run)
     near_miss = run.get("selected_checkpoint_near_miss_eval") or run.get("near_miss_eval") or {}
     rollup = near_miss.get("rollup") if isinstance(near_miss, dict) else {}
     if not isinstance(rollup, dict):
         rollup = {}
     wins = int(eval_payload.get("wins", 0) or 0)
     games = int(eval_payload.get("num_games", eval_payload.get("games", 0)) or 0)
+    metric_audit = _promotion_metric_audit(summary_path, eval_payload)
     return PromotionSnapshot(
         label=str(run.get("label") or payload.get("mode") or summary_path.parent.name),
         artifact=str(summary_path.parent),
@@ -338,6 +395,9 @@ def promotion_snapshot_from_artifact(path: Path) -> PromotionSnapshot:
         close_zone_jump_rate=_optional_float(rollup.get("mean_close_zone_jump_rate")),
         stuck_after_close_rate=_optional_float(rollup.get("stuck_after_close_rate")),
         loop_after_close_rate=_optional_float(rollup.get("loop_after_close_rate")),
+        route_contact_score=_optional_float(scorecard.get("score")),
+        success_depth_frac=_metric_audit_float(metric_audit, "success_depth_frac"),
+        non_success_depth_frac=_metric_audit_float(metric_audit, "non_success_depth_frac"),
     )
 
 
@@ -349,12 +409,20 @@ def format_promotion_result(result: PromotionGateResult) -> str:
         f"Candidate: {c.label} ({c.wins}/{c.games}, crystals {100*c.crystal_frac:.1f}%, depth {100*c.depth_frac:.1f}%)",
         f"Baseline:  {b.label} ({b.wins}/{b.games}, crystals {100*b.crystal_frac:.1f}%, depth {100*b.depth_frac:.1f}%)",
     ]
-    if c.validation_wins is not None:
+    if c.route_contact_score is not None or b.route_contact_score is not None:
         lines.append(
+            f"Route/contact score: candidate {_format_optional_score(c.route_contact_score)} "
+            f"vs baseline {_format_optional_score(b.route_contact_score)}"
+        )
+    if c.validation_wins is not None:
+        validation_line = (
             f"Validation: {c.validation_wins}/{c.validation_games}, "
             f"crystals {100*(c.validation_crystal_frac or 0):.1f}%, "
             f"depth {100*(c.validation_depth_frac or 0):.1f}%"
         )
+        if c.validation_non_success_depth_frac is not None:
+            validation_line += f", non-success depth {100*c.validation_non_success_depth_frac:.1f}%"
+        lines.append(validation_line)
     lines.append("Reasons:")
     lines.extend(f"- {reason}" for reason in result.reasons)
     if result.support_improvements:
@@ -395,10 +463,15 @@ def _select_run(payload: dict[str, Any]) -> dict[str, Any]:
     for run in runs:
         if isinstance(run, dict) and "selected_checkpoint_eval" in run:
             return run
+    for run in runs:
+        if isinstance(run, dict) and "selected_source_eval" in run:
+            return run
     for run in reversed(runs):
         if isinstance(run, dict) and "final_eval" in run:
             return run
-    raise ValueError("summary has no run with selected_checkpoint_eval or final_eval")
+    raise ValueError(
+        "summary has no run with selected_checkpoint_eval, selected_source_eval, or final_eval"
+    )
 
 
 def _with_validation(
@@ -413,8 +486,23 @@ def _with_validation(
             "validation_win_rate": validation.win_rate,
             "validation_crystal_frac": validation.crystal_frac,
             "validation_depth_frac": validation.depth_frac,
+            "validation_success_depth_frac": validation.success_depth_frac,
+            "validation_non_success_depth_frac": validation.non_success_depth_frac,
         }
     )
+
+
+def _promotion_metric_audit(
+    summary_path: Path,
+    eval_payload: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        audit = metric_audit_from_artifact(summary_path.parent)
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        audit = {}
+    if audit.get("has_rows"):
+        return audit
+    return build_eval_metric_audit(eval_payload)
 
 
 def _compare_higher(
@@ -457,6 +545,10 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
+def _format_optional_score(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.3f}"
+
+
 def _eval_win_rate(eval_payload: dict[str, Any], wins: int, games: int) -> float:
     value = eval_payload.get("win_rate")
     if value is None:
@@ -472,3 +564,16 @@ def _safe_rate(wins: int, games: int, fallback: float = 0.0) -> float:
 
 def _fallback_float(primary: float | None, fallback: float) -> float:
     return fallback if primary is None else primary
+
+
+def _first_float(*values: float | None) -> float:
+    for value in values:
+        if value is not None:
+            return value
+    return 0.0
+
+
+def _metric_audit_float(audit: dict[str, Any], key: str) -> float | None:
+    if not audit.get("has_rows"):
+        return None
+    return _optional_float(audit.get(key))

@@ -158,6 +158,38 @@ class TestCrystalCavesState:
         target, _ = game._current_target()
         assert target is not None and target[0] == "switch"
 
+    def test_history_state_is_opt_in(self, game):
+        """Default Crystal Caves state shape must stay checkpoint-compatible."""
+        assert game.METADATA_SIZE == game.BASE_METADATA_SIZE
+        assert game.config.STATE_LAYOUT["meta"] == game.BASE_METADATA_SIZE
+        assert game.get_state().shape == (game.state_size,)
+
+    def test_history_state_appends_action_metadata(self, config):
+        config.CRYSTAL_CAVES_HISTORY_STATE = True
+        config.CRYSTAL_CAVES_HISTORY_STEPS = 4
+        game = CrystalCaves(config, headless=True)
+
+        expected_history = game.HISTORY_FEATURES_PER_STEP * 4
+        assert game.METADATA_SIZE == game.BASE_METADATA_SIZE + expected_history
+        assert game.config.STATE_LAYOUT["meta"] == game.METADATA_SIZE
+        assert game.get_state().shape == (game.state_size,)
+
+        empty_history_tail = game.get_state()[-game.HISTORY_FEATURES_PER_STEP :]
+        assert empty_history_tail.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5])
+
+        place_on_floor(game)
+        state, *_ = game.step(CrystalCaves.RIGHT_JUMP)
+        newest_action = state[-game.HISTORY_FEATURES_PER_STEP :]
+
+        assert newest_action[0] == 0.0  # idle
+        assert newest_action[2] == 1.0  # right
+        assert newest_action[3] == 1.0  # jump
+        assert 0.0 <= newest_action[6] <= 1.0
+
+        reset_state = game.reset()
+        reset_tail = reset_state[-game.HISTORY_FEATURES_PER_STEP :]
+        assert reset_tail.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5])
+
 
 class TestCrystalCavesMovement:
     """Test platforming actions and physics."""

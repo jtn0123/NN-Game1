@@ -206,6 +206,12 @@ def run_tutorial_demo_bc(
     save_selected_checkpoint: bool,
     cave_pool_size: int | None,
     selected_eval_games: int,
+    history_state: bool,
+    history_steps: int,
+    distributional_dqn: bool,
+    c51_atoms: int,
+    c51_v_min: float,
+    c51_v_max: float,
     route_demo_levels: int,
     route_demo_max_steps: int,
     route_demo_variants: tuple[str, ...],
@@ -247,6 +253,18 @@ def run_tutorial_demo_bc(
         difficulty="tutorial",
     )
     apply_cave_pool_override(config, cave_pool_size)
+    apply_history_state_override(
+        config,
+        history_state=history_state,
+        history_steps=history_steps,
+    )
+    apply_distributional_dqn_override(
+        config,
+        distributional_dqn=distributional_dqn,
+        c51_atoms=c51_atoms,
+        c51_v_min=c51_v_min,
+        c51_v_max=c51_v_max,
+    )
     exp_config = cc_experiment_config(config)
     exp_config.CRYSTAL_CAVES_INVALID_SHOOT_PENALTY = invalid_shoot_penalty
     apply_demo_action_override(
@@ -419,6 +437,12 @@ def run_tutorial_demo_bc(
             "difficulty": "tutorial",
             "cave_pool_size": cave_pool_size
             or int(config_snapshot(config).get("cave_pool_size", 0) or 0),
+            "history_state": exp_config.CRYSTAL_CAVES_HISTORY_STATE,
+            "history_steps": exp_config.CRYSTAL_CAVES_HISTORY_STEPS,
+            "distributional_dqn": config.USE_DISTRIBUTIONAL_DQN,
+            "c51_atoms": config.C51_NUM_ATOMS,
+            "c51_v_min": config.C51_V_MIN,
+            "c51_v_max": config.C51_V_MAX,
         },
         "route_demo": {
             "kind": "scripted_tutorial_route",

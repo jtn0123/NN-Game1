@@ -277,6 +277,123 @@ def close_zone_oracle_candidate_sequences(game: CrystalCaves) -> list[list[int]]
     return dedupe_action_sequences(sequences)
 
 
+def close_zone_sequence_score(
+    game: CrystalCaves,
+    sequence: list[int],
+    *,
+    stale_steps: int = 0,
+) -> dict[str, Any]:
+    """Score one local close-zone macro on a copied game state."""
+
+    target, initial_distance_px = game._current_target()
+    if target is None or initial_distance_px == float("inf"):
+        return {"reason": "no_target", "score": 0.0}
+    if not sequence:
+        return {"reason": "empty_sequence", "score": -float("inf")}
+
+    initial_distance = float(initial_distance_px / game.TILE_SIZE)
+    initial_crystals = len(game.crystals)
+    initial_progress = float(getattr(game, "_progress", 0.0) or 0.0)
+    initial_health = int(getattr(game, "health", 0) or 0)
+    try:
+        probe = copy.deepcopy(game)
+    except Exception as exc:  # pragma: no cover - defensive; deepcopy is covered elsewhere
+        return {"reason": f"copy_failed:{type(exc).__name__}", "score": 0.0}
+
+    distances = [initial_distance]
+    total_reward = 0.0
+    info: dict[str, Any] = {}
+    done = False
+    for action in sequence:
+        _, reward, done, info = probe.step(int(action))
+        total_reward += float(reward)
+        _, distance_px = probe._current_target()
+        if distance_px < float("inf"):
+            distances.append(float(distance_px / probe.TILE_SIZE))
+        if done:
+            break
+
+    target_after, _ = probe._current_target()
+    min_distance = min(distances)
+    final_distance = distances[-1]
+    crystals_collected = max(0, initial_crystals - len(probe.crystals))
+    progress_gain = float(getattr(probe, "_progress", 0.0) or 0.0) - initial_progress
+    health_loss = max(0, initial_health - int(getattr(probe, "health", initial_health) or 0))
+    best_delta = initial_distance - min_distance
+    final_delta = initial_distance - final_distance
+    target_completed = bool(info.get("won", False)) or target_after != target
+    first_action = int(sequence[0])
+
+    score = 0.0
+    if target_completed:
+        score += 2500.0
+    score += 1000.0 * crystals_collected
+    score += 600.0 * max(0.0, progress_gain)
+    score += 80.0 * best_delta
+    score += 25.0 * final_delta
+    score -= 8.0 * min_distance
+    score -= 2.0 * final_distance
+    score -= 120.0 * health_loss
+    score += 0.03 * total_reward
+    if game.ACTION_LABELS[first_action] in DEMO_JUMP_ACTIONS:
+        score += 0.25
+    if stale_steps >= 36:
+        score += 10.0 * best_delta
+
+    return {
+        "reason": "ok",
+        "score": float(score),
+        "target_completed": bool(target_completed),
+        "best_delta_tiles": float(best_delta),
+        "final_delta_tiles": float(final_delta),
+        "min_distance_tiles": float(min_distance),
+        "final_distance_tiles": float(final_distance),
+        "first_action": game.ACTION_LABELS[first_action],
+        "crystals_collected": int(crystals_collected),
+        "progress_gain": float(progress_gain),
+        "health_loss": int(health_loss),
+        "total_reward": float(total_reward),
+    }
+
+
+def close_zone_oracle_plan(
+    game: CrystalCaves,
+    *,
+    stale_steps: int = 0,
+    max_actions: int | None = None,
+) -> tuple[list[int], dict[str, Any]]:
+    """Choose a local close-zone macro by simulating short candidates on copied states."""
+
+    target, initial_distance_px = game._current_target()
+    if target is None or initial_distance_px == float("inf"):
+        return [game.IDLE], {"reason": "no_target", "score": 0.0}
+
+    best_score = -float("inf")
+    best_sequence: list[int] = [game.IDLE]
+    best_meta: dict[str, Any] = {"reason": "no_candidate", "score": best_score}
+    for sequence in close_zone_oracle_candidate_sequences(game):
+        if not sequence:
+            continue
+        meta = close_zone_sequence_score(
+            game,
+            [int(action) for action in sequence],
+            stale_steps=stale_steps,
+        )
+        reason = str(meta.get("reason", "") or "")
+        if reason.startswith("copy_failed"):
+            return [game.IDLE], meta
+        score = float(meta.get("score", -float("inf")) or -float("inf"))
+
+        if score > best_score:
+            best_score = score
+            best_sequence = [int(action) for action in sequence]
+            best_meta = meta
+
+    if max_actions is not None:
+        best_sequence = best_sequence[: max(1, int(max_actions))]
+    return best_sequence, best_meta
+
+
 def close_zone_oracle_action(
     game: CrystalCaves,
     *,
@@ -284,81 +401,8 @@ def close_zone_oracle_action(
 ) -> tuple[int, dict[str, Any]]:
     """Choose a local close-zone label by simulating short macros on copied states."""
 
-    target, initial_distance_px = game._current_target()
-    if target is None or initial_distance_px == float("inf"):
-        return game.IDLE, {"reason": "no_target", "score": 0.0}
-
-    initial_distance = float(initial_distance_px / game.TILE_SIZE)
-    initial_crystals = len(game.crystals)
-    initial_progress = float(getattr(game, "_progress", 0.0) or 0.0)
-    initial_health = int(getattr(game, "health", 0) or 0)
-
-    best_score = -float("inf")
-    best_action = game.IDLE
-    best_meta: dict[str, Any] = {"reason": "no_candidate", "score": best_score}
-    for sequence in close_zone_oracle_candidate_sequences(game):
-        if not sequence:
-            continue
-        try:
-            probe = copy.deepcopy(game)
-        except Exception as exc:  # pragma: no cover - defensive; deepcopy is covered elsewhere
-            return game.IDLE, {"reason": f"copy_failed:{type(exc).__name__}", "score": 0.0}
-
-        distances = [initial_distance]
-        total_reward = 0.0
-        info: dict[str, Any] = {}
-        done = False
-        for action in sequence:
-            _, reward, done, info = probe.step(action)
-            total_reward += float(reward)
-            _, distance_px = probe._current_target()
-            if distance_px < float("inf"):
-                distances.append(float(distance_px / probe.TILE_SIZE))
-            if done:
-                break
-
-        target_after, _ = probe._current_target()
-        min_distance = min(distances)
-        final_distance = distances[-1]
-        crystals_collected = max(0, initial_crystals - len(probe.crystals))
-        progress_gain = float(getattr(probe, "_progress", 0.0) or 0.0) - initial_progress
-        health_loss = max(0, initial_health - int(getattr(probe, "health", initial_health) or 0))
-        best_delta = initial_distance - min_distance
-        final_delta = initial_distance - final_distance
-        target_completed = bool(info.get("won", False)) or target_after != target
-        first_action = int(sequence[0])
-
-        score = 0.0
-        if target_completed:
-            score += 2500.0
-        score += 1000.0 * crystals_collected
-        score += 600.0 * max(0.0, progress_gain)
-        score += 80.0 * best_delta
-        score += 25.0 * final_delta
-        score -= 8.0 * min_distance
-        score -= 2.0 * final_distance
-        score -= 120.0 * health_loss
-        score += 0.03 * total_reward
-        if game.ACTION_LABELS[first_action] in DEMO_JUMP_ACTIONS:
-            score += 0.25
-        if stale_steps >= 36:
-            score += 10.0 * best_delta
-
-        if score > best_score:
-            best_score = score
-            best_action = first_action
-            best_meta = {
-                "reason": "ok",
-                "score": float(score),
-                "target_completed": bool(target_completed),
-                "best_delta_tiles": float(best_delta),
-                "final_delta_tiles": float(final_delta),
-                "min_distance_tiles": float(min_distance),
-                "final_distance_tiles": float(final_distance),
-                "first_action": game.ACTION_LABELS[first_action],
-            }
-
-    return best_action, best_meta
+    plan, meta = close_zone_oracle_plan(game, stale_steps=stale_steps, max_actions=1)
+    return int(plan[0] if plan else game.IDLE), meta
 
 
 def route_floor_scripted_action(

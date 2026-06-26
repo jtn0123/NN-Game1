@@ -9,7 +9,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.game.crystal_caves import CrystalCaves
-from src.game.crystal_caves_drills import BRIDGE_CAVES, DRILL_BY_SKILL, DRILL_CAVES
+from src.game.crystal_caves_drills import (
+    BRIDGE_CAVES,
+    CONTACT_CAVES,
+    DRILL_BY_SKILL,
+    DRILL_CAVES,
+    contact_pool_caves,
+)
 from src.game.crystal_caves_gen import _find, cave_reachable
 
 
@@ -96,3 +102,69 @@ def test_game_loads_bridges_in_bridge_mode():
     state = game.reset()
     assert state.shape == (game.state_size,)
     assert game.crystals
+
+
+@pytest.mark.parametrize("spec", CONTACT_CAVES, ids=lambda s: s.name)
+def test_contact_is_well_formed(spec):
+    """Contact levels should keep the same compact cave contract as drills."""
+    rows = spec.layout
+    assert len(rows) == 18
+    assert all(len(r) == 44 for r in rows)
+    assert len(_find(rows, "P")) == 1
+    assert len(_find(rows, "E")) == 1
+    assert len(_find(rows, "*")) >= 1
+
+
+@pytest.mark.parametrize("spec", CONTACT_CAVES, ids=lambda s: s.name)
+def test_contact_is_solvable(spec):
+    """Contact levels must be reachable before they are used as teaching lanes."""
+    rows = spec.layout
+    player = _find(rows, "P")[0]
+    reach = cave_reachable(rows, player, doors_open=True)
+    for crystal in _find(rows, "*"):
+        assert crystal in reach, f"{spec.name}: crystal {crystal} unreachable"
+    assert _find(rows, "E")[0] in reach, f"{spec.name}: exit unreachable"
+
+
+def test_game_loads_contact_levels_in_contact_mode():
+    config = Config()
+    config.GAME_NAME = "crystal_caves"
+    config.CRYSTAL_CAVES_CONTACT_LEVELS = True
+    game = CrystalCaves(config, headless=True)
+    assert game.CAVES == CONTACT_CAVES
+    state = game.reset()
+    assert state.shape == (game.state_size,)
+    assert game.crystals
+
+
+def test_generated_contact_pool_is_unique_and_solvable():
+    pool = contact_pool_caves(32, seed=7)
+
+    assert len(pool) == 32
+    assert len({spec.layout for spec in pool}) == 32
+    for spec in pool:
+        rows = spec.layout
+        assert len(rows) == 18
+        assert all(len(row) == 44 for row in rows)
+        assert len(_find(rows, "P")) == 1
+        assert len(_find(rows, "E")) == 1
+        assert len(_find(rows, "*")) >= 1
+        reach = cave_reachable(rows, _find(rows, "P")[0], doors_open=True)
+        for crystal in _find(rows, "*"):
+            assert crystal in reach, f"{spec.name}: crystal {crystal} unreachable"
+        assert _find(rows, "E")[0] in reach, f"{spec.name}: exit unreachable"
+
+
+def test_game_loads_generated_contact_pool_in_contact_mode():
+    config = Config()
+    config.GAME_NAME = "crystal_caves"
+    config.CRYSTAL_CAVES_CONTACT_LEVELS = True
+    config.CRYSTAL_CAVES_CONTACT_POOL_SIZE = 16
+    config.CRYSTAL_CAVES_CONTACT_POOL_SEED = 3
+
+    game = CrystalCaves(config, headless=True)
+
+    assert len(game.CAVES) == 16
+    assert game.CAVES == contact_pool_caves(16, seed=3)
+    state = game.reset()
+    assert state.shape == (game.state_size,)
