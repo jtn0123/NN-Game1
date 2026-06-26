@@ -1,6 +1,90 @@
 # CHANGELOG
 
 
+## v0.6.0 (2026-06-26)
+
+### Bug Fixes
+
+- **crystal-caves**: Address review — validate geodesic weight, harden tests
+  ([`3f35a2b`](https://github.com/jtn0123/NN-Game1/commit/3f35a2b3d410adc19cb4256ab9a1ebe6d227b06a))
+
+CodeRabbit review on #35: - Validate CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT in Config.__post_init__
+  (must be finite and non-negative) so a bad override can't invert the shaping signal or produce NaN
+  targets. - test_geodesic_flag_disables_additive_approach_reward: assert the genuine-approach
+  precondition (same target, distance actually reduced) instead of leaving the second
+  _current_target() result unused. - test_locked_exit_hidden_in_global_map_by_default: add the
+  occupancy guard and assert the isolated exit cell is fully hidden (== 0.0), so a leaked 0.2 locked
+  marker or a masking objective can't make the test pass spuriously. - Add type-hint annotations to
+  the new test signatures per the repo typing rule.
+
+Tests: tests/test_crystal_caves.py + tests/test_evaluator.py green (98 passed). ruff/black/mypy
+  clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+### Features
+
+- **crystal-caves**: Geodesic PBRS potential + locked-exit map + win-rate selection tiebreaker
+  ([`b6316c2`](https://github.com/jtn0123/NN-Game1/commit/b6316c245fe82eba87302abb9ee5c376e44f18a2))
+
+Follow-up to #34 (n-step target fix, eval hardening, PBRS stage 1). Adds the next attributable
+  learning levers, both off by default so each can be A/B'd cleanly on the chain-progress surrogate
+  rather than changing default behavior silently.
+
+- Eval selection (default-on, measurement fix): restore win_rate as the dominant tiebreaker in the
+  Crystal Caves continuous selection score. #34 dropped win_rate entirely, so two policies that both
+  unlock the exit scored equally even if only one actually reached it. Now wins are preferred once
+  they appear, while the continuous terms still expose progress before wins do.
+
+- Geodesic PBRS potential (CRYSTAL_CAVES_GEODESIC_POTENTIAL, default off): fold a telescoping
+  "closeness to the current objective" term into the shaping potential. It re-aims with the
+  phase-ordered compass (switch -> crystals -> exit), is a deterministic function of state
+  (PBRS-valid), has terminal Phi=0 and subtracts an initial baseline so it telescopes to exactly 0
+  over a full episode (policy- invariant). It replaces the farmable additive per-step approach
+  reward when on, to avoid double-counting; the stall-timer mark on genuine approach is preserved so
+  the agent is never timed out mid-approach to the exit.
+
+- Locked-exit visibility (CRYSTAL_CAVES_SHOW_LOCKED_EXIT, default off): reveal the still-locked exit
+  in the coarse global objective map at a distinct lower value so the agent can learn its route
+  before the last crystal unlocks it.
+
+Tests: closeness monotonicity, geodesic-potential telescoping + terminal zero, additive-approach
+  disable with stall-timer preserved, locked-exit map visibility (hidden by default / shown when
+  enabled), and the win-rate selection tiebreaker.
+
+Full suite: 1092 passed, 115 skipped (web extras). ruff/black/mypy clean on changed files.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+- **crystal-caves**: Make the closeness potential a true geodesic (BFS route distance)
+  ([`9552546`](https://github.com/jtn0123/NN-Game1/commit/9552546e3a81cfc488529a10792cacf960a260f4))
+
+Addresses the remaining CodeRabbit review point on #35: the closeness term named "geodesic" was
+  using straight-line np.hypot distance, which in caves with walls or locked doors rewards pushing
+  toward a blocked shortcut.
+
+_target_closeness() now reads a real route distance from a multi-source BFS field
+  (_geodesic_distance_field): distance over traversable (non-solid) tiles from the active-phase
+  objective tiles, honouring walls and *locked* doors via _solid_at, and re-aiming switch ->
+  crystals -> exit. The field is cached and recomputed only when the objective set or open-door
+  state changes, so the per-step cost stays a dict lookup; closeness is normalized by the field's
+  max distance and returns 0 when the objective is unreachable from the player's tile. It remains a
+  deterministic function of state, so the PBRS term is still policy-invariant.
+
+Tests updated to derive player positions from the BFS field (guaranteeing connectivity) and to
+  assert closeness rises on a genuine geodesic approach.
+
+Full suite: 1092 passed, 115 skipped. ruff/black/mypy clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+
 ## v0.5.1 (2026-06-26)
 
 ### Bug Fixes
