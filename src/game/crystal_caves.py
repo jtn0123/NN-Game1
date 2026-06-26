@@ -349,7 +349,10 @@ class CrystalCaves(
         self._max_depth_row = 0
         self._progress = 0.0
         self._progress_initial = 0.0
+        self._closeness_initial = 0.0
         self._progress_phi = 0.0
+        self._geodesic_field: Optional[Dict[Tuple[int, int], int]] = None
+        self._geodesic_field_key: Optional[Tuple] = None
         self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
         self._obj_region_total = 0.0  # AI-2
         self._visited_novelty_cells: Set[Tuple[int, int]] = set()
@@ -498,6 +501,12 @@ class CrystalCaves(
         self._max_depth_row = self._player_tile()[1]
         self._progress = self._progress_potential()[0]
         self._progress_initial = self._progress
+        # Invalidate the geodesic cache for the new level before computing closeness.
+        self._geodesic_field = None
+        self._geodesic_field_key = None
+        # Capture initial closeness BEFORE the first PBRS potential so the geodesic
+        # term (like the base term) telescopes to exactly 0 over a full episode.
+        self._closeness_initial = self._target_closeness()
         self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
         self._end_reason = "running"
         self._visited_obj_cells = set()
@@ -623,7 +632,78 @@ class CrystalCaves(
         if is_terminal:
             return 0.0
         progress = self._progress_potential()[0] if raw_progress is None else raw_progress
-        return self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
+        phi = self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
+        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+            weight = float(getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT", 0.3))
+            closeness = self._target_closeness()
+            phi += self.PROGRESS_REWARD_SCALE * weight * (closeness - self._closeness_initial)
+        return phi
+
+    def _active_target_tiles(self) -> frozenset:
+        """The phase-ordered objective tiles the closeness potential aims at:
+        unthrown switches first (they gate crystals), then remaining crystals, then
+        the exit — mirroring the compass in ``_current_target``."""
+        unused_switches = self.switches - self.used_switches
+        if unused_switches and self.crystals:
+            return frozenset(unused_switches)
+        if self.crystals:
+            return frozenset(self.crystals)
+        if unused_switches:
+            return frozenset(unused_switches)
+        return frozenset({self.exit_pos})
+
+    def _geodesic_distance_field(self) -> Dict[Tuple[int, int], int]:
+        """Multi-source BFS tile distance to the nearest active objective over
+        traversable tiles (4-connected), honouring walls and *locked* doors via
+        ``_solid_at`` — a true route distance, not straight-line through walls.
+
+        Cached and only recomputed when the objective set or open-door state
+        changes (collecting a crystal, throwing a switch), so the per-step cost is
+        a dict lookup. Vertical adjacency approximates the agent's jump/fall, which
+        is enough for a smooth shaping gradient along the real corridors."""
+        key = (self._active_target_tiles(), frozenset(self.open_colors))
+        if self._geodesic_field is not None and self._geodesic_field_key == key:
+            return self._geodesic_field
+
+        field: Dict[Tuple[int, int], int] = {}
+        queue: Deque[Tuple[int, int]] = deque()
+        for col, row in key[0]:
+            if not self._solid_at(col, row):
+                field[(col, row)] = 0
+                queue.append((col, row))
+        while queue:
+            col, row = queue.popleft()
+            dist = field[(col, row)] + 1
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nc, nr = col + dc, row + dr
+                if (nc, nr) in field or self._solid_at(nc, nr):
+                    continue
+                field[(nc, nr)] = dist
+                queue.append((nc, nr))
+
+        self._geodesic_field = field
+        self._geodesic_field_key = key
+        return field
+
+    def _target_closeness(self) -> float:
+        """Normalized 0..1 geodesic closeness to the current objective (1 = on it).
+
+        Re-aims automatically as objectives are cleared, and is a deterministic
+        function of state, which keeps the closeness term PBRS-valid. Uses true
+        route distance (``_geodesic_distance_field``) so the gradient follows
+        traversable corridors instead of rewarding pushing toward a walled-off
+        shortcut. Returns 0 when the objective is unreachable from the player's
+        tile (e.g. behind a still-locked door)."""
+        field = self._geodesic_distance_field()
+        if not field:
+            return 0.0
+        dist = field.get(self._player_tile())
+        if dist is None:
+            return 0.0
+        norm = max(field.values())
+        if norm <= 0:
+            return 1.0
+        return float(1.0 - dist / norm)
 
     def _progress_shaping_reward(self, previous_phi: float) -> float:
         raw_progress = self._progress_potential()[0]
@@ -748,6 +828,11 @@ class CrystalCaves(
             mark(c, r, 0.6)
         if self.exit_unlocked:
             mark(self.exit_pos[0], self.exit_pos[1], 0.9)
+        elif getattr(self.config, "CRYSTAL_CAVES_SHOW_LOCKED_EXIT", False):
+            # Reveal the still-locked exit at a distinct, lower value so the agent can
+            # learn its route before the last crystal is collected. mark() keeps the
+            # higher value per cell, so a co-located crystal/switch still dominates.
+            mark(self.exit_pos[0], self.exit_pos[1], 0.2)
 
         self._state_array[start : start + gc * gr] = np.array(cells, dtype=np.float32)
 

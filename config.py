@@ -11,6 +11,7 @@ Usage:
     print(cfg.LEARNING_RATE)
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -124,6 +125,21 @@ class Config:
     # HELD-OUT set (one cave per eval game → reproducible, and unseen → a true
     # generalisation measure). 0 restores the legacy single-set behaviour.
     CRYSTAL_CAVES_POOL_SIZE: int = 64
+    # Fold a telescoping geodesic "closeness to the current objective" term into the
+    # potential-based shaping (PBRS), replacing the farmable additive per-step approach
+    # reward. Because it is potential-based (terminal Phi=0, telescopes to 0 over a full
+    # episode) it is policy-invariant — it only changes how fast the policy is found,
+    # not which policy is optimal. Off by default: this is an experiment lever to A/B on
+    # the chain-progress surrogate, not a silent default change.
+    CRYSTAL_CAVES_GEODESIC_POTENTIAL: bool = False
+    # Weight of the geodesic closeness term in the potential, relative to completion
+    # progress (whose component weights sum to 1.0). Small enough that collecting an
+    # objective always nets a positive shaped step despite the target-switch dip.
+    CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT: float = 0.3
+    # Show the still-locked exit in the coarse global objective map (at a distinct,
+    # lower value than the unlocked exit) so the agent can learn the route to it before
+    # the last crystal is collected, instead of the exit appearing only at unlock.
+    CRYSTAL_CAVES_SHOW_LOCKED_EXIT: bool = False
 
     # =========================================================================
     # SCREEN SETTINGS
@@ -737,6 +753,11 @@ class Config:
         self._require(0 < self.PER_BETA_START <= 1, "PER_BETA_START must be in (0, 1]")
         self._require(self.PER_BETA_FRAMES > 0, "PER_BETA_FRAMES must be positive")
         self._require(self.N_STEP_SIZE > 0, "N_STEP_SIZE must be positive")
+        self._require(
+            math.isfinite(self.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT)
+            and self.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT >= 0,
+            "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT must be finite and non-negative",
+        )
         self._require(self.SCREEN_WIDTH > 0, "Screen width must be positive")
         self._require(self.SCREEN_HEIGHT > 0, "Screen height must be positive")
         self._require(self.BALL_SPEED > 0, "Ball speed must be positive")

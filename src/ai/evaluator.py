@@ -277,12 +277,17 @@ class Evaluator:
             or results.mean_exit_unlocked_rate > 0.0
         )
         if has_chain_progress:
+            w_win = getattr(self.config, "EVAL_SELECTION_W_WIN", 1.0)
             w_crystal = getattr(self.config, "EVAL_SELECTION_W_CRYSTAL", 0.5)
             w_depth = getattr(self.config, "EVAL_SELECTION_W_DEPTH", 0.3)
             w_target = getattr(self.config, "EVAL_SELECTION_W_TARGET_DISTANCE", 0.2)
             w_exit = getattr(self.config, "EVAL_SELECTION_W_EXIT_UNLOCKED", 1.0)
+            # Keep the continuous terms so progress is visible before wins appear, but
+            # restore win_rate as the dominant tiebreaker: once two policies both unlock
+            # the exit, the one that actually reaches it (wins) must be preferred.
             return (
-                results.mean_crystal_frac * w_crystal
+                results.win_rate * w_win
+                + results.mean_crystal_frac * w_crystal
                 + results.mean_depth_frac * w_depth
                 + results.mean_target_distance_progress * w_target
                 + results.mean_exit_unlocked_rate * w_exit

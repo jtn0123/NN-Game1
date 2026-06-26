@@ -452,10 +452,19 @@ class CrystalCavesLogicMixin:
         if current_target != previous_target or not np.isfinite(previous_distance):
             return 0.0
 
-        reward = self._target_best_approach_reward(current_target, current_distance)
         tile_progress = (previous_distance - current_distance) / self.TILE_SIZE
+        # Reset the stall timer on real approach regardless of which approach-signal
+        # source is active, so the agent is never timed out mid-approach to the exit.
         if tile_progress > 0.03:
             self._mark_progress()
+
+        # When the telescoping geodesic potential is on it supplies the (unfarmable)
+        # approach gradient; skip the additive per-step approach reward to avoid
+        # double-counting and the back-and-forth farming the additive term enables.
+        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+            return 0.0
+
+        reward = self._target_best_approach_reward(current_target, current_distance)
         reward += float(
             np.clip(
                 tile_progress * self.APPROACH_REWARD_SCALE,
