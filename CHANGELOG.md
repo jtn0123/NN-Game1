@@ -1,6 +1,114 @@
 # CHANGELOG
 
 
+## v0.5.1 (2026-06-26)
+
+### Bug Fixes
+
+- **crystal-caves**: Correct dqn targets and eval selection
+  ([`70a8737`](https://github.com/jtn0123/NN-Game1/commit/70a87373fd14b109bf2c4298b28821c2e42d2039))
+
+### Chores
+
+- **deps**: Bump the github-actions group across 1 directory with 2 updates
+  ([`c9a5af0`](https://github.com/jtn0123/NN-Game1/commit/c9a5af02b456d7837828744b01c19a3bc2fedd3d))
+
+Bumps the github-actions group with 2 updates in the / directory:
+  [actions/checkout](https://github.com/actions/checkout) and
+  [actions/dependency-review-action](https://github.com/actions/dependency-review-action).
+
+Updates `actions/checkout` from 6 to 7 - [Release
+  notes](https://github.com/actions/checkout/releases) -
+  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/actions/checkout/compare/v6...v7)
+
+Updates `actions/dependency-review-action` from 4 to 5 - [Release
+  notes](https://github.com/actions/dependency-review-action/releases) -
+  [Commits](https://github.com/actions/dependency-review-action/compare/v4...v5)
+
+--- updated-dependencies: - dependency-name: actions/checkout dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major
+
+dependency-group: github-actions
+
+- dependency-name: actions/dependency-review-action dependency-version: '5'
+
+dependency-group: github-actions ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump the python-minor-and-patch group across 1 directory with 6 updates
+  ([`d817d28`](https://github.com/jtn0123/NN-Game1/commit/d817d28e971f2b4e840fc4e49f32185fed4b75c2))
+
+Bumps the python-minor-and-patch group with 6 updates in the / directory:
+
+| Package | From | To | | --- | --- | --- | | [torch](https://github.com/pytorch/pytorch) | `2.12.0`
+  | `2.12.1` | | [tqdm](https://github.com/tqdm/tqdm) | `4.68.1` | `4.68.3` | |
+  [pytest](https://github.com/pytest-dev/pytest) | `9.0.3` | `9.1.1` | |
+  [coverage](https://github.com/coveragepy/coveragepy) | `7.14.1` | `7.14.3` | |
+  [python-engineio](https://github.com/miguelgrinberg/python-engineio) | `4.13.2` | `4.13.3` | |
+  [python-socketio](https://github.com/miguelgrinberg/python-socketio) | `5.16.2` | `5.16.3` |
+
+Updates `torch` from 2.12.0 to 2.12.1 - [Release notes](https://github.com/pytorch/pytorch/releases)
+  - [Changelog](https://github.com/pytorch/pytorch/blob/main/RELEASE.md) -
+  [Commits](https://github.com/pytorch/pytorch/compare/v2.12.0...v2.12.1)
+
+Updates `tqdm` from 4.68.1 to 4.68.3 - [Release notes](https://github.com/tqdm/tqdm/releases) -
+  [Commits](https://github.com/tqdm/tqdm/compare/v4.68.1...v4.68.3)
+
+Updates `pytest` from 9.0.3 to 9.1.1 - [Release
+  notes](https://github.com/pytest-dev/pytest/releases) -
+  [Changelog](https://github.com/pytest-dev/pytest/blob/main/CHANGELOG.rst) -
+  [Commits](https://github.com/pytest-dev/pytest/compare/9.0.3...9.1.1)
+
+Updates `coverage` from 7.14.1 to 7.14.3 - [Release
+  notes](https://github.com/coveragepy/coveragepy/releases) -
+  [Changelog](https://github.com/coveragepy/coveragepy/blob/main/CHANGES.rst) -
+  [Commits](https://github.com/coveragepy/coveragepy/compare/7.14.1...7.14.3)
+
+Updates `python-engineio` from 4.13.2 to 4.13.3 - [Release
+  notes](https://github.com/miguelgrinberg/python-engineio/releases) -
+  [Changelog](https://github.com/miguelgrinberg/python-engineio/blob/main/CHANGES.md) -
+  [Commits](https://github.com/miguelgrinberg/python-engineio/compare/v4.13.2...v4.13.3)
+
+Updates `python-socketio` from 5.16.2 to 5.16.3 - [Release
+  notes](https://github.com/miguelgrinberg/python-socketio/releases) -
+  [Changelog](https://github.com/miguelgrinberg/python-socketio/blob/main/CHANGES.md) -
+  [Commits](https://github.com/miguelgrinberg/python-socketio/compare/v5.16.2...v5.16.3)
+
+--- updated-dependencies: - dependency-name: torch dependency-version: 2.12.1
+
+dependency-type: direct:production
+
+update-type: version-update:semver-patch
+
+dependency-group: python-minor-and-patch
+
+- dependency-name: tqdm dependency-version: 4.68.3
+
+- dependency-name: pytest dependency-version: 9.1.1
+
+update-type: version-update:semver-minor
+
+- dependency-name: coverage dependency-version: 7.14.3
+
+- dependency-name: python-engineio dependency-version: 4.13.3
+
+- dependency-name: python-socketio dependency-version: 5.16.3
+
+dependency-group: python-minor-and-patch ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Continuous Integration
+
+- Align release config check with checkout v7
+  ([`7ce119e`](https://github.com/jtn0123/NN-Game1/commit/7ce119e747d0c4e78d4cadbd6a512135d2423bc1))
+
+
 ## v0.5.0 (2026-06-26)
 
 ### Features
