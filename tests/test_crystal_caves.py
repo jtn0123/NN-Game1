@@ -1117,3 +1117,53 @@ class TestCrystalCavesRenderAndVectorized:
         assert rewards.shape == (3,)
         assert dones.shape == (3,)
         assert len(infos) == 3
+
+
+class TestReverseCurriculum:
+    """Mid-solution reverse-curriculum starts (solvability-preserving, training-only)."""
+
+    def test_off_by_default_keeps_full_start(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_REVERSE_CURRICULUM is False
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) == game.initial_crystals
+
+    def test_pre_collects_subset_and_opens_gates(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+
+        # A strict, non-empty subset of crystals remains...
+        assert 0 < len(game.crystals) < game.initial_crystals
+        # ...all gates are opened so the kept objectives stay reachable...
+        assert game.used_switches == set(game.switches)
+        assert game.open_colors == set(game.door_color.values())
+        # ...and the exit is locked iff crystals remain (here: still locked).
+        assert game.exit_unlocked == (len(game.crystals) == 0)
+        # State stays well-formed and normalized.
+        state = game.get_state()
+        assert np.all(np.isfinite(state))
+        assert np.all(state >= 0.0) and np.all(state <= 1.0)
+
+    def test_skipped_in_eval_mode(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        game._eval_mode = True  # eval must always measure the full task
+        game.reset()
+        assert len(game.crystals) == game.initial_crystals
+
+    def test_p_zero_keeps_full_start(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 0.0
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) == game.initial_crystals
+
+    def test_set_reverse_curriculum_p_clamps(self, config: Config) -> None:
+        game = CrystalCaves(config, headless=True)
+        game.set_reverse_curriculum_p(2.0)
+        assert game._reverse_curriculum_p == 1.0
+        game.set_reverse_curriculum_p(-1.0)
+        assert game._reverse_curriculum_p == 0.0

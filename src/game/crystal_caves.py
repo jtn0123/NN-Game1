@@ -238,6 +238,12 @@ class CrystalCaves(
         # built from the same family/difficulty with disjoint seed ranges.
         self._proc_params: Optional[dict] = None
         self._randomize_levels = False
+        # Reverse-curriculum probability (fraction of TRAINING resets that begin from a
+        # mid-solution state). Held as an attribute so a trainer can anneal it toward 0
+        # over training via set_reverse_curriculum_p(); never applied in eval mode.
+        self._reverse_curriculum_p = float(
+            getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_P", 0.0)
+        )
         self._eval_mode = False
         self._eval_caves: Tuple[CaveSpec, ...] = ()
         self._eval_cursor = 0
@@ -497,6 +503,12 @@ class CrystalCaves(
         self.bullets.clear()
         self.visual_events.clear()
 
+        # Reverse curriculum: on a fraction of TRAINING resets, begin from a valid
+        # mid-solution state so the agent gets dense reps of finishing the chain.
+        # Applied before the progress/closeness baselines so they reflect the start.
+        if not self._eval_mode:
+            self._apply_reverse_curriculum_start()
+
         # Completion-progress tracker (deepest row reached + PBRS potential).
         self._max_depth_row = self._player_tile()[1]
         self._progress = self._progress_potential()[0]
@@ -704,6 +716,44 @@ class CrystalCaves(
         if norm <= 0:
             return 1.0
         return float(1.0 - dist / norm)
+
+    def set_reverse_curriculum_p(self, p: float) -> None:
+        """Set the reverse-curriculum probability (clamped to [0, 1]). A trainer can
+        call this each episode to anneal mid-solution starts toward 0 as training
+        progresses, so the policy ends up trained on full-length episodes."""
+        self._reverse_curriculum_p = float(min(1.0, max(0.0, p)))
+
+    def _apply_reverse_curriculum_start(self) -> None:
+        """Begin the episode from a valid mid-solution state: pre-collect a subset of
+        crystals (those farthest from the exit) and open every gate, leaving the
+        player at the level's spawn. This is solvability-preserving — a subset of the
+        objectives with all doors open is still reachable from the original spawn that
+        could already clear the full level — so it never creates an unwinnable start.
+        It shortens the collect->...->exit chain the agent must complete, giving dense
+        practice on the final links (the documented full-game wall). Player relocation
+        toward the remaining objectives is a planned, oracle-verified follow-up."""
+        if not getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM", False):
+            return
+        if self._reverse_curriculum_p <= 0.0 or len(self.crystals) <= 1:
+            return
+        if np.random.random() >= self._reverse_curriculum_p:
+            return
+
+        total = len(self.crystals)
+        keep = int(np.random.randint(1, total))  # leave 1..total-1 crystals
+        exit_c, exit_r = self.exit_pos
+        farthest_first = sorted(
+            self.crystals,
+            key=lambda t: (t[0] - exit_c) ** 2 + (t[1] - exit_r) ** 2,
+            reverse=True,
+        )
+        for cr in farthest_first[: total - keep]:
+            self.crystals.discard(cr)
+
+        # Open every gate so the remaining (kept) crystals stay reachable.
+        self.used_switches = set(self.switches)
+        self.open_colors = set(self.door_color.values())
+        self.exit_unlocked = not self.crystals
 
     def _progress_shaping_reward(self, previous_phi: float) -> float:
         raw_progress = self._progress_potential()[0]

@@ -140,6 +140,15 @@ class Config:
     # lower value than the unlocked exit) so the agent can learn the route to it before
     # the last crystal is collected, instead of the exit appearing only at unlock.
     CRYSTAL_CAVES_SHOW_LOCKED_EXIT: bool = False
+    # Reverse curriculum: begin a fraction of TRAINING episodes from a valid
+    # mid-solution state (a subset of crystals pre-collected, gates opened) so the
+    # agent gets dense reps of finishing the collect->...->exit chain rather than only
+    # ever seeing it from scratch. Solvability-preserving; never applied during eval.
+    # Off by default — an experiment lever to A/B on the chain-progress surrogate.
+    CRYSTAL_CAVES_REVERSE_CURRICULUM: bool = False
+    # Fraction of training resets that use a mid-solution start (in [0, 1]). A trainer
+    # may anneal this toward 0 via CrystalCaves.set_reverse_curriculum_p().
+    CRYSTAL_CAVES_REVERSE_CURRICULUM_P: float = 0.5
 
     # =========================================================================
     # SCREEN SETTINGS
@@ -757,6 +766,10 @@ class Config:
             math.isfinite(self.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT)
             and self.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT >= 0,
             "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT must be finite and non-negative",
+        )
+        self._require(
+            0.0 <= self.CRYSTAL_CAVES_REVERSE_CURRICULUM_P <= 1.0,
+            "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
         )
         self._require(self.SCREEN_WIDTH > 0, "Screen width must be positive")
         self._require(self.SCREEN_HEIGHT > 0, "Screen height must be positive")
