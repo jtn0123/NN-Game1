@@ -95,7 +95,7 @@ def validate_release_workflow(workflow_text: str) -> None:
 def validate_ci_workflow(workflow_text: str) -> None:
     required_snippets = [
         "python .github/scripts/check_release_config.py",
-        "actions/checkout@v6",
+        "actions/checkout@v7",
         "actions/setup-python@v6",
         "actions/setup-node@v6",
     ]
