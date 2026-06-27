@@ -325,6 +325,16 @@ def build_summary(
             n_bootstrap=bootstrap_samples,
             bootstrap_seed=bootstrap_seed,
         )
+        if not comp.get("paired_rows"):
+            # Both arms have rows but no (seed, level_index) overlap -> nothing to pair;
+            # mark skipped rather than emit bogus zero-valued CIs.
+            comparisons[arm] = {
+                "metric": DELTA_METRIC,
+                "skipped": True,
+                "reason": "no matched seed/level rows for baseline and arm",
+                "paired_rows": 0,
+            }
+            continue
         # Correct (paired-row) bootstrap on each surrogate metric, in addition to the
         # seed-grouped one above (kept for reference / back-compat).
         comp["paired_row"] = {
@@ -540,6 +550,9 @@ def main(argv: list[str] | None = None) -> int:
     opts = parser.parse_args(argv)
 
     arms = [a.strip() for a in opts.arms.split(",") if a.strip()]
+    # Dedupe (preserve order) so a repeated arm can't append rows twice and bias it.
+    seen_arms: set[str] = set()
+    arms = [a for a in arms if not (a in seen_arms or seen_arms.add(a))]
     unknown = [a for a in arms if a not in ARMS]
     if unknown:
         parser.error(f"unknown arms: {unknown}. Known: {sorted(ARMS)}")

@@ -796,8 +796,9 @@ class Config:
             "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
         )
         self._require(
-            self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES >= 0,
-            "CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES must be non-negative",
+            isinstance(self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES, int)
+            and self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES >= 0,
+            "CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES must be a non-negative integer",
         )
         self._require(
             math.isfinite(self.CRYSTAL_CAVES_NGU_BETA) and self.CRYSTAL_CAVES_NGU_BETA >= 0,

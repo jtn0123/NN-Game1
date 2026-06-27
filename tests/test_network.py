@@ -473,7 +473,7 @@ class TestSpatialDQN:
 
         assert logits.shape == (4, 10)
 
-    def test_global_average_pool_option(self):
+    def test_global_average_pool_option(self) -> None:
         """GAP collapses the conv map to one value per filter (translation-invariant):
         fc input = conv_channels(32) + gmap + meta, independent of window size; default
         flatten keeps the full spatial map. Both still produce valid Q-values."""
