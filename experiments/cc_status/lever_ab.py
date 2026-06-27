@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -475,6 +476,84 @@ def print_table(summary: dict[str, Any]) -> None:
         print(line, flush=True)
 
 
+def _format_duration(seconds: float) -> str:
+    """Render a seconds duration as a compact ``2h44m`` / ``37m`` / ``45s`` string."""
+    seconds = max(0, int(seconds))
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
+def print_running_ab(
+    rows_by_arm: dict[str, list[dict[str, Any]]],
+    *,
+    arms: list[str],
+    completed: int,
+    total: int,
+    elapsed: float,
+    last_label: str,
+    bootstrap_samples: int,
+    bootstrap_seed: int,
+) -> None:
+    """Print a partial paired A/B snapshot after each (arm, seed) run completes.
+
+    Lets a long sweep be watched live instead of blind: the per-arm IQMs and the
+    paired delta + 95% CI vs baseline appear immediately and tighten as more seeds
+    land. The numbers are PARTIAL until the sweep finishes -- early rows are noisy
+    and the CI is wide -- so treat them as a progress indicator, not a verdict.
+    """
+    eta = (elapsed / completed) * (total - completed) if completed else 0.0
+    print(
+        f"\n[progress {completed}/{total} runs | elapsed {_format_duration(elapsed)}"
+        f" | eta ~{_format_duration(eta)} | last: {last_label}]",
+        flush=True,
+    )
+    print(f"  running paired A/B on '{DELTA_METRIC}' (partial, B - baseline):", flush=True)
+    header = (
+        "  " + "arm".ljust(16) + "rows".rjust(6) + "tgtIQM".rjust(10) + "crystIQM".rjust(10)
+    ) + "   dTgt(B-A) [95% CI]"
+    print(header, flush=True)
+    baseline_rows = rows_by_arm.get(BASELINE_ARM, [])
+    for arm in arms:
+        arm_rows = rows_by_arm.get(arm, [])
+        tgt = (
+            interquartile_mean([float(r.get(DELTA_METRIC, 0.0) or 0.0) for r in arm_rows])
+            if arm_rows
+            else 0.0
+        )
+        cryst = (
+            interquartile_mean([float(r.get("crystal_frac", 0.0) or 0.0) for r in arm_rows])
+            if arm_rows
+            else 0.0
+        )
+        line = (
+            "  " + arm.ljust(16) + str(len(arm_rows)).rjust(6) + f"{tgt:10.4f}" + f"{cryst:10.4f}"
+        )
+        if arm != BASELINE_ARM:
+            if baseline_rows and arm_rows:
+                ci = paired_row_ci(
+                    baseline_rows,
+                    arm_rows,
+                    metric=DELTA_METRIC,
+                    n_bootstrap=bootstrap_samples,
+                    seed=bootstrap_seed,
+                )
+                if ci["n"]:
+                    line += (
+                        f"   {ci['iqm']:+.4f} [{ci['ci_low']:+.4f},{ci['ci_high']:+.4f}]"
+                        f"  (n_pairs={ci['n']})"
+                    )
+                else:
+                    line += "   (no paired rows yet)"
+            else:
+                line += "   (waiting for rows)"
+        print(line, flush=True)
+
+
 def run_lever_ab(
     *,
     arms: list[str],
@@ -495,6 +574,9 @@ def run_lever_ab(
         rows_path.unlink()
 
     rows_by_arm: dict[str, list[dict[str, Any]]] = {arm: [] for arm in arms}
+    total_runs = len(seeds) * len(arms)
+    completed_runs = 0
+    sweep_start = time.monotonic()
     for seed in seeds:
         for arm in arms:
             print(
@@ -514,7 +596,19 @@ def run_lever_ab(
             for row in rows:
                 append_jsonl(rows_path, row)
             rows_by_arm[arm].extend(rows)
+            completed_runs += 1
             print(f"[{arm} seed={seed}] {len(rows)} rows", flush=True)
+            # Live, partial paired snapshot so a multi-hour sweep is never blind.
+            print_running_ab(
+                rows_by_arm,
+                arms=arms,
+                completed=completed_runs,
+                total=total_runs,
+                elapsed=time.monotonic() - sweep_start,
+                last_label=f"{arm}/seed_{seed}",
+                bootstrap_samples=bootstrap_samples,
+                bootstrap_seed=bootstrap_seed,
+            )
 
     summary = build_summary(
         rows_by_arm,
