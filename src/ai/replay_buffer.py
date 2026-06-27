@@ -94,6 +94,24 @@ class ReplayBuffer:
             raise ValueError(f"n_step_length must be positive, got {n_step_length}")
         return n_step_length
 
+    @staticmethod
+    def _validate_truncateds(truncateds: np.ndarray | None, batch_size: int) -> np.ndarray | None:
+        """Coerce an optional truncated mask to a 1-D bool array of length batch_size.
+
+        Returns None when no mask is given. Raises ValueError on a mask whose shape
+        does not match the batch, so a broadcastable/short/long mask can never
+        silently rewrite the wrong done flags.
+        """
+        if truncateds is None:
+            return None
+        truncateds = np.asarray(truncateds).astype(bool)
+        actual_length = truncateds.shape[0] if truncateds.ndim >= 1 else 0
+        if truncateds.ndim != 1 or actual_length != batch_size:
+            raise ValueError(
+                f"truncateds length mismatch: expected {batch_size}, got {actual_length}"
+            )
+        return truncateds
+
     def push(
         self,
         state: np.ndarray,
@@ -169,8 +187,8 @@ class ReplayBuffer:
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
+        truncateds = self._validate_truncateds(truncateds, len(states))
         if truncateds is not None:
-            truncateds = np.asarray(truncateds).astype(bool)
             # Truncation-aware bootstrapping: a transition that only ended because the
             # clock ran out is not a real terminal, so keep its done flag False.
             dones = np.logical_and(dones.astype(bool), ~truncateds)
@@ -806,7 +824,16 @@ class NStepReplayBuffer(ReplayBuffer):
         if done or len(self._n_step_buffer) >= self.n_steps:
             self._flush_buffer(self._n_step_buffer)
 
-    def push_batch(self, states, actions, rewards, next_states, dones, truncateds=None):
+    def push_batch(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        dones: np.ndarray,
+        n_step_lengths: np.ndarray | None = None,
+        truncateds: np.ndarray | None = None,
+    ) -> None:
         """Accumulate N-step returns per parallel environment (vectorized path).
 
         The inherited ReplayBuffer.push_batch stores raw 1-step transitions, which is
@@ -821,18 +848,23 @@ class NStepReplayBuffer(ReplayBuffer):
         env resets), but the stored done flag is kept False so the N-step return
         bootstraps the value of the final state instead of treating the clock as a
         terminal worth zero.
+
+        ``n_step_lengths`` is accepted only for signature compatibility with the base
+        ReplayBuffer.push_batch; this buffer computes the true n-step spans itself, so
+        any caller-supplied value is intentionally ignored.
         """
+        del n_step_lengths  # computed internally; present only for LSP compatibility
         states = np.asarray(states)
         actions = np.asarray(actions)
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
-        truncateds = None if truncateds is None else np.asarray(truncateds).astype(bool)
         batch_size = len(states)
         if batch_size <= 0:
             raise ValueError("push_batch requires at least one experience")
         if states.ndim != 2 or next_states.shape != states.shape:
             raise ValueError("states and next_states must be matching 2D arrays")
+        truncateds = self._validate_truncateds(truncateds, batch_size)
 
         if len(self._env_buffers) != batch_size:
             # Env count changed: flush any partial per-env trajectories, then resize.

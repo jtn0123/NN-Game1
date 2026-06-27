@@ -11,7 +11,7 @@ from typing import List, Tuple
 
 import numpy as np
 
-from .replay_buffer import PrioritizedReplayBuffer
+from .replay_buffer import PrioritizedReplayBuffer, ReplayBuffer
 
 
 class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
@@ -51,7 +51,15 @@ class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
         if done or len(self._n_step_buffer) >= self.n_steps:
             self._flush_buffer(self._n_step_buffer)
 
-    def push_batch(self, states, actions, rewards, next_states, dones, truncateds=None):
+    def push_batch(
+        self,
+        states: np.ndarray,
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: np.ndarray,
+        dones: np.ndarray,
+        truncateds: np.ndarray | None = None,
+    ) -> None:
         """Accumulate N-step returns per parallel environment.
 
         ``truncateds`` (optional) marks envs that ended on a time/no-progress cutoff
@@ -64,12 +72,12 @@ class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
-        truncateds = None if truncateds is None else np.asarray(truncateds).astype(bool)
         batch_size = len(states)
         if batch_size <= 0:
             raise ValueError("push_batch requires at least one experience")
         if states.ndim != 2 or next_states.shape != states.shape:
             raise ValueError("states and next_states must be matching 2D arrays")
+        truncateds = ReplayBuffer._validate_truncateds(truncateds, batch_size)
 
         if len(self._env_buffers) != batch_size:
             for buf in self._env_buffers:
