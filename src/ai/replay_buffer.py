@@ -146,6 +146,7 @@ class ReplayBuffer:
         next_states: np.ndarray,
         dones: np.ndarray,
         n_step_lengths: np.ndarray | None = None,
+        truncateds: np.ndarray | None = None,
     ) -> None:
         """
         Add multiple experiences to the buffer at once (vectorized for speed).
@@ -159,12 +160,20 @@ class ReplayBuffer:
             rewards: Batch of rewards received (batch_size,)
             next_states: Batch of next states (batch_size, state_size)
             dones: Batch of done flags (batch_size,)
+            truncateds: Optional mask of transitions that ended by time/no-progress
+                cutoff rather than a real terminal. Where set, the stored done flag
+                is cleared so the TD target still bootstraps the final state.
         """
         states = np.asarray(states)
         actions = np.asarray(actions)
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
+        if truncateds is not None:
+            truncateds = np.asarray(truncateds).astype(bool)
+            # Truncation-aware bootstrapping: a transition that only ended because the
+            # clock ran out is not a real terminal, so keep its done flag False.
+            dones = np.logical_and(dones.astype(bool), ~truncateds)
         if n_step_lengths is None:
             n_step_lengths = np.ones(len(states), dtype=np.int64)
         else:
@@ -797,7 +806,7 @@ class NStepReplayBuffer(ReplayBuffer):
         if done or len(self._n_step_buffer) >= self.n_steps:
             self._flush_buffer(self._n_step_buffer)
 
-    def push_batch(self, states, actions, rewards, next_states, dones):
+    def push_batch(self, states, actions, rewards, next_states, dones, truncateds=None):
         """Accumulate N-step returns per parallel environment (vectorized path).
 
         The inherited ReplayBuffer.push_batch stores raw 1-step transitions, which is
@@ -806,12 +815,19 @@ class NStepReplayBuffer(ReplayBuffer):
         curriculum forces) calls push_batch, so without this override n-step is silently
         bypassed. Each parallel env accumulates its own trajectory and flushes N-step
         returns exactly like the single-env push() path.
+
+        ``truncateds`` (optional) marks envs that ended on a time/no-progress cutoff
+        rather than a real terminal. A truncated env still flushes its trajectory (the
+        env resets), but the stored done flag is kept False so the N-step return
+        bootstraps the value of the final state instead of treating the clock as a
+        terminal worth zero.
         """
         states = np.asarray(states)
         actions = np.asarray(actions)
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
+        truncateds = None if truncateds is None else np.asarray(truncateds).astype(bool)
         batch_size = len(states)
         if batch_size <= 0:
             raise ValueError("push_batch requires at least one experience")
@@ -825,6 +841,8 @@ class NStepReplayBuffer(ReplayBuffer):
             self._env_buffers = [[] for _ in range(batch_size)]
 
         for i in range(batch_size):
+            ended = bool(dones[i])
+            truncated = bool(truncateds[i]) if truncateds is not None else False
             buf = self._env_buffers[i]
             buf.append(
                 (
@@ -832,10 +850,12 @@ class NStepReplayBuffer(ReplayBuffer):
                     int(actions[i]),
                     float(rewards[i]),
                     np.asarray(next_states[i]).copy(),
-                    bool(dones[i]),
+                    # Store as terminal only for real terminals; a truncated episode
+                    # bootstraps, but still flushes below so it never bridges resets.
+                    ended and not truncated,
                 )
             )
-            if bool(dones[i]) or len(buf) >= self.n_steps:
+            if ended or len(buf) >= self.n_steps:
                 self._flush_buffer(buf)
 
     def _flush_buffer(self, buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]]) -> None:

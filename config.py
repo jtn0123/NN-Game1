@@ -173,6 +173,15 @@ class Config:
     # times out" failure. Off by default; an experiment lever (flows through n-step).
     CRYSTAL_CAVES_NGU_BONUS: bool = False
     CRYSTAL_CAVES_NGU_BETA: float = 0.02
+    # Truncation-aware bootstrapping (Pardo et al. 2018, "Time Limits in RL").
+    # When an episode ends only because it hit a time/no-progress cutoff ("timeout"
+    # or "stalled") rather than a real environment terminal ("won"/"killed"), the
+    # stored transition is marked NOT done so the TD target still bootstraps the
+    # value of the final state. The episode is still reset normally. This stops the
+    # agent from learning that "the clock running out" is a real terminal worth
+    # value 0, which otherwise drags Q-values down. Off by default; an A/B lever.
+    # Only affects the vectorized training path (the one Crystal Caves uses).
+    CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP: bool = False
 
     # =========================================================================
     # SCREEN SETTINGS

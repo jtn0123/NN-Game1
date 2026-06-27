@@ -593,6 +593,30 @@ class TestVectorizedTraining:
         # Check the last few entries match our done flags
         assert len(agent.memory) >= batch_size
 
+    def test_remember_batch_accepts_truncateds(self, agent, config):
+        """remember_batch should accept a truncated mask and store those as non-terminal."""
+        batch_size = 4
+        states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
+        actions = np.array([0, 1, 2, 0])
+        rewards = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        next_states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
+        dones = np.array([False, True, False, True])
+        # The second env ended by truncation; the fourth was a real terminal.
+        truncateds = np.array([False, True, False, False])
+
+        before = agent.memory._size
+        agent.remember_batch(
+            states, actions, rewards, next_states, dones, truncateds=truncateds
+        )
+
+        # The truncated env still flushed (it ended), so at least one new transition lands.
+        assert agent.memory._size > before
+        # No transition stored for the truncated env may carry a terminal flag from it.
+        flushed_dones = agent.memory.dones[: agent.memory._size]
+        # The real terminal (env 3) contributes exactly one terminal-flagged transition;
+        # the truncated terminal (env 1) contributes none.
+        assert flushed_dones.sum() <= 1.0
+
 
 class TestQValueComputation:
     """Test Q-value computation internals."""

@@ -30,6 +30,10 @@ from src.app.training_runtime import (
 )
 from src.game import BaseGame, BaseVecGame, list_games
 
+# End reasons that represent an artificial cutoff (time / no-progress limit) rather
+# than a real environment terminal. Used for truncation-aware bootstrapping.
+_TRUNCATION_END_REASONS = frozenset({"timeout", "stalled"})
+
 WEB_AVAILABLE: bool
 WebDashboard: Optional[type[Any]]
 try:
@@ -101,6 +105,10 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
         self._existing_dashboard = existing_dashboard
         self.running = True
         self.model_service = AppModelService(config)
+        # Cache the truncation-aware bootstrapping flag for the hot vectorized loop.
+        self._truncation_bootstrap = bool(
+            getattr(config, "CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP", False)
+        )
 
         # Apply CLI overrides to config
         if args.lr:
@@ -972,7 +980,23 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
             self.exploitation_actions += num_exploited
 
             next_states, rewards, dones, infos = self.vec_env.step_no_copy(actions)
-            self.agent.remember_batch(states, actions, rewards, next_states, dones)
+            # Truncation-aware bootstrapping: when enabled, transitions that ended only
+            # because the clock / no-progress limit ran out are stored as non-terminal
+            # so the TD target still bootstraps the final state (the env still resets).
+            truncateds = None
+            if self._truncation_bootstrap and np.any(dones):
+                truncateds = np.fromiter(
+                    (
+                        bool(dones[i])
+                        and infos[i].get("end_reason") in _TRUNCATION_END_REASONS
+                        for i in range(len(dones))
+                    ),
+                    dtype=bool,
+                    count=len(dones),
+                )
+            self.agent.remember_batch(
+                states, actions, rewards, next_states, dones, truncateds=truncateds
+            )
             self.agent.learn()
 
             env_episode_rewards += rewards

@@ -79,6 +79,9 @@ ARMS: dict[str, dict[str, object]] = {
         "CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE": True,
     },
     "ngu": {"CRYSTAL_CAVES_NGU_BONUS": True, "CRYSTAL_CAVES_NGU_BETA": 0.02},
+    # Truncation-aware bootstrapping: timeouts/stalls stored as non-terminal so the
+    # value still bootstraps the final state (Pardo et al. 2018). Cheap, budget-free.
+    "truncation_fix": {"CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP": True},
     # --- 2x2 representation x diversity (baseline reward only) ---
     # 'baseline' above is the control: flat MLP, pool=24 (make_config default).
     "mlp_p256": {"CRYSTAL_CAVES_POOL_SIZE": 256},

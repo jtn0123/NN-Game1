@@ -51,13 +51,20 @@ class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
         if done or len(self._n_step_buffer) >= self.n_steps:
             self._flush_buffer(self._n_step_buffer)
 
-    def push_batch(self, states, actions, rewards, next_states, dones):
-        """Accumulate N-step returns per parallel environment."""
+    def push_batch(self, states, actions, rewards, next_states, dones, truncateds=None):
+        """Accumulate N-step returns per parallel environment.
+
+        ``truncateds`` (optional) marks envs that ended on a time/no-progress cutoff
+        rather than a real terminal. A truncated env still flushes its trajectory, but
+        the stored done flag is kept False so the N-step return bootstraps the value of
+        the final state (truncation-aware bootstrapping, Pardo et al. 2018).
+        """
         states = np.asarray(states)
         actions = np.asarray(actions)
         rewards = np.asarray(rewards)
         next_states = np.asarray(next_states)
         dones = np.asarray(dones)
+        truncateds = None if truncateds is None else np.asarray(truncateds).astype(bool)
         batch_size = len(states)
         if batch_size <= 0:
             raise ValueError("push_batch requires at least one experience")
@@ -70,6 +77,8 @@ class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
             self._env_buffers = [[] for _ in range(batch_size)]
 
         for i in range(batch_size):
+            ended = bool(dones[i])
+            truncated = bool(truncateds[i]) if truncateds is not None else False
             buf = self._env_buffers[i]
             buf.append(
                 (
@@ -77,10 +86,10 @@ class PrioritizedNStepReplayBuffer(PrioritizedReplayBuffer):
                     int(actions[i]),
                     float(rewards[i]),
                     np.asarray(next_states[i]).copy(),
-                    bool(dones[i]),
+                    ended and not truncated,
                 )
             )
-            if bool(dones[i]) or len(buf) >= self.n_steps:
+            if ended or len(buf) >= self.n_steps:
                 self._flush_buffer(buf)
 
     def _flush_buffer(self, buffer: List[Tuple[np.ndarray, int, float, np.ndarray, bool]]) -> None:
