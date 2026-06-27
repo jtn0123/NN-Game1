@@ -44,6 +44,7 @@ from experiments.cc_status.paired_ab import (  # noqa: E402
     _evaluate_one_level,
     aggregate_paired_ab,
     interquartile_mean,
+    pair_level_rows,
 )
 from experiments.cc_status.training import (  # noqa: E402
     TUTORIAL_MIN_EPSILON,
@@ -78,6 +79,15 @@ ARMS: dict[str, dict[str, object]] = {
         "CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE": True,
     },
     "ngu": {"CRYSTAL_CAVES_NGU_BONUS": True, "CRYSTAL_CAVES_NGU_BETA": 0.02},
+    # --- 2x2 representation x diversity (baseline reward only) ---
+    # 'baseline' above is the control: flat MLP, pool=24 (make_config default).
+    "mlp_p256": {"CRYSTAL_CAVES_POOL_SIZE": 256},
+    "cnn_p24": {"USE_CNN_STATE": True, "CRYSTAL_CAVES_CNN_GLOBAL_POOL": True},
+    "cnn_p256": {
+        "USE_CNN_STATE": True,
+        "CRYSTAL_CAVES_CNN_GLOBAL_POOL": True,
+        "CRYSTAL_CAVES_POOL_SIZE": 256,
+    },
 }
 
 BASELINE_ARM = "baseline"
@@ -93,8 +103,42 @@ PER_ARM_METRICS = (
     "steps",
 )
 
-# The paired-delta metric reported with bootstrap CIs.
-DELTA_METRIC = "selection_score"
+# The paired-delta metric reported with bootstrap CIs. Primary is a CONTINUOUS,
+# non-saturated surrogate (selection_score's crystal/win components are ~0 at this
+# budget, so it carries little signal); we also report deltas on these others.
+DELTA_METRIC = "target_distance_progress"
+SURROGATE_DELTA_METRICS = ("target_distance_progress", "depth_frac", "selection_score")
+
+
+def paired_row_ci(
+    a_rows: list[dict[str, Any]],
+    b_rows: list[dict[str, Any]],
+    *,
+    metric: str,
+    n_bootstrap: int,
+    seed: int,
+) -> dict[str, Any]:
+    """IQM + 95% CI of the paired (B-A) delta, resampling the PAIRED (seed,level)
+    ROWS with replacement -- not the 3 seed-groups. The seed-grouped bootstrap in
+    paired_ab effectively has n=3 (inflated CIs); pairing by level gives ~seeds*games
+    units, the correct resample population for a paired design."""
+    paired = pair_level_rows(a_rows, b_rows, metric=metric)
+    deltas = [float(p.get(f"delta_{metric}", 0.0) or 0.0) for p in paired]
+    if not deltas:
+        return {"iqm": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n": 0}
+    point = interquartile_mean(deltas)
+    rng = np.random.default_rng(seed)
+    n = len(deltas)
+    samples = []
+    for _ in range(max(1, n_bootstrap)):
+        idx = rng.integers(0, n, size=n)
+        samples.append(interquartile_mean([deltas[i] for i in idx]))
+    return {
+        "iqm": float(point),
+        "ci_low": float(np.quantile(samples, 0.025)),
+        "ci_high": float(np.quantile(samples, 0.975)),
+        "n": n,
+    }
 
 
 def make_config(overrides: dict[str, object], *, difficulty: str) -> Config:
@@ -274,13 +318,26 @@ def build_summary(
                 "paired_rows": 0,
             }
             continue
-        comparisons[arm] = aggregate_paired_ab(
+        comp = aggregate_paired_ab(
             baseline_rows,
             arm_rows,
             metric=DELTA_METRIC,
             n_bootstrap=bootstrap_samples,
             bootstrap_seed=bootstrap_seed,
         )
+        # Correct (paired-row) bootstrap on each surrogate metric, in addition to the
+        # seed-grouped one above (kept for reference / back-compat).
+        comp["paired_row"] = {
+            metric: paired_row_ci(
+                baseline_rows,
+                arm_rows,
+                metric=metric,
+                n_bootstrap=bootstrap_samples,
+                seed=bootstrap_seed + i,
+            )
+            for i, metric in enumerate(SURROGATE_DELTA_METRICS)
+        }
+        comparisons[arm] = comp
 
     return {
         "mode": "lever-ab",
@@ -324,27 +381,28 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "> Difficulty note: `tutorial` caves have a single crystal, so reverse-"
         "curriculum levers can't engage. Use `easy`+ for those.",
         "",
-        "## Paired delta vs baseline (B - A, IQM + 95% CI)",
+        "## Paired delta vs baseline (B - A, IQM + 95% CI, paired-row bootstrap)",
         "",
-        f"Metric: `{summary['delta_metric']}` -- positive favors the arm over baseline.",
+        "Resamples paired (seed, level) rows -- positive favors the arm. Columns are "
+        "the surrogate metrics; `target_distance_progress` is the primary "
+        "(non-saturated) signal.",
         "",
-        "| arm | paired delta (IQM, 95% CI) | arm IQM | baseline IQM | paired rows |",
-        "| --- | --- | --- | --- | --- |",
+        "| arm | target_progress Δ | depth_frac Δ | selection_score Δ |",
+        "| --- | --- | --- | --- |",
     ]
     for arm in summary["arms"]:
         if arm == summary["baseline_arm"]:
             continue
         comp = summary["comparisons_vs_baseline"].get(arm, {})
         if comp.get("skipped"):
-            lines.append(f"| {arm} | _skipped: {comp.get('reason', '')}_ | - | - | 0 |")
+            lines.append(f"| {arm} | _skipped: {comp.get('reason', '')}_ | - | - |")
             continue
-        delta = comp["paired_delta_b_minus_a"]
-        arm_iqm = comp["arm_b"]["iqm"]
-        base_iqm = comp["arm_a"]["iqm"]
-        lines.append(
-            f"| {arm} | {_fmt_ci(delta)} | {arm_iqm:.4f} | {base_iqm:.4f} "
-            f"| {comp.get('paired_rows', 0)} |"
-        )
+        pr = comp.get("paired_row", {})
+        cells = [
+            _fmt_ci(pr[m]) if m in pr else "-"
+            for m in ("target_distance_progress", "depth_frac", "selection_score")
+        ]
+        lines.append(f"| {arm} | {cells[0]} | {cells[1]} | {cells[2]} |")
 
     lines += [
         "",

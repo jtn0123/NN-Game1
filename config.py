@@ -113,6 +113,11 @@ class Config:
     # Spatial layout of the state vector (window/gmap/meta dims), published by the
     # game at runtime so a CNN can reshape the flat state. None for non-spatial games.
     STATE_LAYOUT: Optional[dict] = None
+    # SpatialDQN: global-average-pool the conv feature map instead of flattening it.
+    # Flatten preserves absolute tile position (memorizes layouts); GAP is translation-
+    # invariant and is the standard ProcGen fix for the train-solves/test-fails gap.
+    # Off by default (keeps current behavior); a generalization experiment lever.
+    CRYSTAL_CAVES_CNN_GLOBAL_POOL: bool = False
     # Objective/threat budget for generated caves: "easy" is a learnable
     # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
     # game (10-14 crystals + hazards + enemies).

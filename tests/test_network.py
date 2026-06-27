@@ -473,6 +473,25 @@ class TestSpatialDQN:
 
         assert logits.shape == (4, 10)
 
+    def test_global_average_pool_option(self):
+        """GAP collapses the conv map to one value per filter (translation-invariant):
+        fc input = conv_channels(32) + gmap + meta, independent of window size; default
+        flatten keeps the full spatial map. Both still produce valid Q-values."""
+        layout = self._layout()
+        size = 11 * 19 + 6 * 11 + 20
+
+        flat = SpatialDQN(size, 10, Config(), layout)
+        assert flat.global_pool is False
+
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_CNN_GLOBAL_POOL = True
+        gap = SpatialDQN(size, 10, cfg, layout)
+        assert gap.global_pool is True
+        # GAP fc takes 32 conv channels + 66 gmap + 20 meta = 118, far fewer than flatten.
+        assert gap.fc.in_features == 32 + 66 + 20
+        assert gap.fc.in_features < flat.fc.in_features
+        assert gap(torch.zeros(4, size)).shape == (4, 10)
+
     def test_contact_action_head_detaches_shared_features(self):
         layout = self._layout()
         size = 11 * 19 + 6 * 11 + 20

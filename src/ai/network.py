@@ -724,7 +724,12 @@ class SpatialDQN(nn.Module):
         self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2)
-        conv_out = 32 * max(1, wr // 2) * max(1, wc // 2)
+        # Global average pooling over the conv feature map (translation-invariant) vs
+        # the default flatten (which preserves absolute position and tends to memorize
+        # layouts). Off by default to keep existing checkpoints/behavior; flag it on to
+        # test whether translation invariance closes the train/test generalization gap.
+        self.global_pool = bool(getattr(self.config, "CRYSTAL_CAVES_CNN_GLOBAL_POOL", False))
+        conv_out = 32 if self.global_pool else 32 * max(1, wr // 2) * max(1, wc // 2)
         hidden = (self.config.HIDDEN_LAYERS or [256, 128])[0]
         merged = conv_out + self.gmap_size + self.meta_size
         self.fc = nn.Linear(merged, hidden)
@@ -759,7 +764,7 @@ class SpatialDQN(nn.Module):
         if self.capture_activations:
             # one value per conv filter (mean over the spatial grid) for the viz
             self.activations["layer_0"] = x.mean(dim=(2, 3)).detach()
-        x = torch.flatten(x, 1)
+        x = x.mean(dim=(2, 3)) if self.global_pool else torch.flatten(x, 1)
         x = torch.cat([x, gmap, meta], dim=1)
         x = F.relu(self.fc(x))
         if self.capture_activations:
