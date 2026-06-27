@@ -987,8 +987,7 @@ class HeadlessTrainer(HeadlessRuntimeHelpersMixin, HeadlessDashboardMixin):
             if self._truncation_bootstrap and np.any(dones):
                 truncateds = np.fromiter(
                     (
-                        bool(dones[i])
-                        and infos[i].get("end_reason") in _TRUNCATION_END_REASONS
+                        bool(dones[i]) and infos[i].get("end_reason") in _TRUNCATION_END_REASONS
                         for i in range(len(dones))
                     ),
                     dtype=bool,

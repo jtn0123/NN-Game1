@@ -460,7 +460,9 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         """
         # Use push_batch if available (standard ReplayBuffer), otherwise fall back to loop
         if hasattr(self.memory, "push_batch"):
-            self.memory.push_batch(states, actions, rewards, next_states, dones, truncateds=truncateds)
+            self.memory.push_batch(
+                states, actions, rewards, next_states, dones, truncateds=truncateds
+            )
         else:
             trunc = None if truncateds is None else np.asarray(truncateds).astype(bool)
             for i in range(len(states)):

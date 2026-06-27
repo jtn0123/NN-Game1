@@ -605,9 +605,7 @@ class TestVectorizedTraining:
         truncateds = np.array([False, True, False, False])
 
         before = agent.memory._size
-        agent.remember_batch(
-            states, actions, rewards, next_states, dones, truncateds=truncateds
-        )
+        agent.remember_batch(states, actions, rewards, next_states, dones, truncateds=truncateds)
 
         # The truncated env still flushed (it ended), so at least one new transition lands.
         assert agent.memory._size > before
