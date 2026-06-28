@@ -148,11 +148,14 @@ def run_diagnosis(
     checkpoint_every: int = 0,
     truncation_bootstrap: bool = False,
     force_cpu: bool = False,
+    weight_decay: float = 0.0,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
     if pool_size is not None:
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
+    if weight_decay > 0:
+        overrides["WEIGHT_DECAY"] = weight_decay
     if force_cpu:
         # On Apple Silicon (M-series) CPU beats MPS for this small model; force it.
         overrides["FORCE_CPU"] = True
@@ -379,6 +382,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Force CPU (recommended on Apple Silicon: faster than MPS for this model).",
     )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.0,
+        help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
+    )
     parser.add_argument("--out", default="scratchpad/diag")
     args = parser.parse_args(argv)
     run_diagnosis(
@@ -392,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         checkpoint_every=args.checkpoint_every,
         truncation_bootstrap=args.truncation_bootstrap,
         force_cpu=args.cpu,
+        weight_decay=args.weight_decay,
     )
     return 0
 

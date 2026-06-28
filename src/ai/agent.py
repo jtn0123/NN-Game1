@@ -116,6 +116,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         self.optimizer = optim.Adam(
             self.policy_net.parameters(),  # type: ignore[attr-defined]
             lr=self.config.LEARNING_RATE,
+            weight_decay=getattr(self.config, "WEIGHT_DECAY", 0.0),
         )
 
         # Learning rate scheduler

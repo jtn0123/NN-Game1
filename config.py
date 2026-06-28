@@ -375,6 +375,11 @@ class Config:
     # Typical range: 0.0001 to 0.001
     LEARNING_RATE: float = 0.0001
 
+    # L2 weight decay (Adam). 0 = off (default). A small value (e.g. 1e-4) is a
+    # standard regularizer against memorization in procedurally generated tasks;
+    # exposed as an experiment lever for the Crystal Caves generalization work.
+    WEIGHT_DECAY: float = 0.0
+
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
     # 0.90 = more short-sighted, prefers immediate rewards
@@ -759,6 +764,7 @@ class Config:
     def __post_init__(self):
         """Validation and derived calculations."""
         self._require(self.LEARNING_RATE > 0, "Learning rate must be positive")
+        self._require(self.WEIGHT_DECAY >= 0, "Weight decay must be non-negative")
         self._require(0 < self.GAMMA <= 1, "Gamma must be in (0, 1]")
         self._require(self.MEMORY_SIZE > 0, "Memory size must be positive")
         self._require(self.BATCH_SIZE > 0, "Batch size must be positive")
