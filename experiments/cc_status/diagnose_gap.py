@@ -96,6 +96,25 @@ def _eval_split(
     return rows
 
 
+def _mean_q(trainer: Any, config: Any, *, games: int) -> float:
+    """Mean of max-Q over the first `games` training-level start states. Tracks value
+    magnitude over training: a steady drift toward large-negative is the Q-divergence
+    signature the instability investigation flagged."""
+    game = CrystalCaves(config, headless=True)
+    game.use_train_levels(games)
+    game.reset_eval_cursor()
+    agent = trainer.agent
+    qmax: list[float] = []
+    agent_state = _enter_greedy_agent_eval(agent)
+    try:
+        for _ in range(games):
+            state = game.reset()
+            qmax.append(float(np.max(agent.get_q_values(state))))
+    finally:
+        _restore_greedy_agent_eval(agent, agent_state)
+    return float(np.mean(qmax)) if qmax else 0.0
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Per-split summary: rates for win/exit, IQM for the continuous surrogates."""
     out: dict[str, float] = {"n": float(len(rows))}
@@ -122,7 +141,16 @@ def _average_curve(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
         points = by_episode[episode]
         train = {m: float(np.mean([p["train"][m] for p in points])) for m in metrics}
         test = {m: float(np.mean([p["test"][m] for p in points])) for m in metrics}
-        averaged.append({"episode": episode, "n_seeds": len(points), "train": train, "test": test})
+        mean_q = float(np.mean([p.get("mean_q", 0.0) for p in points]))
+        averaged.append(
+            {
+                "episode": episode,
+                "n_seeds": len(points),
+                "train": train,
+                "test": test,
+                "mean_q": mean_q,
+            }
+        )
     return averaged
 
 
@@ -197,14 +225,17 @@ def run_diagnosis(
             train_rows = _eval_split(trainer, config, split="train", games=games, run_dir=run_dir)
             test_rows = _eval_split(trainer, config, split="test", games=games, run_dir=run_dir)
             tr, te = _aggregate(train_rows), _aggregate(test_rows)
+            mean_q = _mean_q(trainer, config, games=games)
             if checkpoint_every > 0:
-                curve.append({"seed": seed, "episode": milestone, "train": tr, "test": te})
+                curve.append(
+                    {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
+                )
                 print(
                     f"[seed {seed} @ep{milestone}] "
                     f"TRAIN win={tr['won']:.2f} cryst={tr['crystal_frac']:.3f} "
                     f"tgt={tr['target_distance_progress']:.3f} | "
                     f"TEST win={te['won']:.2f} cryst={te['crystal_frac']:.3f} "
-                    f"tgt={te['target_distance_progress']:.3f}",
+                    f"tgt={te['target_distance_progress']:.3f} | meanQ={mean_q:+.2f}",
                     flush=True,
                 )
 
@@ -262,6 +293,7 @@ def _print_curve(curve: list[dict[str, Any]]) -> None:
         + "crystals".rjust(10)
         + "closeness".rjust(11)
         + "exitUnlk".rjust(10)
+        + "meanQ".rjust(10)
     )
     print(header, flush=True)
     for point in curve:
@@ -271,7 +303,8 @@ def _print_curve(curve: list[dict[str, Any]]) -> None:
             + f"{tr['won']:8.2f}"
             + f"{tr['crystal_frac']:10.3f}"
             + f"{tr['target_distance_progress']:11.3f}"
-            + f"{tr['exit_unlocked_rate']:10.2f}",
+            + f"{tr['exit_unlocked_rate']:10.2f}"
+            + f"{point.get('mean_q', 0.0):+10.2f}",
             flush=True,
         )
 
