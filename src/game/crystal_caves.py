@@ -465,6 +465,20 @@ class CrystalCaves(
         self._eval_mode = True
         self._eval_cursor = 0
 
+    def use_train_levels(self, count: int) -> None:
+        """Switch into deterministic eval mode but over the TRAINING pool itself --
+        the caves the agent actually learned on. Lets us measure the train-vs-held-out
+        generalisation gap (train score >> held-out score => memorisation; both low =>
+        the agent never learned the skill). Cycles the first ``count`` training caves
+        in a fixed order, like use_eval_levels but WITHOUT the held-out seed offset.
+        No-op for authored (non-procedural) caves."""
+        if self._proc_params is None or count <= 0 or not self.CAVES:
+            return
+        n = min(count, len(self.CAVES))
+        self._eval_caves = tuple(self.CAVES[:n])
+        self._eval_mode = True
+        self._eval_cursor = 0
+
     def reset_eval_cursor(self) -> None:
         """Restart the held-out cycle so every evaluation plays the same levels in
         the same order (reproducible eval across training checkpoints)."""
