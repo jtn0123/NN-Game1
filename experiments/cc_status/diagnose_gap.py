@@ -130,11 +130,16 @@ def run_diagnosis(
     pool_size: int | None,
     out_dir: Path,
     checkpoint_every: int = 0,
+    truncation_bootstrap: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
     if pool_size is not None:
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
+    if truncation_bootstrap:
+        # Treat timeout/stalled cutoffs as non-terminal so the TD target bootstraps
+        # instead of learning value = raw -8/-6 (which n-step(6) compounds backwards).
+        overrides["CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP"] = True
 
     train_rows_all: list[dict[str, Any]] = []
     test_rows_all: list[dict[str, Any]] = []
@@ -205,7 +210,14 @@ def run_diagnosis(
             m: round(train_agg[m] - test_agg[m], 4) for m in (*_RATE_METRICS, *_IQM_METRICS)
         },
         "curve": curve,
+        "truncation_bootstrap": truncation_bootstrap,
     }
+    # Best checkpoint = the milestone with the strongest TRAINING competence (win, then
+    # crystals). Prior experiments graded the FINAL net, which can be the collapsed one;
+    # grading the best checkpoint de-confounds "collapsed" from "doesn't generalise".
+    if curve:
+        best = max(curve, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"]))
+        summary["best"] = best
     write_json(out_dir / "diagnosis.json", summary)
     if curve:
         _print_curve(curve)
@@ -270,6 +282,26 @@ def _print_report(summary: dict[str, Any]) -> None:
             + f"{gap[metric]:+11.3f}",
             flush=True,
         )
+    # Best-checkpoint readout + collapse indicator. The verdict is based on the agent's
+    # BEST training competence, not the (possibly collapsed) final episode.
+    best = summary.get("best")
+    if best:
+        btr, bte = best["train"], best["test"]
+        print(
+            f"\nbest checkpoint: ep{best['episode']} "
+            f"(TRAIN win={btr['won']:.2f} cryst={btr['crystal_frac']:.3f} | "
+            f"TEST win={bte['won']:.2f} cryst={bte['crystal_frac']:.3f})",
+            flush=True,
+        )
+        collapse = btr["won"] - tr["won"]
+        if collapse > 0.1:
+            print(
+                f"  ⚠ COLLAPSE: train win fell {btr['won']:.2f} (ep{best['episode']}) "
+                f"-> {tr['won']:.2f} (final). The agent unlearned; training past the peak hurts.",
+                flush=True,
+            )
+        tr, te = btr, bte  # base the verdict below on the best checkpoint
+
     # Plain-English verdict heuristic on the primary learnability signals.
     train_learns = tr["crystal_frac"] > 0.15 or tr["won"] > 0.1
     test_learns = te["crystal_frac"] > 0.15 or te["won"] > 0.1
@@ -312,6 +344,11 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="If >0, grade train+test every N episodes to plot a learning curve.",
     )
+    parser.add_argument(
+        "--truncation-bootstrap",
+        action="store_true",
+        help="Treat timeout/stalled as non-terminal (bootstrap) to test the collapse fix.",
+    )
     parser.add_argument("--out", default="scratchpad/diag")
     args = parser.parse_args(argv)
     run_diagnosis(
@@ -323,6 +360,7 @@ def main(argv: list[str] | None = None) -> int:
         pool_size=args.pool_size,
         out_dir=Path(args.out),
         checkpoint_every=args.checkpoint_every,
+        truncation_bootstrap=args.truncation_bootstrap,
     )
     return 0
 
