@@ -110,6 +110,16 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     return out
 
 
+def _milestones(episodes: int, checkpoint_every: int) -> list[int]:
+    """Episode counts at which to evaluate; always includes the final episode."""
+    if checkpoint_every <= 0:
+        return [episodes]
+    ms = list(range(checkpoint_every, episodes + 1, checkpoint_every))
+    if not ms or ms[-1] != episodes:
+        ms.append(episodes)
+    return ms
+
+
 def run_diagnosis(
     *,
     difficulty: str,
@@ -119,6 +129,7 @@ def run_diagnosis(
     vec_envs: int,
     pool_size: int | None,
     out_dir: Path,
+    checkpoint_every: int = 0,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -127,6 +138,7 @@ def run_diagnosis(
 
     train_rows_all: list[dict[str, Any]] = []
     test_rows_all: list[dict[str, Any]] = []
+    curve: list[dict[str, Any]] = []
     for seed in seeds:
         print(
             f"\n===== baseline seed={seed} (difficulty={difficulty}, episodes={episodes}) =====",
@@ -140,20 +152,39 @@ def run_diagnosis(
         trainer = prepare_trainer(config, episodes=episodes, vec_envs=vec_envs)
         if trainer.agent.epsilon < TUTORIAL_MIN_EPSILON:
             trainer.agent.epsilon = TUTORIAL_MIN_EPSILON
-        run_training(
-            trainer,
-            run_dir=run_dir,
-            label=f"diag/seed_{seed}",
-            total_episodes=episodes,
-            heartbeat_seconds=0.0,
-        )
-        train_rows = _eval_split(trainer, config, split="train", games=games, run_dir=run_dir)
-        test_rows = _eval_split(trainer, config, split="test", games=games, run_dir=run_dir)
+
+        # Train in segments to each milestone, grading both splits at each so we can
+        # see whether competence is rising, flat, or never starts (slow vs stuck).
+        train_rows: list[dict[str, Any]] = []
+        test_rows: list[dict[str, Any]] = []
+        for milestone in _milestones(episodes, checkpoint_every):
+            run_training(
+                trainer,
+                run_dir=run_dir,
+                label=f"diag/seed_{seed}",
+                total_episodes=episodes,
+                heartbeat_seconds=0.0,
+                target_episodes=milestone if checkpoint_every > 0 else None,
+            )
+            train_rows = _eval_split(trainer, config, split="train", games=games, run_dir=run_dir)
+            test_rows = _eval_split(trainer, config, split="test", games=games, run_dir=run_dir)
+            tr, te = _aggregate(train_rows), _aggregate(test_rows)
+            if checkpoint_every > 0:
+                curve.append({"seed": seed, "episode": milestone, "train": tr, "test": te})
+                print(
+                    f"[seed {seed} @ep{milestone}] "
+                    f"TRAIN win={tr['won']:.2f} cryst={tr['crystal_frac']:.3f} "
+                    f"tgt={tr['target_distance_progress']:.3f} | "
+                    f"TEST win={te['won']:.2f} cryst={te['crystal_frac']:.3f} "
+                    f"tgt={te['target_distance_progress']:.3f}",
+                    flush=True,
+                )
+
         train_rows_all.extend(train_rows)
         test_rows_all.extend(test_rows)
         tr, te = _aggregate(train_rows), _aggregate(test_rows)
         print(
-            f"[seed {seed}] TRAIN win={tr['won']:.2f} cryst={tr['crystal_frac']:.3f} "
+            f"[seed {seed}] FINAL TRAIN win={tr['won']:.2f} cryst={tr['crystal_frac']:.3f} "
             f"tgt={tr['target_distance_progress']:.3f} | "
             f"TEST win={te['won']:.2f} cryst={te['crystal_frac']:.3f} "
             f"tgt={te['target_distance_progress']:.3f}",
@@ -173,10 +204,36 @@ def run_diagnosis(
         "gap_train_minus_test": {
             m: round(train_agg[m] - test_agg[m], 4) for m in (*_RATE_METRICS, *_IQM_METRICS)
         },
+        "curve": curve,
     }
     write_json(out_dir / "diagnosis.json", summary)
+    if curve:
+        _print_curve(curve)
     _print_report(summary)
     return summary
+
+
+def _print_curve(curve: list[dict[str, Any]]) -> None:
+    """Learning curve: key metrics over training, to separate 'slow' from 'stuck'."""
+    print("\n==== LEARNING CURVE (train split over time) ====", flush=True)
+    header = (
+        "episode".rjust(8)
+        + "win".rjust(8)
+        + "crystals".rjust(10)
+        + "closeness".rjust(11)
+        + "exitUnlk".rjust(10)
+    )
+    print(header, flush=True)
+    for point in curve:
+        tr = point["train"]
+        print(
+            f"{point['episode']:8d}"
+            + f"{tr['won']:8.2f}"
+            + f"{tr['crystal_frac']:10.3f}"
+            + f"{tr['target_distance_progress']:11.3f}"
+            + f"{tr['exit_unlocked_rate']:10.2f}",
+            flush=True,
+        )
 
 
 def _print_report(summary: dict[str, Any]) -> None:
@@ -249,6 +306,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--vec-envs", type=int, default=8)
     parser.add_argument("--pool-size", type=int, default=None)
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help="If >0, grade train+test every N episodes to plot a learning curve.",
+    )
     parser.add_argument("--out", default="scratchpad/diag")
     args = parser.parse_args(argv)
     run_diagnosis(
@@ -259,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
         vec_envs=args.vec_envs,
         pool_size=args.pool_size,
         out_dir=Path(args.out),
+        checkpoint_every=args.checkpoint_every,
     )
     return 0
 
