@@ -182,6 +182,16 @@ class Config:
     # value 0, which otherwise drags Q-values down. Off by default; an A/B lever.
     # Only affects the vectorized training path (the one Crystal Caves uses).
     CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP: bool = False
+    # Infinite-levels training (ProcGen's dominant generalization lever): when on,
+    # each TRAINING reset generates a fresh procedural cave (seed offset 1_000_000+,
+    # disjoint from the fixed pool at offset 0 and the held-out eval block at offset
+    # 500000) instead of sampling the fixed pool. Eval is unaffected. Off by default.
+    CRYSTAL_CAVES_REGENERATE_EACH_EPISODE: bool = False
+    # Drop level-identity / absolute-position features from the observation that let
+    # the agent MEMORISE rather than generalise: zeroes the level_index slot (a pure
+    # train-set ID) and the absolute player_x/player_y slots, keeping the egocentric
+    # window + target compass. Shape-preserving (zeroed, not removed). Off by default.
+    CRYSTAL_CAVES_DROP_LEAK_FEATURES: bool = False
 
     # =========================================================================
     # SCREEN SETTINGS

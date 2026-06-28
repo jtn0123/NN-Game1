@@ -324,6 +324,12 @@ class CrystalCaves(
             self.CAVE_DRESSING = {i: () for i in range(count)}
             # Sample a random cave per episode once the pool has variety to offer.
             self._randomize_levels = pool_size > 0 and count > 1
+        # Infinite-levels lever: counter for the per-episode regenerated training seed.
+        self._train_gen_counter = 0
+        # Cache the de-leak flag (read every step in get_state).
+        self._drop_leak_features = bool(
+            getattr(self.config, "CRYSTAL_CAVES_DROP_LEAK_FEATURES", False)
+        )
         self.level: CaveSpec = self.CAVES[0]
         self.grid: List[List[str]] = []
         self.level_cols = 0
@@ -488,10 +494,20 @@ class CrystalCaves(
         """Reset and return the initial state. In eval mode, deterministically cycle
         the held-out caves; in training with a pool, sample a random cave; otherwise
         fall back to the legacy CAVES[level_index] behaviour."""
+        regenerate = self._proc_params is not None and bool(
+            getattr(self.config, "CRYSTAL_CAVES_REGENERATE_EACH_EPISODE", False)
+        )
         if self._eval_mode and self._eval_caves:
             self.level_index = self._eval_cursor % len(self._eval_caves)
             self.level = self._eval_caves[self.level_index]
             self._eval_cursor += 1
+        elif regenerate:
+            # Infinite-levels: a brand-new procedural cave every training episode.
+            # Seed offset 1_000_000+ is disjoint from the fixed pool (offset 0) and
+            # the held-out eval block (offset 500000), so eval stays a true holdout.
+            self.level = self._build_cave_set(1, seed_offset=1_000_000 + self._train_gen_counter)[0]
+            self.level_index = 0
+            self._train_gen_counter += 1
         elif self._randomize_levels and len(self.CAVES) > 1:
             self.level_index = int(np.random.randint(len(self.CAVES)))
             self.level = self.CAVES[self.level_index]
@@ -897,6 +913,13 @@ class CrystalCaves(
             target_kind,
             min(1.0, self.steps_since_progress / self.MAX_STEPS_WITHOUT_PROGRESS),
         ]
+        if self._drop_leak_features:
+            # Zero the level-identity + absolute-position slots that enable
+            # memorisation (keep the egocentric window + target compass). Indices are
+            # positions in `metadata`: 0 = player_x, 1 = player_y, 10 = level_index.
+            metadata[0] = 0.0
+            metadata[1] = 0.0
+            metadata[10] = 0.0
         if self._history_state_enabled:
             metadata.extend(self._history_metadata())
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)

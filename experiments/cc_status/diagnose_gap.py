@@ -177,6 +177,8 @@ def run_diagnosis(
     truncation_bootstrap: bool = False,
     force_cpu: bool = False,
     weight_decay: float = 0.0,
+    regenerate_each_episode: bool = False,
+    drop_leak_features: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -184,6 +186,10 @@ def run_diagnosis(
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
     if weight_decay > 0:
         overrides["WEIGHT_DECAY"] = weight_decay
+    if regenerate_each_episode:
+        overrides["CRYSTAL_CAVES_REGENERATE_EACH_EPISODE"] = True
+    if drop_leak_features:
+        overrides["CRYSTAL_CAVES_DROP_LEAK_FEATURES"] = True
     if force_cpu:
         # On Apple Silicon (M-series) CPU beats MPS for this small model; force it.
         overrides["FORCE_CPU"] = True
@@ -416,6 +422,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Force CPU (recommended on Apple Silicon: faster than MPS for this model).",
     )
     parser.add_argument(
+        "--regenerate-each-episode",
+        action="store_true",
+        help="Infinite-levels: generate a fresh procedural cave every training episode.",
+    )
+    parser.add_argument(
+        "--drop-leak-features",
+        action="store_true",
+        help="Zero level_index + absolute player_x/y from the observation (anti-memorization).",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -435,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
         truncation_bootstrap=args.truncation_bootstrap,
         force_cpu=args.cpu,
         weight_decay=args.weight_decay,
+        regenerate_each_episode=args.regenerate_each_episode,
+        drop_leak_features=args.drop_leak_features,
     )
     return 0
 
