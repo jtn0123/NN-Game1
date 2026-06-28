@@ -147,11 +147,15 @@ def run_diagnosis(
     out_dir: Path,
     checkpoint_every: int = 0,
     truncation_bootstrap: bool = False,
+    force_cpu: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
     if pool_size is not None:
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
+    if force_cpu:
+        # On Apple Silicon (M-series) CPU beats MPS for this small model; force it.
+        overrides["FORCE_CPU"] = True
     if truncation_bootstrap:
         # Treat timeout/stalled cutoffs as non-terminal so the TD target bootstraps
         # instead of learning value = raw -8/-6 (which n-step(6) compounds backwards).
@@ -370,6 +374,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Treat timeout/stalled as non-terminal (bootstrap) to test the collapse fix.",
     )
+    parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="Force CPU (recommended on Apple Silicon: faster than MPS for this model).",
+    )
     parser.add_argument("--out", default="scratchpad/diag")
     args = parser.parse_args(argv)
     run_diagnosis(
@@ -382,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
         out_dir=Path(args.out),
         checkpoint_every=args.checkpoint_every,
         truncation_bootstrap=args.truncation_bootstrap,
+        force_cpu=args.cpu,
     )
     return 0
 
