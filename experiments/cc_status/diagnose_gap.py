@@ -110,6 +110,22 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     return out
 
 
+def _average_curve(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse the per-(seed, episode) curve into per-episode means across seeds, so
+    the best checkpoint and the verdict reflect the typical run, not one lucky seed."""
+    by_episode: dict[int, list[dict[str, Any]]] = {}
+    for point in curve:
+        by_episode.setdefault(int(point["episode"]), []).append(point)
+    metrics = (*_RATE_METRICS, *_IQM_METRICS)
+    averaged: list[dict[str, Any]] = []
+    for episode in sorted(by_episode):
+        points = by_episode[episode]
+        train = {m: float(np.mean([p["train"][m] for p in points])) for m in metrics}
+        test = {m: float(np.mean([p["test"][m] for p in points])) for m in metrics}
+        averaged.append({"episode": episode, "n_seeds": len(points), "train": train, "test": test})
+    return averaged
+
+
 def _milestones(episodes: int, checkpoint_every: int) -> list[int]:
     """Episode counts at which to evaluate; always includes the final episode."""
     if checkpoint_every <= 0:
@@ -213,14 +229,19 @@ def run_diagnosis(
         "truncation_bootstrap": truncation_bootstrap,
     }
     # Best checkpoint = the milestone with the strongest TRAINING competence (win, then
-    # crystals). Prior experiments graded the FINAL net, which can be the collapsed one;
-    # grading the best checkpoint de-confounds "collapsed" from "doesn't generalise".
-    if curve:
-        best = max(curve, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"]))
-        summary["best"] = best
+    # crystals), chosen on the SEED-AVERAGED curve. Prior experiments graded the FINAL
+    # net, which can be the collapsed one; grading the best checkpoint de-confounds
+    # "collapsed" from "doesn't generalise", and averaging across seeds avoids picking
+    # one lucky run.
+    curve_avg = _average_curve(curve) if curve else []
+    if curve_avg:
+        summary["curve_avg"] = curve_avg
+        summary["best"] = max(
+            curve_avg, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"])
+        )
     write_json(out_dir / "diagnosis.json", summary)
-    if curve:
-        _print_curve(curve)
+    if curve_avg:
+        _print_curve(curve_avg)
     _print_report(summary)
     return summary
 
