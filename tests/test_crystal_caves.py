@@ -1336,6 +1336,53 @@ class TestReverseCurriculumRelocation:
         assert nearest_sq(game._player_tile()) <= nearest_sq(spawn)
 
 
+class TestReverseExitCurriculum:
+    """Reverse-EXIT curriculum: post-collection start near the open exit (leg-2 drill)."""
+
+    def test_off_keeps_crystals(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM is False
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) > 0
+        assert game.exit_unlocked is False
+
+    def test_on_clears_crystals_and_unlocks_exit(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) == 0
+        assert game.exit_unlocked is True
+        # Post-collection world state: every gate is open.
+        assert game.used_switches == set(game.switches)
+
+    def test_start_can_reach_exit_oracle(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        for _ in range(8):
+            game.reset()
+            # Safety invariant: the open exit is jump-aware reachable from the start.
+            assert game.exit_pos in game._oracle_reachable(game._player_tile())
+
+    def test_eval_mode_disables_curriculum(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        game._eval_mode = True
+        game.reset()
+        # Eval starts are always full-from-scratch (curriculum is training-only).
+        assert len(game.crystals) > 0
+        assert game.exit_unlocked is False
+
+    def test_p_zero_is_noop(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 0.0
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) > 0
+
+
 class TestNGUBonus:
     """NGU-style episodic novelty bonus (#5)."""
 

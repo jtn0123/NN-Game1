@@ -172,6 +172,18 @@ class Config:
     # to the spawn if no verified tile is found). Requires REVERSE_CURRICULUM on.
     # Separate flag so it can be A/B'd independently of the base reverse curriculum.
     CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE: bool = False
+    # Reverse-EXIT curriculum (leg-2 practice): on a fraction of TRAINING resets, begin
+    # the episode already in the post-collection state — all crystals collected, every
+    # gate open, exit unlocked — with the player dropped on a safe standing tile near the
+    # open exit (jump-aware oracle-verified reachable). This gives dense, isolated reps of
+    # the documented WALL: the collect->exit conversion / route-to-exit skill the leg-2
+    # probe measured at ~0.5 held-out. Distinct from the base reverse curriculum (which
+    # keeps SOME crystals); this clears ALL of them to drill only the final exit hop.
+    # Solvability-preserving (a subset/empty objective set with all doors open is always
+    # reachable from a spawn that could clear the full level); never applied during eval.
+    CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM: bool = False
+    # Fraction of training resets that use the reverse-exit (near-open-exit) start, [0, 1].
+    CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P: float = 0.5
     # NGU-style episodic novelty bonus: a small per-step intrinsic reward for reaching
     # a (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen THIS
     # episode, decaying as 1/sqrt(visits). Attacks the "stops reaching new cells ->
@@ -824,6 +836,10 @@ class Config:
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_CURRICULUM_P <= 1.0,
             "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
+        )
+        self._require(
+            0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,
+            "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P must be in [0, 1]",
         )
         self._require(
             isinstance(self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES, int)

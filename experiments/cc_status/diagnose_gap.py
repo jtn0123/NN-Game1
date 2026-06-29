@@ -227,6 +227,7 @@ def run_diagnosis(
     geodesic: bool = False,
     geodesic_weight: float | None = None,
     geodesic_after_unlock: bool = False,
+    reverse_exit_curriculum_p: float | None = None,
     leg2_probe: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -263,6 +264,12 @@ def run_diagnosis(
         # Treat timeout/stalled cutoffs as non-terminal so the TD target bootstraps
         # instead of learning value = raw -8/-6 (which n-step(6) compounds backwards).
         overrides["CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP"] = True
+    if reverse_exit_curriculum_p is not None:
+        # Reverse-EXIT curriculum: on a fraction of training resets, start already in the
+        # post-collection state next to the open exit, drilling the leg-2 route-to-exit
+        # skill in isolation (the documented collect->exit wall). RUN-10 lever.
+        overrides["CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM"] = True
+        overrides["CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P"] = reverse_exit_curriculum_p
 
     train_rows_all: list[dict[str, Any]] = []
     test_rows_all: list[dict[str, Any]] = []
@@ -558,6 +565,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Apply geodesic shaping ONLY after the exit unlocks (leg-2/route-to-exit only).",
     )
     parser.add_argument(
+        "--reverse-exit-curriculum-p",
+        type=float,
+        default=None,
+        help="Fraction of TRAINING resets that start in the post-collection state next to "
+        "the open exit, drilling the leg-2 route-to-exit skill (RUN-10 lever); e.g. 0.5.",
+    )
+    parser.add_argument(
         "--leg2-probe",
         action="store_true",
         help="After training, probe held-out route-to-exit: drop the agent next to the open "
@@ -589,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         geodesic=args.geodesic,
         geodesic_weight=args.geodesic_weight,
         geodesic_after_unlock=args.geodesic_after_unlock,
+        reverse_exit_curriculum_p=args.reverse_exit_curriculum_p,
         leg2_probe=args.leg2_probe,
     )
     return 0

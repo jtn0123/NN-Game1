@@ -544,6 +544,7 @@ class CrystalCaves(
         # Applied before the progress/closeness baselines so they reflect the start.
         if not self._eval_mode:
             self._apply_reverse_curriculum_start()
+            self._apply_reverse_exit_curriculum_start()
 
         # Completion-progress tracker (deepest row reached + PBRS potential).
         self._max_depth_row = self._player_tile()[1]
@@ -853,6 +854,71 @@ class CrystalCaves(
                 self.player_x = col * self.TILE_SIZE + 5
                 self.player_y = row * self.TILE_SIZE + 1
                 return
+
+    def _safe_near_exit_tile(self, col: int, row: int) -> bool:
+        """True if (col, row) is a valid standing tile to drop the player on for a
+        reverse-exit start: in-bounds, not an objective/hazard/door/solid, has solid (or
+        elevator) footing below, and the player rect there does not clip a wall."""
+        if not (1 <= col < self.level_cols - 1 and 1 <= row < self.level_rows - 1):
+            return False
+        tile = (col, row)
+        if tile == self.exit_pos:
+            return False
+        if (
+            tile in self.crystals
+            or tile in self.switches
+            or tile in self.hazards
+            or tile in self.doors
+        ):
+            return False
+        if self._solid_at(col, row):
+            return False
+        if not self._solid_at(col, row + 1) and self.grid[row + 1][col] != self.ELEVATOR:
+            return False
+        rect = self._player_rect(col * self.TILE_SIZE + 5, row * self.TILE_SIZE + 1)
+        return not self._rect_collides_solid(rect)
+
+    def _apply_reverse_exit_curriculum_start(self) -> None:
+        """Begin the episode in the post-collection state to drill the documented leg-2
+        wall: clear ALL crystals, open every gate, unlock the exit, and drop the player
+        on a safe standing tile near the open exit from which the exit is jump-aware
+        reachable (oracle-verified, so the start is never an unwinnable pocket). Gives
+        dense, isolated reps of the collect->exit route the leg-2 probe measured at ~0.5.
+        Solvability-preserving and training-only (gated by the caller to ``not eval``)."""
+        if not getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM", False):
+            return
+        p = float(getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P", 0.0))
+        if p <= 0.0 or np.random.random() >= p:
+            return
+
+        # Post-collection world state: nothing left but the exit, all gates open.
+        self.crystals.clear()
+        self.used_switches = set(self.switches)
+        self.open_colors = set(self.switch_color.values())
+        self.exit_unlocked = True
+
+        # Relocate near the open exit, preferring closer tiles, oracle-verified reachable.
+        exit_col, exit_row = self.exit_pos
+        candidates: List[Tuple[int, int, int]] = []
+        for radius in range(1, 6):
+            for col in range(exit_col - radius, exit_col + radius + 1):
+                for row in range(exit_row - 2, exit_row + 3):
+                    if abs(col - exit_col) + abs(row - exit_row) <= radius:
+                        candidates.append((abs(col - exit_col) + abs(row - exit_row), col, row))
+        for _, col, row in sorted(candidates):
+            if not self._safe_near_exit_tile(col, row):
+                continue
+            if self.exit_pos not in self._oracle_reachable((col, row)):
+                continue
+            self.player_x = col * self.TILE_SIZE + 5
+            self.player_y = row * self.TILE_SIZE + 1
+            self.vx = 0.0
+            self.vy = 0.0
+            self.facing = 1 if exit_col >= col else -1
+            self.grounded = self._is_on_surface()
+            self.coyote_timer = 6 if self.grounded else 0
+            self.steps_since_progress = 0
+            return
 
     def _ngu_bonus(self) -> float:
         """NGU-style episodic novelty: a small reward for reaching a
