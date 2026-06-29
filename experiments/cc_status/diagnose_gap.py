@@ -184,9 +184,14 @@ def run_diagnosis(
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
+    geodesic: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
+    if geodesic:
+        # Geodesic (BFS-distance) potential shaping toward the active objective —
+        # targets the collect->exit conversion wall (leg 2: route to the open exit).
+        overrides["CRYSTAL_CAVES_GEODESIC_POTENTIAL"] = True
     if pool_size is not None:
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
     if weight_decay > 0:
@@ -463,6 +468,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Use the position-preserving spatial CNN (flatten, not global-pool).",
     )
     parser.add_argument(
+        "--geodesic",
+        action="store_true",
+        help="Enable geodesic (BFS-distance) potential shaping toward the active objective.",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -485,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
+        geodesic=args.geodesic,
     )
     return 0
 
