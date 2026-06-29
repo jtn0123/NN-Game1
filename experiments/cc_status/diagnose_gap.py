@@ -185,6 +185,7 @@ def run_diagnosis(
     drop_leak_features: bool = False,
     use_cnn: bool = False,
     geodesic: bool = False,
+    geodesic_weight: float | None = None,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -192,6 +193,10 @@ def run_diagnosis(
         # Geodesic (BFS-distance) potential shaping toward the active objective —
         # targets the collect->exit conversion wall (leg 2: route to the open exit).
         overrides["CRYSTAL_CAVES_GEODESIC_POTENTIAL"] = True
+    if geodesic_weight is not None:
+        # Strength of the geodesic shaping (default 0.3). Lower = gentler, to avoid
+        # the dense-shaping learnability hit seen in RUN-06.
+        overrides["CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT"] = geodesic_weight
     if pool_size is not None:
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
     if weight_decay > 0:
@@ -473,6 +478,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Enable geodesic (BFS-distance) potential shaping toward the active objective.",
     )
     parser.add_argument(
+        "--geodesic-weight",
+        type=float,
+        default=None,
+        help="Override geodesic shaping strength (default 0.3); use e.g. 0.1 for a gentler nudge.",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -496,6 +507,7 @@ def main(argv: list[str] | None = None) -> int:
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
         geodesic=args.geodesic,
+        geodesic_weight=args.geodesic_weight,
     )
     return 0
 
