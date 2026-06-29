@@ -238,6 +238,7 @@ def run_diagnosis(
     geodesic_weight: float | None = None,
     geodesic_after_unlock: bool = False,
     reverse_exit_curriculum_p: float | None = None,
+    reverse_exit_curriculum_far: bool = False,
     leg2_probe: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -280,6 +281,9 @@ def run_diagnosis(
         # skill in isolation (the documented collect->exit wall). RUN-10 lever.
         overrides["CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM"] = True
         overrides["CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P"] = reverse_exit_curriculum_p
+        if reverse_exit_curriculum_far:
+            # FAR placement: drill long-range route-to-exit (the RUN-11 wall), not the hop.
+            overrides["CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR"] = True
 
     train_rows_all: list[dict[str, Any]] = []
     test_rows_all: list[dict[str, Any]] = []
@@ -618,6 +622,13 @@ def main(argv: list[str] | None = None) -> int:
         "the open exit, drilling the leg-2 route-to-exit skill (RUN-10 lever); e.g. 0.5.",
     )
     parser.add_argument(
+        "--reverse-exit-curriculum-far",
+        action="store_true",
+        help="With --reverse-exit-curriculum-p: drop the player a real distance from the "
+        "exit (random reachable tile) instead of next to it, drilling long-range "
+        "route-to-exit navigation (the RUN-11 wall) rather than the trivial final hop.",
+    )
+    parser.add_argument(
         "--leg2-probe",
         action="store_true",
         help="After training, probe held-out route-to-exit: drop the agent next to the open "
@@ -650,6 +661,7 @@ def main(argv: list[str] | None = None) -> int:
         geodesic_weight=args.geodesic_weight,
         geodesic_after_unlock=args.geodesic_after_unlock,
         reverse_exit_curriculum_p=args.reverse_exit_curriculum_p,
+        reverse_exit_curriculum_far=args.reverse_exit_curriculum_far,
         leg2_probe=args.leg2_probe,
     )
     return 0

@@ -96,6 +96,9 @@ class CrystalCaves(
     # Most candidate standing tiles to oracle-verify when relocating the player for the
     # reverse curriculum (closest-to-objective first); bounds the per-reset BFS cost.
     REVERSE_RELOCATE_MAX_CANDIDATES = 48
+    # Min Manhattan distance (tiles) from the exit for a FAR reverse-exit curriculum start,
+    # so the drill trains real long-range navigation rather than the trivial final hop.
+    REVERSE_EXIT_CURRICULUM_FAR_MIN_DIST = 6
     MAX_POWER_TIMER = 420
 
     # Completion-progress potential (0..1); shaping uses PBRS with terminal Phi=0.
@@ -878,13 +881,29 @@ class CrystalCaves(
         rect = self._player_rect(col * self.TILE_SIZE + 5, row * self.TILE_SIZE + 1)
         return not self._rect_collides_solid(rect)
 
+    def _place_player_at_curriculum_tile(self, col: int, row: int) -> None:
+        """Drop the player on (col, row) and reset kinematics for a reverse-exit start."""
+        exit_col, _ = self.exit_pos
+        self.player_x = col * self.TILE_SIZE + 5
+        self.player_y = row * self.TILE_SIZE + 1
+        self.vx = 0.0
+        self.vy = 0.0
+        self.facing = 1 if exit_col >= col else -1
+        self.grounded = self._is_on_surface()
+        self.coyote_timer = 6 if self.grounded else 0
+        self.steps_since_progress = 0
+
     def _apply_reverse_exit_curriculum_start(self) -> None:
         """Begin the episode in the post-collection state to drill the documented leg-2
-        wall: clear ALL crystals, open every gate, unlock the exit, and drop the player
-        on a safe standing tile near the open exit from which the exit is jump-aware
-        reachable (oracle-verified, so the start is never an unwinnable pocket). Gives
-        dense, isolated reps of the collect->exit route the leg-2 probe measured at ~0.5.
-        Solvability-preserving and training-only (gated by the caller to ``not eval``)."""
+        wall: clear ALL crystals, open every gate, unlock the exit, and drop the player on
+        a safe oracle-verified standing tile (so the start is never an unwinnable pocket).
+
+        Placement mode (RUN-11 diagnosis): the NEAR variant hugs the exit, which only
+        drills the trivial final hop (the agent already aces it, ~0.73 held-out) — that
+        was RUN-10's null result. The FAR variant (CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR)
+        drops the player on a random reachable tile a real distance from the exit, drilling
+        the genuine long-range route-to-exit navigation the FAR probe measured at ~0.12 —
+        the actual wall. Solvability-preserving and training-only (gated to ``not eval``)."""
         if not getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM", False):
             return
         p = float(getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P", 0.0))
@@ -897,8 +916,30 @@ class CrystalCaves(
         self.open_colors = set(self.switch_color.values())
         self.exit_unlocked = True
 
-        # Relocate near the open exit, preferring closer tiles, oracle-verified reachable.
         exit_col, exit_row = self.exit_pos
+        far = getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR", False)
+        if far:
+            # Random reachable standing tile a real distance away (drills navigation).
+            min_dist = int(getattr(self, "REVERSE_EXIT_CURRICULUM_FAR_MIN_DIST", 6))
+            pool: List[Tuple[int, int]] = []
+            near_pool: List[Tuple[int, int]] = []
+            for row in range(1, self.level_rows - 1):
+                for col in range(1, self.level_cols - 1):
+                    if not self._safe_near_exit_tile(col, row):
+                        continue
+                    if abs(col - exit_col) + abs(row - exit_row) >= min_dist:
+                        pool.append((col, row))
+                    else:
+                        near_pool.append((col, row))
+            order = pool if pool else near_pool
+            for idx in np.random.permutation(len(order)):
+                col, row = order[int(idx)]
+                if self.exit_pos in self._oracle_reachable((col, row)):
+                    self._place_player_at_curriculum_tile(col, row)
+                    return
+            return
+
+        # NEAR: relocate near the open exit, preferring closer tiles, oracle-verified.
         candidates: List[Tuple[int, int, int]] = []
         for radius in range(1, 6):
             for col in range(exit_col - radius, exit_col + radius + 1):
@@ -910,14 +951,7 @@ class CrystalCaves(
                 continue
             if self.exit_pos not in self._oracle_reachable((col, row)):
                 continue
-            self.player_x = col * self.TILE_SIZE + 5
-            self.player_y = row * self.TILE_SIZE + 1
-            self.vx = 0.0
-            self.vy = 0.0
-            self.facing = 1 if exit_col >= col else -1
-            self.grounded = self._is_on_surface()
-            self.coyote_timer = 6 if self.grounded else 0
-            self.steps_since_progress = 0
+            self._place_player_at_curriculum_tile(col, row)
             return
 
     def _ngu_bonus(self) -> float:

@@ -1382,6 +1382,23 @@ class TestReverseExitCurriculum:
         game.reset()
         assert len(game.crystals) > 0
 
+    def test_far_variant_starts_distant_and_reachable(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR = True
+        game = CrystalCaves(config, headless=True)
+        for _ in range(8):
+            game.reset()
+            assert len(game.crystals) == 0 and game.exit_unlocked is True
+            col, row = game._player_tile()
+            # FAR drill: a real distance from the exit, but still oracle-reachable.
+            exit_col, exit_row = game.exit_pos
+            assert (
+                abs(col - exit_col) + abs(row - exit_row)
+                >= game.REVERSE_EXIT_CURRICULUM_FAR_MIN_DIST
+            )
+            assert game.exit_pos in game._oracle_reachable((col, row))
+
 
 class TestNGUBonus:
     """NGU-style episodic novelty bonus (#5)."""

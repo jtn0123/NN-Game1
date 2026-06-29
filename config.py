@@ -184,6 +184,12 @@ class Config:
     CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM: bool = False
     # Fraction of training resets that use the reverse-exit (near-open-exit) start, [0, 1].
     CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P: float = 0.5
+    # FAR variant: instead of hugging the exit (which only drills the trivial final hop the
+    # agent already aces, ~0.73 held-out), drop the player on a random reachable tile a real
+    # distance from the exit. RUN-11 showed the actual wall is long-range route-to-exit
+    # navigation (FAR probe ~0.12), so this drills the genuinely-missing skill. Requires
+    # CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM on; a separate flag so NEAR vs FAR can be A/B'd.
+    CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR: bool = False
     # NGU-style episodic novelty bonus: a small per-step intrinsic reward for reaching
     # a (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen THIS
     # episode, decaying as 1/sqrt(visits). Attacks the "stops reaching new cells ->
