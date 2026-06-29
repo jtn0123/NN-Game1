@@ -683,11 +683,21 @@ class CrystalCaves(
             return 0.0
         progress = self._progress_potential()[0] if raw_progress is None else raw_progress
         phi = self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
-        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+        if self._geodesic_active():
             weight = float(getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT", 0.3))
             closeness = self._target_closeness()
             phi += self.PROGRESS_REWARD_SCALE * weight * (closeness - self._closeness_initial)
         return phi
+
+    def _geodesic_active(self) -> bool:
+        """Whether geodesic route-shaping applies on the CURRENT step. When
+        CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK is set it engages only after the exit
+        unlocks (leg 2 only), so leg 1 keeps its normal approach reward."""
+        if not getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+            return False
+        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK", False):
+            return self.exit_unlocked
+        return True
 
     def _active_target_tiles(self) -> frozenset:
         """The phase-ordered objective tiles the closeness potential aims at:

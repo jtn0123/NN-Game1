@@ -186,6 +186,7 @@ def run_diagnosis(
     use_cnn: bool = False,
     geodesic: bool = False,
     geodesic_weight: float | None = None,
+    geodesic_after_unlock: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -193,6 +194,10 @@ def run_diagnosis(
         # Geodesic (BFS-distance) potential shaping toward the active objective —
         # targets the collect->exit conversion wall (leg 2: route to the open exit).
         overrides["CRYSTAL_CAVES_GEODESIC_POTENTIAL"] = True
+    if geodesic_after_unlock:
+        # Engage geodesic shaping ONLY after the exit unlocks (leg 2 only).
+        overrides["CRYSTAL_CAVES_GEODESIC_POTENTIAL"] = True
+        overrides["CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK"] = True
     if geodesic_weight is not None:
         # Strength of the geodesic shaping (default 0.3). Lower = gentler, to avoid
         # the dense-shaping learnability hit seen in RUN-06.
@@ -484,6 +489,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Override geodesic shaping strength (default 0.3); use e.g. 0.1 for a gentler nudge.",
     )
     parser.add_argument(
+        "--geodesic-after-unlock",
+        action="store_true",
+        help="Apply geodesic shaping ONLY after the exit unlocks (leg-2/route-to-exit only).",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -508,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
         use_cnn=args.cnn,
         geodesic=args.geodesic,
         geodesic_weight=args.geodesic_weight,
+        geodesic_after_unlock=args.geodesic_after_unlock,
     )
     return 0
 

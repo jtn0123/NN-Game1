@@ -461,7 +461,7 @@ class CrystalCavesLogicMixin:
         # When the telescoping geodesic potential is on it supplies the (unfarmable)
         # approach gradient; skip the additive per-step approach reward to avoid
         # double-counting and the back-and-forth farming the additive term enables.
-        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+        if self._geodesic_active():
             return 0.0
 
         reward = self._target_best_approach_reward(current_target, current_distance)

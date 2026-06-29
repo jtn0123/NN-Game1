@@ -141,6 +141,11 @@ class Config:
     # progress (whose component weights sum to 1.0). Small enough that collecting an
     # objective always nets a positive shaped step despite the target-switch dip.
     CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT: float = 0.3
+    # Apply the geodesic route-shaping ONLY after the exit unlocks (i.e. only for
+    # leg 2: route-to-exit), leaving leg 1 (find+collect) on its normal, working
+    # approach reward. Targets the collect->exit conversion wall without the
+    # learnability hit dense geodesic caused when it also shaped pre-collection.
+    CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK: bool = False
     # Show the still-locked exit in the coarse global objective map (at a distinct,
     # lower value than the unlocked exit) so the agent can learn the route to it before
     # the last crystal is collected, instead of the exit appearing only at unlock.
