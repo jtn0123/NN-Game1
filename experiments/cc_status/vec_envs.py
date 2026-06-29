@@ -193,6 +193,11 @@ def place_player_near_tile(
     for _, col, row in sorted(candidates):
         if not _safe_reverse_start_tile(game, col=col, row=row, target_tile=target_tile):
             continue
+        # Require the target (e.g. the open exit) to be jump-aware reachable FROM this
+        # start, so we never drop the agent in an un-jumpable pocket on the wrong side
+        # of a gap — which would otherwise read as a false "can't reach" / false ceiling.
+        if target_tile not in game._oracle_reachable((col, row)):
+            continue
         game.player_x = col * game.TILE_SIZE + 5
         game.player_y = row * game.TILE_SIZE + 1
         game.vx = 0.0

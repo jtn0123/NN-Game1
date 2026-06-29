@@ -46,6 +46,7 @@ from experiments.cc_status.training import (  # noqa: E402
     prepare_trainer,
     run_training,
 )
+from experiments.cc_status.vec_envs import apply_reverse_start  # noqa: E402
 from src.ai.evaluator import Evaluator  # noqa: E402
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
 
@@ -119,6 +120,45 @@ def _mean_q(trainer: Any, config: Any, *, games: int) -> float:
     return float(np.mean(qmax)) if qmax else 0.0
 
 
+def _eval_leg2(trainer: Any, config: Any, *, games: int) -> dict[str, float]:
+    """Leg-2 probe: on each HELD-OUT level, drop the (greedy) trained agent in the
+    post-collection state right next to the now-open exit (reverse_exit start, with
+    the oracle-verified placement), then measure whether it actually reaches the exit.
+
+    This isolates the route-to-exit skill from leg-1: a high rate means the skill
+    exists but isn't reps'd/reached in normal play (curriculum has upside); a low rate
+    on oracle-reachable adjacent exits means the bottleneck is fundamental (ceiling).
+    'reached' == won, since after unlock + all crystals cleared, touching the exit wins.
+    """
+    game = CrystalCaves(config, headless=True)
+    game.use_eval_levels(games)
+    game.reset_eval_cursor()
+    agent = trainer.agent
+    step_limit = int(config.EVAL_MAX_STEPS)
+    reached: list[float] = []
+    agent_state = _enter_greedy_agent_eval(agent)
+    try:
+        for _ in range(games):
+            game.reset()
+            if not apply_reverse_start(game, "reverse_exit"):
+                continue  # no oracle-verified placement on this level; skip (not counted)
+            state = game.get_state()
+            done = False
+            steps = 0
+            info: dict[str, Any] = {}
+            while not done and steps < step_limit:
+                action = agent.select_action(state, training=False)
+                state, _, done, info = game.step(action)
+                steps += 1
+            reached.append(1.0 if info.get("won") else 0.0)
+    finally:
+        _restore_greedy_agent_eval(agent, agent_state)
+    return {
+        "leg2_reach_rate": float(np.mean(reached)) if reached else 0.0,
+        "n": float(len(reached)),
+    }
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Per-split summary: rates for win/exit, IQM for the continuous surrogates."""
     out: dict[str, float] = {"n": float(len(rows))}
@@ -187,6 +227,7 @@ def run_diagnosis(
     geodesic: bool = False,
     geodesic_weight: float | None = None,
     geodesic_after_unlock: bool = False,
+    leg2_probe: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -226,6 +267,7 @@ def run_diagnosis(
     train_rows_all: list[dict[str, Any]] = []
     test_rows_all: list[dict[str, Any]] = []
     curve: list[dict[str, Any]] = []
+    leg2_rates: list[float] = []
     for seed in seeds:
         print(
             f"\n===== baseline seed={seed} (difficulty={difficulty}, episodes={episodes}) =====",
@@ -281,6 +323,15 @@ def run_diagnosis(
             flush=True,
         )
 
+        if leg2_probe:
+            leg2 = _eval_leg2(trainer, config, games=games)
+            leg2_rates.append(leg2["leg2_reach_rate"])
+            print(
+                f"[seed {seed}] LEG-2 PROBE: held-out reach-exit rate "
+                f"(dropped next to open exit) = {leg2['leg2_reach_rate']:.3f} (n={int(leg2['n'])})",
+                flush=True,
+            )
+
     train_agg, test_agg = _aggregate(train_rows_all), _aggregate(test_rows_all)
     summary = {
         "difficulty": difficulty,
@@ -297,6 +348,9 @@ def run_diagnosis(
         "curve": curve,
         "truncation_bootstrap": truncation_bootstrap,
     }
+    if leg2_rates:
+        summary["leg2_reach_rate"] = float(np.mean(leg2_rates))
+        summary["leg2_reach_rate_per_seed"] = leg2_rates
     # Best checkpoint = the milestone with the strongest TRAINING competence (win, then
     # crystals), chosen on the SEED-AVERAGED curve. Prior experiments graded the FINAL
     # net, which can be the collapsed one; grading the best checkpoint de-confounds
@@ -312,6 +366,16 @@ def run_diagnosis(
     if curve_avg:
         _print_curve(curve_avg)
     _print_report(summary)
+    if "leg2_reach_rate" in summary:
+        print(
+            f"\n==== LEG-2 PROBE (held-out, dropped next to the open exit) ====\n"
+            f"seed-avg reach-exit rate = {summary['leg2_reach_rate']:.3f}  "
+            f"(per-seed {[round(r, 3) for r in leg2_rates]})\n"
+            "read: HIGH (>=0.5) => route-to-exit skill EXISTS but is under-reps'd in normal "
+            "play -> a leg-2 curriculum has upside. LOW => fundamental bottleneck (perception/"
+            "motor/credit) -> no curriculum will fix transfer -> ceiling.",
+            flush=True,
+        )
     return summary
 
 
@@ -494,6 +558,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Apply geodesic shaping ONLY after the exit unlocks (leg-2/route-to-exit only).",
     )
     parser.add_argument(
+        "--leg2-probe",
+        action="store_true",
+        help="After training, probe held-out route-to-exit: drop the agent next to the open "
+        "exit (oracle-verified) and measure reach-exit rate (isolates leg-2 from leg-1).",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -519,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         geodesic=args.geodesic,
         geodesic_weight=args.geodesic_weight,
         geodesic_after_unlock=args.geodesic_after_unlock,
+        leg2_probe=args.leg2_probe,
     )
     return 0
 
