@@ -49,9 +49,13 @@ from experiments.cc_status.training import (  # noqa: E402
 from src.ai.evaluator import Evaluator  # noqa: E402
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
 
-# Metrics summarised per split. win/exit are rates (means); the rest are IQMs.
-_RATE_METRICS = ("won", "exit_unlocked_rate")
-_IQM_METRICS = ("crystal_frac", "depth_frac", "target_distance_progress", "selection_score")
+# Metrics summarised per split. Rates use the MEAN (correct for {0,1} per-level
+# outcomes). crystal_frac is a collection FRACTION/rate -> it MUST be a mean: the
+# interquartile mean floors any rate <=25% to exactly 0.0, which previously HID a
+# real ~0.15-0.33 held-out collect-rate behind a fake "0.000". Only the genuinely
+# continuous surrogates stay on IQM.
+_RATE_METRICS = ("won", "exit_unlocked_rate", "crystal_frac")
+_IQM_METRICS = ("depth_frac", "target_distance_progress", "selection_score")
 
 
 def _eval_split(
@@ -355,6 +359,22 @@ def _print_report(summary: dict[str, Any]) -> None:
             + f"{gap[metric]:+11.3f}",
             flush=True,
         )
+
+    # Collect->win conversion: of the levels where the crystal was collected, what
+    # fraction were finished? A low value = the agent solves leg 1 (find/collect) but
+    # fails leg 2 (route to the now-open exit). This is the metric the IQM bug hid.
+    def _conv(split: dict[str, float]) -> float:
+        c = split.get("crystal_frac", 0.0)
+        return (split.get("won", 0.0) / c) if c > 1e-9 else 0.0
+
+    print(
+        "collect->win conversion".ljust(26)
+        + f"{_conv(tr):10.2f}"
+        + f"{_conv(te):11.2f}"
+        + f"{_conv(tr) - _conv(te):+11.2f}",
+        flush=True,
+    )
+
     # Best-checkpoint readout + collapse indicator. The verdict is based on the agent's
     # BEST training competence, not the (possibly collapsed) final episode.
     best = summary.get("best")

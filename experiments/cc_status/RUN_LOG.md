@@ -1,5 +1,9 @@
 # Crystal Caves generalization — RUN LOG
 
+> ## ⚠️ METRIC CORRECTION (supersedes earlier "zero held-out transfer" reads)
+> `crystal_frac` was aggregated with an **interquartile mean that floors any rate ≤25% to 0.000** (verified at N=12/20). On tutorial (1 crystal) the exit unlocks **iff** that crystal is collected, so the plain-mean `exit_unlocked_rate` ≈ the **true** held-out collect-rate. Re-reading that way, the agent has been **collecting crystals on ~0.15–0.33 of UNSEEN levels all along** — real generalization, NOT zero transfer. The wall is the **collect→exit conversion** (held-out win ≈ 0–0.08 ⇒ conversion ~0–25%): it solves leg 1 (find+collect) but fails leg 2 (route to the now-open exit). Fix shipped: `crystal_frac` now aggregated as a MEAN + a `collect->win conversion` line. Next lever = route-to-exit shaping (geodesic), NOT CNN/PPO. Earlier RUN-01..05 "held-out crystals ~0" verdicts are metric artifacts; trust `exit_unlocked_rate` / the new mean.
+
+
 Numbered, append-only log of every tracked experiment so we can refer to runs by ID.
 
 **Convention going forward:** each new experiment gets the next `RUN-NN`. When the M4
@@ -48,8 +52,8 @@ Baseline reference for "held-out crystals" memorization floor ≈ **0.033**.
 - Phase-0 train-vs-test diagnostic (600 ep, 2 seeds) + learning-curve diagnostic (1500/3000 ep): established memorization diagnosis + that "collapse" was largely noise.
 - Disconfirmed levers (earlier A/B): reward shaping, start-state reverse curriculum, CNN+global-average-pool, truncation-as-terminal-vs-bootstrap.
 
-## In flight / next
-- **RUN-05 (running on M4)** — power-confirm of RUN-04 Arm B regeneration: pool 24, **5 seeds, 5000 ep**, `--regenerate-each-episode`. Tests whether the held-out crystal signal is robust (vs RUN-04's one-seed spike) and whether wins move. Out: `scratchpad/RUN-05_confirm/`.
-- **RUN-06 (ready, runnable now via `--cnn`)** — position-preserving spatial CNN (SpatialDQN, flatten, NOT global-pool — the global-pool variant was disconfirmed) + regenerate. Tests whether a conv inductive bias beats the flat MLP on the suspected representation ceiling. Command per seed:
-  `python -m experiments.cc_status.diagnose_gap --difficulty tutorial --episodes 5000 --seeds <s> --games 20 --checkpoint-every 500 --vec-envs 8 --cpu --truncation-bootstrap --regenerate-each-episode --cnn --pool-size 24 --out scratchpad/RUN-06_cnn/seed_<s>`
-- **RUN-07 (later, needs code)** — if RUN-06 shows conv has legs: multi-channel one-hot tile encoding (current single-ordinal channel is a poor conv input) to strengthen the CNN.
+## In flight / next (REVISED after the metric correction)
+- **RUN-05 — KILL (salvage checkpoints).** Its decision metric was the broken IQM `crystal_frac`; finishing buys nothing. Re-grade its saved checkpoints with the fixed code (report held-out collect-rate via mean crystal_frac / `exit_unlocked_rate`, win, and conversion). Stop the training, keep artifacts.
+- **RUN-06 (REVISED) — attack collect→exit conversion with geodesic route-to-exit shaping**, NOT the CNN. `CRYSTAL_CAVES_GEODESIC_POTENTIAL` (config.py) is already coded. A/B geodesic-on vs off, pool 24, tutorial, 3 seeds, ~1500–3000 ep. Success = held-out **win** rises (conversion up) while held-out collect-rate holds. Decision rule (from strategy panel): only if re-grade shows held-out collect genuinely ~0 do we instead go to the CNN (RUN-06-alt); if collect>0.15 & conversion<0.3 (current evidence), do geodesic.
+- **CNN (`--cnn`) is built and parked** as the contingency if collect-rate turns out genuinely ~0.
+- **PPO / bigger-net** deferred (wrong failure mode: this agent's signature is collect-generalizes / conversion-fails, not an overfit gap).
