@@ -48,5 +48,8 @@ Baseline reference for "held-out crystals" memorization floor ≈ **0.033**.
 - Phase-0 train-vs-test diagnostic (600 ep, 2 seeds) + learning-curve diagnostic (1500/3000 ep): established memorization diagnosis + that "collapse" was largely noise.
 - Disconfirmed levers (earlier A/B): reward shaping, start-state reverse curriculum, CNN+global-average-pool, truncation-as-terminal-vs-bootstrap.
 
-## Next (proposed) — pending direction
-- RUN-05 candidates: (a) position-preserving CNN (flatten, multi-channel tile encoding) + regenerate — targets the suspected representation ceiling; (b) confirm RUN-04 Arm B with 5 seeds / longer budget before investing; (c) pause.
+## In flight / next
+- **RUN-05 (running on M4)** — power-confirm of RUN-04 Arm B regeneration: pool 24, **5 seeds, 5000 ep**, `--regenerate-each-episode`. Tests whether the held-out crystal signal is robust (vs RUN-04's one-seed spike) and whether wins move. Out: `scratchpad/RUN-05_confirm/`.
+- **RUN-06 (ready, runnable now via `--cnn`)** — position-preserving spatial CNN (SpatialDQN, flatten, NOT global-pool — the global-pool variant was disconfirmed) + regenerate. Tests whether a conv inductive bias beats the flat MLP on the suspected representation ceiling. Command per seed:
+  `python -m experiments.cc_status.diagnose_gap --difficulty tutorial --episodes 5000 --seeds <s> --games 20 --checkpoint-every 500 --vec-envs 8 --cpu --truncation-bootstrap --regenerate-each-episode --cnn --pool-size 24 --out scratchpad/RUN-06_cnn/seed_<s>`
+- **RUN-07 (later, needs code)** — if RUN-06 shows conv has legs: multi-channel one-hot tile encoding (current single-ordinal channel is a poor conv input) to strengthen the CNN.

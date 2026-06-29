@@ -179,6 +179,7 @@ def run_diagnosis(
     weight_decay: float = 0.0,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
+    use_cnn: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -186,6 +187,11 @@ def run_diagnosis(
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
     if weight_decay > 0:
         overrides["WEIGHT_DECAY"] = weight_decay
+    if use_cnn:
+        # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
+        # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
+        overrides["USE_CNN_STATE"] = True
+        overrides["CRYSTAL_CAVES_CNN_GLOBAL_POOL"] = False
     if regenerate_each_episode:
         overrides["CRYSTAL_CAVES_REGENERATE_EACH_EPISODE"] = True
     if drop_leak_features:
@@ -432,6 +438,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Zero level_index + absolute player_x/y from the observation (anti-memorization).",
     )
     parser.add_argument(
+        "--cnn",
+        action="store_true",
+        help="Use the position-preserving spatial CNN (flatten, not global-pool).",
+    )
+    parser.add_argument(
         "--weight-decay",
         type=float,
         default=0.0,
@@ -453,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
         weight_decay=args.weight_decay,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
+        use_cnn=args.cnn,
     )
     return 0
 
