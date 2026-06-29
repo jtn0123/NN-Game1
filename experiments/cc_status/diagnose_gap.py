@@ -373,17 +373,25 @@ def run_diagnosis(
     if curve_avg:
         _print_curve(curve_avg)
     _print_report(summary)
-    if "leg2_reach_rate" in summary:
-        print(
-            f"\n==== LEG-2 PROBE (held-out, dropped next to the open exit) ====\n"
-            f"seed-avg reach-exit rate = {summary['leg2_reach_rate']:.3f}  "
-            f"(per-seed {[round(r, 3) for r in leg2_rates]})\n"
-            "read: HIGH (>=0.5) => route-to-exit skill EXISTS but is under-reps'd in normal "
-            "play -> a leg-2 curriculum has upside. LOW => fundamental bottleneck (perception/"
-            "motor/credit) -> no curriculum will fix transfer -> ceiling.",
-            flush=True,
-        )
+    _print_leg2(summary)
     return summary
+
+
+def _print_leg2(summary: dict[str, Any]) -> None:
+    """Print the held-out LEG-2 PROBE block (route-to-exit reach rate). Shared by the
+    single-process path and the per-seed aggregator so both render it identically."""
+    if "leg2_reach_rate" not in summary:
+        return
+    per_seed = summary.get("leg2_reach_rate_per_seed", [])
+    print(
+        f"\n==== LEG-2 PROBE (held-out, dropped next to the open exit) ====\n"
+        f"seed-avg reach-exit rate = {summary['leg2_reach_rate']:.3f}  "
+        f"(per-seed {[round(r, 3) for r in per_seed]})\n"
+        "read: HIGH (>=0.5) => route-to-exit skill EXISTS but is under-reps'd in normal "
+        "play -> a leg-2 curriculum has upside. LOW => fundamental bottleneck (perception/"
+        "motor/credit) -> no curriculum will fix transfer -> ceiling.",
+        flush=True,
+    )
 
 
 def _print_curve(curve: list[dict[str, Any]]) -> None:

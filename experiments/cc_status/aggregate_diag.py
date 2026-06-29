@@ -34,6 +34,7 @@ from experiments.cc_status.diagnose_gap import (  # noqa: E402
     _RATE_METRICS,
     _average_curve,
     _print_curve,
+    _print_leg2,
     _print_report,
 )
 
@@ -63,7 +64,7 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
     metrics = (*_RATE_METRICS, *_IQM_METRICS)
 
     base = summaries[0]
-    return {
+    agg = {
         "difficulty": base.get("difficulty"),
         "episodes": base.get("episodes"),
         "seeds": seeds,
@@ -79,6 +80,14 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
         "curve_avg": curve_avg,
         "best": best,
     }
+    # Seed-average the leg-2 probe across per-seed workers (each single-seed run stored
+    # its own leg2_reach_rate), so the aggregated report carries the same route-to-exit
+    # number the single-process --seeds path would have.
+    leg2_per_seed = [float(s["leg2_reach_rate"]) for s in summaries if "leg2_reach_rate" in s]
+    if leg2_per_seed:
+        agg["leg2_reach_rate"] = sum(leg2_per_seed) / len(leg2_per_seed)
+        agg["leg2_reach_rate_per_seed"] = leg2_per_seed
+    return agg
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -94,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     agg = aggregate(args.paths)
     _print_curve(agg["curve_avg"])
     _print_report(agg)
+    _print_leg2(agg)
     if args.out:
         Path(args.out).write_text(json.dumps(agg, indent=2))
         print(f"\nWrote aggregated summary to {args.out}", flush=True)
