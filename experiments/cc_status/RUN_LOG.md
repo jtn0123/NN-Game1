@@ -93,3 +93,19 @@ Corrected, robust picture across RUN-04/05/06: the agent **generalizes collectio
 - **RUN-06 (REVISED) — attack collect→exit conversion with geodesic route-to-exit shaping**, NOT the CNN. `CRYSTAL_CAVES_GEODESIC_POTENTIAL` (config.py) is already coded. A/B geodesic-on vs off, pool 24, tutorial, 3 seeds, ~1500–3000 ep. Success = held-out **win** rises (conversion up) while held-out collect-rate holds. Decision rule (from strategy panel): only if re-grade shows held-out collect genuinely ~0 do we instead go to the CNN (RUN-06-alt); if collect>0.15 & conversion<0.3 (current evidence), do geodesic.
 - **CNN (`--cnn`) is built and parked** as the contingency if collect-rate turns out genuinely ~0.
 - **PPO / bigger-net** deferred (wrong failure mode: this agent's signature is collect-generalizes / conversion-fails, not an overfit gap).
+
+---
+
+## REOPEN — leg-2 probe → leg-2 curriculum
+
+### RUN-09 — leg-2 probe (route-to-exit isolation) — BORDERLINE PASS
+Added a held-out **leg-2 probe** (`--leg2-probe`): after training, drop the trained agent in the post-collection state right next to the now-open exit (reverse_exit start, oracle-verified reachable) on held-out levels and measure greedy reach-exit rate. This isolates leg-2 (route-to-exit) from leg-1 (find+collect). Also oracle-hardened the reverse-start placement so the agent is never dropped in an un-jumpable pocket (which would read as a false ceiling).
+- Result: seed-avg reach-exit **0.50**, narrowly over the ≥0.5 bar.
+- Read: the route-to-exit skill **exists** but is under-practiced in normal play → a leg-2 curriculum has *some* upside. Signal is borderline; not to be over-claimed.
+- Decision rule (pre-agreed): reach ≥0.5 → earns **one** RUN-10 leg-2 curriculum attempt.
+
+### RUN-10 — in-env reverse-exit curriculum (IN FLIGHT, M4)
+Built `CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM(+_P)` + `--reverse-exit-curriculum-p`: on a fraction of TRAINING resets, start already in the post-collection state next to the open exit (all crystals cleared, gates open, exit unlocked, player on a safe oracle-verified standing tile near the exit). Drills leg-2 in isolation; training-only, solvability-preserving. Pushed `74b768e`.
+- A/B: Arm A control (RUN-06 baseline) vs Arm B `--reverse-exit-curriculum-p 0.5`, tutorial, 3 seeds, 4000 ep, `--leg2-probe`.
+- Grade (held-out, best-ckpt, seed-avg): full-chain **win**, **collect→win conversion**, **leg-2 probe rate**.
+- Decision: Arm B wins only if held-out win OR conversion moves materially beyond seed noise. Probe-up but win/conversion-flat → "drilled but doesn't transfer" → ceiling proven. Honest EV ~15–20%.
