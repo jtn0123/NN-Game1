@@ -104,8 +104,12 @@ Added a held-out **leg-2 probe** (`--leg2-probe`): after training, drop the trai
 - Read: the route-to-exit skill **exists** but is under-practiced in normal play → a leg-2 curriculum has *some* upside. Signal is borderline; not to be over-claimed.
 - Decision rule (pre-agreed): reach ≥0.5 → earns **one** RUN-10 leg-2 curriculum attempt.
 
-### RUN-10 — in-env reverse-exit curriculum (IN FLIGHT, M4)
-Built `CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM(+_P)` + `--reverse-exit-curriculum-p`: on a fraction of TRAINING resets, start already in the post-collection state next to the open exit (all crystals cleared, gates open, exit unlocked, player on a safe oracle-verified standing tile near the exit). Drills leg-2 in isolation; training-only, solvability-preserving. Pushed `74b768e`.
-- A/B: Arm A control (RUN-06 baseline) vs Arm B `--reverse-exit-curriculum-p 0.5`, tutorial, 3 seeds, 4000 ep, `--leg2-probe`.
-- Grade (held-out, best-ckpt, seed-avg): full-chain **win**, **collect→win conversion**, **leg-2 probe rate**.
-- Decision: Arm B wins only if held-out win OR conversion moves materially beyond seed noise. Probe-up but win/conversion-flat → "drilled but doesn't transfer" → ceiling proven. Honest EV ~15–20%.
+### RUN-10 — in-env reverse-exit curriculum (M4) — DISCONFIRMED
+Built `CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM(+_P)` + `--reverse-exit-curriculum-p`. A/B: Arm A control (RUN-06 baseline) vs Arm B `--reverse-exit-curriculum-p 0.5`, tutorial, 3 seeds, 4000 ep, `--leg2-probe`, process-per-seed, CPU.
+- **Arm A control:** held-out best-by-win ep2500 win **0.058** / collect 0.192 / conversion **0.30** / meanQ +4.72. Leg-2 probe **0.733** (per-seed [0.80, 0.675, 0.725]).
+- **Arm B curriculum:** held-out best ep2000 win **0.050** / collect 0.183 / conversion **0.27** / meanQ +3.17. Leg-2 probe **0.767** (per-seed [0.775, 0.875, 0.65]).
+- Curriculum also LOWERED train competence (train win 0.375→0.25) and final held-out win (0.033→0.025) — same fixed-p tax we saw on the base reverse curriculum (half the resets skip the full-from-spawn task).
+- **Verdict: disconfirmed.** Drilling raised the isolated probe a hair (0.73→0.77) but did NOT lift held-out full-chain win or conversion; control is actually ahead on the best checkpoint. Skill-in-the-drill did not transfer.
+
+### ⚠️ KEY INSIGHT — the probe & curriculum measured/drilled the WRONG thing
+The leg-2 probe and the reverse-exit curriculum BOTH drop the agent **within ~5 tiles of the open exit** (`place_player_near_tile` / near-exit relocation, closest-first). That isolates only the **trivial final hop**, not the real leg-2 wall: **long-range navigation from the last-collected-crystal across the whole level to the exit.** This explains everything: control already scored 0.73 on the probe (the final hop IS easy), so RUN-09's 0.50 was a small-sample underestimate, and drilling the easy hop changed nothing because the agent was never bad at it. The genuine post-collection navigation skill was never isolated or drilled. So RUN-10 disconfirms *this* curriculum, but does NOT cleanly disconfirm "leg-2 navigation help" in general — that lever was mis-specified. A corrected diagnostic = drop at a RANDOM reachable standing tile (full-level distance) with the exit open; a corrected curriculum would drill from there, not adjacent to the exit.
