@@ -61,7 +61,28 @@ Baseline reference for "held-out crystals" memorization floor ≈ **0.033**.
 ### RUN-07 — gentle geodesic (weight 0.1) (M4) — DISCONFIRMED
 Same setup as RUN-06 Arm B but `--geodesic-weight 0.1`. Best ep1000: held-out collect 0.117, win **0.000**, conversion 0.00, meanQ −0.26; meanQ negative after ep500, train competence collapses after ep1000. Loses decisively to RUN-06 control (collect 0.30 / win 0.05 / conv 0.17 / meanQ +1.90). Verdict: geodesic shaping is the wrong tool for this learner at ANY weight — "too strong" was not the whole story. Fold condition met.
 
-## Status: DECISION POINT (after RUN-07 — geodesic family disconfirmed)
+### RUN-08 — after-unlock-only geodesic (M4) — DISCONFIRMED (terminal shot)
+`--geodesic-after-unlock` (geodesic shapes leg-2 only; leg-1 keeps its normal approach reward), pool 24, 3 seeds, 3000 ep. Best ep2000: held-out collect 0.200, win **0.017**, conversion 0.08, meanQ +1.58 (positive throughout — learnability NOT damaged, unlike RUN-06/07). Still loses to RUN-06 control (collect 0.30 / win 0.05 / conv 0.17). Verdict: the gating fixed the learnability harm (confirming prior geodesic broke leg-1), but produced **no reliable held-out completion lift**. Shaping family fully exhausted. Per the pre-agreed terminal rule: STOP, consolidate.
+
+---
+
+## FINAL SUMMARY / CONCLUSION
+**Original goal — raise held-out (unseen-level) WIN rate — NOT achieved.** Held-out wins stayed ~0.05 across all 8 runs. But the investigation produced real, durable results:
+
+**What we established (high confidence):**
+- The agent **generalizes leg 1**: on *unseen* levels it finds + collects the crystal **~0.25–0.30** of the time (this unlocks the exit). It is NOT a zero-transfer memorizer.
+- The wall is **leg 2 — collect→exit conversion ~0.17**: after unlocking the exit it usually fails to route to it on unseen layouts.
+- Value learning is healthy (meanQ positive); no Q-divergence/collapse (the earlier "collapse" was small-sample noise).
+
+**The big bug we fixed:** `crystal_frac` was aggregated with an interquartile mean that floors any rate ≤25% to 0.000, which masked the real ~0.25–0.30 held-out collection and produced a false "zero transfer / pure memorizer" story for several runs. Fixed (mean aggregation + a `collect→win conversion` line). `exit_unlocked_rate` ≈ true tutorial collect-rate.
+
+**Levers tried and DISCONFIRMED** (all measured with the corrected metric, best-checkpoint, seed-averaged): pool size / diversity (RUN-01,03), more budget (RUN-02,03), fresh-level regeneration (RUN-04,05), de-leak features (RUN-04C), reward shaping & start-state curriculum (pre-numbered), truncation-as-terminal vs bootstrap (bootstrap helped value stability only), CNN+global-avg-pool (pre-numbered), geodesic shaping at full / gentle / after-unlock strengths (RUN-06,07,08). Reward shaping consistently failed or harmed this fragile learner.
+
+**Honest conclusion:** for this ~50K-param DQN on this hard multi-step procedural task, leg 1 generalizes and leg 2 does not, and cheap shaping/data levers do not move it. Real further gains would need a bigger swing — e.g. **PPO/on-policy** (the ProcGen-generalization standard), a **leg-2-specific curriculum** (train route-to-exit from post-collection starts in isolation), or **representation work** — all higher-effort with uncertain payoff.
+
+**Durable deliverables kept on this branch:** the metric fix + conversion metric; the train-vs-held-out diagnostic with best-checkpoint + seed-averaging (`diagnose_gap.py`); per-seed aggregator (`aggregate_diag.py`); levers behind flags (truncation-bootstrap, regenerate-each-episode/infinite levels, drop-leak-features, weight-decay, CNN, geodesic variants); this RUN_LOG; and the distributed M4 experiment workflow.
+
+## (historical) decision points
 Corrected, robust picture across RUN-04/05/06: the agent **generalizes collection** (~0.25–0.30 on unseen levels) but **fails collect→exit conversion** (held-out win stuck ~0.05, conversion ~0.17). Cheap data levers exhausted; first conversion fix (geodesic) failed/hurt. Open options (pending human direction):
 - (a) lighter/after-unlock route-to-exit shaping (tune `CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT` down from 0.3, or shape only after exit unlock) — cheap, modest P.
 - (b) CNN (`--cnn`, built) — lower priority; collection already generalizes so perception isn't the obvious conversion bottleneck.
