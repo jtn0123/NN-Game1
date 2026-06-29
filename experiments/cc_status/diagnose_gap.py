@@ -120,15 +120,20 @@ def _mean_q(trainer: Any, config: Any, *, games: int) -> float:
     return float(np.mean(qmax)) if qmax else 0.0
 
 
-def _eval_leg2(trainer: Any, config: Any, *, games: int) -> dict[str, float]:
+def _eval_leg2(
+    trainer: Any, config: Any, *, games: int, mode: str = "reverse_exit"
+) -> dict[str, float]:
     """Leg-2 probe: on each HELD-OUT level, drop the (greedy) trained agent in the
-    post-collection state right next to the now-open exit (reverse_exit start, with
-    the oracle-verified placement), then measure whether it actually reaches the exit.
+    post-collection state (all crystals cleared, exit unlocked), then measure whether it
+    reaches the exit. 'reached' == won, since touching the open exit with no crystals left
+    wins.
 
-    This isolates the route-to-exit skill from leg-1: a high rate means the skill
-    exists but isn't reps'd/reached in normal play (curriculum has upside); a low rate
-    on oracle-reachable adjacent exits means the bottleneck is fundamental (ceiling).
-    'reached' == won, since after unlock + all crystals cleared, touching the exit wins.
+    mode="reverse_exit" places the agent right NEXT TO the exit — this only isolates the
+    trivial final hop. mode="reverse_exit_far" places it at a RANDOM reachable standing
+    tile a real distance away, isolating the genuine long-range route-to-exit skill (the
+    actual leg-2 wall). Comparing the two separates "can't do the last step" (both low)
+    from "can't navigate to it" (near high, far low) from "ceiling is elsewhere/leg-1"
+    (both high while full-play win stays low). Also returns the mean start->exit distance.
     """
     game = CrystalCaves(config, headless=True)
     game.use_eval_levels(games)
@@ -136,12 +141,16 @@ def _eval_leg2(trainer: Any, config: Any, *, games: int) -> dict[str, float]:
     agent = trainer.agent
     step_limit = int(config.EVAL_MAX_STEPS)
     reached: list[float] = []
+    distances: list[float] = []
     agent_state = _enter_greedy_agent_eval(agent)
     try:
         for _ in range(games):
             game.reset()
-            if not apply_reverse_start(game, "reverse_exit"):
+            if not apply_reverse_start(game, mode):
                 continue  # no oracle-verified placement on this level; skip (not counted)
+            col, row = game._player_tile()
+            ex, ey = game.exit_pos
+            distances.append(float(abs(col - ex) + abs(row - ey)))
             state = game.get_state()
             done = False
             steps = 0
@@ -156,6 +165,7 @@ def _eval_leg2(trainer: Any, config: Any, *, games: int) -> dict[str, float]:
     return {
         "leg2_reach_rate": float(np.mean(reached)) if reached else 0.0,
         "n": float(len(reached)),
+        "mean_start_dist": float(np.mean(distances)) if distances else 0.0,
     }
 
 
@@ -275,6 +285,8 @@ def run_diagnosis(
     test_rows_all: list[dict[str, Any]] = []
     curve: list[dict[str, Any]] = []
     leg2_rates: list[float] = []
+    leg2_far_rates: list[float] = []
+    leg2_far_dists: list[float] = []
     for seed in seeds:
         print(
             f"\n===== baseline seed={seed} (difficulty={difficulty}, episodes={episodes}) =====",
@@ -331,11 +343,16 @@ def run_diagnosis(
         )
 
         if leg2_probe:
-            leg2 = _eval_leg2(trainer, config, games=games)
+            leg2 = _eval_leg2(trainer, config, games=games, mode="reverse_exit")
+            leg2_far = _eval_leg2(trainer, config, games=games, mode="reverse_exit_far")
             leg2_rates.append(leg2["leg2_reach_rate"])
+            leg2_far_rates.append(leg2_far["leg2_reach_rate"])
+            leg2_far_dists.append(leg2_far["mean_start_dist"])
             print(
                 f"[seed {seed}] LEG-2 PROBE: held-out reach-exit rate "
-                f"(dropped next to open exit) = {leg2['leg2_reach_rate']:.3f} (n={int(leg2['n'])})",
+                f"NEAR (next to exit) = {leg2['leg2_reach_rate']:.3f} (n={int(leg2['n'])}) | "
+                f"FAR (random start, mean dist {leg2_far['mean_start_dist']:.1f}) = "
+                f"{leg2_far['leg2_reach_rate']:.3f} (n={int(leg2_far['n'])})",
                 flush=True,
             )
 
@@ -358,6 +375,10 @@ def run_diagnosis(
     if leg2_rates:
         summary["leg2_reach_rate"] = float(np.mean(leg2_rates))
         summary["leg2_reach_rate_per_seed"] = leg2_rates
+    if leg2_far_rates:
+        summary["leg2_far_reach_rate"] = float(np.mean(leg2_far_rates))
+        summary["leg2_far_reach_rate_per_seed"] = leg2_far_rates
+        summary["leg2_far_mean_dist"] = float(np.mean(leg2_far_dists))
     # Best checkpoint = the milestone with the strongest TRAINING competence (win, then
     # crystals), chosen on the SEED-AVERAGED curve. Prior experiments graded the FINAL
     # net, which can be the collapsed one; grading the best checkpoint de-confounds
@@ -383,15 +404,32 @@ def _print_leg2(summary: dict[str, Any]) -> None:
     if "leg2_reach_rate" not in summary:
         return
     per_seed = summary.get("leg2_reach_rate_per_seed", [])
-    print(
-        f"\n==== LEG-2 PROBE (held-out, dropped next to the open exit) ====\n"
-        f"seed-avg reach-exit rate = {summary['leg2_reach_rate']:.3f}  "
-        f"(per-seed {[round(r, 3) for r in per_seed]})\n"
-        "read: HIGH (>=0.5) => route-to-exit skill EXISTS but is under-reps'd in normal "
-        "play -> a leg-2 curriculum has upside. LOW => fundamental bottleneck (perception/"
-        "motor/credit) -> no curriculum will fix transfer -> ceiling.",
-        flush=True,
-    )
+    near = summary["leg2_reach_rate"]
+    lines = [
+        "\n==== LEG-2 PROBE (held-out, post-collection start, reach the open exit) ====",
+        f"NEAR (dropped next to exit, trivial final hop) = {near:.3f}  "
+        f"(per-seed {[round(r, 3) for r in per_seed]})",
+    ]
+    if "leg2_far_reach_rate" in summary:
+        far = summary["leg2_far_reach_rate"]
+        far_seed = summary.get("leg2_far_reach_rate_per_seed", [])
+        dist = summary.get("leg2_far_mean_dist", 0.0)
+        lines.append(
+            f"FAR  (random reachable start, mean dist {dist:.1f}, real navigation) = "
+            f"{far:.3f}  (per-seed {[round(r, 3) for r in far_seed]})"
+        )
+        lines.append(
+            "read: NEAR high & FAR low => the WALL is long-range route-to-exit navigation "
+            "(a corrected far-start curriculum has upside). NEAR≈FAR high while full-play "
+            "win stays low => leg-2 is NOT the wall; the bottleneck is leg-1 collect-all "
+            "or full-chain credit -> ceiling for this lever family. Both low => fundamental."
+        )
+    else:
+        lines.append(
+            "read: HIGH (>=0.5) => route-to-exit skill EXISTS but is under-reps'd in normal "
+            "play. LOW => fundamental bottleneck -> ceiling. (No FAR probe in this run.)"
+        )
+    print("\n".join(lines), flush=True)
 
 
 def _print_curve(curve: list[dict[str, Any]]) -> None:

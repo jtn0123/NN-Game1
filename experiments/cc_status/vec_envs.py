@@ -213,13 +213,57 @@ def place_player_near_tile(
     return False
 
 
+def place_player_random_reachable(
+    game: CrystalCaves,
+    target_tile: tuple[int, int],
+    *,
+    min_distance: int = 4,
+) -> bool:
+    """Drop the player on a RANDOM safe standing tile from which ``target_tile`` is
+    jump-aware oracle-reachable, preferring tiles at least ``min_distance`` (Manhattan)
+    away. Unlike ``place_player_near_tile`` (which hugs the target), this samples the
+    full level, so a reverse-exit start measures genuine long-range navigation to the
+    open exit rather than the trivial final hop next to it."""
+    target_col, target_row = target_tile
+    candidates: list[tuple[int, int, int]] = []
+    for row in range(1, game.level_rows - 1):
+        for col in range(1, game.level_cols - 1):
+            if not _safe_reverse_start_tile(game, col=col, row=row, target_tile=target_tile):
+                continue
+            dist = abs(col - target_col) + abs(row - target_row)
+            candidates.append((col, row, dist))
+    if not candidates:
+        return False
+    far = [c for c in candidates if c[2] >= min_distance]
+    pool = far if far else candidates
+    for idx in np.random.permutation(len(pool)):
+        col, row, _ = pool[int(idx)]
+        if target_tile not in game._oracle_reachable((col, row)):
+            continue
+        game.player_x = col * game.TILE_SIZE + 5
+        game.player_y = row * game.TILE_SIZE + 1
+        game.vx = 0.0
+        game.vy = 0.0
+        game.facing = 1 if target_col >= col else -1
+        game.grounded = game._is_on_surface()
+        game.coyote_timer = 6 if game.grounded else 0
+        game._max_depth_row = max(game._max_depth_row, game._player_tile()[1])
+        game._progress = game._progress_potential()[0]
+        game._target_best_distances = {}
+        game.steps_since_progress = 0
+        return True
+    return False
+
+
 def apply_reverse_start(game: CrystalCaves, mode: str) -> bool:
-    if mode == "reverse_exit":
+    far = False
+    if mode in ("reverse_exit", "reverse_exit_far"):
         game.crystals.clear()
         game.used_switches = set(game.switches)
         game.open_colors = set(game.switch_color.values())
         game.exit_unlocked = True
         target_tile = game.exit_pos
+        far = mode == "reverse_exit_far"
     elif mode == "reverse_objective":
         target, _ = game._current_target()
         if target is None:
@@ -229,7 +273,10 @@ def apply_reverse_start(game: CrystalCaves, mode: str) -> bool:
     else:
         raise ValueError(f"unknown reverse start mode: {mode}")
 
-    applied = place_player_near_tile(game, target_tile)
+    if far:
+        applied = place_player_random_reachable(game, target_tile)
+    else:
+        applied = place_player_near_tile(game, target_tile)
     game._progress = game._progress_potential()[0]
     return applied
 

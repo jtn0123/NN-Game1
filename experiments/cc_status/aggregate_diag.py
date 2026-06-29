@@ -87,6 +87,15 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
     if leg2_per_seed:
         agg["leg2_reach_rate"] = sum(leg2_per_seed) / len(leg2_per_seed)
         agg["leg2_reach_rate_per_seed"] = leg2_per_seed
+    far_per_seed = [
+        float(s["leg2_far_reach_rate"]) for s in summaries if "leg2_far_reach_rate" in s
+    ]
+    if far_per_seed:
+        agg["leg2_far_reach_rate"] = sum(far_per_seed) / len(far_per_seed)
+        agg["leg2_far_reach_rate_per_seed"] = far_per_seed
+        dists = [float(s["leg2_far_mean_dist"]) for s in summaries if "leg2_far_mean_dist" in s]
+        if dists:
+            agg["leg2_far_mean_dist"] = sum(dists) / len(dists)
     return agg
 
 
