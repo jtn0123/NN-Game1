@@ -44,9 +44,8 @@ from experiments.cc_status.io_utils import append_jsonl, write_json  # noqa: E40
 from experiments.cc_status.paired_ab import (  # noqa: E402
     _evaluate_one_level,
     aggregate_paired_ab,
-    interquartile_mean,
-    pipeline_mean,
     pair_level_rows,
+    pipeline_mean,
 )
 from experiments.cc_status.training import (  # noqa: E402
     TUTORIAL_MIN_EPSILON,

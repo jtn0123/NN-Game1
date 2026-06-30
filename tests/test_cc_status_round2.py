@@ -58,8 +58,6 @@ def test_r2d_history_state_restored_from_checkpoint(tmp_path):
 def test_r2d_use_train_levels_caps_distinct_caves_below_games():
     # The condition that triggered the duplication bug: a small training pool yields fewer
     # DISTINCT caves than `games`, so _eval_split must grade only the distinct ones.
-    from config import Config
-
     from experiments.cc_status.lever_ab import make_config
     from src.game.crystal_caves import CrystalCaves
 
