@@ -118,3 +118,53 @@ def test_b5_report_labels_final_vs_best_checkpoint(capsys):
     _print_report(summary)
     out = capsys.readouterr().out
     assert "table = FINAL net" in out
+
+
+def _ckpt(won, crystal):
+    return {
+        "won": won,
+        "exit_unlocked_rate": 0.0,
+        "crystal_frac": crystal,
+        "depth_frac": 0.3,
+        "target_distance_progress": 0.4,
+        "selection_score": 0.1,
+    }
+
+
+def _seed_summary(seed, points, holdout=False):
+    return {
+        "difficulty": "easy",
+        "episodes": 1000,
+        "games": 10,
+        "pool_size": 24,
+        "truncation_bootstrap": False,
+        "train_split_is_holdout": holdout,
+        "curve": [
+            {"seed": seed, "episode": ep, "train": tr, "test": te, "mean_q": 0.0}
+            for (ep, tr, te) in points
+        ],
+    }
+
+
+def test_r2c_aggregate_guards_ragged_seeds_and_carries_holdout(tmp_path):
+    import json
+
+    from experiments.cc_status.aggregate_diag import aggregate
+
+    # seed 0 reaches ep1000 with a lucky-high train; seed 1 only reached ep500.
+    s0 = _seed_summary(
+        0,
+        [(500, _ckpt(0.1, 0.1), _ckpt(0.0, 0.0)), (1000, _ckpt(0.9, 0.9), _ckpt(0.0, 0.0))],
+        holdout=True,
+    )
+    s1 = _seed_summary(1, [(500, _ckpt(0.1, 0.1), _ckpt(0.0, 0.0))])
+    p0, p1 = tmp_path / "s0.json", tmp_path / "s1.json"
+    p0.write_text(json.dumps(s0))
+    p1.write_text(json.dumps(s1))
+
+    agg = aggregate([str(p0), str(p1)])
+    # n_seeds guard: best comes from the full 2-seed ep500 bucket, NOT the lucky 1-seed ep1000.
+    assert agg["best"]["episode"] == 500  # pre-fix: 1000
+    # B3 gate carried into the aggregate so the verdict isn't re-run the buggy way.
+    assert agg["train_split_is_holdout"] is True
+    assert "gap_train_minus_test_best" in agg

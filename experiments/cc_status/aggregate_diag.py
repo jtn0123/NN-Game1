@@ -58,12 +58,17 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
         )
 
     curve_avg = _average_curve(curve)
-    best = max(curve_avg, key=lambda pt: (pt["train"]["won"], pt["train"]["crystal_frac"]))
     final = curve_avg[-1]
     seeds = sorted({int(pt["seed"]) for pt in curve})
     metrics = (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
+    # Audit R2-C: only pick the best checkpoint from buckets that have ALL seeds. Under the
+    # multi-process aggregate path a crashed/straggling seed leaves ragged buckets; without
+    # this guard max() could report a single lucky seed as the cross-seed result.
+    full_buckets = [pt for pt in curve_avg if pt.get("n_seeds", 1) == len(seeds)] or curve_avg
+    best = max(full_buckets, key=lambda pt: (pt["train"]["won"], pt["train"]["crystal_frac"]))
 
     base = summaries[0]
+    gap_final = {m: round(final["train"][m] - final["test"][m], 4) for m in metrics}
     agg = {
         "difficulty": base.get("difficulty"),
         "episodes": base.get("episodes"),
@@ -73,9 +78,17 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
         "truncation_bootstrap": base.get("truncation_bootstrap"),
         "train": final["train"],
         "test": final["test"],
-        "gap_train_minus_test": {
-            m: round(final["train"][m] - final["test"][m], 4) for m in metrics
+        "gap_train_minus_test": gap_final,
+        # Audit B5 parity: emit final + best gaps like the single-process path.
+        "gap_train_minus_test_final": gap_final,
+        "gap_train_minus_test_best": {
+            m: round(best["train"].get(m, 0.0) - best["test"].get(m, 0.0), 4)
+            for m in metrics
+            if m in best["train"] and m in best["test"]
         },
+        # Audit R2-C: carry the B3 regenerate/holdout gate so the aggregate report doesn't
+        # re-run the (meaningless) memorisation verdict when the train split is held-out.
+        "train_split_is_holdout": any(bool(s.get("train_split_is_holdout")) for s in summaries),
         "curve": curve,
         "curve_avg": curve_avg,
         "best": best,

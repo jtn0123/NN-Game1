@@ -557,7 +557,11 @@ def run_diagnosis(
     curve_avg = _average_curve(curve) if curve else []
     if curve_avg:
         summary["curve_avg"] = curve_avg
-        best = max(curve_avg, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"]))
+        # Audit R2-C: pick the best checkpoint only from buckets that have ALL seeds, so a
+        # ragged/straggling seed can't make a single-seed bucket the reported cross-seed best.
+        n_all = len(seeds)
+        full_buckets = [p for p in curve_avg if p.get("n_seeds", 1) == n_all] or curve_avg
+        best = max(full_buckets, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"]))
         summary["best"] = best
         # Audit B5: the top-level gap_train_minus_test is the FINAL net; the verdict uses the
         # BEST checkpoint. On a collapsing run these disagree (final gap says "never learned
