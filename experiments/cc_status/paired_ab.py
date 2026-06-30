@@ -36,6 +36,16 @@ def interquartile_mean(values: list[float]) -> float:
     return float(np.mean(core if len(core) else ordered))
 
 
+def pipeline_mean(values: list[float]) -> float:
+    """Empty-safe PLAIN mean — the estimator the metrics/lever pipeline must use.
+
+    NOT interquartile_mean: trimming the outer 50% floored bottom-heavy sparse-RL
+    distributions to 0 and even flipped the SIGN of near-zero lever deltas (audit B1), so
+    a helpful lever could read as harmful. interquartile_mean is kept only as a generic
+    utility; nothing in the metric/A-B path should call it."""
+    return float(np.mean(values)) if values else 0.0
+
+
 def stratified_bootstrap_ci(
     rows: list[dict[str, Any]],
     *,
@@ -45,7 +55,7 @@ def stratified_bootstrap_ci(
     confidence: float = 0.95,
 ) -> dict[str, float]:
     values = [float(row.get(metric, 0.0) or 0.0) for row in rows]
-    point = interquartile_mean(values)
+    point = pipeline_mean(values)
     if not rows or n_bootstrap <= 0:
         return {"iqm": point, "ci_low": point, "ci_high": point, "n": float(len(rows))}
 
@@ -63,9 +73,7 @@ def stratified_bootstrap_ci(
             group = groups[int(key)]
             indices = rng.integers(0, len(group), size=len(group))
             sampled_rows.extend(group[int(index)] for index in indices)
-        samples.append(
-            interquartile_mean([float(row.get(metric, 0.0) or 0.0) for row in sampled_rows])
-        )
+        samples.append(pipeline_mean([float(row.get(metric, 0.0) or 0.0) for row in sampled_rows]))
 
     return {
         "iqm": point,
@@ -416,6 +424,7 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
 __all__ = [
     "aggregate_paired_ab",
     "interquartile_mean",
+    "pipeline_mean",
     "paired_ab_main",
     "pair_level_rows",
     "stratified_bootstrap_ci",

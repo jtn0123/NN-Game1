@@ -30,7 +30,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from experiments.cc_status.diagnose_gap import (  # noqa: E402
-    _IQM_METRICS,
+    _MEAN_SURROGATE_METRICS,
     _RATE_METRICS,
     _average_curve,
     _print_curve,
@@ -61,7 +61,7 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
     best = max(curve_avg, key=lambda pt: (pt["train"]["won"], pt["train"]["crystal_frac"]))
     final = curve_avg[-1]
     seeds = sorted({int(pt["seed"]) for pt in curve})
-    metrics = (*_RATE_METRICS, *_IQM_METRICS)
+    metrics = (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
 
     base = summaries[0]
     agg = {

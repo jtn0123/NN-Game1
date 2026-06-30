@@ -45,6 +45,7 @@ from experiments.cc_status.paired_ab import (  # noqa: E402
     _evaluate_one_level,
     aggregate_paired_ab,
     interquartile_mean,
+    pipeline_mean,
     pair_level_rows,
 )
 from experiments.cc_status.training import (  # noqa: E402
@@ -130,13 +131,13 @@ def paired_row_ci(
     deltas = [float(p.get(f"delta_{metric}", 0.0) or 0.0) for p in paired]
     if not deltas:
         return {"iqm": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n": 0}
-    point = interquartile_mean(deltas)
+    point = pipeline_mean(deltas)
     rng = np.random.default_rng(seed)
     n = len(deltas)
     samples = []
     for _ in range(max(1, n_bootstrap)):
         idx = rng.integers(0, n, size=n)
-        samples.append(interquartile_mean([deltas[i] for i in idx]))
+        samples.append(pipeline_mean([deltas[i] for i in idx]))
     return {
         "iqm": float(point),
         "ci_low": float(np.quantile(samples, 0.025)),
@@ -273,7 +274,7 @@ def per_arm_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "end_reason_counts": {},
         }
     iqm = {
-        metric: interquartile_mean([float(row.get(metric, 0.0) or 0.0) for row in rows])
+        metric: pipeline_mean([float(row.get(metric, 0.0) or 0.0) for row in rows])
         for metric in PER_ARM_METRICS
     }
     end_reason_counts: dict[str, int] = {}
@@ -521,12 +522,12 @@ def print_running_ab(
     for arm in arms:
         arm_rows = rows_by_arm.get(arm, [])
         tgt = (
-            interquartile_mean([float(r.get(DELTA_METRIC, 0.0) or 0.0) for r in arm_rows])
+            pipeline_mean([float(r.get(DELTA_METRIC, 0.0) or 0.0) for r in arm_rows])
             if arm_rows
             else 0.0
         )
         cryst = (
-            interquartile_mean([float(r.get("crystal_frac", 0.0) or 0.0) for r in arm_rows])
+            pipeline_mean([float(r.get("crystal_frac", 0.0) or 0.0) for r in arm_rows])
             if arm_rows
             else 0.0
         )
