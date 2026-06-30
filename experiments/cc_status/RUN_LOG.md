@@ -187,3 +187,13 @@ Repeat the RUN-13 compass A/B at `easy` (2–3 crystals, no hazards) then `norma
 - **Result: did NOT crack completion AND regressed the compass baseline.** Both arms held-out win **0.000**, exit_unlocked **0.000**, conversion 0.00. Curriculum WORSE on the useful signals: crystals **0.725 vs 0.833**, NEAR **0.433 vs 0.633**, FAR **0.058 vs 0.125**, meanQ 4.4 vs 6.1.
 - **Read:** easy pretrain is a weak/partial policy (held-out easy ~30-44% crystals) that **washes out / misaligns** on normal (which adds hazards/enemies the easy agent never saw). At equal total budget the curriculum starts behind on normal and never catches up — trading 2000 normal episodes for easy pretrain net-hurt. Simple difficulty warm-start, this recipe, is dead. (Lower-priority tweaks — epsilon-carry, lighter split — unlikely to overcome a baseline regression.)
 - **Persistent wall stands:** exit_unlocked = 0.000 on held-out normal for BOTH arms → still **never collects all ~12 crystals**. RUN-15a proved it's structurally feasible ⇒ behavioral. Prime suspect: the **normal-specific hazards/enemies** (the one thing easy lacks, and easy *did* produce wins). → diagnose the failure mode (hazard exposure / death-vs-timeout) before the next lever; don't guess between survival/execution/shaping.
+
+### RUN-15b — hazard-exposure probe (agent-free) — DONE: wall = hazard/enemy survival
+Extended `diagnose_completion.py` (commit `5616202`) with hazard/enemy density + crystal-guarding, 40 held-out lvls/difficulty.
+- **easy:** 0 hazards, 0 enemies, 0% crystals guarded. **normal:** 7.5 hazards + 3.6 enemies/level, **35% of crystals adjacent (≤1 tile) to a threat** (43% ≤2). To unlock the exit the agent must safely collect ALL ~12 crystals incl. ~4-5 threat-guarded, on 3 health.
+- Confirmed the perception window already injects hazards+enemies (`_fill_window`) → the agent **SEES** threats but hasn't **learned** to survive them: a **capability gap, not an observation gap** ⇒ "add hazards to state" is NOT the fix. Explains RUN-15 (easy-pretrained policy never saw a hazard → washed out).
+
+### RUN-16 — behavioral death-trace (BUILT, dispatched to M4)
+`--death-trace` (commit `3e52d08`): after training, greedy-play held-out normal and report end-reason distribution (won/killed/timeout/stalled), the hazard-vs-enemy-vs-air split of deaths, and crystals-at-end. Added `last_damage_source` tracking to the game. Single arm (diagnostic), normal+compass, 3 seeds, 4000 ep.
+- Decides RUN-17's lever: killed≫timeout & enemy-dominated → enemy-velocity obs / combat; killed & hazard-dominated → static-hazard pathing; timeout-dominated → exploration/credit (not death).
+- Smoke-tested end-to-end; 111 crystal_caves tests pass.
