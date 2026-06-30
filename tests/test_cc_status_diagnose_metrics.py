@@ -108,3 +108,13 @@ def test_aggregate_empty_rows_safe():
     agg = _aggregate([])
     assert agg["crystal_frac"] == 0.0
     assert agg["depth_frac"] == 0.0
+
+
+def test_b5_report_labels_final_vs_best_checkpoint(capsys):
+    # Audit B5: when a best checkpoint exists, the report must flag that the table/GAP are
+    # the FINAL net (which can disagree with the best-checkpoint verdict).
+    summary = _memorisation_summary(train_split_is_holdout=False)
+    summary["best"] = {"episode": 500, "train": _metrics(0.6, 0.7), "test": _metrics(0.1, 0.2)}
+    _print_report(summary)
+    out = capsys.readouterr().out
+    assert "table = FINAL net" in out

@@ -1595,3 +1595,69 @@ class TestDeathSourceAttribution:
         game.hazards = {(pcol, prow)}
         game.enemies = [_FakeEnemy(pygame.Rect(player_rect))]
         assert self._attribute(game) == "both"
+
+
+class TestTerminalPrecedence:
+    """Audit B7 / latent-2 / B9: first terminal event in a frame wins; correct level label."""
+
+    def test_b7_terminal_win_not_overwritten_by_same_frame_damage(self, game: CrystalCaves) -> None:
+        game.reset()
+        game.game_over = True  # e.g. a FIRST_CRYSTAL_GOAL win fired in _collect_pickups
+        game.won = True
+        game._end_reason = "first_crystal_goal"
+        pcol, prow = game._player_tile()
+        game.hazards = {(pcol, prow)}  # a fatal hazard overlaps the same frame
+        game.health = 1
+        game.invuln_timer = 0
+        game._check_player_danger()
+        assert game.won is True
+        assert game._end_reason == "first_crystal_goal"  # pre-fix: overwritten to "killed"
+
+    def test_latent2_death_not_overwritten_by_same_frame_exit(self, game: CrystalCaves) -> None:
+        game.reset()
+        game.game_over = True  # a fatal hit fired earlier this frame
+        game.won = False
+        game._end_reason = "killed"
+        game.exit_unlocked = True
+        ex, ey = game.exit_pos
+        game.player_x = float(ex * game.TILE_SIZE)
+        game.player_y = float(ey * game.TILE_SIZE)
+        game._check_exit()
+        assert game.won is False
+        assert game._end_reason == "killed"  # pre-fix: overwritten to "won"
+
+    def test_b9_won_episode_reports_played_level_not_next(self, game: CrystalCaves) -> None:
+        game.reset()
+        played = game.level_index
+        game.exit_unlocked = True
+        ex, ey = game.exit_pos
+        game.player_x = float(ex * game.TILE_SIZE)
+        game.player_y = float(ey * game.TILE_SIZE)
+        game._check_exit()
+        assert game.won is True
+        assert game.level_index != played  # internal cursor advanced
+        assert game._info()["level"] == played  # but the report shows the PLAYED level
+
+
+class TestStallTimerNetProgress:
+    """Audit B8: the stall timer resets only on NET progress, not instantaneous oscillation."""
+
+    def test_oscillation_does_not_reset_stall_timer(self, game: CrystalCaves, monkeypatch) -> None:
+        game.reset()
+        game.game_over = False
+        target = ("crystal", 5, 5)
+        game._stall_best = {target: 90.0}
+
+        def drive(current_distance: float, prev_distance: float) -> None:
+            monkeypatch.setattr(game, "_current_target", lambda: (target, current_distance))
+            game._target_progress_reward(target, prev_distance)
+
+        # Moves CLOSER than the previous step (instantaneous progress) but NOT past the
+        # closest-ever 90 -> pre-fix this reset the timer every wiggle; now it must not.
+        game.steps_since_progress = 50
+        drive(current_distance=95.0, prev_distance=99.0)
+        assert game.steps_since_progress == 50
+
+        # A genuine new closest-ever approach DOES reset the timer.
+        drive(current_distance=80.0, prev_distance=95.0)
+        assert game.steps_since_progress == 0

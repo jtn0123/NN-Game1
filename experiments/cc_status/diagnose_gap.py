@@ -557,9 +557,18 @@ def run_diagnosis(
     curve_avg = _average_curve(curve) if curve else []
     if curve_avg:
         summary["curve_avg"] = curve_avg
-        summary["best"] = max(
-            curve_avg, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"])
-        )
+        best = max(curve_avg, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"]))
+        summary["best"] = best
+        # Audit B5: the top-level gap_train_minus_test is the FINAL net; the verdict uses the
+        # BEST checkpoint. On a collapsing run these disagree (final gap says "never learned
+        # train" while the verdict says MEMORISATION). Emit the best-checkpoint gap too so the
+        # JSON carries both, and label the printed one FINAL.
+        summary["gap_train_minus_test_final"] = summary["gap_train_minus_test"]
+        summary["gap_train_minus_test_best"] = {
+            m: round(best["train"].get(m, 0.0) - best["test"].get(m, 0.0), 4)
+            for m in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
+            if m in best["train"] and m in best["test"]
+        }
     write_json(out_dir / "diagnosis.json", summary)
     if curve_avg:
         _print_curve(curve_avg)
@@ -636,6 +645,15 @@ def _print_report(summary: dict[str, Any]) -> None:
         f"episodes={summary['episodes']} games/split={summary['games']}",
         flush=True,
     )
+    if summary.get("best"):
+        # Audit B5: the table/GAP below are the FINAL net; the verdict uses the BEST
+        # checkpoint (printed lower). On a collapsing run they differ — see
+        # gap_train_minus_test_best in the JSON.
+        print(
+            "  [note] table = FINAL net; GAP can differ from the best-checkpoint verdict "
+            "below (JSON has gap_train_minus_test_final/_best).",
+            flush=True,
+        )
     if summary.get("train_split_is_holdout"):
         print(
             "  [!] --regenerate-each-episode: the TRAIN column is a 2nd HELD-OUT set "

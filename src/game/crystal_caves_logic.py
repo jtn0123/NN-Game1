@@ -322,6 +322,11 @@ class CrystalCavesLogicMixin:
         return reward
 
     def _check_player_danger(self: Any) -> float:
+        # Audit B7: if a terminal event already fired this frame (e.g. a FIRST_CRYSTAL_GOAL
+        # win in _collect_pickups), do not overwrite it with a same-frame death.
+        if self.game_over:
+            return 0.0
+
         reward = 0.0
         player_rect = self._player_rect()
 
@@ -377,11 +382,16 @@ class CrystalCavesLogicMixin:
         return -3.0
 
     def _check_exit(self: Any) -> float:
+        # Audit latent-2: a fatal hit earlier this frame (_check_player_danger) must not be
+        # overwritten by a same-frame exit touch — "first terminal event wins".
+        if self.game_over:
+            return 0.0
         if not self.exit_unlocked:
             return 0.0
 
         exit_rect = self._tile_rect(self.exit_pos).inflate(-6, -2)
         if self._player_rect().colliderect(exit_rect):
+            self._won_level_index = self.level_index  # Audit B9: report the PLAYED level
             self.game_over = True
             self.won = True
             self._end_reason = "won"
@@ -458,9 +468,14 @@ class CrystalCavesLogicMixin:
             return 0.0
 
         tile_progress = (previous_distance - current_distance) / self.TILE_SIZE
-        # Reset the stall timer on real approach regardless of which approach-signal
-        # source is active, so the agent is never timed out mid-approach to the exit.
-        if tile_progress > 0.03:
+        # Audit B8: reset the stall timer only on NET progress — a new closest-ever approach
+        # to the current target — not on any instantaneous toward-step. An oscillating agent
+        # with ~0 net displacement otherwise resets the timer every wiggle and never
+        # 'stalls', mislabeling the failure as 'timeout'. Works in every shaping mode (the
+        # additive path below also marks progress on its own new-best, which is idempotent).
+        stall_best = self._stall_best.get(current_target)
+        if stall_best is None or current_distance < stall_best - self.TILE_SIZE * 0.10:
+            self._stall_best[current_target] = current_distance
             self._mark_progress()
 
         # When the telescoping geodesic potential is on it supplies the (unfarmable)

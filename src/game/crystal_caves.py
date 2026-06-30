@@ -387,6 +387,7 @@ class CrystalCaves(
         self.show_agent_overlay = False  # educational: draw the agent's view + goal
         self._end_reason = "running"
         self._last_damage_source = "none"
+        self._won_level_index = self.level_index  # Audit B9: level actually played this episode
         self._max_depth_row = 0
         self._progress = 0.0
         self._progress_initial = 0.0
@@ -582,6 +583,8 @@ class CrystalCaves(
         self._closeness_initial = self._target_closeness()
         self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
         self._end_reason = "running"
+        self._last_damage_source = "none"
+        self._won_level_index = self.level_index
         self._visited_obj_cells = set()
         self._obj_region_total = 0.0
         self._visited_novelty_cells = set()
@@ -589,6 +592,9 @@ class CrystalCaves(
         self._ngu_visits = {}
         self._remember_current_novelty_cell()
         self._target_best_distances: Dict[Tuple[str, int, int], float] = {}
+        # Audit B8: closest-ever distance per target for the STALL timer (separate from the
+        # reward's best-distance map), so the stall timer resets only on NET progress.
+        self._stall_best: Dict[Tuple[str, int, int], float] = {}
         self._anti_loop_tile = None
         self._anti_loop_same_tile_steps = 0
         self._anti_loop_no_approach_steps = 0
@@ -1377,7 +1383,9 @@ class CrystalCaves(
             "switches_used": len(self.used_switches),
             "exit_unlocked": self.exit_unlocked,
             "doors_open": self.doors_open,
-            "level": self.level_index,
+            # Audit B9: _check_exit advances level_index on a win before _info runs; report
+            # the level actually PLAYED so per-level win breakdowns aren't off-by-one.
+            "level": self._won_level_index if self.won else self.level_index,
             "level_name": self.level.name,
             "won": self.won,
             "steps": self.steps,
