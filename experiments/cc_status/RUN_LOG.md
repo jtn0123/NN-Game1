@@ -166,3 +166,16 @@ Repeat the RUN-13 compass A/B at `easy` (2–3 crystals, no hazards) then `norma
 1. **Difficulty curriculum (warm-start normal ⟵ easy)** — top pick; targets the confirmed "can't complete the long chain from scratch" wall (train wins 0 at normal, but easy produces wins).
 2. **Op 2 learnable route** (`--route-aux`, built) — elegance/oracle-removal; A/B on tutorial/easy where routing→wins. Won't crack normal alone.
 3. **Completion diagnostic** — why does collection stall at ~0.83 / exit never unlocks? (step-limit? last-crystal accessibility? hazards?) Cheap; de-risks before committing a build.
+
+### RUN-15a — completion diagnostic (agent-free, structural) — DONE: the wall is BEHAVIORAL
+`diagnose_completion.py` (commit `58d6dec`), 40 held-out levels/difficulty, perfect-agent upper bound (greedy geodesic collect-all-then-exit tour vs MAX_STEPS/no-progress window). No training/GPU.
+
+| difficulty | crystals | reachable | tour steps (mean / max) | fits 3000 | budget used | longest leg < 720 |
+|---|---:|---:|---:|---:|---:|---:|
+| tutorial | 1.0 | 100% | 305 / 442 | 100% | 10% | 100% |
+| easy | 2.4 | 100% | 531 / 907 | 100% | 18% | 100% |
+| normal | 12.4 | 100% | 1103 / 1585 | 100% | 37% | 100% |
+
+- **Result: the cheap structural causes are RULED OUT.** Every normal level is winnable; a perfect agent's tour uses only ~37% of the 3000-step budget (max 1585); no inter-crystal leg exceeds the 720 no-progress window. So normal's 0 wins are NOT a step-limit / unreachable-crystal / no-progress-trap problem.
+- **⇒ The normal wall is purely BEHAVIORAL/capability:** the policy can't *execute* the full 12-crystal chain + hazard/enemy survival from scratch, even though it's comfortably doable within limits. (The tour also ignores hazards/enemies, so real play only adds DEATH risk + dodging overhead — a survival dimension, not a budget one.) This validates the **curriculum/capability** family for RUN-15 and rules out "just raise MAX_STEPS."
+- Caveat: still behavioral-blind (agent-free). A loadable normal checkpoint (needs `--save-checkpoints`) would let a follow-up probe split the actual failure into timeout-wander vs death vs stuck — but structural feasibility being clean already justifies the curriculum build.
