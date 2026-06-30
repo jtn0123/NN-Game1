@@ -21,6 +21,7 @@ Baseline reference for "held-out crystals" memorization floor ≈ **0.033**.
 | RUN-03 | M4 | generalization-budget: pool 256, 3 seeds, 5000 ep | 0.033 / 0.00 (final TEST cryst 0.10, exit 0.27) | more diversity+budget → modest off-zero transfer, but wins ~0 and train weak; not enough |
 | RUN-04 | M4 | infinite-deleak: pool 24, 3 seeds, 3000 ep, 2 arms | B (regenerate): 0.167 / 0.05 · C (regenerate+de-leak): 0.067 / 0.05 | fresh-level regeneration = **real but weak/noisy** lever (0.167 peak vs 0.033, spiky, regressed); de-leak **inconclusive**; agent UNDERfits in infinite regime → representation likely the ceiling |
 | RUN-12 | M4 | FAR reverse-exit curriculum p=0.5, 3 seeds, 4000 ep, 2 arms | ctrl: 0.242 / 0.033 (FAR probe 0.117) · curr: 0.192 / 0.033 (FAR probe 0.100) | **DISCONFIRMED** — drilling far-starts lowered train competence (win 0.375→0.20) AND the FAR probe; control wins. Confirms leg-2 is a **representation ceiling**, not a data/start-distribution problem → reward/curriculum family exhausted, observation change (RUN-13) is the live lever |
+| RUN-13 | M4 | **geodesic corridor compass** (`--geo-compass`), 3 seeds, 4000 ep, 2 arms | ctrl: 0.242 / 0.033 (FAR 0.117) · compass: **0.817 / 0.483** (FAR **0.575**) | ✅ **BREAKTHROUGH** — held-out win 0.033→0.483 (14×), FAR probe 0.117→0.575, every seed, from ep500 on. The flat MLP CAN use an explicit route signal; the wall WAS missing route info. Caveat: oracle-fed → RUN-14 makes it learnable |
 
 ## Detail
 
@@ -128,9 +129,27 @@ Built `CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR` + `--reverse-exit-curriculum-f
 - **Train competence dropped:** train win 0.375→**0.200** (the fixed-p=0.5 drill makes half the resets skip the full-from-spawn task → underfits). NEAR probe also dipped (0.733→0.625).
 - **Verdict: disconfirmed — control wins.** Not even "FAR probe up but full-play flat": the FAR probe itself is *lower* with the curriculum (0.100 vs 0.117). Drilling far-starts harder did not lift navigation and reduced overall competence. This is the **representation-ceiling** branch RUN-11 flagged: the flat-MLP can't acquire unseen-level route-planning from more reps alone — so the fix must change what the agent *sees/computes*, not just its start distribution. → the reward/curriculum family for leg-2 is exhausted; the live lever is RUN-13 (give it the route as an observation).
 
-### RUN-13 — geodesic corridor compass (BUILT, queued on M4) — the live lever
+### RUN-13 — geodesic corridor compass (M4) — ✅ BREAKTHROUGH (first real lift)
 Brainstorm #1 (see NAV_EXPANSION_BRIEF.md). RUN-11 root cause: the agent's only directional signal is a EUCLIDEAN compass that points at the objective THROUGH walls, so it can't route around them (FAR probe 0.12). Fix: append 4 metadata scalars `[step_dx, step_dy, reachable, geo_dist_norm]` pointing down the real traversable route, read from the already-cached `_geodesic_distance_field()` BFS. Observation (computed identically at eval), NOT reward → does not re-trigger the disconfirmed geodesic-PBRS lever. Pushed `6f1d910`. Cheap (~1.3K params, +4 state dims), works on MLP + SpatialDQN. **Directly attacks RUN-12's representation-ceiling finding:** RUN-12 proved more reps won't teach route-planning, so this hands the agent the route signal directly instead.
-- A/B: Arm A control vs Arm B `--geo-compass`, tutorial, 3 seeds, 4000 ep, `--leg2-probe`.
-- Grade (held-out, best-ckpt, seed-avg): **FAR probe** (0.117 → materially higher?), full-chain **win** (0.033), **conversion** (0.14). NEAR (0.733) and collect-rate (0.242) must not regress.
-- Decision: if FAR probe + held-out win rise → first real lift; next swing combines it with the corridor signal in the *window* (trail channel / aux head, brief items #2–#3) as RUN-14. If FAR probe rises but win flat → the agent can follow the corridor but still can't convert (credit/representation) → escalate to the aux-head/credit items. If nothing moves → the flat MLP can't even exploit an explicit route signal → the ceiling is the architecture itself (CNN/bigger net or PPO).
-- Verified: compass step strictly reduces route-distance to exit in 30/30 far states.
+- A/B: Arm A control vs Arm B `--geo-compass`, tutorial, 3 seeds, 4000 ep, `--leg2-probe`. (~1h51m on M4, all six workers exit 0.)
+- **RESULT — every grade metric moved the right way, hugely, on every seed:**
+
+| metric | control | geo-compass | Δ |
+|---|---:|---:|---:|
+| held-out win (best ckpt) | 0.033 | **0.483** | +0.450 |
+| held-out win (final ep4000) | 0.033 | 0.475 | +0.442 |
+| held-out crystals (best) | 0.242 | 0.817 | +0.575 |
+| collect→win conversion (best) | 0.138 | 0.592 | +0.454 |
+| FAR leg-2 probe | 0.117 | **0.575** | +0.458 |
+| NEAR leg-2 probe | 0.733 | 0.850 | +0.117 |
+| train win | 0.375 | 0.842 | +0.467 |
+
+- **Read: the flat MLP CAN exploit an explicit corridor signal — the bottleneck was missing route information, exactly as RUN-11 diagnosed and RUN-12 (curriculum) failed to supply.** Not a one-checkpoint spike: compass beats control from ep500 onward, every seed, and it lifted leg-1 (collect, train win) too — knowing the route to objectives helps the whole chain, not just leg-2. Gap narrowed (win gap 0.342→0.300) AND absolute held-out rose. This clears the success branch.
+- **Honest caveat (drives RUN-14):** the compass is *oracle-fed* — a BFS planner runs alongside the net and hands it the descending direction each step; the net learns to follow it (and to platform/execute, which is why it's 0.48 not ~1.0). It's eval-fair (computed identically per-level at eval, on unseen layouts, so it's real generalization not memorization) and cheap, but it leans on a hand-coded route oracle. RUN-14 should make the route signal *learnable* (aux route-distance head — note `CRYSTAL_CAVES_ROUTE_AUX_LOSS`/`route_aux_head` infra already exists — and/or a spatial trail channel / CNN that preserves structure), so the net builds a route-aware representation from raw observation rather than being spoon-fed. Also untested: whether the lift holds at `easy`/`normal` difficulty (multi-crystal + hazards) — RUN-13 is tutorial (1 crystal).
+- Verified pre-run: compass step strictly reduces route-distance to exit in 30/30 far states.
+
+### bench-net — CPU vs MPS device decision (M4) — RESOLVED: stay on CPU+vec-envs
+Micro-benchmark (`bench_net.py`, commit `f1d114a`) timing a real train step for the 614K MLP / 798K flatten-CNN / 77K global-pool CNN. Both legs run on M4 (GPU leg alongside RUN-13 on the idle GPU; CPU leg after, on the freed box). Samples/s (steps/s×batch):
+- **MLP: CPU wins 5–10×** at every batch (overhead-bound on MPS). No contest.
+- **CNN: CPU wins at B128** (the recipe regime); MPS only edges ahead at B512+ (where conv compute finally amortizes GPU dispatch). Throttle detector flagged 2 MPS cells (early-vs-late drift) — methodology worked.
+- **Decision: keep RUN-14 on CPU + `--vec-envs`** regardless of architecture. The real DQN loop (CPU env-step, replay sampling, per-step host sync) is even less MPS-favorable than this isolated bench. Neural Engine is unreachable from PyTorch training. MPS would only pay off for a multi-M-param encoder at batch ≥512 with a sync-free loop — not justified by any evidence.
