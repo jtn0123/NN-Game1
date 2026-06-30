@@ -227,7 +227,18 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
             out[metric] = 0.0
         return out
     for metric in _RATE_METRICS:
-        out[metric] = float(np.mean([float(bool(r.get(metric, False))) for r in rows]))
+        if metric == "crystal_frac":
+            # crystal_frac is a 0..1 collection FRACTION → TRUE MEAN, not a bool
+            # "collected-any" rate. The bool form over-reports multi-crystal difficulties:
+            # on normal it read 0.83 (= 83% of levels collected ≥1 crystal) while the actual
+            # mean fraction is ~0.20 (RUN-16 death-trace). Also expose the collected-≥1 rate
+            # separately so the distribution signal isn't lost.
+            out[metric] = float(np.mean([float(r.get(metric, 0.0) or 0.0) for r in rows]))
+            out["crystal_any_rate"] = float(
+                np.mean([float(bool(r.get(metric, False))) for r in rows])
+            )
+        else:
+            out[metric] = float(np.mean([float(bool(r.get(metric, False))) for r in rows]))
     for metric in _IQM_METRICS:
         out[metric] = interquartile_mean([float(r.get(metric, 0.0) or 0.0) for r in rows])
     return out
