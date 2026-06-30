@@ -94,6 +94,15 @@ def _greedy_tour_tiles(
     return total, longest, True
 
 
+def _hazard_tiles(game: CrystalCaves) -> set[tuple[int, int]]:
+    """Tiles occupied by a static hazard (spike/acid) OR an enemy spawn — the things
+    `normal` adds and `easy` lacks. Enemy positions are pixels → tiles."""
+    tiles: set[tuple[int, int]] = set(game.hazards)
+    for e in game.enemies:
+        tiles.add((int(e.x // game.TILE_SIZE), int(e.y // game.TILE_SIZE)))
+    return tiles
+
+
 def diagnose(difficulty: str, games: int) -> dict[str, Any]:
     # Same config path as the RUN-14 A/B (procedural, platform_network, difficulty-aware
     # generation) so the held-out eval levels match what was actually trained/evaluated.
@@ -114,6 +123,20 @@ def diagnose(difficulty: str, games: int) -> dict[str, Any]:
         )
         tour_steps = tour_tiles * steps_per_tile
         longest_leg_steps = longest_leg * steps_per_tile
+
+        # Hazard exposure: how many crystals sit next to a hazard/enemy (a structural proxy
+        # for "is the LAST-crystal stall a deadliness problem"). guarded@K = a crystal within
+        # K Manhattan tiles of a hazard/enemy tile.
+        hazards = _hazard_tiles(game)
+
+        def _guarded(k: int) -> int:
+            return sum(
+                1
+                for cx, cy in game.crystals
+                if any(abs(cx - hx) + abs(cy - hy) <= k for hx, hy in hazards)
+            )
+
+        n_cryst = max(1, total_crystals)
         rows_out.append(
             {
                 "crystals": total_crystals,
@@ -122,6 +145,10 @@ def diagnose(difficulty: str, games: int) -> dict[str, Any]:
                 "longest_leg_steps": longest_leg_steps,
                 "fits_max_steps": tour_steps <= game.MAX_STEPS,
                 "leg_under_noprogress": longest_leg_steps <= game.MAX_STEPS_WITHOUT_PROGRESS,
+                "n_hazards": len(game.hazards),
+                "n_enemies": len(game.enemies),
+                "frac_guarded_k1": _guarded(1) / n_cryst,
+                "frac_guarded_k2": _guarded(2) / n_cryst,
             }
         )
 
@@ -141,6 +168,10 @@ def diagnose(difficulty: str, games: int) -> dict[str, Any]:
         "pct_tour_fits_3000": float(np.mean([r["fits_max_steps"] for r in rows_out])),
         "pct_legs_under_noprogress": float(np.mean([r["leg_under_noprogress"] for r in rows_out])),
         "budget_used_mean_frac": float(ts.mean() / game.MAX_STEPS),
+        "mean_hazards": float(np.mean([r["n_hazards"] for r in rows_out])),
+        "mean_enemies": float(np.mean([r["n_enemies"] for r in rows_out])),
+        "frac_crystals_guarded_k1": float(np.mean([r["frac_guarded_k1"] for r in rows_out])),
+        "frac_crystals_guarded_k2": float(np.mean([r["frac_guarded_k2"] for r in rows_out])),
     }
 
 
@@ -171,6 +202,14 @@ def main() -> int:
         print(
             f"  budget used by movement    {r['budget_used_mean_frac']*100:5.1f}%  "
             f"(before jumps/backtracking/hazard-dodging)"
+        )
+        print(
+            f"  hazards/enemies per level  {r['mean_hazards']:.1f} hazards + "
+            f"{r['mean_enemies']:.1f} enemies"
+        )
+        print(
+            f"  crystals next to a hazard  {r['frac_crystals_guarded_k1']*100:5.1f}% (≤1 tile)  "
+            f"{r['frac_crystals_guarded_k2']*100:5.1f}% (≤2 tiles)"
         )
     return 0
 
