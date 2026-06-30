@@ -280,13 +280,18 @@ def _evaluate_one_level(
 
 
 def _target_distance_progress(distances: list[float]) -> float:
+    """Closeness to the agent's CURRENT objective at the FINAL step, normalized by the
+    initial distance. Uses the terminal distance, NOT the best-ever minimum: the old min
+    form saturated to ~1.0 the instant the agent touched its first objective (the target
+    then switches and the distance jumps), badly overstating competence. 1.0 = ended on the
+    objective; 0.0 = ended at/beyond the starting distance."""
     if not distances:
         return 0.0
     initial = distances[0]
-    best = min(distances)
+    final = distances[-1]
     if initial > 1e-6:
-        return float(np.clip(1.0 - best / initial, 0.0, 1.0))
-    return 1.0 if best <= 1e-6 else 0.0
+        return float(np.clip(1.0 - final / initial, 0.0, 1.0))
+    return 1.0 if final <= 1e-6 else 0.0
 
 
 def paired_ab_main(argv: list[str] | None = None) -> int:

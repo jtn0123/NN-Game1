@@ -40,7 +40,7 @@ from experiments.cc_status.evals import (  # noqa: E402
 )
 from experiments.cc_status.io_utils import write_json  # noqa: E402
 from experiments.cc_status.lever_ab import make_config  # noqa: E402
-from experiments.cc_status.paired_ab import _evaluate_one_level, interquartile_mean  # noqa: E402
+from experiments.cc_status.paired_ab import _evaluate_one_level  # noqa: E402
 from experiments.cc_status.training import (  # noqa: E402
     TUTORIAL_MIN_EPSILON,
     capture_weight_snapshot,
@@ -55,10 +55,12 @@ from src.game.crystal_caves import CrystalCaves  # noqa: E402
 # outcomes → mean of the bool = a true rate. `crystal_frac` is a 0..1 collection FRACTION
 # → aggregated as a TRUE MEAN in _aggregate (NOT bool: the bool form reported a
 # collected-≥1 rate, e.g. normal 0.83 while the real mean is ~0.20; RUN-16 death-trace).
-# The continuous chain surrogates stay on IQM (note: IQM discards the outer 50% and floors
-# bottom-heavy distributions — fine while these read high, fragile otherwise).
+# The continuous chain surrogates use a PLAIN MEAN (previously an interquartile mean that
+# discarded the outer 50% and floored bottom-heavy distributions — a true mean is honest
+# and matches what a reader assumes). target_distance_progress is now a FINAL-step closeness
+# (see paired_ab), not best-ever, which used to saturate to ~1.0 on the first objective.
 _RATE_METRICS = ("won", "exit_unlocked_rate", "crystal_frac")
-_IQM_METRICS = ("depth_frac", "target_distance_progress", "selection_score")
+_MEAN_SURROGATE_METRICS = ("depth_frac", "target_distance_progress", "selection_score")
 
 
 def _eval_split(
@@ -224,7 +226,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Per-split summary: rates for win/exit, IQM for the continuous surrogates."""
     out: dict[str, float] = {"n": float(len(rows))}
     if not rows:
-        for metric in (*_RATE_METRICS, *_IQM_METRICS):
+        for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
             out[metric] = 0.0
         return out
     for metric in _RATE_METRICS:
@@ -240,8 +242,8 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
             )
         else:
             out[metric] = float(np.mean([float(bool(r.get(metric, False))) for r in rows]))
-    for metric in _IQM_METRICS:
-        out[metric] = interquartile_mean([float(r.get(metric, 0.0) or 0.0) for r in rows])
+    for metric in _MEAN_SURROGATE_METRICS:
+        out[metric] = float(np.mean([float(r.get(metric, 0.0) or 0.0) for r in rows]))
     return out
 
 
@@ -251,7 +253,7 @@ def _average_curve(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_episode: dict[int, list[dict[str, Any]]] = {}
     for point in curve:
         by_episode.setdefault(int(point["episode"]), []).append(point)
-    metrics = (*_RATE_METRICS, *_IQM_METRICS)
+    metrics = (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
     averaged: list[dict[str, Any]] = []
     for episode in sorted(by_episode):
         points = by_episode[episode]
@@ -497,7 +499,8 @@ def run_diagnosis(
         "train": train_agg,
         "test": test_agg,
         "gap_train_minus_test": {
-            m: round(train_agg[m] - test_agg[m], 4) for m in (*_RATE_METRICS, *_IQM_METRICS)
+            m: round(train_agg[m] - test_agg[m], 4)
+            for m in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
         },
         "curve": curve,
         "truncation_bootstrap": truncation_bootstrap,
