@@ -170,6 +170,55 @@ def _eval_leg2(
     }
 
 
+def _eval_death_trace(trainer: Any, config: Any, *, games: int) -> dict[str, float]:
+    """Behavioral failure trace (RUN-16): greedy-play held-out levels to termination and
+    record HOW each episode ends — won / killed (by hazard vs enemy vs air) / timeout /
+    stalled — plus crystals collected at the end. Pins whether normal's 0 wins are deaths
+    (and to what) vs running out of time, which picks the survival lever."""
+    game = CrystalCaves(config, headless=True)
+    game.use_eval_levels(games)
+    game.reset_eval_cursor()
+    agent = trainer.agent
+    step_limit = int(config.EVAL_MAX_STEPS)
+    reasons: dict[str, int] = {}
+    kill_sources: dict[str, int] = {}
+    crystal_fracs: list[float] = []
+    steps_used: list[float] = []
+    agent_state = _enter_greedy_agent_eval(agent)
+    try:
+        for _ in range(games):
+            state = game.reset()
+            done = False
+            steps = 0
+            info: dict[str, Any] = {}
+            while not done and steps < step_limit:
+                action = agent.select_action(state, training=False)
+                state, _, done, info = game.step(action)
+                steps += 1
+            reason = info.get("end_reason", "unknown") if done else "timeout"
+            reasons[reason] = reasons.get(reason, 0) + 1
+            if reason == "killed":
+                src = str(info.get("last_damage_source", "none"))
+                kill_sources[src] = kill_sources.get(src, 0) + 1
+            init_c = max(1, int(info.get("initial_crystals", 1)))
+            rem = int(info.get("crystals_remaining", 0))
+            crystal_fracs.append((init_c - rem) / init_c)
+            steps_used.append(float(steps))
+    finally:
+        _restore_greedy_agent_eval(agent, agent_state)
+    n = max(1, games)
+    out: dict[str, float] = {
+        "n": float(games),
+        "crystal_frac_mean": float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
+        "steps_mean": float(np.mean(steps_used)) if steps_used else 0.0,
+    }
+    for r in ("won", "killed", "timeout", "stalled", "first_crystal_goal"):
+        out[f"reason_{r}"] = reasons.get(r, 0) / n
+    for s in ("hazard", "enemy", "air"):
+        out[f"killed_by_{s}"] = kill_sources.get(s, 0) / n
+    return out
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Per-split summary: rates for win/exit, IQM for the continuous surrogates."""
     out: dict[str, float] = {"n": float(len(rows))}
@@ -245,6 +294,7 @@ def run_diagnosis(
     curriculum_easy_episodes: int = 0,
     curriculum_pretrain_difficulty: str = "easy",
     leg2_probe: bool = False,
+    death_trace: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -306,6 +356,7 @@ def run_diagnosis(
     leg2_rates: list[float] = []
     leg2_far_rates: list[float] = []
     leg2_far_dists: list[float] = []
+    death_traces: list[dict[str, float]] = []
     for seed in seeds:
         print(
             f"\n===== baseline seed={seed} (difficulty={difficulty}, episodes={episodes}) =====",
@@ -410,6 +461,19 @@ def run_diagnosis(
                 flush=True,
             )
 
+        if death_trace:
+            dt = _eval_death_trace(trainer, config, games=games)
+            death_traces.append(dt)
+            print(
+                f"[seed {seed}] DEATH-TRACE (held-out, greedy play): "
+                f"won={dt['reason_won']:.2f} killed={dt['reason_killed']:.2f} "
+                f"(hazard={dt['killed_by_hazard']:.2f} enemy={dt['killed_by_enemy']:.2f} "
+                f"air={dt['killed_by_air']:.2f}) timeout={dt['reason_timeout']:.2f} "
+                f"stalled={dt['reason_stalled']:.2f} | crystals={dt['crystal_frac_mean']:.2f} "
+                f"steps={dt['steps_mean']:.0f}",
+                flush=True,
+            )
+
     train_agg, test_agg = _aggregate(train_rows_all), _aggregate(test_rows_all)
     summary = {
         "difficulty": difficulty,
@@ -433,6 +497,34 @@ def run_diagnosis(
         summary["leg2_far_reach_rate"] = float(np.mean(leg2_far_rates))
         summary["leg2_far_reach_rate_per_seed"] = leg2_far_rates
         summary["leg2_far_mean_dist"] = float(np.mean(leg2_far_dists))
+    if death_traces:
+        keys = sorted({k for dt in death_traces for k in dt})
+        summary["death_trace"] = {
+            k: float(np.mean([dt.get(k, 0.0) for dt in death_traces])) for k in keys
+        }
+        print("\n==== DEATH-TRACE (held-out, greedy play, seed-avg) ====", flush=True)
+        dts = summary["death_trace"]
+        print(
+            f"  ended: won={dts['reason_won']:.2f}  killed={dts['reason_killed']:.2f}  "
+            f"timeout={dts['reason_timeout']:.2f}  stalled={dts['reason_stalled']:.2f}",
+            flush=True,
+        )
+        print(
+            f"  of deaths: hazard={dts['killed_by_hazard']:.2f}  enemy={dts['killed_by_enemy']:.2f}  "
+            f"air={dts['killed_by_air']:.2f}  (fractions of all episodes)",
+            flush=True,
+        )
+        print(
+            f"  crystals collected at end={dts['crystal_frac_mean']:.2f}  "
+            f"mean steps={dts['steps_mean']:.0f}",
+            flush=True,
+        )
+        print(
+            "  read: killed≫timeout & enemy-dominated => moving-enemy survival (maybe an "
+            "enemy-velocity obs gap); killed≫timeout & hazard-dominated => static-hazard "
+            "pathing; timeout-dominated => wander/exploration, not death.",
+            flush=True,
+        )
     # Best checkpoint = the milestone with the strongest TRAINING competence (win, then
     # crystals), chosen on the SEED-AVERAGED curve. Prior experiments graded the FINAL
     # net, which can be the collapsed one; grading the best checkpoint de-confounds
@@ -700,6 +792,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Difficulty tier for the curriculum pretrain phase (default easy).",
     )
     parser.add_argument(
+        "--death-trace",
+        action="store_true",
+        help="RUN-16 behavioral failure trace: after training, greedy-play held-out levels "
+        "and report HOW episodes end (won/killed-by-hazard/killed-by-enemy/timeout/stalled) "
+        "+ crystals at end. Pins whether normal's 0 wins are deaths (and to what) vs timeouts.",
+    )
+    parser.add_argument(
         "--reverse-exit-curriculum-far",
         action="store_true",
         help="With --reverse-exit-curriculum-p: drop the player a real distance from the "
@@ -745,6 +844,7 @@ def main(argv: list[str] | None = None) -> int:
         curriculum_easy_episodes=args.curriculum_easy_episodes,
         curriculum_pretrain_difficulty=args.curriculum_pretrain_difficulty,
         leg2_probe=args.leg2_probe,
+        death_trace=args.death_trace,
     )
     return 0
 

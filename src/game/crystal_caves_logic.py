@@ -325,6 +325,7 @@ class CrystalCavesLogicMixin:
         reward = 0.0
         player_rect = self._player_rect()
         danger = False
+        source = "hazard"
 
         for tile in self.hazards:
             if player_rect.colliderect(self._tile_rect(tile)):
@@ -335,17 +336,19 @@ class CrystalCavesLogicMixin:
             for enemy in self.enemies:
                 if enemy.alive and player_rect.colliderect(enemy.rect):
                     danger = True
+                    source = "enemy"
                     break
 
         if danger:
-            reward += self._damage_player()
+            reward += self._damage_player(source)
 
         return reward
 
-    def _damage_player(self: Any) -> float:
+    def _damage_player(self: Any, source: str = "hazard") -> float:
         if self.invuln_timer > 0:
             return 0.0
 
+        self._last_damage_source = source
         self.health -= 1
         self.invuln_timer = self.INVULN_FRAMES
         self.shake_timer = self.SHAKE_FRAMES  # juice: kick the camera on a hit
@@ -612,4 +615,4 @@ class CrystalCavesLogicMixin:
         tank_x, tank_y = self._tile_center(tank)
         player_x, player_y = self._player_center()
         if np.hypot(tank_x - player_x, tank_y - player_y) <= self.TILE_SIZE * 2.2:
-            self._damage_player()
+            self._damage_player("air")

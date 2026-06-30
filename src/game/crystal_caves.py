@@ -386,6 +386,7 @@ class CrystalCaves(
         self.show_controls = False
         self.show_agent_overlay = False  # educational: draw the agent's view + goal
         self._end_reason = "running"
+        self._last_damage_source = "none"
         self._max_depth_row = 0
         self._progress = 0.0
         self._progress_initial = 0.0
@@ -1384,6 +1385,7 @@ class CrystalCaves(
             "progress": round(self._progress, 3),
             "progress_parts": self._progress_potential()[1],
             "end_reason": self._end_reason,
+            "last_damage_source": self._last_damage_source,
             "anti_loop_penalty_total": round(self._anti_loop_total, 3),
             "invalid_interact_count": self._invalid_interact_count,
             "invalid_interact_penalty_total": round(self._invalid_interact_total, 3),
