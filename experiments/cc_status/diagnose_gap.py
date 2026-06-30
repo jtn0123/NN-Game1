@@ -51,11 +51,12 @@ from experiments.cc_status.vec_envs import apply_reverse_start  # noqa: E402
 from src.ai.evaluator import Evaluator  # noqa: E402
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
 
-# Metrics summarised per split. Rates use the MEAN (correct for {0,1} per-level
-# outcomes). crystal_frac is a collection FRACTION/rate -> it MUST be a mean: the
-# interquartile mean floors any rate <=25% to exactly 0.0, which previously HID a
-# real ~0.15-0.33 held-out collect-rate behind a fake "0.000". Only the genuinely
-# continuous surrogates stay on IQM.
+# Metrics summarised per split. `won` and `exit_unlocked_rate` are per-level binary
+# outcomes → mean of the bool = a true rate. `crystal_frac` is a 0..1 collection FRACTION
+# → aggregated as a TRUE MEAN in _aggregate (NOT bool: the bool form reported a
+# collected-≥1 rate, e.g. normal 0.83 while the real mean is ~0.20; RUN-16 death-trace).
+# The continuous chain surrogates stay on IQM (note: IQM discards the outer 50% and floors
+# bottom-heavy distributions — fine while these read high, fragile otherwise).
 _RATE_METRICS = ("won", "exit_unlocked_rate", "crystal_frac")
 _IQM_METRICS = ("depth_frac", "target_distance_progress", "selection_score")
 
