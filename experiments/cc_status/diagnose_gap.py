@@ -504,6 +504,13 @@ def run_diagnosis(
         },
         "curve": curve,
         "truncation_bootstrap": truncation_bootstrap,
+        # Audit B3: under --regenerate-each-episode the agent trains on freshly generated
+        # caves (seed offset 1e6+), NOT on the offset-0 CAVES[:n] that use_train_levels grades
+        # as the "train" split — so that split is a SECOND held-out set and the
+        # train-vs-test gap / memorisation verdict do NOT apply (no training-distribution
+        # score was ever measured). Consumers must check this flag before reading the gap.
+        "regenerate_each_episode": regenerate_each_episode,
+        "train_split_is_holdout": regenerate_each_episode,
     }
     if leg2_rates:
         summary["leg2_reach_rate"] = float(np.mean(leg2_rates))
@@ -627,6 +634,12 @@ def _print_report(summary: dict[str, Any]) -> None:
         f"episodes={summary['episodes']} games/split={summary['games']}",
         flush=True,
     )
+    if summary.get("train_split_is_holdout"):
+        print(
+            "  [!] --regenerate-each-episode: the TRAIN column is a 2nd HELD-OUT set "
+            "(agent never trained on it); the GAP column is NOT a generalisation gap.",
+            flush=True,
+        )
     header = "metric".ljust(26) + "TRAIN".rjust(10) + "HELD-OUT".rjust(11) + "GAP".rjust(11)
     print(header, flush=True)
     labels = {
@@ -687,6 +700,25 @@ def _print_report(summary: dict[str, Any]) -> None:
                 flush=True,
             )
         tr, te = btr, bte  # base the verdict below on the best checkpoint
+
+    # Audit B3: under --regenerate-each-episode the "train" split is a 2nd held-out set, so
+    # the gap and the memorisation-vs-learning heuristic below are meaningless — both legs
+    # are out-of-distribution. Emit a regenerate-appropriate read instead.
+    if summary.get("train_split_is_holdout"):
+        test_learns = te["crystal_frac"] > 0.15 or te["won"] > 0.1
+        print("\nread:", flush=True)
+        print(
+            "  -> --regenerate-each-episode: BOTH splits are held-out (the agent trained on "
+            "freshly generated caves, not the 'train' split). The train-vs-test GAP and the "
+            "memorisation/generalisation verdict DO NOT APPLY here. Judge absolute held-out: "
+            + (
+                "held-out is non-trivial — a real (if data-hungry) signal."
+                if test_learns
+                else "held-out is ~0 — it is not solving unseen caves."
+            ),
+            flush=True,
+        )
+        return
 
     # Plain-English verdict heuristic on the primary learnability signals.
     train_learns = tr["crystal_frac"] > 0.15 or tr["won"] > 0.1

@@ -19,8 +19,50 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from experiments.cc_status.diagnose_gap import _aggregate  # noqa: E402
+from experiments.cc_status.diagnose_gap import _aggregate, _print_report  # noqa: E402
 from experiments.cc_status.paired_ab import _target_distance_progress  # noqa: E402
+
+
+def _metrics(won, crystal):
+    return {
+        "won": won,
+        "crystal_frac": crystal,
+        "depth_frac": 0.3,
+        "target_distance_progress": 0.4,
+        "exit_unlocked_rate": 0.0,
+        "selection_score": 0.1,
+    }
+
+
+def _memorisation_summary(train_split_is_holdout):
+    # Train looks solved, held-out fails -> the heuristic would normally say MEMORISATION.
+    train, test = _metrics(0.5, 0.6), _metrics(0.0, 0.0)
+    return {
+        "difficulty": "easy",
+        "seeds": [0],
+        "episodes": 100,
+        "games": 10,
+        "train": train,
+        "test": test,
+        "gap_train_minus_test": {m: round(train[m] - test[m], 4) for m in train},
+        "train_split_is_holdout": train_split_is_holdout,
+    }
+
+
+def test_b3_regenerate_suppresses_memorisation_verdict(capsys):
+    # Audit B3: under regenerate the "train" split is a 2nd held-out set, so the
+    # memorisation/generalisation verdict must NOT be emitted.
+    _print_report(_memorisation_summary(train_split_is_holdout=True))
+    out = capsys.readouterr().out
+    assert "DO NOT APPLY" in out
+    assert "MEMORISATION" not in out
+
+
+def test_b3_normal_run_still_emits_memorisation_verdict(capsys):
+    # Control: the same train-high/test-low shape on a NON-regenerate run still fires it.
+    _print_report(_memorisation_summary(train_split_is_holdout=False))
+    out = capsys.readouterr().out
+    assert "MEMORISATION" in out
 
 
 def _row(crystal_frac=0.0, depth=0.0, target=0.0, selection=0.0, won=False, exit_unlocked=False):
