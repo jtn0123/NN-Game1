@@ -235,3 +235,91 @@ def test_aggregate_without_death_trace_omits_it(tmp_path):
     agg = aggregate([str(p0)])
     assert "death_trace" not in agg
     _print_death_trace(agg)  # no-op, must not raise
+
+
+def _stall_trace(*, trapped, near, far, osc, geo, crystals, rate):
+    return {
+        "n_games": 40.0,
+        "n_stalled": 20.0,
+        "stalled_rate": rate,
+        "trapped_frac": trapped,
+        "near_objective_frac": near,
+        "far_from_objective_frac": far,
+        "oscillating_frac": osc,
+        "geo_dist_mean": geo,
+        "crystal_frac_mean": crystals,
+    }
+
+
+def test_aggregate_seed_averages_stall_trace(tmp_path, capsys):
+    # The stall trace (RUN-19 stall diagnostic) must seed-average through the per-seed
+    # aggregator and print, just like the death trace.
+    import json
+
+    from experiments.cc_status.aggregate_diag import aggregate
+    from experiments.cc_status.diagnose_gap import _print_stall_trace
+
+    s0 = _seed_summary(0, [(500, _ckpt(0.0, 0.1), _ckpt(0.0, 0.0))])
+    s1 = _seed_summary(1, [(500, _ckpt(0.0, 0.1), _ckpt(0.0, 0.0))])
+    s0["stall_trace"] = _stall_trace(
+        trapped=0.4, near=0.2, far=0.6, osc=0.5, geo=10.0, crystals=0.2, rate=0.5
+    )
+    s1["stall_trace"] = _stall_trace(
+        trapped=0.2, near=0.4, far=0.4, osc=0.7, geo=6.0, crystals=0.1, rate=0.6
+    )
+    p0, p1 = tmp_path / "s0.json", tmp_path / "s1.json"
+    p0.write_text(json.dumps(s0))
+    p1.write_text(json.dumps(s1))
+
+    agg = aggregate([str(p0), str(p1)])
+
+    assert "stall_trace" in agg  # pre-fix: missing entirely
+    st = agg["stall_trace"]
+    assert st["trapped_frac"] == pytest.approx(0.3)  # (0.4 + 0.2) / 2
+    assert st["far_from_objective_frac"] == pytest.approx(0.5)  # (0.6 + 0.4) / 2
+    assert st["geo_dist_mean"] == pytest.approx(8.0)  # (10 + 6) / 2
+    assert len(agg["stall_trace_per_seed"]) == 2
+
+    _print_stall_trace(agg)
+    out = capsys.readouterr().out
+    assert "STALL-TRACE (held-out, greedy play, seed-avg)" in out
+    assert "trapped" in out
+
+
+def test_aggregate_without_stall_trace_omits_it(tmp_path):
+    import json
+
+    from experiments.cc_status.aggregate_diag import aggregate
+    from experiments.cc_status.diagnose_gap import _print_stall_trace
+
+    s0 = _seed_summary(0, [(500, _ckpt(0.0, 0.1), _ckpt(0.0, 0.0))])
+    p0 = tmp_path / "s0.json"
+    p0.write_text(json.dumps(s0))
+
+    agg = aggregate([str(p0)])
+    assert "stall_trace" not in agg
+    _print_stall_trace(agg)  # no-op, must not raise
+
+
+def test_eval_stall_trace_flags_motionless_oscillation():
+    # A do-nothing agent never moves -> the no-net-progress stall timer fires -> end_reason
+    # 'stalled'. The trace must record it as a stall and flag oscillation (it stayed within
+    # <=3 tiles), validating the rollout + bucketing end to end on a real game.
+    from types import SimpleNamespace
+
+    from config import Config
+    from experiments.cc_status.diagnose_gap import _eval_stall_trace
+
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_DIFFICULTY = "normal"
+    cfg.EVAL_MAX_STEPS = 1500  # > the 720 stall threshold; keeps the smoke test short
+    agent = SimpleNamespace(select_action=lambda state, training=False: 0)  # NOOP every step
+    trainer = SimpleNamespace(agent=agent)
+
+    st = _eval_stall_trace(trainer, cfg, games=2)
+
+    assert st["n_stalled"] >= 1.0  # the motionless agent stalls rather than times out
+    assert st["stalled_rate"] > 0.0
+    assert st["oscillating_frac"] == pytest.approx(1.0)  # never moved -> <=3 unique tiles
+    for k in ("trapped_frac", "near_objective_frac", "far_from_objective_frac"):
+        assert 0.0 <= st[k] <= 1.0

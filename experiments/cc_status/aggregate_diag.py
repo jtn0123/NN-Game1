@@ -37,6 +37,7 @@ from experiments.cc_status.diagnose_gap import (  # noqa: E402
     _print_death_trace,
     _print_leg2,
     _print_report,
+    _print_stall_trace,
 )
 
 
@@ -122,6 +123,15 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
             for k in keys
         }
         agg["death_trace_per_seed"] = death_traces
+    # Same seed-averaging for the stall trace (RUN-19 stall diagnostic).
+    stall_traces = [s["stall_trace"] for s in summaries if isinstance(s.get("stall_trace"), dict)]
+    if stall_traces:
+        keys = sorted({k for st in stall_traces for k in st})
+        agg["stall_trace"] = {
+            k: sum(float(st.get(k, 0.0)) for st in stall_traces) / len(stall_traces)
+            for k in keys
+        }
+        agg["stall_trace_per_seed"] = stall_traces
     return agg
 
 
@@ -140,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     _print_report(agg)
     _print_leg2(agg)
     _print_death_trace(agg)
+    _print_stall_trace(agg)
     if args.out:
         Path(args.out).write_text(json.dumps(agg, indent=2))
         print(f"\nWrote aggregated summary to {args.out}", flush=True)

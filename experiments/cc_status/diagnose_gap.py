@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Deque, Tuple
 
 import numpy as np
 
@@ -226,6 +227,84 @@ def _eval_death_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
     return out
 
 
+def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, float]:
+    """Stall diagnostic (RUN-19): for held-out greedy episodes that end in a STALL (the
+    no-net-progress timer fires), characterise WHY, the way death-trace did for kills.
+    RUN-18 showed 'stalled' is the dominant failure (~0.56) and that removing deaths just
+    converts them into stalls, so the stall mechanism is now the binding constraint. For
+    each stalled episode we record, at the stuck position:
+      - trapped: the nearest active objective is NOT physically reachable (oracle/jump-aware)
+        from the stuck tile -> the agent is wedged where no policy could finish (a control /
+        exploration dead-end, or the BFS-compass routed it through a jump physics forbids);
+      - near_objective: geodesic route distance to the objective is small (<=3 tiles) -> a
+        last-mile failure (basically there, can't close it);
+      - oscillating: <=3 distinct tiles visited in the trailing window -> bouncing in place
+        rather than searching;
+    plus mean geodesic distance and crystals collected at the stall. This tells whether the
+    fix is control/jump skill (trapped/last-mile), exploration (far+drifting), or the route
+    signal being physically unexecutable."""
+    game = CrystalCaves(config, headless=True)
+    game.use_eval_levels(games)
+    game.reset_eval_cursor()
+    agent = trainer.agent
+    step_limit = int(config.EVAL_MAX_STEPS)
+    trail_window = 120
+    near_tiles = 3
+    n_stalled = 0
+    trapped = osc = near = far = 0
+    geo_dists: list[float] = []
+    crystal_fracs: list[float] = []
+    agent_state = _enter_greedy_agent_eval(agent)
+    try:
+        for _ in range(games):
+            state = game.reset()
+            done = False
+            steps = 0
+            info: dict[str, Any] = {}
+            trail: Deque[Tuple[int, int]] = deque(maxlen=trail_window)
+            while not done and steps < step_limit:
+                trail.append(game._player_tile())
+                action = agent.select_action(state, training=False)
+                state, _, done, info = game.step(action)
+                steps += 1
+            reason = info.get("end_reason", "unknown") if done else "timeout"
+            if reason != "stalled":
+                continue
+            n_stalled += 1
+            ptile = game._player_tile()
+            targets = game._active_target_tiles()
+            reachable = game._oracle_reachable(ptile) if targets else set()
+            if targets and not any(t in reachable for t in targets):
+                trapped += 1
+            gdist = game._geodesic_distance_field().get(ptile)
+            if gdist is not None:
+                geo_dists.append(float(gdist))
+                if gdist <= near_tiles:
+                    near += 1
+                else:
+                    far += 1
+            if len(set(trail)) <= 3:
+                osc += 1
+            init_c = max(1, int(info.get("initial_crystals", 1)))
+            rem = int(info.get("crystals_remaining", 0))
+            crystal_fracs.append((init_c - rem) / init_c)
+    finally:
+        _restore_greedy_agent_eval(agent, agent_state)
+    s = max(1, n_stalled)
+    return {
+        "n_games": float(games),
+        "n_stalled": float(n_stalled),
+        "stalled_rate": n_stalled / max(1, games),
+        # fractions of STALLED episodes (overlapping buckets, like kill sources)
+        "trapped_frac": trapped / s,
+        "near_objective_frac": near / s,
+        "far_from_objective_frac": far / s,
+        "oscillating_frac": osc / s,
+        "geo_dist_mean": float(np.mean(geo_dists)) if geo_dists else 0.0,
+        "crystal_frac_mean": float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
+    }
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Per-split summary: rates for win/exit, IQM for the continuous surrogates."""
     out: dict[str, float] = {"n": float(len(rows))}
@@ -314,6 +393,7 @@ def run_diagnosis(
     curriculum_pretrain_difficulty: str = "easy",
     leg2_probe: bool = False,
     death_trace: bool = False,
+    stall_trace: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -382,6 +462,7 @@ def run_diagnosis(
     leg2_far_rates: list[float] = []
     leg2_far_dists: list[float] = []
     death_traces: list[dict[str, float]] = []
+    stall_traces: list[dict[str, float]] = []
     for seed in seeds:
         print(
             f"\n===== baseline seed={seed} (difficulty={difficulty}, episodes={episodes}) =====",
@@ -500,6 +581,18 @@ def run_diagnosis(
                 flush=True,
             )
 
+        if stall_trace:
+            st = _eval_stall_trace(trainer, config, games=games)
+            stall_traces.append(st)
+            print(
+                f"[seed {seed}] STALL-TRACE (held-out, greedy play): "
+                f"stalled={st['stalled_rate']:.2f} (n={int(st['n_stalled'])}) | "
+                f"trapped={st['trapped_frac']:.2f} near={st['near_objective_frac']:.2f} "
+                f"far={st['far_from_objective_frac']:.2f} osc={st['oscillating_frac']:.2f} | "
+                f"geoDist={st['geo_dist_mean']:.1f} crystals={st['crystal_frac_mean']:.2f}",
+                flush=True,
+            )
+
     train_agg, test_agg = _aggregate(train_rows_all), _aggregate(test_rows_all)
     summary = {
         "difficulty": difficulty,
@@ -544,6 +637,13 @@ def run_diagnosis(
             "pathing; timeout-dominated => wander/exploration, not death.",
             flush=True,
         )
+    if stall_traces:
+        keys = sorted({k for st in stall_traces for k in st})
+        summary["stall_trace"] = {
+            k: float(np.mean([st.get(k, 0.0) for st in stall_traces])) for k in keys
+        }
+        summary["stall_trace_per_seed"] = stall_traces
+        _print_stall_trace(summary)
     # Best checkpoint = the milestone with the strongest TRAINING competence (win, then
     # crystals), chosen on the SEED-AVERAGED curve. Prior experiments graded the FINAL
     # net, which can be the collapsed one; grading the best checkpoint de-confounds
@@ -637,6 +737,43 @@ def _print_death_trace(summary: dict[str, Any]) -> None:
     print(
         f"  crystals collected at end={dts.get('crystal_frac_mean', 0.0):.2f}  "
         f"mean steps={dts.get('steps_mean', 0.0):.0f}",
+        flush=True,
+    )
+
+
+def _print_stall_trace(summary: dict[str, Any]) -> None:
+    """Print the held-out STALL-TRACE block (why greedy episodes stall: trapped / last-mile /
+    far / oscillating). Shared by the single-process path and the per-seed aggregator so both
+    render the seed-averaged trace identically."""
+    if "stall_trace" not in summary:
+        return
+    st = summary["stall_trace"]
+    print("\n==== STALL-TRACE (held-out, greedy play, seed-avg) ====", flush=True)
+    print(
+        f"  stalled rate={st.get('stalled_rate', 0.0):.3f}  "
+        f"(buckets below are fractions of STALLED episodes, overlapping)",
+        flush=True,
+    )
+    print(
+        f"  trapped (objective physically unreachable from stuck tile)="
+        f"{st.get('trapped_frac', 0.0):.2f}",
+        flush=True,
+    )
+    print(
+        f"  near-objective (<=3 tiles, last-mile)={st.get('near_objective_frac', 0.0):.2f}  "
+        f"far={st.get('far_from_objective_frac', 0.0):.2f}  "
+        f"oscillating (<=3 tiles in trail)={st.get('oscillating_frac', 0.0):.2f}",
+        flush=True,
+    )
+    print(
+        f"  mean geodesic dist to objective={st.get('geo_dist_mean', 0.0):.1f} tiles  "
+        f"crystals at stall={st.get('crystal_frac_mean', 0.0):.2f}",
+        flush=True,
+    )
+    print(
+        "  read: trapped-heavy => control/jump dead-ends or a route the physics can't execute; "
+        "near-heavy => last-mile precision (jump/landing skill); far+oscillating => the policy "
+        "isn't following the route (credit/exploration), not a perception gap.",
         flush=True,
     )
 
@@ -922,6 +1059,14 @@ def main(argv: list[str] | None = None) -> int:
         default=0.0,
         help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
     )
+    parser.add_argument(
+        "--stall-trace",
+        action="store_true",
+        help="On held-out greedy play, characterise WHY episodes STALL (the dominant failure "
+        "after RUN-18): trapped (objective physically unreachable from the stuck tile), "
+        "last-mile (near the objective), far, and oscillating-in-place. Picks whether the "
+        "stall fix is control/jump skill, exploration, or an unexecutable route signal.",
+    )
     parser.add_argument("--out", default="scratchpad/diag")
     args = parser.parse_args(argv)
     run_diagnosis(
@@ -951,6 +1096,7 @@ def main(argv: list[str] | None = None) -> int:
         curriculum_pretrain_difficulty=args.curriculum_pretrain_difficulty,
         leg2_probe=args.leg2_probe,
         death_trace=args.death_trace,
+        stall_trace=args.stall_trace,
     )
     return 0
 
