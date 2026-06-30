@@ -43,6 +43,7 @@ from experiments.cc_status.lever_ab import make_config  # noqa: E402
 from experiments.cc_status.paired_ab import _evaluate_one_level, interquartile_mean  # noqa: E402
 from experiments.cc_status.training import (  # noqa: E402
     TUTORIAL_MIN_EPSILON,
+    capture_weight_snapshot,
     prepare_trainer,
     run_training,
 )
@@ -241,6 +242,8 @@ def run_diagnosis(
     reverse_exit_curriculum_far: bool = False,
     geo_compass: bool = False,
     route_aux: bool = False,
+    curriculum_easy_episodes: int = 0,
+    curriculum_pretrain_difficulty: str = "easy",
     leg2_probe: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -313,7 +316,42 @@ def run_diagnosis(
         config.CRYSTAL_CAVES_SEED = seed
         run_dir = out_dir / f"seed_{seed}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        trainer = prepare_trainer(config, episodes=episodes, vec_envs=vec_envs)
+
+        # Difficulty curriculum (RUN-15): warm-start the target-difficulty phase from an
+        # agent first trained on an easier tier, so it learns the full collect->exit chain
+        # progressively instead of from scratch (RUN-15a showed normal's wall is behavioral
+        # completion, not structural). state_size is identical across tiers (difficulty
+        # changes crystal count, not window/gmap/meta), so the weights transfer strictly.
+        transfer_weights = None
+        if curriculum_easy_episodes > 0:
+            print(
+                f"  [curriculum] phase 1: pretrain {curriculum_easy_episodes} ep at "
+                f"difficulty={curriculum_pretrain_difficulty}, then {episodes} ep at "
+                f"difficulty={difficulty}",
+                flush=True,
+            )
+            set_seed(seed)
+            pre_config = make_config(overrides, difficulty=curriculum_pretrain_difficulty)
+            pre_config.CRYSTAL_CAVES_SEED = seed
+            pre_dir = run_dir / "pretrain"
+            pre_dir.mkdir(parents=True, exist_ok=True)
+            pre_trainer = prepare_trainer(
+                pre_config, episodes=curriculum_easy_episodes, vec_envs=vec_envs
+            )
+            run_training(
+                pre_trainer,
+                run_dir=pre_dir,
+                label=f"diag/seed_{seed}/pretrain",
+                total_episodes=curriculum_easy_episodes,
+                heartbeat_seconds=0.0,
+                target_episodes=None,
+            )
+            transfer_weights = capture_weight_snapshot(pre_trainer.agent)
+            set_seed(seed)  # realign RNG so the target phase mirrors the control's stream
+
+        trainer = prepare_trainer(
+            config, episodes=episodes, vec_envs=vec_envs, transfer_weights=transfer_weights
+        )
         if trainer.agent.epsilon < TUTORIAL_MIN_EPSILON:
             trainer.agent.epsilon = TUTORIAL_MIN_EPSILON
 
@@ -648,6 +686,20 @@ def main(argv: list[str] | None = None) -> int:
         "feeding it. The net learns route-awareness from raw observation; oracle off at eval.",
     )
     parser.add_argument(
+        "--curriculum-easy-episodes",
+        type=int,
+        default=0,
+        help="Difficulty curriculum (RUN-15): pretrain this many episodes at "
+        "--curriculum-pretrain-difficulty, then warm-start the main --difficulty run from "
+        "those weights. Targets the behavioral completion wall (RUN-15a). For a fair A/B, "
+        "set control --episodes = curriculum (pretrain + main) episodes.",
+    )
+    parser.add_argument(
+        "--curriculum-pretrain-difficulty",
+        default="easy",
+        help="Difficulty tier for the curriculum pretrain phase (default easy).",
+    )
+    parser.add_argument(
         "--reverse-exit-curriculum-far",
         action="store_true",
         help="With --reverse-exit-curriculum-p: drop the player a real distance from the "
@@ -690,6 +742,8 @@ def main(argv: list[str] | None = None) -> int:
         reverse_exit_curriculum_far=args.reverse_exit_curriculum_far,
         geo_compass=args.geo_compass,
         route_aux=args.route_aux,
+        curriculum_easy_episodes=args.curriculum_easy_episodes,
+        curriculum_pretrain_difficulty=args.curriculum_pretrain_difficulty,
         leg2_probe=args.leg2_probe,
     )
     return 0
