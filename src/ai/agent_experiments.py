@@ -356,10 +356,34 @@ class AgentExperimentMixin:
     def _route_auxiliary_targets(
         self: Any, states: torch.Tensor
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        """Build 9-way objective-direction labels from Crystal Caves metadata."""
+        """Build 9-way objective-direction labels from Crystal Caves metadata.
+
+        Op 2 (geodesic): when enabled, the label is the GEODESIC next-step direction carried
+        in the trailing route-label slots (sliced off the policy input) — the real route
+        around walls, which the net must learn to predict. Otherwise falls back to the legacy
+        euclidean target bearing read from meta 15/16 (which the net can already see)."""
         layout = getattr(self.config, "STATE_LAYOUT", None)
         if not layout:
             return None
+        route_label = int(layout.get("route_label", 0))
+        if getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC", False) and route_label >= 2:
+            if states.shape[1] < route_label:
+                return None
+            lab = states[:, -route_label:]
+            dx, dy = lab[:, 0], lab[:, 1]
+            reachable = lab[:, 2] if route_label > 2 else torch.ones_like(dx)
+            mask = (
+                torch.isfinite(dx)
+                & torch.isfinite(dy)
+                & (reachable > 0.5)
+                & ((dx != 0) | (dy != 0))  # a real directional step exists
+            )
+            if not bool(mask.any().item()):
+                return None
+            sx = dx.clamp(-1.0, 1.0).round().long()
+            sy = dy.clamp(-1.0, 1.0).round().long()
+            labels = (sy + 1) * 3 + (sx + 1)
+            return labels.long(), mask
         wr, wc = layout["window"]
         gr, gc = layout.get("gmap", (0, 0))
         meta_size = int(layout.get("meta", 0))

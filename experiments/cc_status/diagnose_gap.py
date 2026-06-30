@@ -240,6 +240,7 @@ def run_diagnosis(
     reverse_exit_curriculum_p: float | None = None,
     reverse_exit_curriculum_far: bool = False,
     geo_compass: bool = False,
+    route_aux: bool = False,
     leg2_probe: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -276,6 +277,12 @@ def run_diagnosis(
         # Corridor compass: append metadata pointing down the real traversable route to
         # the active objective (the RUN-11 nav fix). Observation, not reward.
         overrides["CRYSTAL_CAVES_GEO_COMPASS"] = True
+    if route_aux:
+        # Op 2 (learnable route): supervise an aux head to PREDICT the geodesic route
+        # direction (carried in trailing label slots, sliced off the policy input) — so the
+        # net learns route-awareness instead of being fed the compass. Oracle off at eval.
+        overrides["CRYSTAL_CAVES_ROUTE_AUX_LOSS"] = True
+        overrides["CRYSTAL_CAVES_ROUTE_AUX_GEODESIC"] = True
     if truncation_bootstrap:
         # Treat timeout/stalled cutoffs as non-terminal so the TD target bootstraps
         # instead of learning value = raw -8/-6 (which n-step(6) compounds backwards).
@@ -634,6 +641,13 @@ def main(argv: list[str] | None = None) -> int:
         "observation, not a reward — does not re-trigger the disconfirmed geodesic shaping.",
     )
     parser.add_argument(
+        "--route-aux",
+        action="store_true",
+        help="Op 2 (learnable route): train an auxiliary head to PREDICT the geodesic route "
+        "direction (carried in trailing label slots, sliced off the policy input) instead of "
+        "feeding it. The net learns route-awareness from raw observation; oracle off at eval.",
+    )
+    parser.add_argument(
         "--reverse-exit-curriculum-far",
         action="store_true",
         help="With --reverse-exit-curriculum-p: drop the player a real distance from the "
@@ -675,6 +689,7 @@ def main(argv: list[str] | None = None) -> int:
         reverse_exit_curriculum_p=args.reverse_exit_curriculum_p,
         reverse_exit_curriculum_far=args.reverse_exit_curriculum_far,
         geo_compass=args.geo_compass,
+        route_aux=args.route_aux,
         leg2_probe=args.leg2_probe,
     )
     return 0

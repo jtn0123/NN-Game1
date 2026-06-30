@@ -235,6 +235,14 @@ class CrystalCaves(
         self.METADATA_SIZE = (
             self.BASE_METADATA_SIZE + self._geo_compass_size + self._history_metadata_size
         )
+        # Op 2 (learnable route): the geodesic next-step direction rides in TRAILING label
+        # slots, sliced off before the policy input (network reads STATE_LAYOUT["route_label"])
+        # so the policy can't see it; an aux head learns to PREDICT it from the rest of the
+        # observation. Distinct from the fed geo-compass: label-only, dropped at action time.
+        self._route_aux_geodesic = bool(
+            getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC", False)
+        )
+        self._route_label_dims = self.GEO_COMPASS_FEATURES if self._route_aux_geodesic else 0
 
         # Publish the spatial layout so a convolutional network (USE_CNN_STATE) can
         # reshape the flat state into the perception window + global map + metadata.
@@ -242,6 +250,9 @@ class CrystalCaves(
             "window": (self.WINDOW_ROWS, self.WINDOW_COLS),
             "gmap": (self.GLOBAL_MAP_ROWS, self.GLOBAL_MAP_COLS),
             "meta": self.METADATA_SIZE,
+            # Trailing label slots (Op 2): not part of the policy input — the network
+            # slices them off; only the route-aux head's target reads them.
+            "route_label": self._route_label_dims,
         }
 
         self.level_index = 0
@@ -444,6 +455,7 @@ class CrystalCaves(
             self.WINDOW_COLS * self.WINDOW_ROWS
             + self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS
             + self.METADATA_SIZE
+            + getattr(self, "_route_label_dims", 0)
         )
 
     @property
@@ -1072,6 +1084,11 @@ class CrystalCaves(
             metadata.extend(self._geodesic_next_step_compass())
         if self._history_state_enabled:
             metadata.extend(self._history_metadata())
+        if self._route_label_dims:
+            # Trailing LABEL slots (Op 2): the geodesic next-step direction, carried to the
+            # learner as the route-aux target. The network slices these off its input, so the
+            # policy never reads them — it must LEARN to predict the route from the rest.
+            metadata.extend(self._geodesic_next_step_compass())
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)
         return self._state_array.copy()
 

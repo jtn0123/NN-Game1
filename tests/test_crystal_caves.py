@@ -1440,6 +1440,50 @@ class TestGeoCompass:
         assert (step_dx, step_dy, reachable) == (0.0, 0.0, 0.0)
 
 
+class TestRouteAux:
+    """Op 2: learnable geodesic route via an auxiliary head + trailing label slots."""
+
+    def test_off_by_default(self, config: Config) -> None:
+        assert getattr(config, "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC", False) is False
+        game = CrystalCaves(config, headless=True)
+        assert game._route_label_dims == 0
+        assert game.config.STATE_LAYOUT["route_label"] == 0
+
+    def test_adds_trailing_label_slots(self, config: Config) -> None:
+        base = CrystalCaves(config, headless=True).state_size
+        cfg2 = Config()
+        cfg2.CRYSTAL_CAVES_ROUTE_AUX_GEODESIC = True
+        game = CrystalCaves(cfg2, headless=True)
+        assert game.state_size == base + CrystalCaves.GEO_COMPASS_FEATURES
+        assert game.config.STATE_LAYOUT["route_label"] == CrystalCaves.GEO_COMPASS_FEATURES
+        # the trailing slots ARE the geodesic compass (label-only; meta size is unchanged)
+        game.reset()
+        state = game.get_state()
+        trailing = state[-CrystalCaves.GEO_COMPASS_FEATURES :]
+        assert np.allclose(trailing, np.array(game._geodesic_next_step_compass(), dtype=np.float32))
+
+    def test_policy_is_route_blind(self, config: Config) -> None:
+        """The network must slice the label off — scrambling it cannot change Q-values."""
+        import torch
+
+        from src.ai.network import DuelingDQN
+
+        config.CRYSTAL_CAVES_ROUTE_AUX_GEODESIC = True
+        config.CRYSTAL_CAVES_ROUTE_AUX_LOSS = True
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        net = DuelingDQN(state_size=game.state_size, action_size=game.action_size, config=config)
+        assert net.core_in == game.state_size - CrystalCaves.GEO_COMPASS_FEATURES
+        assert hasattr(net, "route_aux_head")
+        t = torch.tensor(game.get_state().astype(np.float32)).unsqueeze(0)
+        q = net(t).detach().clone()
+        scrambled = t.clone()
+        scrambled[:, -CrystalCaves.GEO_COMPASS_FEATURES :] = torch.randn(
+            CrystalCaves.GEO_COMPASS_FEATURES
+        )
+        assert torch.allclose(q, net(scrambled).detach(), atol=1e-6)
+
+
 class TestNGUBonus:
     """NGU-style episodic novelty bonus (#5)."""
 
