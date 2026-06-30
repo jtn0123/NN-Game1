@@ -217,7 +217,7 @@ def _eval_death_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
     }
     for r in ("won", "killed", "timeout", "stalled", "first_crystal_goal"):
         out[f"reason_{r}"] = reasons.get(r, 0) / n
-    for s in ("hazard", "enemy", "air"):
+    for s in ("hazard", "enemy", "both", "air"):
         out[f"killed_by_{s}"] = kill_sources.get(s, 0) / n
     return out
 
@@ -482,7 +482,8 @@ def run_diagnosis(
                 f"[seed {seed}] DEATH-TRACE (held-out, greedy play): "
                 f"won={dt['reason_won']:.2f} killed={dt['reason_killed']:.2f} "
                 f"(hazard={dt['killed_by_hazard']:.2f} enemy={dt['killed_by_enemy']:.2f} "
-                f"air={dt['killed_by_air']:.2f}) timeout={dt['reason_timeout']:.2f} "
+                f"both={dt['killed_by_both']:.2f} air={dt['killed_by_air']:.2f}) "
+                f"timeout={dt['reason_timeout']:.2f} "
                 f"stalled={dt['reason_stalled']:.2f} | crystals={dt['crystal_frac_mean']:.2f} "
                 f"steps={dt['steps_mean']:.0f}",
                 flush=True,
@@ -533,7 +534,8 @@ def run_diagnosis(
         )
         print(
             f"  of deaths: hazard={dts['killed_by_hazard']:.2f}  enemy={dts['killed_by_enemy']:.2f}  "
-            f"air={dts['killed_by_air']:.2f}  (fractions of all episodes)",
+            f"both={dts['killed_by_both']:.2f}  air={dts['killed_by_air']:.2f}  "
+            f"(fractions of all episodes)",
             flush=True,
         )
         print(

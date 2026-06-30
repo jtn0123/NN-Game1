@@ -1556,3 +1556,42 @@ class TestNGUBonus:
         cfg.CRYSTAL_CAVES_NGU_BETA = value
         with pytest.raises(ValueError, match="CRYSTAL_CAVES_NGU_BETA"):
             cfg.__post_init__()
+
+
+class TestDeathSourceAttribution:
+    """Audit B6: hazard vs enemy death attribution must be independent (no hazard bias)."""
+
+    def _attribute(self, game: CrystalCaves) -> str:
+        game.invuln_timer = 0
+        game.health = 3
+        game._last_damage_source = "none"
+        game._check_player_danger()
+        return game._last_damage_source
+
+    def test_independent_hazard_enemy_and_both_bucket(self, game: CrystalCaves) -> None:
+        import pygame
+
+        game.reset()
+        player_rect = game._player_rect()
+        pcol, prow = game._player_tile()
+
+        class _FakeEnemy:
+            alive = True
+
+            def __init__(self, rect: pygame.Rect) -> None:
+                self.rect = rect
+
+        # hazard only
+        game.hazards = {(pcol, prow)}
+        game.enemies = []
+        assert self._attribute(game) == "hazard"
+
+        # enemy only
+        game.hazards = set()
+        game.enemies = [_FakeEnemy(pygame.Rect(player_rect))]
+        assert self._attribute(game) == "enemy"
+
+        # BOTH overlap on the same frame — pre-fix this was forced to 'hazard'.
+        game.hazards = {(pcol, prow)}
+        game.enemies = [_FakeEnemy(pygame.Rect(player_rect))]
+        assert self._attribute(game) == "both"

@@ -324,22 +324,24 @@ class CrystalCavesLogicMixin:
     def _check_player_danger(self: Any) -> float:
         reward = 0.0
         player_rect = self._player_rect()
-        danger = False
-        source = "hazard"
 
-        for tile in self.hazards:
-            if player_rect.colliderect(self._tile_rect(tile)):
-                danger = True
-                break
+        # Audit B6: detect hazard and enemy overlap INDEPENDENTLY. The old code checked
+        # hazards first and break'd, only checking enemies `if not danger`, so a frame
+        # overlapping both was always attributed to 'hazard' — biasing the death-source
+        # taxonomy that forks the survival remediation (static-hazard pathing vs
+        # moving-enemy survival). On simultaneous overlap, record a distinct 'both' source.
+        hazard_hit = any(player_rect.colliderect(self._tile_rect(tile)) for tile in self.hazards)
+        enemy_hit = any(
+            enemy.alive and player_rect.colliderect(enemy.rect) for enemy in self.enemies
+        )
 
-        if not danger:
-            for enemy in self.enemies:
-                if enemy.alive and player_rect.colliderect(enemy.rect):
-                    danger = True
-                    source = "enemy"
-                    break
-
-        if danger:
+        if hazard_hit or enemy_hit:
+            if hazard_hit and enemy_hit:
+                source = "both"
+            elif enemy_hit:
+                source = "enemy"
+            else:
+                source = "hazard"
             reward += self._damage_player(source)
 
         return reward
