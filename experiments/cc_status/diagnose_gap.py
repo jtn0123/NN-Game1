@@ -78,6 +78,10 @@ def _eval_split(
     else:
         game.use_eval_levels(games)
     game.reset_eval_cursor()
+    # Audit R2-D: the train pool can hold fewer DISTINCT caves than `games` (when
+    # pool_size < games); cycling would silently duplicate caves and double-weight the
+    # early ones in the mean. Grade only the distinct caves actually available.
+    n_levels = min(games, len(getattr(game, "_eval_caves", ()) or range(games)))
     evaluator = Evaluator(
         game=game,
         agent=trainer.agent,
@@ -88,7 +92,7 @@ def _eval_split(
     rows: list[dict[str, Any]] = []
     agent_state = _enter_greedy_agent_eval(trainer.agent)
     try:
-        for level_index in range(games):
+        for level_index in range(n_levels):
             row = _evaluate_one_level(
                 game,
                 trainer.agent,

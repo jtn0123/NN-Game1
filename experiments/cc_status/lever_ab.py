@@ -123,26 +123,38 @@ def paired_row_ci(
     n_bootstrap: int,
     seed: int,
 ) -> dict[str, Any]:
-    """IQM + 95% CI of the paired (B-A) delta, resampling the PAIRED (seed,level)
-    ROWS with replacement -- not the 3 seed-groups. The seed-grouped bootstrap in
-    paired_ab effectively has n=3 (inflated CIs); pairing by level gives ~seeds*games
-    units, the correct resample population for a paired design."""
+    """Mean + 95% CI of the paired (B-A) delta via a SEED-CLUSTER bootstrap.
+
+    Audit R2-D: rows sharing a seed come from ONE trained net, so they are NOT independent.
+    The previous version resampled the (seed,level) rows i.i.d., treating ~seeds*games as the
+    unit and producing CIs ~6x too narrow — declaring no-op/harmful levers significant.
+    Correct paired-design inference clusters by seed: resample the seed-groups with
+    replacement, then the levels within each chosen seed."""
     paired = pair_level_rows(a_rows, b_rows, metric=metric)
-    deltas = [float(p.get(f"delta_{metric}", 0.0) or 0.0) for p in paired]
-    if not deltas:
+    if not paired:
         return {"iqm": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n": 0}
-    point = pipeline_mean(deltas)
+    groups: dict[int, list[float]] = {}
+    for p in paired:
+        groups.setdefault(int(p.get("seed", 0) or 0), []).append(
+            float(p.get(f"delta_{metric}", 0.0) or 0.0)
+        )
+    point = pipeline_mean([d for g in groups.values() for d in g])
+    keys = sorted(groups)
     rng = np.random.default_rng(seed)
-    n = len(deltas)
     samples = []
     for _ in range(max(1, n_bootstrap)):
-        idx = rng.integers(0, n, size=n)
-        samples.append(pipeline_mean([deltas[i] for i in idx]))
+        chosen = rng.choice(keys, size=len(keys), replace=True)
+        vals: list[float] = []
+        for k in chosen:
+            g = groups[int(k)]
+            idx = rng.integers(0, len(g), size=len(g))
+            vals.extend(g[i] for i in idx)
+        samples.append(pipeline_mean(vals))
     return {
         "iqm": float(point),
         "ci_low": float(np.quantile(samples, 0.025)),
         "ci_high": float(np.quantile(samples, 0.975)),
-        "n": n,
+        "n": len(paired),
     }
 
 

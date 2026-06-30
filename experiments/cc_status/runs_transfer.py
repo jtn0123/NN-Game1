@@ -448,6 +448,11 @@ def config_from_selected_checkpoint(
     cave_pool = int(saved_config.get("cave_pool_size", 0) or 0)
     apply_cave_pool_override(config, cave_pool if cave_pool > 0 else None)
     exp_config = cc_experiment_config(config)
+    # Audit R2-D: restore the state-SHAPE flags too. history_state/steps enlarge the env
+    # state_size; if not read back, the rebuilt eval env has a smaller state than the saved
+    # net and the shape guard/strict load rejects the checkpoint (it can never be graded).
+    exp_config.CRYSTAL_CAVES_HISTORY_STATE = bool(saved_config.get("history_state", False))
+    exp_config.CRYSTAL_CAVES_HISTORY_STEPS = int(saved_config.get("history_steps", 4) or 4)
     exp_config.CRYSTAL_CAVES_ROUTE_AUX_LOSS = bool(saved_config.get("route_aux_loss", False))
     exp_config.CRYSTAL_CAVES_ROUTE_AUX_WEIGHT = float(
         saved_config.get("route_aux_weight", 0.0) or 0.0
