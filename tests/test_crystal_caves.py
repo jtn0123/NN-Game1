@@ -1661,3 +1661,23 @@ class TestStallTimerNetProgress:
         # A genuine new closest-ever approach DOES reset the timer.
         drive(current_distance=80.0, prev_distance=95.0)
         assert game.steps_since_progress == 0
+
+
+class TestReInteractNotFarmable:
+    """Audit R2-A: re-interacting an already-thrown switch must not pay positive reward."""
+
+    def test_reinteract_used_switch_is_noop(self, game: CrystalCaves) -> None:
+        game.reset()
+        pcol, prow = game._player_tile()
+        game.switches = {(pcol, prow)}
+        game.used_switches = {(pcol, prow)}  # already thrown
+        game.config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY = False
+        assert game._try_interact() == 0.0  # pre-fix: +0.05 (farmable)
+
+    def test_reinteract_penalized_when_flag_on(self, game: CrystalCaves) -> None:
+        game.reset()
+        pcol, prow = game._player_tile()
+        game.switches = {(pcol, prow)}
+        game.used_switches = {(pcol, prow)}
+        game.config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY = True
+        assert game._try_interact() < 0.0

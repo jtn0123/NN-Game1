@@ -174,8 +174,11 @@ class CrystalCavesLogicMixin:
                     reward += self.INVALID_INTERACT_PENALTY
                     self._invalid_interact_count += 1
                     self._invalid_interact_total += self.INVALID_INTERACT_PENALTY
-                else:
-                    reward += 0.05
+                # Audit R2-A: re-interacting an ALREADY-THROWN switch is a NO-OP. It was a
+                # farmable +0.05/step (sign-flipped from the intended -0.05 penalty): INTERACT
+                # zeroes move, so a policy could park at a used lever harvesting positive
+                # reward while the stall timer ran out — corrupting the learned policy and the
+                # shaped-return signal. Now neutral (only the base step cost applies).
                 break
         else:
             if penalize_invalid:
