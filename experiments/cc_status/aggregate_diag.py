@@ -34,6 +34,7 @@ from experiments.cc_status.diagnose_gap import (  # noqa: E402
     _RATE_METRICS,
     _average_curve,
     _print_curve,
+    _print_death_trace,
     _print_leg2,
     _print_report,
 )
@@ -109,6 +110,18 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
         dists = [float(s["leg2_far_mean_dist"]) for s in summaries if "leg2_far_mean_dist" in s]
         if dists:
             agg["leg2_far_mean_dist"] = sum(dists) / len(dists)
+    # Seed-average the death trace across per-seed workers. Each single-seed run stores its
+    # own `death_trace` (RUN-16 survival lever picker); without this the multi-process path
+    # dropped it and the trace had to be averaged by hand. Mirror diagnose_gap's mean-over-
+    # union-of-keys so the aggregated trace matches the single-process --seeds output.
+    death_traces = [s["death_trace"] for s in summaries if isinstance(s.get("death_trace"), dict)]
+    if death_traces:
+        keys = sorted({k for dt in death_traces for k in dt})
+        agg["death_trace"] = {
+            k: sum(float(dt.get(k, 0.0)) for dt in death_traces) / len(death_traces)
+            for k in keys
+        }
+        agg["death_trace_per_seed"] = death_traces
     return agg
 
 
@@ -126,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     _print_curve(agg["curve_avg"])
     _print_report(agg)
     _print_leg2(agg)
+    _print_death_trace(agg)
     if args.out:
         Path(args.out).write_text(json.dumps(agg, indent=2))
         print(f"\nWrote aggregated summary to {args.out}", flush=True)

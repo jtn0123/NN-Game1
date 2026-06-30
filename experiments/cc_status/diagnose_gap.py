@@ -529,24 +529,8 @@ def run_diagnosis(
         summary["death_trace"] = {
             k: float(np.mean([dt.get(k, 0.0) for dt in death_traces])) for k in keys
         }
-        print("\n==== DEATH-TRACE (held-out, greedy play, seed-avg) ====", flush=True)
-        dts = summary["death_trace"]
-        print(
-            f"  ended: won={dts['reason_won']:.2f}  killed={dts['reason_killed']:.2f}  "
-            f"timeout={dts['reason_timeout']:.2f}  stalled={dts['reason_stalled']:.2f}",
-            flush=True,
-        )
-        print(
-            f"  of deaths: hazard={dts['killed_by_hazard']:.2f}  enemy={dts['killed_by_enemy']:.2f}  "
-            f"both={dts['killed_by_both']:.2f}  air={dts['killed_by_air']:.2f}  "
-            f"(fractions of all episodes)",
-            flush=True,
-        )
-        print(
-            f"  crystals collected at end={dts['crystal_frac_mean']:.2f}  "
-            f"mean steps={dts['steps_mean']:.0f}",
-            flush=True,
-        )
+        summary["death_trace_per_seed"] = death_traces
+        _print_death_trace(summary)
         print(
             "  read: killed≫timeout & enemy-dominated => moving-enemy survival (maybe an "
             "enemy-velocity obs gap); killed≫timeout & hazard-dominated => static-hazard "
@@ -617,6 +601,37 @@ def _print_leg2(summary: dict[str, Any]) -> None:
             "play. LOW => fundamental bottleneck -> ceiling. (No FAR probe in this run.)"
         )
     print("\n".join(lines), flush=True)
+
+
+def _print_death_trace(summary: dict[str, Any]) -> None:
+    """Print the held-out DEATH-TRACE block (how greedy episodes end: won/killed/timeout/
+    stalled + kill source). Shared by the single-process path and the per-seed aggregator so
+    both render the seed-averaged trace identically — the aggregator no longer needs the
+    trace computed by hand."""
+    if "death_trace" not in summary:
+        return
+    dts = summary["death_trace"]
+    print("\n==== DEATH-TRACE (held-out, greedy play, seed-avg) ====", flush=True)
+    print(
+        f"  ended: won={dts.get('reason_won', 0.0):.2f}  "
+        f"killed={dts.get('reason_killed', 0.0):.2f}  "
+        f"timeout={dts.get('reason_timeout', 0.0):.2f}  "
+        f"stalled={dts.get('reason_stalled', 0.0):.2f}",
+        flush=True,
+    )
+    print(
+        f"  of deaths: hazard={dts.get('killed_by_hazard', 0.0):.2f}  "
+        f"enemy={dts.get('killed_by_enemy', 0.0):.2f}  "
+        f"both={dts.get('killed_by_both', 0.0):.2f}  "
+        f"air={dts.get('killed_by_air', 0.0):.2f}  "
+        f"(fractions of all episodes)",
+        flush=True,
+    )
+    print(
+        f"  crystals collected at end={dts.get('crystal_frac_mean', 0.0):.2f}  "
+        f"mean steps={dts.get('steps_mean', 0.0):.0f}",
+        flush=True,
+    )
 
 
 def _print_curve(curve: list[dict[str, Any]]) -> None:

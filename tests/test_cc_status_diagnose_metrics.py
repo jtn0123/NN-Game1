@@ -168,3 +168,70 @@ def test_r2c_aggregate_guards_ragged_seeds_and_carries_holdout(tmp_path):
     # B3 gate carried into the aggregate so the verdict isn't re-run the buggy way.
     assert agg["train_split_is_holdout"] is True
     assert "gap_train_minus_test_best" in agg
+
+
+def _death_trace(*, killed, hazard, enemy, stalled, crystals):
+    return {
+        "n": 40.0,
+        "reason_won": 0.0,
+        "reason_killed": killed,
+        "reason_timeout": 0.0,
+        "reason_stalled": stalled,
+        "killed_by_hazard": hazard,
+        "killed_by_enemy": enemy,
+        "killed_by_both": 0.0,
+        "killed_by_air": 0.0,
+        "crystal_frac_mean": crystals,
+        "steps_mean": 1000.0,
+    }
+
+
+def test_aggregate_seed_averages_death_trace(tmp_path, capsys):
+    # The per-seed aggregator used to DROP `death_trace`, so the survival-lever-picking
+    # trace had to be averaged by hand. It must now seed-average it like leg-2.
+    import json
+
+    from experiments.cc_status.aggregate_diag import aggregate
+
+    s0 = _seed_summary(0, [(500, _ckpt(0.0, 0.1), _ckpt(0.0, 0.0))])
+    s1 = _seed_summary(1, [(500, _ckpt(0.0, 0.1), _ckpt(0.0, 0.0))])
+    s0["death_trace"] = _death_trace(killed=0.4, hazard=0.3, enemy=0.1, stalled=0.6, crystals=0.20)
+    s1["death_trace"] = _death_trace(killed=0.2, hazard=0.1, enemy=0.1, stalled=0.8, crystals=0.10)
+    p0, p1 = tmp_path / "s0.json", tmp_path / "s1.json"
+    p0.write_text(json.dumps(s0))
+    p1.write_text(json.dumps(s1))
+
+    agg = aggregate([str(p0), str(p1)])
+
+    assert "death_trace" in agg  # pre-fix: missing entirely
+    dt = agg["death_trace"]
+    assert dt["reason_killed"] == pytest.approx(0.3)  # (0.4 + 0.2) / 2
+    assert dt["killed_by_hazard"] == pytest.approx(0.2)  # (0.3 + 0.1) / 2
+    assert dt["reason_stalled"] == pytest.approx(0.7)  # (0.6 + 0.8) / 2
+    assert dt["crystal_frac_mean"] == pytest.approx(0.15)  # (0.20 + 0.10) / 2
+    assert len(agg["death_trace_per_seed"]) == 2
+
+    # And the aggregator prints the seed-averaged block so M4 doesn't hand-compute it.
+    from experiments.cc_status.diagnose_gap import _print_death_trace
+
+    _print_death_trace(agg)
+    out = capsys.readouterr().out
+    assert "DEATH-TRACE (held-out, greedy play, seed-avg)" in out
+    assert "killed=0.30" in out
+    assert "hazard=0.20" in out
+
+
+def test_aggregate_without_death_trace_omits_it(tmp_path):
+    # Runs without --death-trace must not gain a phantom death_trace key or crash the print.
+    import json
+
+    from experiments.cc_status.aggregate_diag import aggregate
+    from experiments.cc_status.diagnose_gap import _print_death_trace
+
+    s0 = _seed_summary(0, [(500, _ckpt(0.0, 0.1), _ckpt(0.0, 0.0))])
+    p0 = tmp_path / "s0.json"
+    p0.write_text(json.dumps(s0))
+
+    agg = aggregate([str(p0)])
+    assert "death_trace" not in agg
+    _print_death_trace(agg)  # no-op, must not raise
