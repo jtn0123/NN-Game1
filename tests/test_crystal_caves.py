@@ -1400,6 +1400,46 @@ class TestReverseExitCurriculum:
             assert game.exit_pos in game._oracle_reachable((col, row))
 
 
+class TestGeoCompass:
+    """Geodesic next-step corridor compass (RUN-11 navigation fix)."""
+
+    def test_off_by_default_no_size_change(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_GEO_COMPASS is False
+        base = CrystalCaves(config, headless=True).state_size
+        cfg2 = Config()
+        cfg2.CRYSTAL_CAVES_GEO_COMPASS = True
+        assert (
+            CrystalCaves(cfg2, headless=True).state_size == base + CrystalCaves.GEO_COMPASS_FEATURES
+        )
+
+    def test_compass_points_down_the_route(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_GEO_COMPASS = True
+        game = CrystalCaves(config, headless=True)
+        for _ in range(6):
+            game.reset()
+            field = game._geodesic_distance_field()
+            pcol, prow = game._player_tile()
+            here = field.get((pcol, prow))
+            if here is None or here == 0:
+                continue
+            step_dx, step_dy, reachable, dist_norm = game._geodesic_next_step_compass()
+            assert reachable == 1.0
+            assert 0.0 <= dist_norm <= 1.0
+            # The suggested step must strictly reduce the route distance to the objective.
+            nd = field.get((pcol + int(step_dx), prow + int(step_dy)))
+            assert nd is not None and nd < here
+
+    def test_unreachable_returns_zero_reachable(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_GEO_COMPASS = True
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        # An empty field (no objective tiles in it) -> reachable flag is 0.
+        game._geodesic_field = {}
+        game._geodesic_field_key = (game._active_target_tiles(), frozenset(game.open_colors))
+        step_dx, step_dy, reachable, _ = game._geodesic_next_step_compass()
+        assert (step_dx, step_dy, reachable) == (0.0, 0.0, 0.0)
+
+
 class TestNGUBonus:
     """NGU-style episodic novelty bonus (#5)."""
 

@@ -239,6 +239,7 @@ def run_diagnosis(
     geodesic_after_unlock: bool = False,
     reverse_exit_curriculum_p: float | None = None,
     reverse_exit_curriculum_far: bool = False,
+    geo_compass: bool = False,
     leg2_probe: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -271,6 +272,10 @@ def run_diagnosis(
     if force_cpu:
         # On Apple Silicon (M-series) CPU beats MPS for this small model; force it.
         overrides["FORCE_CPU"] = True
+    if geo_compass:
+        # Corridor compass: append metadata pointing down the real traversable route to
+        # the active objective (the RUN-11 nav fix). Observation, not reward.
+        overrides["CRYSTAL_CAVES_GEO_COMPASS"] = True
     if truncation_bootstrap:
         # Treat timeout/stalled cutoffs as non-terminal so the TD target bootstraps
         # instead of learning value = raw -8/-6 (which n-step(6) compounds backwards).
@@ -622,6 +627,13 @@ def main(argv: list[str] | None = None) -> int:
         "the open exit, drilling the leg-2 route-to-exit skill (RUN-10 lever); e.g. 0.5.",
     )
     parser.add_argument(
+        "--geo-compass",
+        action="store_true",
+        help="Append a geodesic next-step corridor compass to the state: scalars pointing "
+        "down the real traversable route to the active objective (the RUN-11 nav fix). An "
+        "observation, not a reward — does not re-trigger the disconfirmed geodesic shaping.",
+    )
+    parser.add_argument(
         "--reverse-exit-curriculum-far",
         action="store_true",
         help="With --reverse-exit-curriculum-p: drop the player a real distance from the "
@@ -662,6 +674,7 @@ def main(argv: list[str] | None = None) -> int:
         geodesic_after_unlock=args.geodesic_after_unlock,
         reverse_exit_curriculum_p=args.reverse_exit_curriculum_p,
         reverse_exit_curriculum_far=args.reverse_exit_curriculum_far,
+        geo_compass=args.geo_compass,
         leg2_probe=args.leg2_probe,
     )
     return 0

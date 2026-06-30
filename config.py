@@ -106,6 +106,15 @@ class Config:
     # global objective map. When False, the legacy 11x9 window (119-feature state)
     # that reached ~8% wins. Toggleable so the two can be compared head-to-head.
     CRYSTAL_CAVES_RICH_STATE: bool = True
+    # Geodesic next-step "corridor compass": append a few metadata scalars that point down
+    # the actual traversable route toward the active objective (read from the cached BFS
+    # distance field), instead of relying only on the euclidean target compass which points
+    # straight at the objective THROUGH walls. RUN-11 showed the wall is long-range route-
+    # to-exit navigation (FAR probe 0.12) precisely because the only directional signal is
+    # that wall-blind euclidean compass. This is an OBSERVATION (computable identically at
+    # eval), NOT a reward — so it does not re-trigger the disconfirmed geodesic-PBRS lever.
+    # Off by default; an experiment lever. Adds GEO_COMPASS_FEATURES scalars to the state.
+    CRYSTAL_CAVES_GEO_COMPASS: bool = False
     # Use a convolutional Q-network that reads the perception window as a 2D grid
     # (the right architecture for the spatial rich state). Requires the game to set
     # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.

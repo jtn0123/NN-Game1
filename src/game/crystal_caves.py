@@ -89,6 +89,8 @@ class CrystalCaves(
     BASE_METADATA_SIZE = 20
     METADATA_SIZE = BASE_METADATA_SIZE
     HISTORY_FEATURES_PER_STEP = 7
+    # Geodesic corridor-compass scalars: [step_dx, step_dy, reachable, geo_dist_norm].
+    GEO_COMPASS_FEATURES = 4
     MAX_HEALTH = 3
     MAX_AMMO_FOR_STATE = 20
     MAX_STEPS = 3000
@@ -226,7 +228,13 @@ class CrystalCaves(
             else 0
         )
         self._history_metadata_size = self._history_steps * self.HISTORY_FEATURES_PER_STEP
-        self.METADATA_SIZE = self.BASE_METADATA_SIZE + self._history_metadata_size
+        # Geodesic corridor compass (RUN-11 nav fix): appended metadata scalars pointing
+        # down the real traversable route toward the active objective.
+        self._geo_compass_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS", False))
+        self._geo_compass_size = self.GEO_COMPASS_FEATURES if self._geo_compass_enabled else 0
+        self.METADATA_SIZE = (
+            self.BASE_METADATA_SIZE + self._geo_compass_size + self._history_metadata_size
+        )
 
         # Publish the spatial layout so a convolutional network (USE_CNN_STATE) can
         # reshape the flat state into the perception window + global map + metadata.
@@ -749,6 +757,34 @@ class CrystalCaves(
         self._geodesic_field_key = key
         return field
 
+    def _geodesic_next_step_compass(self) -> List[float]:
+        """Corridor compass: point down the actual traversable route toward the active
+        objective, vs the euclidean target compass (metadata 15-16) which points straight
+        through walls. Reads the cached geodesic BFS field and steps toward the neighbour
+        with the lowest route-distance. Returns [step_dx, step_dy, reachable, geo_dist_norm]
+        — all a function of LOCAL connectivity, so it transfers to unseen layouts, and it is
+        computed identically at eval (a legitimate observation, not a memorisation leak)."""
+        field = self._geodesic_distance_field()
+        pcol, prow = self._player_tile()
+        here = field.get((pcol, prow))
+        if here is None:
+            # Objective not reachable from the player's tile (e.g. mid-jump over a gap).
+            return [0.0, 0.0, 0.0, 1.0]
+        best_dist = here
+        best_dc = best_dr = 0
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            nd = field.get((pcol + dc, prow + dr))
+            if nd is not None and nd < best_dist:
+                best_dist = nd
+                best_dc, best_dr = dc, dr
+        norm = max(1, self.level_cols + self.level_rows)
+        return [
+            float(np.sign(best_dc)),
+            float(np.sign(best_dr)),
+            1.0,
+            min(1.0, here / norm),
+        ]
+
     def _target_closeness(self) -> float:
         """Normalized 0..1 geodesic closeness to the current objective (1 = on it).
 
@@ -1030,6 +1066,10 @@ class CrystalCaves(
             metadata[0] = 0.0
             metadata[1] = 0.0
             metadata[10] = 0.0
+        if self._geo_compass_enabled:
+            # Appended AFTER the base 20 so route_aux (meta 15-18) and drop-leak
+            # (meta 0/1/10) indices stay valid; before history for a stable layout.
+            metadata.extend(self._geodesic_next_step_compass())
         if self._history_state_enabled:
             metadata.extend(self._history_metadata())
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)
