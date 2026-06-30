@@ -197,3 +197,12 @@ Extended `diagnose_completion.py` (commit `5616202`) with hazard/enemy density +
 `--death-trace` (commit `3e52d08`): after training, greedy-play held-out normal and report end-reason distribution (won/killed/timeout/stalled), the hazard-vs-enemy-vs-air split of deaths, and crystals-at-end. Added `last_damage_source` tracking to the game. Single arm (diagnostic), normal+compass, 3 seeds, 4000 ep.
 - Decides RUN-17's lever: killed≫timeout & enemy-dominated → enemy-velocity obs / combat; killed & hazard-dominated → static-hazard pathing; timeout-dominated → exploration/credit (not death).
 - Smoke-tested end-to-end; 111 crystal_caves tests pass.
+
+### RUN-16-fixed — death-trace rerun on the audit-fixed harness (M4)
+Reran the RUN-16 death-trace on `9adee82` (post audit-round-1). The CORRECTED metrics give an honest, different read.
+- **Held-out (true means):** win 0.000, exit_unlocked 0.000, crystal_frac **0.186** (NOT the old "0.83" collected-≥1 rate), target_progress **0.487** (NOT the old saturated "0.90"). Train crystal_frac 0.293 — both low ⇒ a competence/early wall, not a clean memorisation gap.
+- **Death-trace (fixed attribution):** **stalled 0.592**, killed 0.400 (hazard **0.250** > enemy **0.150**, both **0.000**), timeout 0.008, crystals-at-end 0.186, steps 999.
+- **Key shift from the buggy run:** the B8 stall fix moved ~0.36 of episodes from "timeout" (0.367→0.008) to **"stalled" (0.225→0.592)** and dropped mean steps 1737→999 — confirming the agent OSCILLATES WITHOUT NET PROGRESS (gets stuck) in most episodes rather than running out of time while advancing. B6's `both=0.000` confirms the hazard>enemy split is real, not an overlap-attribution artifact.
+- **Reframed wall:** collect ~19% of crystals, then ~59% **get STUCK** (stall: no net progress to the next objective for 720 steps) and ~40% **die** (hazard-dominated). The compass already gives the route, so this is an EXECUTION/getting-unstuck problem (jumps/hazard-dodging/maneuvering through complex terrain), plus hazard survival — NOT a routing-info gap. Leg-2 FAR still 0.125 but rarely reached in full play (exit never unlocks).
+- RUN-17 lever (pending round-2 audit clearance): target getting-unstuck + hazard-execution, not more routing signal.
+- M4 perf note: per-seed speed now bound by PER replay sampling (`np.random.choice` over priorities), not device — a code-level optimization target if needed.
