@@ -115,6 +115,19 @@ class Config:
     # eval), NOT a reward — so it does not re-trigger the disconfirmed geodesic-PBRS lever.
     # Off by default; an experiment lever. Adds GEO_COMPASS_FEATURES scalars to the state.
     CRYSTAL_CAVES_GEO_COMPASS: bool = False
+    # Make the corridor compass route AROUND static hazards instead of straight through
+    # them. The plain compass BFS treats hazard tiles as ordinary floor, so it steers the
+    # agent into spikes — and the RUN-17 trusted death-trace shows hazards are the single
+    # largest death source (~0.28 of episodes) and likely drive much of the stall mass
+    # (the agent freezes when the only suggested step is into a hazard). This re-weights a
+    # SEPARATE compass-only field so hazard tiles cost HAZARD_COST extra steps but stay
+    # passable (the objective never becomes unreachable); the PBRS shaping field is left
+    # untouched. Same 4 compass dims, so no network-shape change. Requires GEO_COMPASS.
+    CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE: bool = False
+    # Extra route cost (in tiles) charged for stepping onto a hazard tile in the hazard-
+    # aware compass field. Higher = wider detours around hazards; must stay finite so a
+    # hazard-only corridor remains routable rather than infinitely avoided.
+    CRYSTAL_CAVES_GEO_COMPASS_HAZARD_COST: float = 8.0
     # Use a convolutional Q-network that reads the perception window as a 2D grid
     # (the right architecture for the spatial rich state). Requires the game to set
     # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.

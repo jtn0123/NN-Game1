@@ -308,6 +308,7 @@ def run_diagnosis(
     reverse_exit_curriculum_p: float | None = None,
     reverse_exit_curriculum_far: bool = False,
     geo_compass: bool = False,
+    geo_compass_hazard_aware: bool = False,
     route_aux: bool = False,
     curriculum_easy_episodes: int = 0,
     curriculum_pretrain_difficulty: str = "easy",
@@ -348,6 +349,12 @@ def run_diagnosis(
         # Corridor compass: append metadata pointing down the real traversable route to
         # the active objective (the RUN-11 nav fix). Observation, not reward.
         overrides["CRYSTAL_CAVES_GEO_COMPASS"] = True
+    if geo_compass_hazard_aware:
+        # RUN-17 survival lever: route the compass AROUND static hazards (the largest
+        # death source in the trusted RUN-17 trace) instead of through them. Same dims,
+        # observation-only; implies the compass.
+        overrides["CRYSTAL_CAVES_GEO_COMPASS"] = True
+        overrides["CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE"] = True
     if route_aux:
         # Op 2 (learnable route): supervise an aux head to PREDICT the geodesic route
         # direction (carried in trailing label slots, sliced off the policy input) — so the
@@ -861,6 +868,14 @@ def main(argv: list[str] | None = None) -> int:
         "observation, not a reward — does not re-trigger the disconfirmed geodesic shaping.",
     )
     parser.add_argument(
+        "--geo-compass-hazard-aware",
+        action="store_true",
+        help="Make the corridor compass route AROUND static hazards instead of through them "
+        "(implies --geo-compass). RUN-17 survival lever: hazards are the largest death source "
+        "in the trusted trace and likely drive much of the stall mass. Same dims, no net-shape "
+        "change — an observation that points down a hazard-avoiding route.",
+    )
+    parser.add_argument(
         "--route-aux",
         action="store_true",
         help="Op 2 (learnable route): train an auxiliary head to PREDICT the geodesic route "
@@ -930,6 +945,7 @@ def main(argv: list[str] | None = None) -> int:
         reverse_exit_curriculum_p=args.reverse_exit_curriculum_p,
         reverse_exit_curriculum_far=args.reverse_exit_curriculum_far,
         geo_compass=args.geo_compass,
+        geo_compass_hazard_aware=args.geo_compass_hazard_aware,
         route_aux=args.route_aux,
         curriculum_easy_episodes=args.curriculum_easy_episodes,
         curriculum_pretrain_difficulty=args.curriculum_pretrain_difficulty,

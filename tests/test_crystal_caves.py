@@ -1440,6 +1440,90 @@ class TestGeoCompass:
         assert (step_dx, step_dy, reachable) == (0.0, 0.0, 0.0)
 
 
+class TestHazardAwareCompass:
+    """RUN-17 survival lever: the compass routes AROUND static hazards, not through them."""
+
+    @staticmethod
+    def _stub_corridor(game, *, hazard_aware: bool):
+        """Two parallel 5-wide corridors (rows 0 and 1) joined at every column. Objective at
+        (4,0); a hazard sits at (2,0) on the direct top-row route, with the bottom row a free
+        detour. Player at (1,0), one tile west of the hazard."""
+        free = {(c, r) for c in range(5) for r in range(2)}
+        game._solid_at = lambda c, r: (c, r) not in free
+        game._active_target_tiles = lambda: frozenset({(4, 0)})
+        game._player_tile = lambda: (1, 0)
+        game.hazards = {(2, 0)}
+        game.open_colors = set()
+        game.level_cols, game.level_rows = 5, 2
+        game._geo_compass_hazard_aware = hazard_aware
+        game._hazard_field = None
+        game._hazard_field_key = None
+        game._geodesic_field = None
+        game._geodesic_field_key = None
+
+    def test_plain_compass_steps_into_hazard(self, config):
+        # Control: the hazard-blind compass takes the shortest route, straight onto (2,0).
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=False)
+        step_dx, step_dy, reachable, _ = game._geodesic_next_step_compass()
+        assert reachable == 1.0
+        assert (step_dx, step_dy) == (1.0, 0.0)  # east, onto the hazard at (2,0)
+
+    def test_hazard_aware_compass_detours_around_hazard(self, config):
+        # Arm B: the hazard-aware compass detours down to the free bottom row instead.
+        config.CRYSTAL_CAVES_GEO_COMPASS = True
+        config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=True)
+        step_dx, step_dy, reachable, _ = game._geodesic_next_step_compass()
+        assert reachable == 1.0
+        # Leaves the hazard top row (dy=+1) and lands on a non-hazard detour tile, rather
+        # than stepping east onto (2,0) like the plain compass does.
+        assert step_dy == 1.0
+        landing = (1 + int(step_dx), 0 + int(step_dy))
+        assert landing not in game.hazards
+        assert (step_dx, step_dy) != (1.0, 0.0)
+
+    def test_hazard_cost_raises_route_distance(self, config):
+        # The hazard-weighted field must cost >= the plain field everywhere, and strictly
+        # more at the player tile where the cheap route crosses the hazard.
+        config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=True)
+        plain = game._geodesic_distance_field()
+        weighted = game._hazard_aware_distance_field()
+        for tile, d in plain.items():
+            assert weighted[tile] >= d - 1e-9
+        assert weighted[(1, 0)] > plain[(1, 0)]
+
+    def test_no_hazards_matches_plain_route(self, config):
+        # Degenerate safety: with no hazards the hazard-aware field equals the plain field,
+        # so arm B reduces exactly to the proven compass.
+        config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=True)
+        game.hazards = set()
+        game._hazard_field = None
+        plain = game._geodesic_distance_field()
+        weighted = game._hazard_aware_distance_field()
+        assert {k: float(v) for k, v in plain.items()} == {k: float(v) for k, v in weighted.items()}
+
+    def test_off_by_default_no_size_change(self, config):
+        # The lever adds no state dims (same 4 compass scalars) and is off by default.
+        assert config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE is False
+        base = CrystalCaves(config, headless=True)
+        base_compass = Config()
+        base_compass.CRYSTAL_CAVES_GEO_COMPASS = True
+        haz = Config()
+        haz.CRYSTAL_CAVES_GEO_COMPASS = True
+        haz.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        assert (
+            CrystalCaves(haz, headless=True).state_size
+            == CrystalCaves(base_compass, headless=True).state_size
+        )
+        assert base.state_size <= CrystalCaves(haz, headless=True).state_size
+
+
 class TestRouteAux:
     """Op 2: learnable geodesic route via an auxiliary head + trailing label slots."""
 

@@ -9,9 +9,10 @@ live in sibling mixin modules to keep each file focused and under budget.
 
 from __future__ import annotations
 
+import heapq
 import warnings
 from collections import deque
-from typing import Deque, Dict, List, Optional, Set, Tuple
+from typing import Deque, Dict, List, Mapping, Optional, Set, Tuple
 
 import numpy as np
 import pygame
@@ -232,6 +233,14 @@ class CrystalCaves(
         # down the real traversable route toward the active objective.
         self._geo_compass_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS", False))
         self._geo_compass_size = self.GEO_COMPASS_FEATURES if self._geo_compass_enabled else 0
+        # Hazard-aware routing for the compass (RUN-17 survival lever): route around static
+        # hazards instead of through them. Reads a separate weighted field, same dims.
+        self._geo_compass_hazard_aware = bool(
+            getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE", False)
+        )
+        self._geo_compass_hazard_cost = float(
+            getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS_HAZARD_COST", 8.0)
+        )
         self.METADATA_SIZE = (
             self.BASE_METADATA_SIZE + self._geo_compass_size + self._history_metadata_size
         )
@@ -395,6 +404,8 @@ class CrystalCaves(
         self._progress_phi = 0.0
         self._geodesic_field: Optional[Dict[Tuple[int, int], int]] = None
         self._geodesic_field_key: Optional[Tuple] = None
+        self._hazard_field: Optional[Dict[Tuple[int, int], float]] = None
+        self._hazard_field_key: Optional[Tuple] = None
         self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
         self._obj_region_total = 0.0  # AI-2
         self._visited_novelty_cells: Set[Tuple[int, int]] = set()
@@ -578,6 +589,8 @@ class CrystalCaves(
         # Invalidate the geodesic cache for the new level before computing closeness.
         self._geodesic_field = None
         self._geodesic_field_key = None
+        self._hazard_field = None
+        self._hazard_field_key = None
         # Capture initial closeness BEFORE the first PBRS potential so the geodesic
         # term (like the base term) telescopes to exactly 0 over a full episode.
         self._closeness_initial = self._target_closeness()
@@ -776,14 +789,59 @@ class CrystalCaves(
         self._geodesic_field_key = key
         return field
 
+    def _hazard_aware_distance_field(self) -> Dict[Tuple[int, int], float]:
+        """Like ``_geodesic_distance_field`` but charges ``_geo_compass_hazard_cost`` extra
+        per step ONTO a hazard tile, so the route prefers a detour up to that many tiles
+        longer rather than walking the agent through spikes. Hazards stay PASSABLE (still
+        relaxed), so a hazard-only corridor remains routable and the objective never becomes
+        unreachable — it just costs more. A weighted multi-source Dijkstra (not BFS) because
+        edge costs are no longer uniform. Separate cache from the plain field, and used ONLY
+        by the compass observation; the PBRS shaping field (``_target_closeness``) is
+        deliberately left hazard-blind so this lever changes perception, not reward."""
+        key = (self._active_target_tiles(), frozenset(self.open_colors), frozenset(self.hazards))
+        if self._hazard_field is not None and self._hazard_field_key == key:
+            return self._hazard_field
+
+        hazard_cost = self._geo_compass_hazard_cost
+        dist: Dict[Tuple[int, int], float] = {}
+        heap: List[Tuple[float, int, int]] = []
+        for col, row in key[0]:
+            if not self._solid_at(col, row):
+                dist[(col, row)] = 0.0
+                heapq.heappush(heap, (0.0, col, row))
+        while heap:
+            d, col, row = heapq.heappop(heap)
+            if d > dist.get((col, row), float("inf")):
+                continue
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nc, nr = col + dc, row + dr
+                if self._solid_at(nc, nr):
+                    continue
+                step = 1.0 + (hazard_cost if (nc, nr) in self.hazards else 0.0)
+                nd = d + step
+                if nd < dist.get((nc, nr), float("inf")):
+                    dist[(nc, nr)] = nd
+                    heapq.heappush(heap, (nd, nc, nr))
+
+        self._hazard_field = dist
+        self._hazard_field_key = key
+        return dist
+
     def _geodesic_next_step_compass(self) -> List[float]:
         """Corridor compass: point down the actual traversable route toward the active
         objective, vs the euclidean target compass (metadata 15-16) which points straight
-        through walls. Reads the cached geodesic BFS field and steps toward the neighbour
+        through walls. Reads the cached geodesic field and steps toward the neighbour
         with the lowest route-distance. Returns [step_dx, step_dy, reachable, geo_dist_norm]
         — all a function of LOCAL connectivity, so it transfers to unseen layouts, and it is
-        computed identically at eval (a legitimate observation, not a memorisation leak)."""
-        field = self._geodesic_distance_field()
+        computed identically at eval (a legitimate observation, not a memorisation leak).
+
+        When ``_geo_compass_hazard_aware`` is set the route is read from the hazard-weighted
+        field, so the suggested step detours around hazards instead of through them."""
+        field: Mapping[Tuple[int, int], float]
+        if self._geo_compass_hazard_aware:
+            field = self._hazard_aware_distance_field()
+        else:
+            field = self._geodesic_distance_field()
         pcol, prow = self._player_tile()
         here = field.get((pcol, prow))
         if here is None:
