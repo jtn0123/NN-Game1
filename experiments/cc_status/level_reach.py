@@ -73,12 +73,7 @@ class LevelSim:
         raise ValueError(f"tile {target!r} not found")
 
     def _find_all(self, pred) -> Set[Tuple[int, int]]:
-        return {
-            (c, r)
-            for r, row in enumerate(self.grid)
-            for c, ch in enumerate(row)
-            if pred(ch)
-        }
+        return {(c, r) for r, row in enumerate(self.grid) for c, ch in enumerate(row) if pred(ch)}
 
     # --- collision (mirrors _solid_at / _rect_collides_solid; doors passable) ---
     def solid_at(self, col: int, row: int) -> bool:
@@ -179,45 +174,57 @@ def _touched(sim: LevelSim, x: float, y: float, touch: Set[Tuple[int, int]]) -> 
         touch.add((c, r))
 
 
-# Macro control programs: (move_dir, jump-held). Held-jump only re-fires from the
-# ground (coyote); mid-air it is a no-op except on ladders (where it climbs).
-_MACROS = [
-    (-1, False),
-    (1, False),
-    (-1, True),
-    (1, True),
-    (0, True),   # climb straight up / vertical jump
-    (0, False),  # descend a ladder / drop
-]
+# Macro control PROGRAMS: each is a list of (frames, move_dir, jump-held) segments,
+# mirroring the input sequences a player/agent can actually feed the engine.
+# Held-jump re-fires only from the ground (coyote) or climbs on a ladder; the
+# engine grants full mid-air direction control (AIR_SPEED per frame), so the
+# jump-then-reverse programs model up-and-over arcs.
+_D = (-1, 1)
+_MACROS: List[List[Tuple[int, int, bool]]] = (
+    [[(MAX_FRAMES, d, False)] for d in _D]  # walk / fall off edges
+    + [[(MAX_FRAMES, d, True)] for d in _D]  # repeated hops (+ climb on ladders)
+    + [[(1, d, True), (MAX_FRAMES - 1, d, False)] for d in _D]  # jump, hold direction
+    + [
+        [(1, 0, True), (12, 0, False), (MAX_FRAMES - 13, d, False)] for d in _D
+    ]  # vertical jump then drift after apex
+    + [
+        [(1, d, True), (11, d, False), (MAX_FRAMES - 12, -d, False)] for d in _D
+    ]  # jump one way, reverse mid-air (up-and-over)
+    + [[(MAX_FRAMES, 0, True)]]  # climb straight up a ladder
+    + [[(MAX_FRAMES, 0, False)]]  # descend a ladder / wait
+)
 
 
 def _run_macro(
-    sim: LevelSim, start: _Body, move_dir: int, jump: bool, touch: Set[Tuple[int, int]]
+    sim: LevelSim,
+    start: _Body,
+    program: List[Tuple[int, int, bool]],
+    touch: Set[Tuple[int, int]],
 ) -> List[Tuple[int, int]]:
-    """Simulate one macro to completion; return resting cells reached."""
+    """Simulate one control program to completion; return resting cells reached."""
     b = _Body(start.x, start.y, 0.0, 0.0, start.grounded, start.coyote)
     rests: List[Tuple[int, int]] = []
-    prev_cell = None
-    for frame in range(MAX_FRAMES):
-        _step(sim, b, move_dir, jump)
+    prev_cell: Tuple[int, int] | None = None
+
+    def record() -> bool:
+        nonlocal prev_cell
         _touched(sim, b.x, b.y, touch)
         cell = _player_tile(b.x, b.y)
-        resting = b.grounded or sim.on_ladder(b.x, b.y)
-        if resting and cell != prev_cell:
+        if (b.grounded or sim.on_ladder(b.x, b.y)) and cell != prev_cell:
             rests.append(cell)
             prev_cell = cell
-        # out of bounds / stuck
-        if b.y > (sim.rows + 2) * TILE:
-            break
-    # settle: let it fall to a resting cell if the macro ended airborne
+        return b.y > (sim.rows + 2) * TILE
+
+    for frames, move_dir, jump in program:
+        for _ in range(frames):
+            _step(sim, b, move_dir, jump)
+            if record():
+                return rests
+    # settle: let it fall to a resting cell if the program ended airborne
     if not (b.grounded or sim.on_ladder(b.x, b.y)):
         for _ in range(MAX_FRAMES):
             _step(sim, b, 0, False)
-            _touched(sim, b.x, b.y, touch)
-            if b.grounded or sim.on_ladder(b.x, b.y):
-                rests.append(_player_tile(b.x, b.y))
-                break
-            if b.y > (sim.rows + 2) * TILE:
+            if record() or b.grounded or sim.on_ladder(b.x, b.y):
                 break
     return rests
 
@@ -240,19 +247,21 @@ def analyze(layout: Tuple[str, ...]) -> Dict:
     # map resting cell -> a representative body so we can re-expand
     while queue and len(seen) < MAX_RESTING:
         body = queue.popleft()
-        for move_dir, jump in _MACROS:
-            for cell in _run_macro(sim, body, move_dir, jump, touch):
+        for program in _MACROS:
+            for cell in _run_macro(sim, body, program, touch):
                 resting_cells.add(cell)
                 if cell not in seen:
                     seen.add(cell)
-                    # rebuild a resting body at this cell for expansion
+                    # rebuild a resting body at this cell for expansion. On a ladder the
+                    # player rests in place; otherwise settle it onto the ground below.
                     nx = cell[0] * TILE + 5
                     ny = cell[1] * TILE + 1
                     nb = _Body(nx, ny)
-                    for _ in range(MAX_FRAMES):
-                        _step(sim, nb, 0, False)
-                        if nb.grounded or sim.on_ladder(nb.x, nb.y):
-                            break
+                    if not sim.on_ladder(nb.x, nb.y):
+                        for _ in range(MAX_FRAMES):
+                            _step(sim, nb, 0, False)
+                            if nb.grounded or sim.on_ladder(nb.x, nb.y):
+                                break
                     queue.append(nb)
 
     def reached(tiles: Set[Tuple[int, int]]) -> Set[Tuple[int, int]]:
