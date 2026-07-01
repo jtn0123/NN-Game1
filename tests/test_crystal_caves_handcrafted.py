@@ -20,7 +20,8 @@ _LEGEND = set(". # * E D d s S = H P ^ M F A $ O".split())
 
 
 def test_levels_present_and_well_formed():
-    assert len(HANDCRAFTED_LEVELS) >= 5
+    # At least the 16 of the original Episode 1.
+    assert len(HANDCRAFTED_LEVELS) >= 16
     for lv in HANDCRAFTED_LEVELS:
         flat = "".join(lv.layout)
         assert all(len(row) == 40 for row in lv.layout), lv.name
