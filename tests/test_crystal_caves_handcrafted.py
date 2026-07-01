@@ -16,7 +16,7 @@ from experiments.cc_status.level_reach import analyze  # noqa: E402
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
 from src.game.crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS  # noqa: E402
 
-_LEGEND = set(". # * E D d s S = H P ^ M F A $ O".split())
+_LEGEND = set(". # * E D d s S = H P ^ ~ M F A $ O p g z".split())
 
 
 def test_levels_present_and_well_formed():

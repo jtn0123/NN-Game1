@@ -286,7 +286,7 @@ def analyze(layout: Tuple[str, ...]) -> Dict:
 
 
 def main() -> int:
-    from src.game.crystal_caves_cc1_levels import CC1_LEVELS
+    from src.game.crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS as CC1_LEVELS
 
     win = 0
     for lvl in CC1_LEVELS:
