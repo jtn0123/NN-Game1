@@ -56,10 +56,11 @@ MAX_RESTING = 6000  # BFS safety cap
 
 
 class LevelSim:
-    def __init__(self, layout: Tuple[str, ...]):
+    def __init__(self, layout: Tuple[str, ...], closed_doors: frozenset = frozenset()):
         self.rows = len(layout)
         self.cols = max(len(r) for r in layout)
         self.grid = [row.ljust(self.cols, SOLID) for row in layout]
+        self.closed_doors = frozenset(closed_doors)  # door chars treated as solid
         self.start = self._find(PLAYER)
         self.crystals = self._find_all(lambda ch: ch == CRYSTAL)
         self.switches = self._find_all(lambda ch: ch in SWITCHES)
@@ -75,11 +76,13 @@ class LevelSim:
     def _find_all(self, pred) -> Set[Tuple[int, int]]:
         return {(c, r) for r, row in enumerate(self.grid) for c, ch in enumerate(row) if pred(ch)}
 
-    # --- collision (mirrors _solid_at / _rect_collides_solid; doors passable) ---
+    # --- collision (mirrors _solid_at / _rect_collides_solid). Doors listed in
+    # ``closed_doors`` act as walls, exactly like the engine's locked doors. ---
     def solid_at(self, col: int, row: int) -> bool:
         if col < 0 or row < 0 or col >= self.cols or row >= self.rows:
             return True
-        return self.grid[row][col] == SOLID
+        ch = self.grid[row][col]
+        return ch == SOLID or ch in self.closed_doors
 
     def _tiles_for_rect(self, x: float, y: float):
         left = int(x) // TILE
@@ -229,8 +232,8 @@ def _run_macro(
     return rests
 
 
-def analyze(layout: Tuple[str, ...]) -> Dict:
-    sim = LevelSim(layout)
+def analyze(layout: Tuple[str, ...], closed_doors: frozenset = frozenset()) -> Dict:
+    sim = LevelSim(layout, closed_doors=closed_doors)
     # place player at start cell and settle to the ground
     sc, sr = sim.start
     b = _Body(sc * TILE + 5, sr * TILE + 1)
@@ -283,6 +286,49 @@ def analyze(layout: Tuple[str, ...]) -> Dict:
         "resting_cells": resting_cells,
         "sim": sim,
     }
+
+
+# door char -> the switch char that opens it (engine colour pairing)
+SWITCH_FOR_DOOR = {"D": "s", "d": "S"}
+
+
+def analyze_gated(layout: Tuple[str, ...]) -> Dict:
+    """In-game lock-ordering solvability. Unlike ``analyze`` (which treats doors as
+    open), doors start CLOSED (solid) and a colour opens only once one of its
+    switches has been physically REACHED with the doors opened so far. Iterates to
+    a fixpoint, so switch-behind-other-colour chains resolve, and a switch locked
+    behind its OWN door is correctly reported as a deadlock."""
+    present = {ch for row in layout for ch in row}
+    doors_present = {dc for dc in DOORS if dc in present}
+    opened: Set[str] = set()
+    order: list = []
+    while True:
+        res = analyze(layout, closed_doors=frozenset(doors_present - opened))
+        sim = res["sim"]
+        reached_sw = sim.switches - set(res["missing_switches"])
+        reach_chars = {sim.grid[r][c] for (c, r) in reached_sw}
+        newly = {dc for dc in doors_present - opened if SWITCH_FOR_DOOR[dc] in reach_chars}
+        if not newly:
+            break
+        opened |= newly
+        order.append(sorted(newly))
+    res["gated_winnable"] = res["winnable"]
+    res["door_open_order"] = order
+    res["doors_never_opened"] = sorted(doors_present - opened)
+    return res
+
+
+def door_value(layout: Tuple[str, ...]) -> Dict[str, bool]:
+    """Per door colour: does keeping it closed actually block any objective?
+    False = decorative (the player can route around it, so the switch puzzle
+    gates nothing)."""
+    present = {ch for row in layout for ch in row}
+    out: Dict[str, bool] = {}
+    for dc in DOORS:
+        if dc in present:
+            res = analyze(layout, closed_doors=frozenset({dc}))
+            out[dc] = not res["winnable"]
+    return out
 
 
 def main() -> int:

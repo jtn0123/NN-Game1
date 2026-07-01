@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config  # noqa: E402
-from experiments.cc_status.level_reach import analyze  # noqa: E402
+from experiments.cc_status.level_reach import analyze, analyze_gated, door_value  # noqa: E402
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
 from src.game.crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS  # noqa: E402
 
@@ -40,6 +40,26 @@ def test_every_level_is_winnable():
             f"missing switches {res['missing_switches']}, "
             f"exit reachable={res['exit']}"
         )
+
+
+def test_every_level_is_gated_winnable():
+    """Doors start CLOSED and only open when their switch is physically reached —
+    the real in-game lock ordering. Catches switch-behind-its-own-door deadlocks."""
+    for lv in HANDCRAFTED_LEVELS:
+        res = analyze_gated(lv.layout)
+        assert res["gated_winnable"], (
+            f"{lv.name}: not solvable under lock ordering — "
+            f"open order {res['door_open_order']}, never opened {res['doors_never_opened']}, "
+            f"missing crystals {res['missing_crystals']}"
+        )
+
+
+def test_every_door_actually_gates_something():
+    """No decorative doors: closing a colour must block at least one objective,
+    otherwise the switch puzzle is theatre the player can just walk around."""
+    for lv in HANDCRAFTED_LEVELS:
+        for colour, gates in door_value(lv.layout).items():
+            assert gates, f"{lv.name}: door {colour!r} is decorative (routable around)"
 
 
 def test_engine_loads_and_plays_the_levels():
