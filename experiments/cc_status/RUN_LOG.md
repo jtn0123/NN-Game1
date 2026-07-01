@@ -206,3 +206,21 @@ Reran the RUN-16 death-trace on `9adee82` (post audit-round-1). The CORRECTED me
 - **Reframed wall:** collect ~19% of crystals, then ~59% **get STUCK** (stall: no net progress to the next objective for 720 steps) and ~40% **die** (hazard-dominated). The compass already gives the route, so this is an EXECUTION/getting-unstuck problem (jumps/hazard-dodging/maneuvering through complex terrain), plus hazard survival — NOT a routing-info gap. Leg-2 FAR still 0.125 but rarely reached in full play (exit never unlocks).
 - RUN-17 lever (pending round-2 audit clearance): target getting-unstuck + hazard-execution, not more routing signal.
 - M4 perf note: per-seed speed now bound by PER replay sampling (`np.random.choice` over priorities), not device — a code-level optimization target if needed.
+
+### RUN-17 — R2 trusted baseline (post two audits, R2-A applied) (M4)
+Reran normal+compass death-trace on `2a6d3fe` (22 audit bugs fixed; R2-A removed the farmable already-thrown-switch reward). This is the trusted pre-lever baseline. 3 seeds, 4000 ep, `--geo-compass --death-trace --leg2-probe`.
+- **Held-out:** win **0.000**, exit_unlocked **0.000**, crystal_frac **0.199**, target_progress 0.514. Train crystal_frac 0.358. meanQ +6.38 (bounded — not Q-divergence).
+- **Death-trace:** killed **0.483** / stalled **0.492** / timeout 0.025. Kills: hazard **0.283** > enemy **0.200**, both 0.000. crystals-at-end 0.199, steps 986.
+- **R2-A effect:** stall dropped 0.592 → 0.492 (−0.10) vs RUN-16-fixed → ~a tenth of prior stalling WAS lever-camping. Baseline now trustworthy. Leg-2 NEAR 0.767 / FAR 0.242 (downstream — exit rarely unlocks).
+- **Read:** failure ~50/50 killed/stalled; hazard is the largest single death source → motivated RUN-18 (hazard-aware compass).
+
+### RUN-18 — hazard-aware corridor compass (A/B) (M4) — ❌ DISCONFIRMED
+`--geo-compass-hazard-aware` (commit `431c694`): route the compass AROUND static hazards (separate hazard-weighted Dijkstra field; observation-only, same 4 dims). Control = plain compass. 3 seeds, 4000 ep, normal.
+- **Reduced deaths but bought nothing.** killed 0.483 → 0.417, hazard 0.283 → 0.258, enemy 0.200 → 0.158; guardrails held (train flat 0.358→0.356, NEAR 0.767→0.792, FAR 0.242→0.258). BUT stalled **0.492 → 0.558** (+0.067 — deaths converted to stalls), mean steps 986→1090, wins still **0.000**, held-out crystals flat-to-worse 0.199→0.195.
+- **Read:** the compass *was* steering into spikes (deaths drop when routed around), but suppressing deaths just converts them to stalls — no net objective gain. Don't stack. The binding constraint is the STALL, not survival per se.
+
+### RUN-19 — stall diagnostic (single arm) (M4) — decisive: far+oscillating
+`--stall-trace` (commit `fc0202e`): for each held-out STALLED episode, classify trapped (objective physics-unreachable from the stuck tile) / near-objective (≤3 tiles) / far / oscillating (≤3 tiles in trail). Normal+compass, 3 seeds, 4000 ep. Reproduces the RUN-17 baseline shape exactly.
+- **Stall-trace (seed-avg over stalled eps):** trapped **0.018**, near-objective **0.137**, far-from-objective **0.863**, oscillating **0.645**, mean geodesic dist to objective **12.1 tiles**, crystals-at-stall 0.189.
+- **Read:** NOT trapped (agent isn't wedged / compass isn't routing through impossible jumps) and NOT last-mile. It stalls **far from the objective, bouncing in a small local loop** — i.e. it has the route signal and still won't follow it. This is the **route-following / credit / exploration / representation** branch (a learning problem), not a control/jump-skill one. Disconfirms a jump-aware-routing or last-mile fix as the next lever; strengthens the case for a bigger swing (PPO / recurrence) or a route-following curriculum.
+- Next: `--record-play` (commit `c852b96`) to WATCH the far+oscillating behavior on a deterministic replay before committing to the bigger swing.
