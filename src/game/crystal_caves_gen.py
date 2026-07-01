@@ -214,6 +214,7 @@ def _family_platform_network(grid: Grid, rng: random.Random, surface: int, shaft
         for cc in range(span_start, span_end):
             grid[r - 2][cc] = EMPTY
             grid[r - 1][cc] = EMPTY
+
     # link adjacent galleries with vertical shafts punched straight through the
     # rock at arbitrary columns (same approach the maze uses to stay fully
     # connected); the carved span plus headroom is <= a jump so the player climbs
