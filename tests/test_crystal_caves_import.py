@@ -15,7 +15,7 @@ from config import Config  # noqa: E402
 from src.game.crystal_caves import CrystalCaves  # noqa: E402
 from src.game.crystal_caves_cc1_levels import CC1_LEVELS  # noqa: E402
 
-_LEGEND = set(". # * E D d s S = H P".split())
+_LEGEND = set(". # * E D d s S = H P ^ M F A $ O".split())
 
 
 def test_sixteen_levels_present_and_well_formed():
