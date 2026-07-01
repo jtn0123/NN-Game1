@@ -394,6 +394,7 @@ def run_diagnosis(
     leg2_probe: bool = False,
     death_trace: bool = False,
     stall_trace: bool = False,
+    record_play: int = 0,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -590,6 +591,19 @@ def run_diagnosis(
                 f"trapped={st['trapped_frac']:.2f} near={st['near_objective_frac']:.2f} "
                 f"far={st['far_from_objective_frac']:.2f} osc={st['oscillating_frac']:.2f} | "
                 f"geoDist={st['geo_dist_mean']:.1f} crystals={st['crystal_frac_mean']:.2f}",
+                flush=True,
+            )
+
+        if record_play > 0:
+            from experiments.cc_status.record_play import record_policy_play
+
+            replay_dir = run_dir / "replays"
+            saved = record_policy_play(
+                trainer.agent, config, games=games, out_dir=replay_dir, max_gifs=record_play
+            )
+            print(
+                f"[seed {seed}] RECORD-PLAY: saved {len(saved)} gif(s) to {replay_dir} "
+                f"({', '.join(s['end_reason'] for s in saved)})",
                 flush=True,
             )
 
@@ -1067,6 +1081,15 @@ def main(argv: list[str] | None = None) -> int:
         "last-mile (near the objective), far, and oscillating-in-place. Picks whether the "
         "stall fix is control/jump skill, exploration, or an unexecutable route signal.",
     )
+    parser.add_argument(
+        "--record-play",
+        type=int,
+        default=0,
+        metavar="N",
+        help="After training, record the greedy policy PLAYING N held-out levels as labeled "
+        "GIFs (under <out>/seed_<s>/replays/), preferring stalls. Lets us watch the behaviour "
+        "the traces measure. Deterministic, so re-running a past experiment reproduces it.",
+    )
     parser.add_argument("--out", default="scratchpad/diag")
     args = parser.parse_args(argv)
     run_diagnosis(
@@ -1097,6 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
         leg2_probe=args.leg2_probe,
         death_trace=args.death_trace,
         stall_trace=args.stall_trace,
+        record_play=args.record_play,
     )
     return 0
 
