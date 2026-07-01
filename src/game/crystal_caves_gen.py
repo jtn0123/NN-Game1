@@ -32,7 +32,6 @@ CRYSTAL, AMMO, TREASURE = "*", "A", "$"
 POWER, GRAV, FREEZE = "p", "g", "z"
 SPIKE, ACID, CRAWLER, FLYER = "^", "~", "M", "F"
 ELEVATOR = "="  # a vertical-shaft lift platform; rideable up/down within its run
-LADDER = "H"  # climbable chain/ladder tile for narrow vertical connectors
 
 # Colour-keyed lever/door pairs: a switch opens only the door of its colour.
 DOOR_CHARS = {DOOR, DOOR2}
@@ -100,21 +99,20 @@ def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]
     def grounded(c: int, r: int) -> bool:
         # standing inside an elevator shaft => the platform supports you (it rides
         # the full run, so any shaft cell is a valid footing)
-        if rows[r][c] in (ELEVATOR, LADDER):
+        if rows[r][c] == ELEVATOR:
             return True
         if r + 1 >= rows_n:
             return True
         below = rows[r + 1][c]
         return below == SOLID or (below in DOOR_CHARS and not door_open(below))
 
-    def transport_run(c: int, r: int):
-        """Yield every cell of a contiguous climb/ride shaft through (c, r)."""
-        ch = rows[r][c]
+    def elevator_run(c: int, r: int):
+        """Yield every cell of the contiguous elevator shaft through (c, r)."""
         top = r
-        while top - 1 >= 0 and rows[top - 1][c] == ch:
+        while top - 1 >= 0 and rows[top - 1][c] == ELEVATOR:
             top -= 1
         bot = r
-        while bot + 1 < rows_n and rows[bot + 1][c] == ch:
+        while bot + 1 < rows_n and rows[bot + 1][c] == ELEVATOR:
             bot += 1
         for rr in range(top, bot + 1):
             yield c, rr
@@ -132,9 +130,9 @@ def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]
         tiles.add((c, r))
         if grounded(c, r):
             f = jump
-        # riding a lift or climbing a ladder: free vertical travel to any cell in its shaft
-        if rows[r][c] in (ELEVATOR, LADDER):
-            for ec, er in transport_run(c, r):
+        # riding an elevator: free vertical travel to any cell in its shaft
+        if rows[r][c] == ELEVATOR:
+            for ec, er in elevator_run(c, r):
                 queue.append((ec, er, jump))
         if is_open(c, r + 1):
             queue.append((c, r + 1, 0))
@@ -193,130 +191,66 @@ def _family_platform_network(grid: Grid, rng: random.Random, surface: int, shaft
 
     Unlike the old open-interior version this leaves the surrounding rock SOLID
     (the base grid), matching the dense look of the snake/maze families."""
-    gallery_rows = [surface + 3, surface + 7, surface + 11]
-    rooms_by_row: Dict[int, List[Tuple[int, int]]] = {}
+    gallery_rows = list(range(surface + 3, ROWS - 1, 3))
     for r in gallery_rows:
         c = rng.randint(1, 3)
         while c < COLS - 2:
-            run = rng.randint(11, 17)  # wider rooms cut from the rock
+            run = rng.randint(6, 12)  # wide rooms cut from the rock
             end = min(c + run, COLS - 1)
-            rooms_by_row.setdefault(r, []).append((c, end))
             for cc in range(c, end):
                 grid[r][cc] = SOLID  # the shelf / platform floor
                 grid[r - 1][cc] = EMPTY  # stand
                 grid[r - 2][cc] = EMPTY  # headroom
             # an occasional rock pillar rises through a room to vary it
-            if rng.random() < 0.08 and end - c > 8:
+            if rng.random() < 0.16 and end - c > 4:
                 grid[r - 1][rng.randint(c + 1, end - 2)] = SOLID
-            c = end + rng.randint(5, 8)  # rock wall between rooms
-        segments = rooms_by_row[r]
-        span_start, span_end = segments[0][0], segments[-1][1]
-        for cc in range(span_start, span_end):
-            grid[r - 2][cc] = EMPTY
-            grid[r - 1][cc] = EMPTY
-
+            c = end + rng.randint(2, 4)  # rock wall between rooms
     # link adjacent galleries with vertical shafts punched straight through the
     # rock at arbitrary columns (same approach the maze uses to stay fully
     # connected); the carved span plus headroom is <= a jump so the player climbs
     # out as well as drops in. Unconstrained columns => no sealed-off pockets.
-    def in_room(col: int, segments: List[Tuple[int, int]]) -> bool:
-        return any(start + 1 <= col < end - 1 for start, end in segments)
-
-    def carve_landing(col: int, row: int) -> None:
-        for rr in (row - 2, row - 1):
-            for cc in range(max(1, col - 1), min(COLS - 1, col + 2)):
-                grid[rr][cc] = EMPTY
-
-    used_connector_cols: Set[int] = set()
     for i in range(len(gallery_rows) - 1):
         r0, r1 = gallery_rows[i], gallery_rows[i + 1]
-        upper = rooms_by_row[r0]
-        lower = rooms_by_row[r1]
-        candidates = [
-            c
-            for c in range(2, COLS - 2)
-            if in_room(c, upper)
-            and in_room(c, lower)
-            and not any(abs(c - used) < 10 for used in used_connector_cols)
-        ]
-        if not candidates:
-            candidates = [
-                c
-                for c in range(2, COLS - 2)
-                if (in_room(c, upper) or in_room(c, lower))
-                and not any(abs(c - used) < 10 for used in used_connector_cols)
-            ]
-        if not candidates:
-            continue
-        c = rng.choice(candidates)
-        used_connector_cols.add(c)
-        carve_landing(c, r0)
-        carve_landing(c, r1)
-        for r in range(r0 - 2, r1 + 1):
-            grid[r][c] = LADDER
-            if c + 1 < COLS - 1 and rng.random() < 0.35:
-                grid[r][c + 1] = EMPTY
+        for _ in range(rng.randint(5, 8)):
+            c = rng.randint(2, COLS - 3)
+            for r in range(r0 - 2, r1 + 1):
+                grid[r][c] = EMPTY
     # mine-shaft drop into the top gallery
     for r in range(surface + 1, gallery_rows[0]):
         grid[r][shaft] = EMPTY
 
 
 def _family_snake_bands(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
-    """Staggered platform rooms with vertical breaks, not full-width lanes."""
+    """Thick horizontal bands stacked with staggered end-gaps, forcing a
+    left-right-left snake descent (Ep2 L7 style)."""
     _open_interior(grid)
-    rows = [surface + 3, surface + 6, surface + 9, surface + 12]
-    for idx, r in enumerate(rows):
-        anchors = [3, 23, 34] if idx % 2 == 0 else [8, 18, 30]
-        rng.shuffle(anchors)
-        for start in anchors:
-            c0 = max(1, min(COLS - 3, start + rng.randint(-2, 2)))
-            c1 = min(COLS - 1, c0 + rng.randint(5, 8))
-            for c in range(c0, c1):
-                grid[r][c] = SOLID
-                if rng.random() < 0.40 and r + 1 < ROWS - 1:
-                    grid[r + 1][c] = SOLID
-        # Short wall ribs make small rooms and break the side-to-side visual read.
-        for _ in range(rng.randint(2, 3)):
-            c = rng.randint(4, COLS - 5)
-            for rr in range(max(surface + 1, r - 2), min(ROWS - 1, r + 2)):
-                grid[rr][c] = SOLID
-
-    for i in range(len(rows) - 1):
-        r0, r1 = rows[i], rows[i + 1]
-        for _ in range(1):
-            c = rng.randint(4, COLS - 5)
-            for rr in range(r0 - 1, r1 + 1):
-                grid[rr][c] = LADDER
-                if c + 1 < COLS - 1 and rng.random() < 0.35:
-                    grid[rr][c + 1] = EMPTY
+    side = rng.randint(0, 1)
+    for r in range(surface + 3, ROWS - 2, 3):
+        gap = rng.randint(6, 10)
+        thickness = rng.choice([1, 2, 2])
+        cols = range(1, COLS - 1 - gap) if side == 0 else range(1 + gap, COLS - 1)
+        for c in cols:
+            for t in range(thickness):
+                if r + t < ROWS - 1:
+                    grid[r + t][c] = SOLID
+        side ^= 1
 
 
 def _family_terrain_climb(grid: Grid, rng: random.Random, surface: int, shaft: int) -> None:
     """Open upper area with sparse platforms over a stepped solid terrain mound
     rising from the floor (Ep1 L1 / L13 style)."""
     _open_interior(grid)
-    shelf_rows = list(range(surface + 2, ROWS - 4, 2))
-    for r in shelf_rows:
-        anchors = [3, 11, 19, 27, 35]
-        rng.shuffle(anchors)
-        chosen = anchors[: rng.randint(3, 4)]
-        if surface + 4 <= r <= ROWS - 6:
-            chosen.append(rng.choice([17, 22, 27]))
-        for start in chosen:
-            c0 = max(1, min(COLS - 3, start + rng.randint(-2, 2)))
-            length = rng.randint(4, 7)
-            for cc in range(c0, min(c0 + length, COLS - 1)):
-                grid[r][cc] = SOLID
-        if rng.random() < 0.65 and r + 1 < ROWS - 1:
-            c0 = rng.randint(5, COLS - 10)
-            for cc in range(c0, min(c0 + rng.randint(3, 6), COLS - 1)):
-                grid[r + 1][cc] = SOLID
-    for c in (rng.randint(12, 16), rng.randint(21, 25), rng.randint(30, 34)):
-        top = surface + rng.randint(3, 5)
-        bottom = ROWS - rng.randint(4, 6)
-        for r in range(top, max(top, bottom)):
-            if grid[r][c] == EMPTY:
-                grid[r][c] = LADDER
+    for r in range(surface + 2, ROWS - 7, 2):
+        c = rng.randint(2, 6)
+        while c < COLS - 3:
+            if rng.random() < 0.5:
+                length = rng.randint(3, 7)
+                end = min(c + length, COLS - 1)
+                for cc in range(c, end):
+                    grid[r][cc] = SOLID
+                c = end + rng.randint(3, 6)
+            else:
+                c += rng.randint(3, 5)
     peak = rng.randint(COLS // 3, 2 * COLS // 3)
     peak_h = rng.randint(5, 8)
     slope = rng.choice([2, 3])
@@ -331,31 +265,21 @@ def _family_corridor_maze(grid: Grid, rng: random.Random, surface: int, shaft: i
     common reference archetype (Ep1 L4 spiral / corridor maze). Interior stays
     SOLID; thin 1-tall walkways every 3 rows are carved with solid pillars left
     between runs (winding), then linked by short jumpable vertical connectors."""
-    rows = [surface + 3, surface + 7, surface + 11]
+    rows = list(range(surface + 2, ROWS - 1, 3))
     for r in rows:
-        for cc in range(1, COLS - 1):
-            grid[r][cc] = EMPTY
-            grid[r - 1][cc] = EMPTY
-            grid[r - 2][cc] = EMPTY
-        c = rng.randint(7, 10)
-        while c < COLS - 6:
-            width = rng.randint(2, 3)
-            for cc in range(c, min(c + width, COLS - 1)):
-                # Ceiling teeth and short buttresses add maze texture without
-                # sealing each side into disconnected chunks.
-                grid[r - 2][cc] = SOLID
-                if rng.random() < 0.45:
-                    grid[r - 1][cc] = SOLID
-            c += rng.randint(8, 12)
+        c = rng.randint(1, 3)
+        while c < COLS - 1:
+            run = rng.randint(7, 14)  # long corridors -> rows overlap and connect
+            for cc in range(c, min(c + run, COLS - 1)):
+                grid[r][cc] = EMPTY
+            c += run + rng.randint(2, 3)  # solid pillar -> winding maze
     for i in range(len(rows) - 1):
         r0, r1 = rows[i], rows[i + 1]
-        for _ in range(rng.randint(2, 3)):  # fewer, wider links across the width
+        for _ in range(rng.randint(5, 8)):  # plenty of links across the width
             c = rng.randint(2, COLS - 3)
-            width = rng.choice([1, 2, 2])
-            for r in range(r0 - 2, r1 + 1):
+            for r in range(r0, r1 + 1):  # connector spans <= jump so it climbs
                 grid[r][c] = EMPTY
-                if width == 2 and c + 1 < COLS - 1:
-                    grid[r][c + 1] = EMPTY
+                grid[r - 1][c] = EMPTY  # headroom at the connector for the jump
     for r in range(surface + 1, rows[0] + 1):
         grid[r][shaft] = EMPTY  # drop the shaft into the top corridor
 
@@ -377,7 +301,7 @@ def _seal_unreachable_open(grid: Grid, start: Cell, surface: int) -> None:
     reach = cave_reachable(grid, start, doors_open=True)
     for r in range(surface + 1, ROWS - 1):
         for c in range(1, COLS - 1):
-            if grid[r][c] in (EMPTY, LADDER) and (c, r) not in reach:
+            if grid[r][c] == EMPTY and (c, r) not in reach:
                 grid[r][c] = SOLID
 
 
@@ -530,16 +454,12 @@ def _place_elevators(grid: Grid, rng: random.Random, surface: int, shaft: int) -
             continue
         r = surface + 1
         while r < ROWS - 1:
-            shaft_cell = (
-                grid[r][c] in (EMPTY, LADDER)
-                and grid[r][c - 1] == SOLID
-                and grid[r][c + 1] == SOLID
-            )
+            shaft_cell = grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID
             if shaft_cell:
                 top = r
                 while (
                     r < ROWS - 1
-                    and grid[r][c] in (EMPTY, LADDER)
+                    and grid[r][c] == EMPTY
                     and grid[r][c - 1] == SOLID
                     and grid[r][c + 1] == SOLID
                 ):
@@ -561,84 +481,6 @@ def _place_elevators(grid: Grid, rng: random.Random, surface: int, shaft: int) -
             grid[rr][c] = ELEVATOR
         used_cols.add(c)
         placed += 1
-
-
-def _place_ladders(
-    grid: Grid,
-    surface: int,
-    shaft: int,
-    *,
-    max_runs: Optional[int] = None,
-    min_len: int = 2,
-    min_spacing: int = 5,
-) -> None:
-    """Turn decorative one-wide vertical shafts into real climbable ladders.
-
-    The renderer already drew these connectors as ladders. Making the tile
-    explicit keeps the generator oracle, rendering, and live physics aligned:
-    the player can climb the same shafts the level art tells them to climb.
-    """
-
-    runs: List[Tuple[int, int, int]] = []
-    for c in range(1, COLS - 1):
-        r = surface + 1
-        while r < ROWS - 1:
-            shaft_cell = grid[r][c] == EMPTY and grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID
-            if not shaft_cell:
-                r += 1
-                continue
-            top = r
-            while (
-                r < ROWS - 1
-                and grid[r][c] == EMPTY
-                and grid[r][c - 1] == SOLID
-                and grid[r][c + 1] == SOLID
-            ):
-                r += 1
-            bottom = r - 1
-            if bottom - top + 1 < min_len:
-                continue
-            runs.append((c, top, bottom))
-
-    used_cols: Set[int] = set()
-    placed = 0
-    for c, top, bottom in sorted(runs, key=lambda run: (run[1], run[0])):
-        if max_runs is not None and placed >= max_runs:
-            break
-        if any(abs(c - used) < min_spacing for used in used_cols):
-            continue
-        for rr in range(top, bottom + 1):
-            grid[rr][c] = LADDER
-        used_cols.add(c)
-        placed += 1
-
-
-def _place_platform_connector_ladders(grid: Grid, surface: int) -> None:
-    """Mark existing platform-network connector cuts as short climbable ladders.
-
-    This is deliberately late and local: the generator first builds normal open
-    rooms/pockets, then only the already-carved vertical cuts through shelf floors
-    become climbable. That keeps the visual closer to authored ladder segments
-    instead of adding full-screen scaffold columns.
-    """
-
-    for c in range(2, COLS - 2):
-        r = surface + 1
-        while r < ROWS - 1:
-            if grid[r][c] != EMPTY:
-                r += 1
-                continue
-            top = r
-            shelf_cuts = 0
-            while r < ROWS - 1 and grid[r][c] == EMPTY:
-                if grid[r][c - 1] == SOLID and grid[r][c + 1] == SOLID:
-                    shelf_cuts += 1
-                r += 1
-            bottom = r - 1
-            run_len = bottom - top + 1
-            if 4 <= run_len <= 7 and shelf_cuts >= 1:
-                for rr in range(top, bottom + 1):
-                    grid[rr][c] = LADDER
 
 
 # Difficulty presets scale the objective/threat budget so a curriculum can start
@@ -690,7 +532,7 @@ DIFFICULTY: Dict[str, Dict[str, Any]] = {
     # walking floor, colour-keyed doors arrive later).
     "easy_open": {"crystals": (2, 3), "ammo": 1, "hazards": (0, 0), "enemies": (0, 0), "locks": 0},
     "easy": {"crystals": (2, 3), "ammo": 2, "hazards": (0, 0), "enemies": (0, 0), "locks": 1},
-    "normal": {"crystals": (8, 10), "ammo": 3, "hazards": (3, 5), "enemies": (2, 3), "locks": 1},
+    "normal": {"crystals": (10, 14), "ammo": 3, "hazards": (6, 9), "enemies": (3, 6), "locks": 1},
 }
 DIFFICULTY_NAMES = tuple(DIFFICULTY.keys())
 
@@ -725,21 +567,6 @@ def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> 
     for c in range(shaft - 1, shaft + 3):
         if 1 <= c <= COLS - 2:
             grid[surface + 3][c] = SOLID
-
-    ladder_caps = {
-        "platform_network": 0,
-        "snake_bands": 0,
-        "terrain_climb": 1,
-        "corridor_maze": 2,
-    }
-    _place_ladders(
-        grid,
-        surface,
-        shaft,
-        max_runs=ladder_caps.get(family),
-        min_len=3,
-        min_spacing=7,
-    )
 
     _seal_unreachable_open(grid, (px, py), surface)
 
@@ -887,37 +714,18 @@ def _attempt(seed: int, theme: str, family: str, difficulty: str = "normal") -> 
         free.remove(guaranteed)
         free.append(guaranteed)
 
-    placed_items: Set[Cell] = set(pocket_cells) | {exit_cell} | used_switch_cells
-
-    def take(n: int, *, min_distance: int = 0) -> List[Cell]:
-        chosen: List[Cell] = []
-        if min_distance:
-            for cell in reversed(free[:]):
-                if len(chosen) >= n:
-                    break
-                if any(
-                    abs(cell[0] - other[0]) + abs(cell[1] - other[1]) < min_distance
-                    for other in placed_items
-                ):
-                    continue
-                free.remove(cell)
-                chosen.append(cell)
-                placed_items.add(cell)
-        while len(chosen) < n and free:
-            cell = free.pop()
-            chosen.append(cell)
-            placed_items.add(cell)
-        return chosen
+    def take(n: int) -> List[Cell]:
+        return [free.pop() for _ in range(min(n, len(free)))]
 
     crystal_cells = list(pocket_cells)
-    for c, r in take(max(1, rng.randint(*diff["crystals"]) - len(pocket_cells)), min_distance=5):
+    for c, r in take(max(1, rng.randint(*diff["crystals"]) - len(pocket_cells))):
         grid[r][c] = CRYSTAL
         crystal_cells.append((c, r))
-    for c, r in take(diff["ammo"], min_distance=4):
+    for c, r in take(diff["ammo"]):
         grid[r][c] = AMMO
-    for c, r in take(1, min_distance=4):
+    for c, r in take(1):
         grid[r][c] = rng.choice(spec["powerups"])
-    for c, r in take(1, min_distance=4):
+    for c, r in take(1):
         grid[r][c] = TREASURE
 
     # Hazards + enemies. A share of the hazard budget guards chokepoints — the
@@ -1025,22 +833,14 @@ def generate_cave(
     if difficulty == "normal":
         for attempt in range(60):
             spec = _attempt(seed * 101 + attempt, theme, family, difficulty)
-            if spec is not None and grade_cave(spec)["score"] >= 80 and _body_fit_winnable(spec):
+            if spec is not None and grade_cave(spec)["score"] >= 80:
                 return spec
     # Fall back to (or, for easy presets, target) the first solvable layout.
     for attempt in range(60):
         spec = _attempt(seed * 101 + attempt, theme, family, difficulty)
-        if spec is not None and _body_fit_winnable(spec):
+        if spec is not None:
             return spec
     raise RuntimeError(f"could not generate a solvable {family} cave for seed {seed}")
-
-
-def _body_fit_winnable(spec: CaveSpec) -> bool:
-    """Cheap final gate that keeps generated objectives physically reachable."""
-
-    from .crystal_caves_physics_reach import audit_physics_winnability
-
-    return audit_physics_winnability(spec).winnable
 
 
 def grade_cave(spec: CaveSpec) -> dict:

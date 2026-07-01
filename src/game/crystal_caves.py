@@ -290,7 +290,15 @@ class CrystalCaves(
         self._eval_cursor = 0
         # Drill mode: replace the cave set with the hand-authored single-skill drills
         # (for skill diagnostics and motor-skill pre-training). Takes precedence.
-        if getattr(self.config, "CRYSTAL_CAVES_DRILLS", False):
+        if getattr(self.config, "CRYSTAL_CAVES_IMPORTED", False):
+            # The REAL Crystal Caves Episode 1 levels, extracted from the original game
+            # (faithful + fair by construction), replacing the procedural generator.
+            from .crystal_caves_cc1_levels import CC1_LEVELS
+
+            self.CAVES = CC1_LEVELS
+            self.CAVE_DRESSING = {i: () for i in range(len(CC1_LEVELS))}
+            self._randomize_levels = len(CC1_LEVELS) > 1
+        elif getattr(self.config, "CRYSTAL_CAVES_DRILLS", False):
             from .crystal_caves_drills import DRILL_CAVES
 
             self.CAVES = DRILL_CAVES

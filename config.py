@@ -100,6 +100,11 @@ class Config:
     # Drill mode: use the hand-authored single-skill teaching levels instead of the
     # authored/procedural caves (for skill diagnostics and motor-skill pre-training).
     CRYSTAL_CAVES_DRILLS: bool = False
+    # Imported mode: use the REAL Crystal Caves Episode 1 levels (extracted from the
+    # original 1991 game) instead of the procedural generator. Faithful and fair by
+    # construction (they shipped winnable), so they sidestep the generator's fairness
+    # problems. See src/game/crystal_caves_cc1_levels.py.
+    CRYSTAL_CAVES_IMPORTED: bool = False
     CRYSTAL_CAVES_SEED: int = 0
     CRYSTAL_CAVES_FAMILIES: str = ""
     # AI-1 rich state: a wider perception window (19x11 ~ the 1991 view) + a coarse

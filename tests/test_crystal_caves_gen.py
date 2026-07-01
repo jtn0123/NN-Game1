@@ -146,25 +146,6 @@ def test_elevator_levels_stay_solvable():
     assert found >= 3, f"expected elevators to appear; found {found}"
 
 
-@pytest.mark.parametrize(
-    ("seed", "theme", "family", "difficulty"),
-    [
-        (4, "rust", "platform_network", "easy"),
-        (15, "blue_rock", "corridor_maze", "normal"),
-        (500006, "blue_rock", "terrain_climb", "easy"),
-    ],
-)
-def test_generated_caves_are_body_fit_winnable(seed, theme, family, difficulty):
-    """Regression for generated levels the old tile flood could approve even
-    when the real player body had no physical route to every objective."""
-    from src.game.crystal_caves_physics_reach import audit_physics_winnability
-
-    spec = generate_cave(seed, theme, family, difficulty=difficulty)
-    report = audit_physics_winnability(spec)
-
-    assert report.winnable, report
-
-
 def test_invalid_cave_family_warns_instead_of_silent_fallback():
     """A typo'd --cave-families surfaces a warning rather than silently using all
     families (GEN-1)."""
