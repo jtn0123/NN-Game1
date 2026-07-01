@@ -229,3 +229,4 @@ checkpoints/
 runs/
 wandb/
 tensorboard_logs/
+scratchpad_levels.py
