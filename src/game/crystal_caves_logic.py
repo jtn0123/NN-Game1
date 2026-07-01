@@ -33,6 +33,19 @@ class CrystalCavesLogicMixin:
         return move_dir, wants_jump, wants_shoot, wants_interact
 
     def _apply_player_input(self: Any, move_dir: int, wants_jump: bool) -> None:
+        if self._is_on_ladder():
+            self.grounded = False
+            self.coyote_timer = 0
+            if move_dir:
+                self.vx = move_dir * self.AIR_SPEED
+                self.facing = move_dir
+            else:
+                self.vx *= self.FRICTION
+                if abs(self.vx) < 0.05:
+                    self.vx = 0.0
+            self.vy = -self.LADDER_CLIMB_SPEED if wants_jump else self.LADDER_DESCEND_SPEED
+            return
+
         self.grounded = self._is_on_surface()
         if self.grounded:
             self.coyote_timer = 6

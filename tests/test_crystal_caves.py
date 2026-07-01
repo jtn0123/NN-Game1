@@ -22,7 +22,7 @@ from src.app.headless import HeadlessTrainer, reverse_curriculum_p_for_episode
 from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
-from src.game.crystal_caves_entities import Elevator, Enemy
+from src.game.crystal_caves_entities import CaveSpec, Elevator, Enemy
 from src.game.crystal_caves_vec import VecCrystalCaves
 
 
@@ -642,6 +642,39 @@ class TestCrystalCavesObjectives:
         assert max(feet) - min(feet) > ts * 3
         assert min(feet) <= 5 * ts  # rode up near the top
         assert max(feet) >= 10 * ts - ts  # and back down near the bottom
+
+    @pytest.mark.parametrize("climb_tile", [CrystalCaves.LADDER, CrystalCaves.ELEVATOR])
+    def test_ladder_and_elevator_rails_are_climbable(self, config, climb_tile):
+        layout = tuple(
+            row.replace("H", climb_tile)
+            for row in (
+                "########",
+                "#..H..*#",
+                "#..H...#",
+                "#..H..E#",
+                "#..H...#",
+                "#P.H...#",
+                "#..H...#",
+                "########",
+            )
+        )
+        spec = CaveSpec("climb test", layout, (0, 0, 0), (255, 255, 255))
+        game = CrystalCaves(config, headless=True)
+        game.level = spec
+        game._load_level(spec)
+        game.player_x = 3 * game.TILE_SIZE + 5
+        game.player_y = 5 * game.TILE_SIZE + 1
+        start_y = game.player_y
+
+        for _ in range(8):
+            game.step(CrystalCaves.JUMP)
+        climbed_y = game.player_y
+
+        for _ in range(8):
+            game.step(CrystalCaves.IDLE)
+
+        assert climbed_y < start_y - 12
+        assert game.player_y > climbed_y + 8
 
 
 class TestCrystalCavesCombatAndDanger:

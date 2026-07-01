@@ -165,6 +165,7 @@ class CrystalCaves(
     SPIKE = "^"
     ACID = "~"
     ELEVATOR = "="
+    LADDER = "H"
     PLAYER = "P"
     CAVES: Tuple[CaveSpec, ...] = _CAVES
     CAVE_DRESSING: Dict[int, Tuple[DressingPiece, ...]] = _CAVE_DRESSING
@@ -187,6 +188,7 @@ class CrystalCaves(
         SPIKE: 0.96,
         ACID: 0.98,
         ELEVATOR: 0.52,
+        LADDER: 0.50,
         CRAWLER: 0.62,
         FLYER: 0.66,
         PLAYER: 1.0,
@@ -194,6 +196,8 @@ class CrystalCaves(
 
     # Elevator platform speed (tiles per physics step).
     ELEVATOR_SPEED = 0.06
+    LADDER_CLIMB_SPEED = 3.1
+    LADDER_DESCEND_SPEED = 2.0
 
     # Colour-keyed lever/door pairs: a lever opens only the door of its colour.
     DOOR_COLOR_OF: Dict[str, str] = {DOOR: "red", DOOR2: "blue"}
@@ -432,6 +436,7 @@ class CrystalCaves(
         self.air_tanks: Set[Tuple[int, int]] = set()
         self.enemies: List[Enemy] = []
         self.elevators: List[Elevator] = []
+        self.ladders: Set[Tuple[int, int]] = set()
         self._elevator_solid: List[pygame.Rect] = []  # platform collision rects
         self.bullets: List[Bullet] = []
         self.visual_events: List[VisualEvent] = []
@@ -940,6 +945,8 @@ class CrystalCaves(
                     chars.append("#")
                 elif tile == self.ELEVATOR:
                     chars.append("=")
+                elif tile == self.LADDER:
+                    chars.append("H")
                 elif (c, r) in self.doors and not self._door_open((c, r)):
                     chars.append("#")
                 else:
@@ -1360,6 +1367,7 @@ class CrystalCaves(
         self.air_tanks.clear()
         self.enemies.clear()
         self.elevators.clear()
+        self.ladders.clear()
 
         for row, line in enumerate(rows):
             for col, char in enumerate(line):
@@ -1383,6 +1391,9 @@ class CrystalCaves(
                     self.hazard_kinds[(col, row)] = char
                 elif char == self.ELEVATOR:
                     self.grid[row][col] = self.ELEVATOR
+                elif char == self.LADDER:
+                    self.grid[row][col] = self.LADDER
+                    self.ladders.add((col, row))
                 elif char == self.AMMO:
                     self.ammo_pickups.add((col, row))
                 elif char == self.TREASURE:
@@ -1423,12 +1434,21 @@ class CrystalCaves(
                     row += 1
         self._refresh_elevator_rects()
 
-        # Cache static terrain masks for the vectorized state window. After load,
-        # self.grid only ever holds SOLID / ELEVATOR chars, and both are static for
-        # the level's lifetime — so these masks never need rebuilding mid-episode.
+        self._refresh_static_tile_masks()
+
+    def _refresh_static_tile_masks(self) -> None:
+        """Refresh static grid masks after loading or test-time tile edits."""
+
         grid_arr = np.array(self.grid, dtype="<U1")
         self._wall_mask = grid_arr == self.SOLID
         self._elevator_mask = grid_arr == self.ELEVATOR
+        self._ladder_mask = grid_arr == self.LADDER
+        self.ladders = {
+            (c, r)
+            for r in range(self.level_rows)
+            for c in range(self.level_cols)
+            if self.grid[r][c] == self.LADDER
+        }
 
     def _info(self) -> dict:
         return {

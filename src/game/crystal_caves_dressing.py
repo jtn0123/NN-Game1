@@ -138,6 +138,8 @@ class CrystalCavesDressingMixin:
         )
 
         for tile in self._visible_tiles(self.hazards, first_col, last_col, first_row, last_row):
+            if not self._should_draw_hazard_sign(tile):
+                continue
             if self.hazard_kinds.get(tile) == self.ACID:
                 if not self._same_hazard_at(tile[0] - 1, tile[1], self.ACID):
                     self._draw_sign_for_tile(
@@ -180,6 +182,11 @@ class CrystalCavesDressingMixin:
                         self._draw_pickaxe(screen, rect)
                     elif selector == 13:
                         self._draw_lamp(screen, rect)
+
+    def _should_draw_hazard_sign(self: Any, tile: Tuple[int, int]) -> bool:
+        """Sparse deterministic hazard signage; hazards themselves remain legible."""
+
+        return (tile[0] * 11 + tile[1] * 7 + self.level_index) % 3 == 0
 
     @staticmethod
     def _visible_tiles(
