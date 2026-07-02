@@ -37,11 +37,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 from config import Config  # noqa: E402
 from experiments.cc_status.level_reach import (  # noqa: E402
-    LevelSim,
     MAX_FRAMES,
     PH,
     PW,
     TILE,
+    LevelSim,
     _Body,
     _player_tile,
     _step,
@@ -79,9 +79,77 @@ _PLAN_MACROS: List[List[Tuple[int, int, bool]]] = (
 _MAX_LEG_EXPANSIONS = 150_000
 _HAZARD_EDGE_COST = 600  # frames-equivalent price for clipping spikes/acid
 _STEP_BUDGET = 2900  # must win inside the engine's 3000-step horizon
-_MAX_REPLANS = 8
+_MAX_REPLANS = 24
 
 _SWITCH_CHARS = {"s": "D", "S": "d"}  # lever char -> door char it opens
+
+
+_HORIZON = 3000  # engine episode cap; enemy trajectories precomputed to here
+_EW = _EH = 24  # engine Enemy rect size
+
+
+def enemy_spawns(layout: Tuple[str, ...]) -> List[Tuple[float, float, float, str]]:
+    """(x, y, vx, kind) at reset, mirroring the engine's _load_level spawns."""
+    out: List[Tuple[float, float, float, str]] = []
+    for row, line in enumerate(layout):
+        for col, ch in enumerate(line):
+            if ch == "M":
+                out.append((col * TILE + 4.0, row * TILE + 8.0, 1.1, "crawler"))
+            elif ch == "F":
+                out.append((col * TILE + 4.0, row * TILE + 4.0, 1.6, "flyer"))
+    return out
+
+
+def enemy_trajectories(
+    sim: LevelSim,
+    enemies: List[Tuple[float, float, float, str]],
+    horizon: int = _HORIZON,
+) -> List[List[Tuple[float, float]]]:
+    """Per-frame (x, y) for each enemy, simulated with the engine's patrol rules
+    (advance; flip on solid collision, crawlers also flip at ledges). Enemies
+    ignore the player entirely, so their paths are a pure function of time —
+    which is what lets the planner time routes through patrol gaps."""
+
+    def collides(x: float, y: float) -> bool:
+        lo_c, hi_c = int(x) // TILE, (int(x) + _EW - 1) // TILE
+        lo_r, hi_r = int(y) // TILE, (int(y) + _EH - 1) // TILE
+        return any(
+            sim.solid_at(col, row) for row in range(lo_r, hi_r + 1) for col in range(lo_c, hi_c + 1)
+        )
+
+    tracks: List[List[Tuple[float, float, float]]] = []
+    for x, y, vx, kind in enemies:
+        track: List[Tuple[float, float, float]] = []
+        ex, ey, evx = x, y, vx
+        for _ in range(horizon):
+            track.append((ex, ey, evx))
+            ex += evx
+            if kind == "flyer":
+                if collides(ex, ey):
+                    ex -= evx
+                    evx = -evx
+            else:
+                ahead_x = ex + (_EW + 2 if evx > 0 else -2)
+                foot_row = int((ey + _EH + 2) // TILE)
+                ahead_col = int(ahead_x // TILE)
+                if collides(ex, ey) or not sim.solid_at(ahead_col, foot_row):
+                    ex -= evx
+                    evx = -evx
+        tracks.append(track)
+    return tracks
+
+
+def _contact(x: float, y: float, t: int, tracks: List[List[Tuple[float, float]]]) -> bool:
+    """Player rect at (x, y) overlaps any enemy rect at frame t (lethal in plans)."""
+    if t >= _HORIZON:
+        t = _HORIZON - 1
+    px2 = x + PW
+    py2 = y + PH
+    for track in tracks:
+        ex, ey = track[t][0], track[t][1]
+        if x < ex + _EW and px2 > ex and y < ey + _EH and py2 > ey:
+            return True
+    return False
 
 
 def _frame_action(move_dir: int, jump: bool) -> int:
@@ -95,18 +163,27 @@ def _run_macro(
     start: _Body,
     program: List[Tuple[int, int, bool]],
     stop_on: Optional[Tuple[int, int]] = None,
-) -> Tuple[_Body, List[int], bool, int]:
-    """Run one macro; return (end body, actions, hit stop_on, hazard clips).
+    t0: int = 0,
+    tracks: Optional[List[List[Tuple[float, float]]]] = None,
+) -> Tuple[_Body, List[int], bool, int, bool]:
+    """Run one macro; return (end body, actions, hit stop_on, hazard clips, died).
 
+    ``tracks`` are precomputed enemy trajectories: overlapping an enemy at the
+    absolute frame (t0 + local index) is LETHAL during planning, so routes get
+    timed through patrol gaps instead of patched around contact afterwards.
     ``stop_on`` cuts the macro at the exact frame the player rect overlaps that
     tile, so legs end at the pickup instead of overshooting a full stride."""
     b = _Body(start.x, start.y, 0.0, 0.0, start.grounded, start.coyote)
     actions: List[int] = []
     hazard_clips = 0
+    t = t0
     for frames, move_dir, jump in program:
         for _ in range(frames):
             _step(sim, b, move_dir, jump)
             actions.append(_frame_action(move_dir, jump))
+            t += 1
+            if tracks is not None and _contact(b.x, b.y, t, tracks):
+                return b, actions, False, hazard_clips, True
             lo_c, hi_c = int(b.x) // TILE, (int(b.x) + PW - 1) // TILE
             lo_r, hi_r = int(b.y) // TILE, (int(b.y) + PH - 1) // TILE
             for row in range(lo_r, hi_r + 1):
@@ -115,46 +192,77 @@ def _run_macro(
                         if sim.grid[row][col] in "^~":
                             hazard_clips += 1
                         if stop_on == (col, row):
-                            return b, actions, True, hazard_clips
+                            return b, actions, True, hazard_clips, False
             if b.y > (sim.rows + 2) * TILE:
-                return b, actions, False, hazard_clips
+                return b, actions, False, hazard_clips, False
     for _ in range(MAX_FRAMES):  # settle so legs chain from stable footing
         if b.grounded or sim.on_ladder(b.x, b.y):
             break
         _step(sim, b, 0, False)
         actions.append(IDLE)
-    return b, actions, False, hazard_clips
+        t += 1
+        if tracks is not None and _contact(b.x, b.y, t, tracks):
+            return b, actions, False, hazard_clips, True
+    return b, actions, False, hazard_clips, False
 
 
 def _plan_leg(
-    sim: LevelSim, start: _Body, *, target: Tuple[int, int], reach: str
+    sim: LevelSim,
+    start: _Body,
+    *,
+    target: Tuple[int, int],
+    reach: str,
+    t0: int = 0,
+    tracks: Optional[List[List[Tuple[float, float]]]] = None,
 ) -> Optional[Tuple[_Body, List[int]]]:
     """Frame-cost Dijkstra over rest states until the target is satisfied.
 
     reach="touch": player rect overlaps the target tile (crystals, exit).
     reach="adjacent": end RESTING within Chebyshev 1 (a lever's INTERACT range).
     """
-    if reach == "adjacent":
+    if reach == "adjacent" and (tracks is None or not _contact(start.x, start.y, t0, tracks)):
         c0, r0 = _player_tile(start.x, start.y)
         if max(abs(c0 - target[0]), abs(r0 - target[1])) <= 1:
             return start, []
-    best: Dict[Tuple[int, int], int] = {_player_tile(start.x, start.y): 0}
+    # A*: priority = elapsed frames + penalties + admissible walk-time heuristic;
+    # state keyed by (cell, time bucket) because the same cell can be lethal at one
+    # frame and safe 30 frames later (patrol phase).
+    walk_dist = _bfs_distances(sim, target)
+    frames_per_tile = TILE / 4.2
+
+    def h(cell: Tuple[int, int]) -> float:
+        return walk_dist.get(cell, 200) * frames_per_tile * 0.9
+
+    start_cell = _player_tile(start.x, start.y)
+    best: Dict[Tuple[int, int, int], int] = {(start_cell[0], start_cell[1], t0 // 24): 0}
     counter = 0
-    heap: List[Tuple[int, int, _Body, List[int]]] = [(0, counter, start, [])]
+    heap: List[Tuple[float, int, int, int, _Body, List[int]]] = [
+        (h(start_cell), 0, counter, t0, start, [])
+    ]
     expansions = 0
     while heap and expansions < _MAX_LEG_EXPANSIONS:
-        cost, _, body, actions = heapq.heappop(heap)
+        _f, cost, _, t, body, actions = heapq.heappop(heap)
         cell = _player_tile(body.x, body.y)
-        if cost > best.get(cell, 1 << 30):
+        if cost > best.get((cell[0], cell[1], t // 24), 1 << 30):
             continue
         for program in _PLAN_MACROS:
             expansions += 1
-            end, macro_actions, hit, clips = _run_macro(
-                sim, body, program, stop_on=target if reach == "touch" else None
+            end, macro_actions, hit, clips, died = _run_macro(
+                sim,
+                body,
+                program,
+                stop_on=target if reach == "touch" else None,
+                t0=t,
+                tracks=tracks,
             )
+            if died:
+                continue
             if hit:
                 return end, actions + macro_actions
             if not (end.grounded or sim.on_ladder(end.x, end.y)):
+                continue
+            end_t = t + len(macro_actions)
+            if end_t > _HORIZON - 100:
                 continue
             end_cell = _player_tile(end.x, end.y)
             if (
@@ -163,10 +271,21 @@ def _plan_leg(
             ):
                 return end, actions + macro_actions
             new_cost = cost + len(macro_actions) + (_HAZARD_EDGE_COST if clips else 0)
-            if new_cost < best.get(end_cell, 1 << 30):
-                best[end_cell] = new_cost
+            key = (end_cell[0], end_cell[1], end_t // 24)
+            if new_cost < best.get(key, 1 << 30):
+                best[key] = new_cost
                 counter += 1
-                heapq.heappush(heap, (new_cost, counter, end, actions + macro_actions))
+                heapq.heappush(
+                    heap,
+                    (
+                        new_cost + h(end_cell),
+                        new_cost,
+                        counter,
+                        end_t,
+                        end,
+                        actions + macro_actions,
+                    ),
+                )
     return None
 
 
@@ -212,15 +331,42 @@ def plan_from(
     crystals_left: Set[Tuple[int, int]],
     exit_pos: Tuple[int, int],
     open_door_chars: Set[str],
+    enemies: Optional[List[Tuple[float, float, float, str]]] = None,
 ) -> Optional[List[int]]:
-    """Plan a winning action tail from an arbitrary (live) game state."""
+    """Plan a winning action tail from an arbitrary (live) game state.
+
+    ``enemies`` anchors the patrol simulation to the LIVE enemy states, so a
+    replan mid-episode is timed against where the enemies actually are."""
     doors_present = {dc for dc in ("D", "d") if any(dc in row for row in layout)}
     opened = set(open_door_chars)
+    if enemies is None:
+        enemies = enemy_spawns(layout)
+    kinds = [kind for _x, _y, _vx, kind in enemies]
 
     def make_sim() -> LevelSim:
         return LevelSim(layout, closed_doors=frozenset(doors_present - opened))
 
     sim = make_sim()
+    tracks = enemy_trajectories(sim, enemies)
+
+    def reanchor(t: int) -> None:
+        # Door state changed: enemy collision world changed. Re-simulate the
+        # remaining horizon from each enemy's position/heading at plan-time t.
+        nonlocal tracks
+        anchored = [
+            (
+                track[min(t, _HORIZON - 1)][0],
+                track[min(t, _HORIZON - 1)][1],
+                track[min(t, _HORIZON - 1)][2],
+                kind,
+            )
+            for track, kind in zip(tracks, kinds)
+        ]
+        fresh = enemy_trajectories(sim, anchored)
+        tracks = [
+            track[:t] + fresh_track[: _HORIZON - t] for track, fresh_track in zip(tracks, fresh)
+        ]
+
     body = _Body(start_xy[0], start_xy[1])
     actions: List[int] = []
     for _ in range(MAX_FRAMES):
@@ -232,7 +378,7 @@ def plan_from(
     switches = set(switches_left)
     while switches:
         tile = _nearest(sim, _player_tile(body.x, body.y), switches)
-        result = _plan_leg(sim, body, target=tile, reach="adjacent")
+        result = _plan_leg(sim, body, target=tile, reach="adjacent", t0=len(actions), tracks=tracks)
         if result is None:
             return None
         body, leg = result
@@ -243,11 +389,12 @@ def plan_from(
         if door_char:
             opened.add(door_char)
         sim = make_sim()
+        reanchor(len(actions))
 
     remaining = set(crystals_left)
     while remaining:
         tile = _nearest(sim, _player_tile(body.x, body.y), remaining)
-        result = _plan_leg(sim, body, target=tile, reach="touch")
+        result = _plan_leg(sim, body, target=tile, reach="touch", t0=len(actions), tracks=tracks)
         if result is None:
             return None
         prev = body
@@ -256,7 +403,7 @@ def plan_from(
         remaining.discard(tile)
         remaining -= _resim_touches(sim, prev, leg)
 
-    result = _plan_leg(sim, body, target=exit_pos, reach="touch")
+    result = _plan_leg(sim, body, target=exit_pos, reach="touch", t0=len(actions), tracks=tracks)
     if result is None:
         return None
     _body, leg = result
@@ -326,6 +473,38 @@ class _Executor:
                     return True
         return False
 
+    def hunt(self, step_budget: int) -> str:
+        """No contact-free route exists: the corridor is camped. Walk toward the
+        nearest live enemy and shoot it (never toward an air generator), then let
+        the caller replan. Returns 'killed_one' | 'done' | 'failed'."""
+        g = self.game
+        for _ in range(400):
+            if g.game_over:
+                return "done"
+            if self.steps >= step_budget:
+                return "failed"
+            alive = [e for e in g.enemies if e.alive]
+            if not alive or g.ammo <= 0:
+                return "failed"
+            px = g.player_x + g.PLAYER_WIDTH / 2
+            py = g.player_y + g.PLAYER_HEIGHT / 2
+            target = min(alive, key=lambda e: abs(e.x - px) + 2 * abs(e.y - py))
+            n_alive = len(alive)
+            dx = (target.x + target.width / 2) - px
+            dy = (target.y + target.height / 2) - py
+            if abs(dy) < 40 and g.shoot_cooldown == 0 and not self._airtank_in_line(dx):
+                if self._do(RIGHT_SHOOT if dx > 0 else LEFT_SHOOT):
+                    return "done"
+            elif g.grounded:
+                if self._do(RIGHT if dx > 0 else LEFT):
+                    return "done"
+            else:
+                if self._do(IDLE):
+                    return "done"
+            if len([e for e in g.enemies if e.alive]) < n_alive:
+                return "killed_one"
+        return "failed"
+
     def run(
         self,
         actions: List[int],
@@ -334,43 +513,43 @@ class _Executor:
         *,
         step_budget: int,
     ) -> str:
-        """Execute a plan; returns 'done' | 'derailed' | 'budget'."""
+        """Execute a timed plan; returns 'done' | 'derailed' | 'budget'.
+
+        The plan is contact-free BY CONSTRUCTION (enemy patrols simulated during
+        planning), so the executor's job is fidelity, not combat: any health
+        loss or accumulated time drift means the timing assumption broke —
+        replan from live state rather than patch (injected frames shift enemy
+        phase, which is exactly what the plan is timed against)."""
         g = self.game
         i = 0
-        repair_left = 700
+        injected = 0
+        start_health = g.health
         while i < len(actions):
             if g.game_over:
                 return "done"
             if self.steps >= step_budget:
                 return "budget"
-            # combat layer: shoot the corridor threat, else wait for the patrol
-            enemy, dx = self._threat()
-            if enemy is not None and g.grounded and not g._is_on_ladder():
-                if g.ammo > 0 and g.shoot_cooldown == 0 and not self._airtank_in_line(dx):
-                    if self._do(RIGHT_SHOOT if dx > 0 else LEFT_SHOOT):
-                        return "done"
-                    continue
-                if self._do(IDLE):
-                    return "done"
-                continue
-            # re-sync layer: strict at rest checkpoints, loose mid-segment
+            if g.health < start_health:
+                return "derailed"  # a hit means the timing model broke — replan
             ex, ey = expected[i]
             dx_p = ex - g.player_x
             dy_p = ey - g.player_y
             at_cp = i in checkpoints or i == 0
             tol_x, tol_y = (6, 10) if at_cp else (26, 44)
             if (abs(dx_p) > tol_x or abs(dy_p) > tol_y) and g.grounded:
-                if repair_left <= 0:
-                    return "derailed"
-                repair_left -= 1
+                if injected > 18:
+                    return "derailed"  # drift already desynced the patrol phase
+                injected += 1
                 move = RIGHT if dx_p > 3 else LEFT if dx_p < -3 else IDLE
                 if dy_p < -12 and abs(dx_p) < 48:
                     move = {RIGHT: RIGHT_JUMP, LEFT: LEFT_JUMP, IDLE: JUMP}[move]
                 if self._do(move):
                     return "done"
                 continue
-            if at_cp and (abs(g.vx) > 0.4 or not g.grounded) and repair_left > 0:
-                repair_left -= 1
+            if at_cp and (abs(g.vx) > 0.4 or not g.grounded):
+                if injected > 18:
+                    return "derailed"
+                injected += 1
                 if self._do(IDLE):
                     return "done"
                 continue
@@ -408,9 +587,26 @@ def extract_level(level_index: int) -> Dict[str, Any]:
             crystals_left=set(game.crystals),
             exit_pos=game.exit_pos,
             open_door_chars=open_chars,
+            enemies=[(e.x, e.y, e.vx, e.kind) for e in game.enemies if e.alive],
         )
         if plan is None:
-            return {"won": False, "end_reason": "plan_failed", "steps": executor.steps}
+            # No contact-free route: a patrol camps the corridor. Clear one enemy
+            # with the gun, then replan against the new (deterministic) world.
+            outcome = executor.hunt(_STEP_BUDGET)
+            replans += 1
+            if outcome == "killed_one" and not game.game_over:
+                continue
+            if not game.game_over:
+                return {
+                    "won": False,
+                    "end_reason": "plan_failed",
+                    "steps": executor.steps,
+                    "replans": replans,
+                    "crystals_remaining": len(game.crystals),
+                    "health": game.health,
+                    "actions": executor.executed,
+                }
+            break
         expected, checkpoints = _expected_and_checkpoints(
             spec.layout, (game.player_x, game.player_y), plan, open_chars
         )
