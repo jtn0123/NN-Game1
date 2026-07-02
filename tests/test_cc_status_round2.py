@@ -25,7 +25,7 @@ def test_r2d_paired_row_ci_clusters_by_seed():
                 {"seed": s, "level_index": lvl, "level_name": f"l{lvl}", "selection_score": delta}
             )
     ci = paired_row_ci(a, b, metric="selection_score", n_bootstrap=400, seed=0)
-    assert ci["iqm"] == pytest.approx(0.0, abs=1e-9)
+    assert ci["mean"] == pytest.approx(0.0, abs=1e-9)
     assert ci["ci_high"] - ci["ci_low"] > 0.04  # wide; i.i.d. would be ~0.02
     assert ci["n"] == 30
     assert paired_row_ci(a, b, metric="selection_score", n_bootstrap=400, seed=0) == ci  # determ.

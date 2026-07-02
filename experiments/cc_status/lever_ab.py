@@ -96,7 +96,7 @@ ARMS: dict[str, dict[str, object]] = {
 
 BASELINE_ARM = "baseline"
 
-# Surrogate component metrics reported per-arm as IQMs.
+# Surrogate component metrics reported per-arm as plain means.
 PER_ARM_METRICS = (
     "selection_score",
     "crystal_frac",
@@ -131,7 +131,7 @@ def paired_row_ci(
     replacement, then the levels within each chosen seed."""
     paired = pair_level_rows(a_rows, b_rows, metric=metric)
     if not paired:
-        return {"iqm": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n": 0}
+        return {"mean": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n": 0}
     groups: dict[int, list[float]] = {}
     for p in paired:
         groups.setdefault(int(p.get("seed", 0) or 0), []).append(
@@ -150,15 +150,24 @@ def paired_row_ci(
             vals.extend(g[i] for i in idx)
         samples.append(pipeline_mean(vals))
     return {
-        "iqm": float(point),
+        "mean": float(point),
         "ci_low": float(np.quantile(samples, 0.025)),
         "ci_high": float(np.quantile(samples, 0.975)),
         "n": len(paired),
     }
 
 
-def make_config(overrides: dict[str, object], *, difficulty: str) -> Config:
-    """Build a procedural-tutorial config plus the arm's lever overrides.
+FAILED_RUNS: list[dict[str, object]] = []  # crashed (arm, seed) runs, surfaced in summary
+
+
+def make_config(overrides: dict[str, object], *, difficulty: str, imported: bool = False) -> Config:
+    """Build the run config plus the arm's lever overrides.
+
+    ``imported=True`` targets the hand-crafted fixed 16-level set
+    (CRYSTAL_CAVES_IMPORTED) instead of procedural generation — previously the
+    canonical pipeline had NO versioned path to the imported set at all, so
+    official imported-mode numbers came from ad-hoc unversioned runners
+    (eval-hygiene audit finding #1).
 
     Turbo throughput knobs (LEARN_EVERY=8, GRADIENT_STEPS=2, BATCH_SIZE=128) are
     applied identically to every arm, so they cannot bias the A/B comparison.
@@ -166,10 +175,22 @@ def make_config(overrides: dict[str, object], *, difficulty: str) -> Config:
 
     config = Config()
     config.GAME_NAME = "crystal_caves"
-    config.CRYSTAL_CAVES_PROCEDURAL = True
+    if imported:
+        config.CRYSTAL_CAVES_PROCEDURAL = False
+        config.CRYSTAL_CAVES_IMPORTED = True
+    else:
+        config.CRYSTAL_CAVES_PROCEDURAL = True
+        config.CRYSTAL_CAVES_FAMILIES = "platform_network"
+        config.CRYSTAL_CAVES_POOL_SIZE = 24
     config.CRYSTAL_CAVES_DIFFICULTY = difficulty
-    config.CRYSTAL_CAVES_FAMILIES = "platform_network"
-    config.CRYSTAL_CAVES_POOL_SIZE = 24
+    # Eval-hygiene audit finding #2: the in-training Evaluator ran on held-out seeds
+    # 500000+ (a superset of the diagnosis test split) AND steered training through the
+    # plateau epsilon-boost / early-stop / keep-best machinery — so the "held-out"
+    # levels doubled as a training control signal. Diagnosis harnesses do their own
+    # milestone evals; disable the in-training one. (Protocol change: runs after this
+    # commit are not schedule-identical to RUN-01..22.)
+    config.EVAL_EVERY = 0
+    config.DISABLE_EXPLORATION_BOOST = True
     # Turbo-ish throughput, applied equally to every arm to keep the A/B fair.
     config.LEARN_EVERY = 8
     config.GRADIENT_STEPS = 2
@@ -266,8 +287,15 @@ def train_and_evaluate_arm_seed(
             games=games,
             run_dir=run_dir,
         )
-    except Exception as exc:  # noqa: BLE001 - robustness: never crash the sweep
-        print(f"[lever-ab] arm={arm} seed={seed} FAILED: {exc}", flush=True)
+    except Exception:  # noqa: BLE001 - robustness: never crash the sweep
+        import traceback
+
+        # Loud + recorded: a swallowed crash used to shrink the paired N silently,
+        # making a broken (arm, seed) run indistinguishable from a bad agent
+        # (metric-audit finding #3d).
+        print(f"[lever-ab] arm={arm} seed={seed} FAILED with traceback:", flush=True)
+        traceback.print_exc()
+        FAILED_RUNS.append({"arm": arm, "seed": seed})
         return []
     return rows
 
@@ -278,7 +306,7 @@ def per_arm_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {
             "rows": 0,
-            "iqm": {metric: 0.0 for metric in PER_ARM_METRICS},
+            "mean": {metric: 0.0 for metric in PER_ARM_METRICS},
             "win_rate": 0.0,
             "exit_unlock_rate": 0.0,
             "timeout_frac": 0.0,
@@ -295,7 +323,7 @@ def per_arm_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(rows)
     return {
         "rows": total,
-        "iqm": iqm,
+        "mean": iqm,
         "win_rate": float(np.mean([bool(row.get("won", False)) for row in rows])),
         "exit_unlock_rate": float(
             np.mean([float(row.get("exit_unlocked_rate", 0.0) or 0.0) for row in rows])
@@ -440,7 +468,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
     ]
     for arm in summary["arms"]:
         info = summary["per_arm"].get(arm, {})
-        iqm = info.get("iqm", {})
+        iqm = info.get("mean", {})
         lines.append(
             f"| {arm} | {info.get('rows', 0)} "
             f"| {iqm.get('selection_score', 0.0):.4f} "
@@ -472,11 +500,13 @@ def print_table(summary: dict[str, Any]) -> None:
         f"difficulty={summary['difficulty']}",
         flush=True,
     )
-    header = "arm".ljust(12) + "rows".rjust(6) + "selIQM".rjust(10) + "dSel(B-A) [95% CI]".rjust(34)
+    header = (
+        "arm".ljust(12) + "rows".rjust(6) + "selMean".rjust(10) + "dSel(B-A) [95% CI]".rjust(34)
+    )
     print(header, flush=True)
     for arm in summary["arms"]:
         info = summary["per_arm"].get(arm, {})
-        sel = info.get("iqm", {}).get("selection_score", 0.0)
+        sel = info.get("mean", {}).get("selection_score", 0.0)
         line = arm.ljust(12) + str(info.get("rows", 0)).rjust(6) + f"{sel:10.4f}"
         if arm != summary["baseline_arm"]:
             comp = summary["comparisons_vs_baseline"].get(arm, {})
@@ -634,6 +664,13 @@ def run_lever_ab(
         bootstrap_samples=bootstrap_samples,
         bootstrap_seed=bootstrap_seed,
     )
+    if FAILED_RUNS:
+        summary["failed_runs"] = list(FAILED_RUNS)
+        print(
+            f"[lever-ab] WARNING: {len(FAILED_RUNS)} (arm, seed) runs FAILED and are "
+            f"absent from every mean/CI: {FAILED_RUNS}",
+            flush=True,
+        )
     write_json(out_dir / "summary.json", summary)
     write_report(out_dir / "report.md", summary)
     print_table(summary)

@@ -299,6 +299,7 @@ class CrystalCaves(
         self._eval_mode = False
         self._eval_caves: Tuple[CaveSpec, ...] = ()
         self._eval_cursor = 0
+        self._eval_source = ""  # which set _eval_caves holds (stale-cache guard)
         # Drill mode: replace the cave set with the hand-authored single-skill drills
         # (for skill diagnostics and motor-skill pre-training). Takes precedence.
         if getattr(self.config, "CRYSTAL_CAVES_IMPORTED", False):
@@ -520,17 +521,29 @@ class CrystalCaves(
 
     def use_eval_levels(self, count: int) -> None:
         """Switch this instance into evaluation mode: reset() will deterministically
-        cycle a fixed HELD-OUT set of ``count`` caves (disjoint from the training
-        pool, identical across calls) so eval measures generalisation, not memory.
-        No-op for authored (non-procedural) caves, which are already a fixed set."""
-        if self._proc_params is None or count <= 0:
+        cycle a fixed set of caves in order. Procedural games build a HELD-OUT set of
+        ``count`` caves (disjoint seed offset — eval measures generalisation, not
+        memory). Authored/imported games cycle their own fixed CAVES: previously this
+        was a silent NO-OP, which left "eval" sampling levels randomly WITH
+        replacement and left training-only curriculum starts un-gated (eval-hygiene
+        audit finding #1)."""
+        if count <= 0:
+            return
+        if self._proc_params is None:
+            if not self.CAVES:
+                return
+            n = min(count, len(self.CAVES))
+            self._set_eval_caves(tuple(self.CAVES[:n]), source=f"authored:{n}")
             return
         # Build once; the seed range (offset 500000) is disjoint from the training
         # pool's offset-0 range, so these levels are never seen during training.
-        if len(self._eval_caves) != count:
-            self._eval_caves = self._build_cave_set(count, seed_offset=500000)
-        self._eval_mode = True
-        self._eval_cursor = 0
+        if self._eval_source != f"heldout:{count}":
+            self._set_eval_caves(
+                self._build_cave_set(count, seed_offset=500000), source=f"heldout:{count}"
+            )
+        else:
+            self._eval_mode = True
+            self._eval_cursor = 0
 
     def use_train_levels(self, count: int) -> None:
         """Switch into deterministic eval mode but over the TRAINING pool itself --
@@ -538,11 +551,21 @@ class CrystalCaves(
         generalisation gap (train score >> held-out score => memorisation; both low =>
         the agent never learned the skill). Cycles the first ``count`` training caves
         in a fixed order, like use_eval_levels but WITHOUT the held-out seed offset.
-        No-op for authored (non-procedural) caves."""
-        if self._proc_params is None or count <= 0 or not self.CAVES:
+        For authored/imported games the train set IS the fixed set, so this equals
+        use_eval_levels."""
+        if count <= 0 or not self.CAVES:
             return
         n = min(count, len(self.CAVES))
-        self._eval_caves = tuple(self.CAVES[:n])
+        self._set_eval_caves(tuple(self.CAVES[:n]), source=f"train:{n}")
+
+    def _set_eval_caves(self, caves: Tuple[CaveSpec, ...], *, source: str) -> None:
+        """Enter eval mode over ``caves``. Tracks the SOURCE of the current eval set so
+        switching between train/held-out/authored sets rebuilds instead of silently
+        reusing a stale cache (the old guard compared only len(), so use_train_levels
+        followed by use_eval_levels of the same count kept the wrong caves)."""
+        if self._eval_source != source:
+            self._eval_caves = caves
+            self._eval_source = source
         self._eval_mode = True
         self._eval_cursor = 0
 
@@ -686,8 +709,13 @@ class CrystalCaves(
         reward += self._collect_pickups()
         reward += self._update_bullets()
         reward += self._update_enemies()
-        reward += self._check_player_danger()
+        # Exit BEFORE danger: on the frame where the player both reaches the open exit
+        # and takes a fatal hit, score the win. The old order ruled it a death, while
+        # the first-crystal-goal win (inside _collect_pickups) already beat a same-frame
+        # death — the precedence between the two win mechanisms was inconsistent
+        # (metric-audit finding #7).
         reward += self._check_exit()
+        reward += self._check_player_danger()
         reward += self._target_progress_reward(previous_target, previous_distance)
         reward += self._anti_loop_penalty(previous_target, previous_distance)
 
@@ -722,8 +750,13 @@ class CrystalCaves(
         """Monotonic 0..1 completion potential and its components — how close the
         player is to clearing the cave (collect all crystals, throw the switch,
         reach the exit). Drives progress reward shaping and info['progress']."""
-        total = max(1, self.initial_crystals)
-        crystal_frac = (self.initial_crystals - len(self.crystals)) / total
+        if self.initial_crystals == 0:
+            # A crystal-free cave is vacuously fully-collected (the exit is open from
+            # the start); the old max(1,..) denominator pinned it to 0 forever
+            # (metric-audit finding #9). Constant within the episode, so PBRS-safe.
+            crystal_frac = 1.0
+        else:
+            crystal_frac = (self.initial_crystals - len(self.crystals)) / self.initial_crystals
         switch_done = 0.0 if (self.switches - self.used_switches) else 1.0
         span = max(1, self.level_rows - self.sky_rows - 1)
         depth_frac = float(np.clip((self._max_depth_row - self.sky_rows) / span, 0.0, 1.0))
@@ -734,10 +767,13 @@ class CrystalCaves(
             + self.PROGRESS_W_DEPTH * depth_frac
             + self.PROGRESS_W_WIN * won
         )
+        # Unrounded: these feed metric rows that are AVERAGED downstream; rounding per
+        # episode before the mean biased every aggregate and made the best-checkpoint
+        # crystal_frac tiebreak sensitive to 5e-4 artifacts (metric-audit finding #5).
         return phi, {
-            "crystal_frac": round(crystal_frac, 3),
+            "crystal_frac": float(crystal_frac),
             "switch_done": switch_done,
-            "depth_frac": round(depth_frac, 3),
+            "depth_frac": depth_frac,
             "won": won,
         }
 

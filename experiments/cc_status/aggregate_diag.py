@@ -60,13 +60,41 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
         )
 
     curve_avg = _average_curve(curve)
-    final = curve_avg[-1]
     seeds = sorted({int(pt["seed"]) for pt in curve})
     metrics = (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
     # Audit R2-C: only pick the best checkpoint from buckets that have ALL seeds. Under the
     # multi-process aggregate path a crashed/straggling seed leaves ragged buckets; without
     # this guard max() could report a single lucky seed as the cross-seed result.
-    full_buckets = [pt for pt in curve_avg if pt.get("n_seeds", 1) == len(seeds)] or curve_avg
+    full_buckets = [pt for pt in curve_avg if pt.get("n_seeds", 1) == len(seeds)]
+    if not full_buckets:
+        max_seeds = max(pt.get("n_seeds", 1) for pt in curve_avg)
+        full_buckets = [pt for pt in curve_avg if pt.get("n_seeds", 1) == max_seeds]
+        print(
+            f"[aggregate_diag] WARNING: no checkpoint bucket contains all {len(seeds)} "
+            f"seeds; using buckets with n_seeds={max_seeds} only",
+            flush=True,
+        )
+    # The FINAL bucket gets the same guard: the last milestone of a crashed seed is
+    # missing, so curve_avg[-1] could silently be a partial-seed bucket while the
+    # header still claims all seeds (metric-audit finding #1).
+    final = full_buckets[-1]
+    if final is not curve_avg[-1]:
+        print(
+            "[aggregate_diag] WARNING: final checkpoint bucket is ragged; reporting the "
+            f"last bucket with n_seeds={final.get('n_seeds')} "
+            f"(episode {final.get('episode')}) as FINAL",
+            flush=True,
+        )
+    # Homogeneity check: the aggregate copies run params from the FIRST summary; if the
+    # per-seed runs disagree, the header would misdescribe the data (finding #1b).
+    for key in ("difficulty", "episodes", "games", "pool_size"):
+        values = {repr(s.get(key)) for s in summaries}
+        if len(values) > 1:
+            print(
+                f"[aggregate_diag] WARNING: per-seed runs disagree on {key!r}: "
+                f"{sorted(values)} — header reports the first",
+                flush=True,
+            )
     best = max(full_buckets, key=lambda pt: (pt["train"]["won"], pt["train"]["crystal_frac"]))
 
     base = summaries[0]
@@ -119,8 +147,7 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
     if death_traces:
         keys = sorted({k for dt in death_traces for k in dt})
         agg["death_trace"] = {
-            k: sum(float(dt.get(k, 0.0)) for dt in death_traces) / len(death_traces)
-            for k in keys
+            k: sum(float(dt.get(k, 0.0)) for dt in death_traces) / len(death_traces) for k in keys
         }
         agg["death_trace_per_seed"] = death_traces
     # Same seed-averaging for the stall trace (RUN-19 stall diagnostic).
@@ -128,8 +155,7 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
     if stall_traces:
         keys = sorted({k for st in stall_traces for k in st})
         agg["stall_trace"] = {
-            k: sum(float(st.get(k, 0.0)) for st in stall_traces) / len(stall_traces)
-            for k in keys
+            k: sum(float(st.get(k, 0.0)) for st in stall_traces) / len(stall_traces) for k in keys
         }
         agg["stall_trace_per_seed"] = stall_traces
     return agg

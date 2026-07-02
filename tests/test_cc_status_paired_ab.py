@@ -79,10 +79,10 @@ def test_stratified_bootstrap_ci_is_deterministic_for_seed():
 
     assert first == second
     # Audit B1: the estimator is now a PLAIN MEAN (mean([0.1,0.2,0.4,0.6]) = 0.325), not the
-    # old interquartile mean (which trimmed to [0.2,0.4] -> 0.3). The "iqm" key is kept for
+    # old interquartile mean (which trimmed to [0.2,0.4] -> 0.3). The key (renamed "mean" — honest naming) is kept for
     # compatibility but now holds the plain mean.
-    assert first["iqm"] == pytest.approx(0.325)
-    assert first["ci_low"] <= first["iqm"] <= first["ci_high"]
+    assert first["mean"] == pytest.approx(0.325)
+    assert first["ci_low"] <= first["mean"] <= first["ci_high"]
 
 
 def test_aggregate_paired_ab_reports_paired_delta_iqm():
@@ -108,5 +108,5 @@ def test_aggregate_paired_ab_reports_paired_delta_iqm():
 
     assert aggregate["paired_rows"] == 4
     # Audit B1: plain mean of deltas [0.1,0.1,0.2,0.3] = 0.175 (old IQM trimmed to 0.15).
-    assert aggregate["paired_delta_b_minus_a"]["iqm"] == pytest.approx(0.175)
-    assert aggregate["arm_b"]["iqm"] > aggregate["arm_a"]["iqm"]
+    assert aggregate["paired_delta_b_minus_a"]["mean"] == pytest.approx(0.175)
+    assert aggregate["arm_b"]["mean"] > aggregate["arm_a"]["mean"]

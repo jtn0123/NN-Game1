@@ -57,7 +57,7 @@ def stratified_bootstrap_ci(
     values = [float(row.get(metric, 0.0) or 0.0) for row in rows]
     point = pipeline_mean(values)
     if not rows or n_bootstrap <= 0:
-        return {"iqm": point, "ci_low": point, "ci_high": point, "n": float(len(rows))}
+        return {"mean": point, "ci_low": point, "ci_high": point, "n": float(len(rows))}
 
     groups: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -76,7 +76,7 @@ def stratified_bootstrap_ci(
         samples.append(pipeline_mean([float(row.get(metric, 0.0) or 0.0) for row in sampled_rows]))
 
     return {
-        "iqm": point,
+        "mean": point,
         "ci_low": float(np.quantile(samples, alpha)),
         "ci_high": float(np.quantile(samples, 1.0 - alpha)),
         "n": float(len(rows)),

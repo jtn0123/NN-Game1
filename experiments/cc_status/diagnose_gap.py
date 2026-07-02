@@ -153,8 +153,13 @@ def _eval_leg2(
     distances: list[float] = []
     agent_state = _enter_greedy_agent_eval(agent)
     try:
-        for _ in range(games):
+        for probe_index in range(games):
             game.reset()
+            # Deterministic probe placement: apply_reverse_start draws from the GLOBAL
+            # np.random stream; unseeded it inherited whatever state training left, so
+            # the same checkpoint gave different FAR start tiles per invocation
+            # (eval-hygiene audit finding #4).
+            np.random.seed(913_000 + probe_index)
             if not apply_reverse_start(game, mode):
                 continue  # no oracle-verified placement on this level; skip (not counted)
             col, row = game._player_tile()
@@ -208,9 +213,10 @@ def _eval_death_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
             if reason == "killed":
                 src = str(info.get("last_damage_source", "none"))
                 kill_sources[src] = kill_sources.get(src, 0) + 1
-            init_c = max(1, int(info.get("initial_crystals", 1)))
+            init_c = int(info.get("initial_crystals", 1))
             rem = int(info.get("crystals_remaining", 0))
-            crystal_fracs.append((init_c - rem) / init_c)
+            # zero-crystal cave = vacuously fully collected (matches the engine metric)
+            crystal_fracs.append(1.0 if init_c <= 0 else (init_c - rem) / init_c)
             steps_used.append(float(steps))
     finally:
         _restore_greedy_agent_eval(agent, agent_state)
@@ -220,7 +226,9 @@ def _eval_death_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
         "crystal_frac_mean": float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
         "steps_mean": float(np.mean(steps_used)) if steps_used else 0.0,
     }
-    for r in ("won", "killed", "timeout", "stalled", "first_crystal_goal"):
+    # Emit the standard taxonomy PLUS anything unexpected: the old fixed key list
+    # silently dropped unknown end reasons, hiding taxonomy breaks (audit finding #8).
+    for r in sorted({"won", "killed", "timeout", "stalled", "first_crystal_goal"} | set(reasons)):
         out[f"reason_{r}"] = reasons.get(r, 0) / n
     for s in ("hazard", "enemy", "both", "air"):
         out[f"killed_by_{s}"] = kill_sources.get(s, 0) / n
@@ -285,9 +293,10 @@ def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
                     far += 1
             if len(set(trail)) <= 3:
                 osc += 1
-            init_c = max(1, int(info.get("initial_crystals", 1)))
+            init_c = int(info.get("initial_crystals", 1))
             rem = int(info.get("crystals_remaining", 0))
-            crystal_fracs.append((init_c - rem) / init_c)
+            # zero-crystal cave = vacuously fully collected (matches the engine metric)
+            crystal_fracs.append(1.0 if init_c <= 0 else (init_c - rem) / init_c)
     finally:
         _restore_greedy_agent_eval(agent, agent_state)
     s = max(1, n_stalled)
@@ -305,28 +314,45 @@ def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
     }
 
 
+def _present_values(rows: list[dict[str, Any]], metric: str) -> tuple[list[Any], int]:
+    """Values for ``metric`` from rows that HAVE it, plus the count that don't.
+    A missing key used to silently score 0.0, making a pipeline break read as a
+    bad agent (metric-audit finding #3) — now missing rows are excluded from the
+    mean and surfaced loudly."""
+    vals = [r[metric] for r in rows if r.get(metric) is not None]
+    return vals, len(rows) - len(vals)
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
-    """Per-split summary: rates for win/exit, IQM for the continuous surrogates."""
+    """Per-split summary: rates for win/exit, true means for the surrogates."""
     out: dict[str, float] = {"n": float(len(rows))}
     if not rows:
         for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
             out[metric] = 0.0
         return out
-    for metric in _RATE_METRICS:
+    for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
+        vals, missing = _present_values(rows, metric)
+        if missing:
+            out[f"missing_{metric}"] = float(missing)
+            print(
+                f"[diagnose_gap] WARNING: {missing}/{len(rows)} rows missing metric "
+                f"{metric!r} — excluded from the mean (broken rows are NOT zeros)",
+                flush=True,
+            )
         if metric == "crystal_frac":
             # crystal_frac is a 0..1 collection FRACTION → TRUE MEAN, not a bool
             # "collected-any" rate. The bool form over-reports multi-crystal difficulties:
             # on normal it read 0.83 (= 83% of levels collected ≥1 crystal) while the actual
             # mean fraction is ~0.20 (RUN-16 death-trace). Also expose the collected-≥1 rate
             # separately so the distribution signal isn't lost.
-            out[metric] = float(np.mean([float(r.get(metric, 0.0) or 0.0) for r in rows]))
-            out["crystal_any_rate"] = float(
-                np.mean([float(bool(r.get(metric, False))) for r in rows])
+            out[metric] = float(np.mean([float(v) for v in vals])) if vals else 0.0
+            out["crystal_any_rate"] = (
+                float(np.mean([float(bool(v)) for v in vals])) if vals else 0.0
             )
+        elif metric in _RATE_METRICS:
+            out[metric] = float(np.mean([float(bool(v)) for v in vals])) if vals else 0.0
         else:
-            out[metric] = float(np.mean([float(bool(r.get(metric, False))) for r in rows]))
-    for metric in _MEAN_SURROGATE_METRICS:
-        out[metric] = float(np.mean([float(r.get(metric, 0.0) or 0.0) for r in rows]))
+            out[metric] = float(np.mean([float(v) for v in vals])) if vals else 0.0
     return out
 
 
@@ -395,6 +421,7 @@ def run_diagnosis(
     death_trace: bool = False,
     stall_trace: bool = False,
     record_play: int = 0,
+    imported: bool = False,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     overrides: dict[str, object] = {}
@@ -470,7 +497,7 @@ def run_diagnosis(
             flush=True,
         )
         set_seed(seed)
-        config = make_config(overrides, difficulty=difficulty)
+        config = make_config(overrides, difficulty=difficulty, imported=imported)
         config.CRYSTAL_CAVES_SEED = seed
         run_dir = out_dir / f"seed_{seed}"
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -526,10 +553,19 @@ def run_diagnosis(
                 heartbeat_seconds=0.0,
                 target_episodes=milestone if checkpoint_every > 0 else None,
             )
-            train_rows = _eval_split(trainer, config, split="train", games=games, run_dir=run_dir)
-            test_rows = _eval_split(trainer, config, split="test", games=games, run_dir=run_dir)
-            tr, te = _aggregate(train_rows), _aggregate(test_rows)
-            mean_q = _mean_q(trainer, config, games=games)
+            # Eval must not perturb the training RNG stream: constructing eval games
+            # consumes global np.random draws, so milestone cadence used to change the
+            # trained policy itself (eval-hygiene audit finding #3).
+            rng_state = np.random.get_state()
+            try:
+                train_rows = _eval_split(
+                    trainer, config, split="train", games=games, run_dir=run_dir
+                )
+                test_rows = _eval_split(trainer, config, split="test", games=games, run_dir=run_dir)
+                tr, te = _aggregate(train_rows), _aggregate(test_rows)
+                mean_q = _mean_q(trainer, config, games=games)
+            finally:
+                np.random.set_state(rng_state)
             if checkpoint_every > 0:
                 curve.append(
                     {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
@@ -609,6 +645,7 @@ def run_diagnosis(
 
     train_agg, test_agg = _aggregate(train_rows_all), _aggregate(test_rows_all)
     summary = {
+        "imported_fixed_set": bool(imported),
         "difficulty": difficulty,
         "episodes": episodes,
         "seeds": seeds,
@@ -669,7 +706,19 @@ def run_diagnosis(
         # Audit R2-C: pick the best checkpoint only from buckets that have ALL seeds, so a
         # ragged/straggling seed can't make a single-seed bucket the reported cross-seed best.
         n_all = len(seeds)
-        full_buckets = [p for p in curve_avg if p.get("n_seeds", 1) == n_all] or curve_avg
+        full_buckets = [p for p in curve_avg if p.get("n_seeds", 1) == n_all]
+        if not full_buckets:
+            # No bucket has all seeds (crashed seeds / mismatched --checkpoint-every).
+            # Fall back to the buckets with the MOST seeds — loudly, not silently: the
+            # old `or curve_avg` fallback quietly re-admitted single-seed buckets,
+            # exactly the failure the guard exists for (metric-audit finding #6).
+            max_seeds = max(p.get("n_seeds", 1) for p in curve_avg)
+            full_buckets = [p for p in curve_avg if p.get("n_seeds", 1) == max_seeds]
+            print(
+                f"[diagnose_gap] WARNING: no checkpoint bucket contains all {n_all} seeds; "
+                f"selecting best from buckets with n_seeds={max_seeds} only",
+                flush=True,
+            )
         best = max(full_buckets, key=lambda p: (p["train"]["won"], p["train"]["crystal_frac"]))
         summary["best"] = best
         # Audit B5: the top-level gap_train_minus_test is the FINAL net; the verdict uses the
@@ -817,6 +866,17 @@ def _print_curve(curve: list[dict[str, Any]]) -> None:
         )
 
 
+def _wilson95(rate: float, n: int) -> tuple[float, float]:
+    """Wilson 95% interval for a binomial rate over n trials (n<=0 -> full span)."""
+    if n <= 0:
+        return 0.0, 1.0
+    z = 1.96
+    denom = 1.0 + z * z / n
+    centre = rate + z * z / (2 * n)
+    half = z * ((rate * (1.0 - rate) / n + z * z / (4 * n * n)) ** 0.5)
+    return max(0.0, (centre - half) / denom), min(1.0, (centre + half) / denom)
+
+
 def _print_report(summary: dict[str, Any]) -> None:
     tr, te = summary["train"], summary["test"]
     gap = summary["gap_train_minus_test"]
@@ -887,10 +947,21 @@ def _print_report(summary: dict[str, Any]) -> None:
     best = summary.get("best")
     if best:
         btr, bte = best["train"], best["test"]
+        n_eval = int(summary.get("games", 0)) * max(1, len(summary.get("seeds", [1])))
+        tr_lo, tr_hi = _wilson95(btr["won"], n_eval)
+        te_lo, te_hi = _wilson95(bte["won"], n_eval)
         print(
             f"\nbest checkpoint: ep{best['episode']} "
-            f"(TRAIN win={btr['won']:.2f} cryst={btr['crystal_frac']:.3f} | "
-            f"TEST win={bte['won']:.2f} cryst={bte['crystal_frac']:.3f})",
+            f"(TRAIN win={btr['won']:.2f} [95% CI {tr_lo:.2f}-{tr_hi:.2f}] "
+            f"cryst={btr['crystal_frac']:.3f} | "
+            f"TEST win={bte['won']:.2f} [95% CI {te_lo:.2f}-{te_hi:.2f}] "
+            f"cryst={bte['crystal_frac']:.3f}) n={n_eval} eval episodes/split",
+            flush=True,
+        )
+        print(
+            "  note: best checkpoint is the argmax over checkpoints of these same "
+            "episodes, so its TRAIN numbers carry winner's-curse bias; the CI bounds "
+            "chance, not selection.",
             flush=True,
         )
         collapse = btr["won"] - tr["won"]
@@ -921,6 +992,13 @@ def _print_report(summary: dict[str, Any]) -> None:
         )
         return
 
+    if summary.get("imported_fixed_set"):
+        print(
+            "\nnote: --imported runs train and eval on the SAME fixed 16-level set; the "
+            "train-vs-test gap and the memorisation verdict below do not apply — judge "
+            "absolute win/crystal numbers.",
+            flush=True,
+        )
     # Plain-English verdict heuristic on the primary learnability signals.
     train_learns = tr["crystal_frac"] > 0.15 or tr["won"] > 0.1
     test_learns = te["crystal_frac"] > 0.15 or te["won"] > 0.1
@@ -952,6 +1030,13 @@ def _parse_seeds(raw: str) -> list[int]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Phase 0 train-vs-test gap diagnostic.")
     parser.add_argument("--difficulty", default="tutorial")
+    parser.add_argument(
+        "--imported",
+        action="store_true",
+        help="Train/eval on the hand-crafted fixed 16-level set (CRYSTAL_CAVES_IMPORTED) "
+        "instead of procedural generation. Train and test splits are then the SAME fixed "
+        "set (memorisation allowed); the train-vs-test gap read does not apply.",
+    )
     parser.add_argument("--episodes", type=int, default=600)
     parser.add_argument("--seeds", default="0,1")
     parser.add_argument("--games", type=int, default=20)
@@ -1121,6 +1206,7 @@ def main(argv: list[str] | None = None) -> int:
         death_trace=args.death_trace,
         stall_trace=args.stall_trace,
         record_play=args.record_play,
+        imported=args.imported,
     )
     return 0
 
