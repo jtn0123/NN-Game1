@@ -679,6 +679,11 @@ class CrystalCaves(
         self._invalid_shoot_total = 0.0
         self._reset_history_state()
 
+        # Demo-prefix start LAST: it replays real step() frames, so the episode
+        # must already be fully initialised; it then re-zeros the clocks/baselines.
+        if not self._eval_mode:
+            self._apply_demo_prefix_start()
+
         return self.get_state()
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, dict]:
@@ -1002,6 +1007,52 @@ class CrystalCaves(
         # shorten the navigation horizon (oracle-verified so the start stays solvable).
         if getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE", False):
             self._relocate_player_for_curriculum()
+
+    def _apply_demo_prefix_start(self) -> None:
+        """Backward-curriculum episode start from a demonstration: with probability
+        CRYSTAL_CAVES_DEMO_RESET_P, replay a random prefix of a verified winning
+        demo for this level and hand control to the agent mid-route — crystals
+        collected, gates opened, health/score as the route left them, clocks
+        re-zeroed. The engine is deterministic, so the prefix replays exactly as
+        it verified; the agent gets dense practice on the endgame it can never
+        reach from spawn (Salimans & Chen's cheap half of demo learning).
+        Imported fixed-set only (demo files are keyed by hand-crafted level
+        index); called at the END of reset() so step() runs on a fully
+        initialised episode, and training-only (the caller gates on eval)."""
+        p = float(getattr(self.config, "CRYSTAL_CAVES_DEMO_RESET_P", 0.0))
+        if p <= 0.0 or not getattr(self.config, "CRYSTAL_CAVES_IMPORTED", False):
+            return
+        if not hasattr(self, "_demo_prefixes"):
+            demo_dir = getattr(self.config, "DEMO_DIR", None)
+            if demo_dir:
+                from src.ai.demo_learning import demo_prefix_registry
+
+                self._demo_prefixes = demo_prefix_registry(demo_dir)
+            else:
+                self._demo_prefixes = {}
+        demos = self._demo_prefixes.get(self.level_index % max(1, len(self.CAVES)))
+        if not demos or np.random.random() >= p:
+            return
+        actions = demos[int(np.random.randint(len(demos)))]
+        # 10-85% of the route: never far enough to trigger the demo's win.
+        cut = int(len(actions) * float(np.random.uniform(0.10, 0.85)))
+        for action in actions[:cut]:
+            if self.game_over:  # defensive: a verified win's prefix never terminates
+                break
+            self.step(int(action))
+        # Re-zero the episode accounting so the replayed prefix costs the agent
+        # nothing: full step budget, fresh stall clock, PBRS baselines anchored to
+        # the mid-route start (so shaping still telescopes from here).
+        self.steps = 0
+        self.steps_since_progress = 0
+        self._stall_best = {}
+        self._target_best_distances = {}
+        self._progress = self._progress_potential()[0]
+        self._progress_initial = self._progress
+        self._closeness_initial = self._target_closeness()
+        self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
+        self._damage_taken = 0
+        self._idle_steps = 0
 
     def _oracle_reachable(self, start: Tuple[int, int]) -> Set[Tuple[int, int]]:
         """Jump-aware tiles reachable from ``start`` under the engine's physics, via the

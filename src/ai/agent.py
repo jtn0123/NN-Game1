@@ -722,6 +722,12 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
             if contribution.weight != 0.0:
                 loss = loss + contribution.weighted_loss()
 
+        # DQfD-lite: when a demo store is attached, every gradient step also
+        # trains on a small never-overwritten demo minibatch (TD + margin loss).
+        demo_loss = self._dqfd_loss()
+        if demo_loss is not None:
+            loss = loss + demo_loss
+
         # Optimize (outside autocast for numerical stability)
         self.optimizer.zero_grad()
         loss.backward()

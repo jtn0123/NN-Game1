@@ -457,6 +457,9 @@ def run_diagnosis(
     enemy_motion: bool = False,
     win_at_k: int = 0,
     save_weights: bool = False,
+    demo_dir: str | None = None,
+    demo_pretrain: int = 0,
+    demo_reset_p: float = 0.0,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -515,6 +518,12 @@ def run_diagnosis(
     if win_at_k > 0:
         # Training-only win tier: exit opens at K crystals; eval keeps the real rule.
         overrides["CRYSTAL_CAVES_WIN_AT_K"] = win_at_k
+    if demo_dir:
+        # DQfD-lite: fixed demo buffer + margin loss on every gradient step, plus
+        # optional demo-only pre-training and demo-prefix (backward-curriculum) starts.
+        overrides["DEMO_DIR"] = demo_dir
+        overrides["DEMO_PRETRAIN_STEPS"] = demo_pretrain
+        overrides["CRYSTAL_CAVES_DEMO_RESET_P"] = demo_reset_p
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -613,6 +622,24 @@ def run_diagnosis(
         )
         if trainer.agent.epsilon < TUTORIAL_MIN_EPSILON:
             trainer.agent.epsilon = TUTORIAL_MIN_EPSILON
+
+        if getattr(config, "DEMO_DIR", None):
+            from src.ai.demo_learning import DemoStore
+
+            store = DemoStore.from_dir(config.DEMO_DIR, config)
+            if store is None:
+                print(f"[seed {seed}] WARNING: no usable demos in {config.DEMO_DIR}", flush=True)
+            else:
+                trainer.agent.attach_demo_store(store)
+                pre_steps = trainer.agent.pretrain_on_demos(
+                    int(getattr(config, "DEMO_PRETRAIN_STEPS", 0))
+                )
+                print(
+                    f"[seed {seed}] demos: {store.n_episodes} episodes, "
+                    f"{len(store)} transitions, pretrain steps={pre_steps}, "
+                    f"demo_reset_p={getattr(config, 'CRYSTAL_CAVES_DEMO_RESET_P', 0.0)}",
+                    flush=True,
+                )
 
         # Train in segments to each milestone, grading both splits at each so we can
         # see whether competence is rising, flat, or never starts (slow vs stuck).
@@ -1307,6 +1334,29 @@ def main(argv: list[str] | None = None) -> int:
         "win rates stay canonical. 0 = off.",
     )
     parser.add_argument(
+        "--demo-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Directory of verified winning demo JSONs (human recorder / planner). "
+        "Enables DQfD-lite: fixed demo buffer + large-margin loss each gradient step.",
+    )
+    parser.add_argument(
+        "--demo-pretrain",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Demo-only gradient steps before environment interaction (DQfD pre-training).",
+    )
+    parser.add_argument(
+        "--demo-reset-p",
+        type=float,
+        default=0.0,
+        metavar="P",
+        help="Probability a TRAINING episode starts mid-route from a random 10-85%% "
+        "prefix of a winning demo (backward curriculum). Eval unaffected.",
+    )
+    parser.add_argument(
         "--save-weights",
         action="store_true",
         help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
@@ -1352,6 +1402,9 @@ def main(argv: list[str] | None = None) -> int:
         enemy_motion=args.enemy_motion,
         win_at_k=args.win_at_k,
         save_weights=args.save_weights,
+        demo_dir=args.demo_dir,
+        demo_pretrain=args.demo_pretrain,
+        demo_reset_p=args.demo_reset_p,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,

@@ -239,6 +239,19 @@ class Config:
     CRYSTAL_CAVES_HIT_PENALTY: float = -3.0
     CRYSTAL_CAVES_NGU_BONUS: bool = False
     CRYSTAL_CAVES_NGU_BETA: float = 0.02
+    # --- Demonstration learning (DQfD-lite + demo-prefix starts, RUN-26) ---
+    # Directory of verified winning demo JSONs (human recorder or planner output).
+    # When set, the training harness builds a never-overwritten demo buffer and every
+    # gradient step adds a demo minibatch loss: n-step TD + the DQfD large-margin term.
+    DEMO_DIR: Optional[str] = None
+    DEMO_BATCH_FRACTION: float = 0.125  # demo minibatch size as a fraction of BATCH_SIZE
+    DEMO_MARGIN: float = 0.8  # margin by which the demonstrated action must beat others
+    DEMO_MARGIN_WEIGHT: float = 1.0
+    DEMO_TD_WEIGHT: float = 1.0
+    DEMO_PRETRAIN_STEPS: int = 0  # demo-only gradient steps before env interaction
+    # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
+    # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
+    CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
