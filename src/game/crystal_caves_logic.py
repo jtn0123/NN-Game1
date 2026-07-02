@@ -372,6 +372,7 @@ class CrystalCavesLogicMixin:
             return 0.0
 
         self._last_damage_source = source
+        self._damage_taken += 1
         self.health -= 1
         self.invuln_timer = self.INVULN_FRAMES
         self.shake_timer = self.SHAKE_FRAMES  # juice: kick the camera on a hit
@@ -392,10 +393,10 @@ class CrystalCavesLogicMixin:
             self.won = False
             self._end_reason = "killed"
             self.audio.play("lose")
-            return -12.0
+            return float(getattr(self.config, "CRYSTAL_CAVES_DEATH_PENALTY", -12.0))
 
         self.audio.play("damage")
-        return -3.0
+        return float(getattr(self.config, "CRYSTAL_CAVES_HIT_PENALTY", -3.0))
 
     def _check_exit(self: Any) -> float:
         # Audit latent-2: a fatal hit earlier this frame (_check_player_danger) must not be

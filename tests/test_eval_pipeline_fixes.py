@@ -113,3 +113,28 @@ class TestUnroundedFractions:
         assert (
             abs(parts["crystal_frac"] - expected) < 1e-12
         ), "per-episode rounding before averaging biased aggregates (audit #5)"
+
+
+class TestRewardCalibrationKnobs:
+    def test_penalties_are_configurable(self) -> None:
+        game = _imported_game(CRYSTAL_CAVES_DEATH_PENALTY=-30.0, CRYSTAL_CAVES_HIT_PENALTY=-1.5)
+        game.use_eval_levels(1)
+        game.reset()
+        game.invuln_timer = 0
+        game.health = 2
+        assert game._damage_player("enemy") == -1.5
+        game.invuln_timer = 0
+        assert game._damage_player("enemy") == -30.0
+        assert game._end_reason == "killed"
+
+    def test_movement_telemetry_in_info(self) -> None:
+        game = _imported_game()
+        game.use_eval_levels(1)
+        game.reset()
+        game.invuln_timer = 0
+        game._damage_player("hazard")
+        for _ in range(12):
+            _s, _r, _d, info = game.step(game.RIGHT)
+        assert info["damage_taken"] == 1
+        assert info["tiles_visited"] >= 2, "walking must accumulate distinct tiles"
+        assert 0.0 <= info["idle_frac"] < 1.0

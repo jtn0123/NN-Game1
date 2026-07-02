@@ -228,6 +228,12 @@ class Config:
     # a (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen THIS
     # episode, decaying as 1/sqrt(visits). Attacks the "stops reaching new cells ->
     # times out" failure. Off by default; an experiment lever (flows through n-step).
+    # Reward calibration (RUN-23): death/hit penalties were hardcoded (-12 / -3) and
+    # tuned for the ~10-14-crystal generated levels. The hand-crafted set holds 30-34
+    # crystals (+150+ potential), so death's RELATIVE cost collapsed — dying costs less
+    # than three crystals, making reckless play rational. Knobs so the scale can be A/B'd.
+    CRYSTAL_CAVES_DEATH_PENALTY: float = -12.0
+    CRYSTAL_CAVES_HIT_PENALTY: float = -3.0
     CRYSTAL_CAVES_NGU_BONUS: bool = False
     CRYSTAL_CAVES_NGU_BETA: float = 0.02
     # Truncation-aware bootstrapping (Pardo et al. 2018, "Time Limits in RL").

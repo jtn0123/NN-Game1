@@ -435,6 +435,12 @@ class CrystalCaves(
         self._obj_region_total = 0.0  # AI-2
         self._visited_novelty_cells: Set[Tuple[int, int]] = set()
         self._novelty_bonus_total = 0.0
+        # Movement telemetry (RUN-23): hits taken, distinct tiles touched, idle steps —
+        # lets the report show HOW the agent moves, not just how episodes end.
+        self._damage_taken = 0
+        self._tiles_visited: Set[Tuple[int, int]] = set()
+        self._idle_steps = 0
+        self._prev_step_tile: Optional[Tuple[int, int]] = None
         self._anti_loop_tile: Optional[Tuple[int, int]] = None
         self._anti_loop_same_tile_steps = 0
         self._anti_loop_no_approach_steps = 0
@@ -650,6 +656,10 @@ class CrystalCaves(
         self._obj_region_total = 0.0
         self._visited_novelty_cells = set()
         self._novelty_bonus_total = 0.0
+        self._damage_taken = 0
+        self._tiles_visited = set()
+        self._idle_steps = 0
+        self._prev_step_tile = None
         self._ngu_visits = {}
         self._remember_current_novelty_cell()
         self._target_best_distances: Dict[Tuple[str, int, int], float] = {}
@@ -719,7 +729,12 @@ class CrystalCaves(
         reward += self._target_progress_reward(previous_target, previous_distance)
         reward += self._anti_loop_penalty(previous_target, previous_distance)
 
-        self._max_depth_row = max(self._max_depth_row, self._player_tile()[1])
+        current_tile = self._player_tile()
+        self._tiles_visited.add(current_tile)
+        if current_tile == self._prev_step_tile:
+            self._idle_steps += 1
+        self._prev_step_tile = current_tile
+        self._max_depth_row = max(self._max_depth_row, current_tile[1])
 
         # AI-2: reward reaching a new region that holds a known uncollected objective
         region_bonus = self._objective_region_reward()
@@ -1581,4 +1596,7 @@ class CrystalCaves(
             "invalid_shoot_count": self._invalid_shoot_count,
             "invalid_shoot_penalty_total": round(self._invalid_shoot_total, 3),
             "novelty_bonus_total": round(self._novelty_bonus_total, 3),
+            "damage_taken": self._damage_taken,
+            "tiles_visited": len(self._tiles_visited),
+            "idle_frac": self._idle_steps / max(1, self.steps),
         }
