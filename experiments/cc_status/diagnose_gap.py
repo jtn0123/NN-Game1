@@ -436,6 +436,7 @@ def run_diagnosis(
     truncation_bootstrap: bool = False,
     force_cpu: bool = False,
     weight_decay: float = 0.0,
+    reward_clip: float | None = None,
     death_penalty: float | None = None,
     hit_penalty: float | None = None,
     ngu_bonus: bool = False,
@@ -477,6 +478,12 @@ def run_diagnosis(
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
     if weight_decay > 0:
         overrides["WEIGHT_DECAY"] = weight_decay
+    if reward_clip is not None:
+        # RUN-23 finding: REWARD_CLIP=5 clamps sampled (n-step) rewards to min=-5, so
+        # death -12/-30, timeout -8 and stall -6 all trained as the SAME -5 — death-scale
+        # levers are invisible unless the clip is raised (or 0 = disabled; the agent code
+        # guards `if REWARD_CLIP > 0`, so 0 is a safe off-switch, not a clamp-to-zero).
+        overrides["REWARD_CLIP"] = reward_clip
     if death_penalty is not None:
         overrides["CRYSTAL_CAVES_DEATH_PENALTY"] = death_penalty
     if hit_penalty is not None:
@@ -690,6 +697,7 @@ def run_diagnosis(
     train_agg, test_agg = _aggregate(train_rows_all), _aggregate(test_rows_all)
     summary = {
         "imported_fixed_set": bool(imported),
+        "config_overrides": {k: v for k, v in sorted(overrides.items())},
         "difficulty": difficulty,
         "episodes": episodes,
         "seeds": seeds,
@@ -1207,6 +1215,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
     )
     parser.add_argument(
+        "--reward-clip",
+        type=float,
+        default=None,
+        help="Override REWARD_CLIP (negative-reward clamp before learning). Default 5.0 "
+        "clips ALL penalties to -5, masking death-scale levers; set >= |death penalty| "
+        "when testing CRYSTAL_CAVES_DEATH_PENALTY, or 0 to disable clipping entirely.",
+    )
+    parser.add_argument(
         "--death-penalty",
         type=float,
         default=None,
@@ -1260,6 +1276,7 @@ def main(argv: list[str] | None = None) -> int:
         truncation_bootstrap=args.truncation_bootstrap,
         force_cpu=args.cpu,
         weight_decay=args.weight_decay,
+        reward_clip=args.reward_clip,
         death_penalty=args.death_penalty,
         hit_penalty=args.hit_penalty,
         ngu_bonus=args.ngu_bonus,
