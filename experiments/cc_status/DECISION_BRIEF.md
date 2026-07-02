@@ -127,3 +127,34 @@ of those carried a false "trapped" label — the true residual stall mass is
 far/oscillating + clock semantics. RUN-25 arms stay as planned (enemy-motion
 ON, win-at-K tier, checkpoint hygiene) plus stall-clock geodesic telemetry;
 level repair is off the table.
+
+## RUN-25 verdict (both Phase-1 levers disconfirmed; instruments validated)
+
+Full result in RUN_LOG.md (M4 commit `0de02eb`). 4 arms x 3 seeds x 6k episodes,
+zero canonical wins and zero exit unlocks anywhere; the winner's-curse guard
+never even triggered.
+
+- **Enemy-motion observation: closed.** +0.013/+0.055 crystal over control,
+  no death reduction (killed 0.500 vs 0.458), no completions. The "agent dies
+  because it can't see movers" theory doesn't survive contact: it sees them
+  now and dies the same.
+- **Win-at-K=15 tier: closed in this form.** C had LOWER crystal than control
+  and the highest killed rate (0.646); D collected best (0.508) but had the
+  worst target progress. The tier never converts to eval unlocks because eval
+  (correctly) keeps the real rule and the agent doesn't reach 15-crystal
+  states reliably enough for the training tier to reshape behaviour.
+- **Phase-0 instrument fixes CONFIRMED live:** trapped_frac = 0.000 and
+  clock_mislabel_frac = 0.000 in every arm. The old trapped=0.354 is formally
+  buried, and the red-team's stall-clock-mislabel hypothesis (#4) is
+  disconfirmed — stalls are genuinely far-from-objective oscillation
+  (far-stall 0.82-1.00), not measurement error.
+
+**Strategic position after RUN-25:** observation-side, reward-side, task-tier,
+train-longer, and level-repair families are ALL now closed with evidence. The
+failure is stable across everything tried: ~50% killed by enemies mid-route,
+~40-50% far-oscillation stalls, crystal plateau ~0.5 at 6k / 0.6-0.66 at 16k.
+What has never been tried on this fixed set: **demonstration data** (DQfD-lite
+margin loss / backward curriculum from demo states — Tier 2 of the improvement
+plan, blocked only on demos existing). The demo recorder is built; the owner
+playtest is the demo source (planner retry with an HP budget is the fallback).
+RUN-26 should be the demo run.
