@@ -100,12 +100,46 @@ class Config:
     # Drill mode: use the hand-authored single-skill teaching levels instead of the
     # authored/procedural caves (for skill diagnostics and motor-skill pre-training).
     CRYSTAL_CAVES_DRILLS: bool = False
+    # Curated mode: use the small hand-crafted Crystal-Caves-style level set instead of
+    # the procedural generator. Every level is certified winnable by the physics-faithful
+    # reachability oracle (experiments/cc_status/level_reach.py), so they sidestep the
+    # generator's fairness problems. See src/game/crystal_caves_handcrafted_levels.py.
+    CRYSTAL_CAVES_IMPORTED: bool = False
     CRYSTAL_CAVES_SEED: int = 0
     CRYSTAL_CAVES_FAMILIES: str = ""
     # AI-1 rich state: a wider perception window (19x11 ~ the 1991 view) + a coarse
     # global objective map. When False, the legacy 11x9 window (119-feature state)
     # that reached ~8% wins. Toggleable so the two can be compared head-to-head.
     CRYSTAL_CAVES_RICH_STATE: bool = True
+    # Geodesic next-step "corridor compass": append a few metadata scalars that point down
+    # the actual traversable route toward the active objective (read from the cached BFS
+    # distance field), instead of relying only on the euclidean target compass which points
+    # straight at the objective THROUGH walls. RUN-11 showed the wall is long-range route-
+    # to-exit navigation (FAR probe 0.12) precisely because the only directional signal is
+    # that wall-blind euclidean compass. This is an OBSERVATION (computable identically at
+    # eval), NOT a reward — so it does not re-trigger the disconfirmed geodesic-PBRS lever.
+    # Off by default; an experiment lever. Adds GEO_COMPASS_FEATURES scalars to the state.
+    CRYSTAL_CAVES_GEO_COMPASS: bool = False
+    # Make the corridor compass route AROUND static hazards instead of straight through
+    # them. The plain compass BFS treats hazard tiles as ordinary floor, so it steers the
+    # agent into spikes — and the RUN-17 trusted death-trace shows hazards are the single
+    # largest death source (~0.28 of episodes) and likely drive much of the stall mass
+    # (the agent freezes when the only suggested step is into a hazard). This re-weights a
+    # SEPARATE compass-only field so hazard tiles cost HAZARD_COST extra steps but stay
+    # passable (the objective never becomes unreachable); the PBRS shaping field is left
+    # untouched. Same 4 compass dims, so no network-shape change. Requires GEO_COMPASS.
+    CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE: bool = False
+    # Extra route cost (in tiles) charged for stepping onto a hazard tile in the hazard-
+    # aware compass field. Higher = wider detours around hazards; must stay finite so a
+    # hazard-only corridor remains routable rather than infinitely avoided.
+    CRYSTAL_CAVES_GEO_COMPASS_HAZARD_COST: float = 8.0
+    # Enemy-motion perception (RUN-22 survival lever): append per-enemy metadata for the
+    # nearest few enemies VISIBLE INSIDE the perception window — [present, dx, dy, vx,
+    # is_flyer] each. A single-frame tile window cannot distinguish an enemy moving toward
+    # vs away from the player (the killed-dominant failure mode of RUN-20/21), and a human
+    # player watching the screen DOES see motion — so this is fair perception, not an
+    # oracle: enemies outside the window contribute nothing. Off by default; A/B lever.
+    CRYSTAL_CAVES_ENEMY_MOTION: bool = False
     # Use a convolutional Q-network that reads the perception window as a 2D grid
     # (the right architecture for the spatial rich state). Requires the game to set
     # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.
@@ -113,6 +147,11 @@ class Config:
     # Spatial layout of the state vector (window/gmap/meta dims), published by the
     # game at runtime so a CNN can reshape the flat state. None for non-spatial games.
     STATE_LAYOUT: Optional[dict] = None
+    # SpatialDQN: global-average-pool the conv feature map instead of flattening it.
+    # Flatten preserves absolute tile position (memorizes layouts); GAP is translation-
+    # invariant and is the standard ProcGen fix for the train-solves/test-fails gap.
+    # Off by default (keeps current behavior); a generalization experiment lever.
+    CRYSTAL_CAVES_CNN_GLOBAL_POOL: bool = False
     # Objective/threat budget for generated caves: "easy" is a learnable
     # curriculum floor (2-3 crystals, no hazards/enemies); "normal" is the full
     # game (10-14 crystals + hazards + enemies).
@@ -136,6 +175,11 @@ class Config:
     # progress (whose component weights sum to 1.0). Small enough that collecting an
     # objective always nets a positive shaped step despite the target-switch dip.
     CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT: float = 0.3
+    # Apply the geodesic route-shaping ONLY after the exit unlocks (i.e. only for
+    # leg 2: route-to-exit), leaving leg 1 (find+collect) on its normal, working
+    # approach reward. Targets the collect->exit conversion wall without the
+    # learnability hit dense geodesic caused when it also shaped pre-collection.
+    CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK: bool = False
     # Show the still-locked exit in the coarse global objective map (at a distinct,
     # lower value than the unlocked exit) so the agent can learn the route to it before
     # the last crystal is collected, instead of the exit appearing only at unlock.
@@ -149,6 +193,68 @@ class Config:
     # Fraction of training resets that use a mid-solution start (in [0, 1]). A trainer
     # may anneal this toward 0 via CrystalCaves.set_reverse_curriculum_p().
     CRYSTAL_CAVES_REVERSE_CURRICULUM_P: float = 0.5
+    # Linear anneal of the reverse-curriculum probability down to 0.0 over the first
+    # N training episodes (then held at 0). A fixed p hurt held-out performance because
+    # half of training never saw the full-from-spawn task; annealing p -> 0 lets the
+    # policy finish on full-length episodes. 0 = no annealing (constant p, the legacy
+    # behaviour). Only takes effect when CRYSTAL_CAVES_REVERSE_CURRICULUM is on.
+    CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES: int = 0
+    # Reverse-curriculum follow-up: also RELOCATE the player toward the remaining
+    # objectives on a mid-solution start, shortening the navigation horizon. The
+    # destination is verified with the jump-aware reachability oracle so every
+    # relocated start can still reach all remaining objectives + the exit (falls back
+    # to the spawn if no verified tile is found). Requires REVERSE_CURRICULUM on.
+    # Separate flag so it can be A/B'd independently of the base reverse curriculum.
+    CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE: bool = False
+    # Reverse-EXIT curriculum (leg-2 practice): on a fraction of TRAINING resets, begin
+    # the episode already in the post-collection state — all crystals collected, every
+    # gate open, exit unlocked — with the player dropped on a safe standing tile near the
+    # open exit (jump-aware oracle-verified reachable). This gives dense, isolated reps of
+    # the documented WALL: the collect->exit conversion / route-to-exit skill the leg-2
+    # probe measured at ~0.5 held-out. Distinct from the base reverse curriculum (which
+    # keeps SOME crystals); this clears ALL of them to drill only the final exit hop.
+    # Solvability-preserving (a subset/empty objective set with all doors open is always
+    # reachable from a spawn that could clear the full level); never applied during eval.
+    CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM: bool = False
+    # Fraction of training resets that use the reverse-exit (near-open-exit) start, [0, 1].
+    CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P: float = 0.5
+    # FAR variant: instead of hugging the exit (which only drills the trivial final hop the
+    # agent already aces, ~0.73 held-out), drop the player on a random reachable tile a real
+    # distance from the exit. RUN-11 showed the actual wall is long-range route-to-exit
+    # navigation (FAR probe ~0.12), so this drills the genuinely-missing skill. Requires
+    # CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM on; a separate flag so NEAR vs FAR can be A/B'd.
+    CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR: bool = False
+    # NGU-style episodic novelty bonus: a small per-step intrinsic reward for reaching
+    # a (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen THIS
+    # episode, decaying as 1/sqrt(visits). Attacks the "stops reaching new cells ->
+    # times out" failure. Off by default; an experiment lever (flows through n-step).
+    # Reward calibration (RUN-23): death/hit penalties were hardcoded (-12 / -3) and
+    # tuned for the ~10-14-crystal generated levels. The hand-crafted set holds 30-34
+    # crystals (+150+ potential), so death's RELATIVE cost collapsed — dying costs less
+    # than three crystals, making reckless play rational. Knobs so the scale can be A/B'd.
+    CRYSTAL_CAVES_DEATH_PENALTY: float = -12.0
+    CRYSTAL_CAVES_HIT_PENALTY: float = -3.0
+    CRYSTAL_CAVES_NGU_BONUS: bool = False
+    CRYSTAL_CAVES_NGU_BETA: float = 0.02
+    # Truncation-aware bootstrapping (Pardo et al. 2018, "Time Limits in RL").
+    # When an episode ends only because it hit a time/no-progress cutoff ("timeout"
+    # or "stalled") rather than a real environment terminal ("won"/"killed"), the
+    # stored transition is marked NOT done so the TD target still bootstraps the
+    # value of the final state. The episode is still reset normally. This stops the
+    # agent from learning that "the clock running out" is a real terminal worth
+    # value 0, which otherwise drags Q-values down. Off by default; an A/B lever.
+    # Only affects the vectorized training path (the one Crystal Caves uses).
+    CRYSTAL_CAVES_TRUNCATION_BOOTSTRAP: bool = False
+    # Infinite-levels training (ProcGen's dominant generalization lever): when on,
+    # each TRAINING reset generates a fresh procedural cave (seed offset 1_000_000+,
+    # disjoint from the fixed pool at offset 0 and the held-out eval block at offset
+    # 500000) instead of sampling the fixed pool. Eval is unaffected. Off by default.
+    CRYSTAL_CAVES_REGENERATE_EACH_EPISODE: bool = False
+    # Drop level-identity / absolute-position features from the observation that let
+    # the agent MEMORISE rather than generalise: zeroes the level_index slot (a pure
+    # train-set ID) and the absolute player_x/player_y slots, keeping the egocentric
+    # window + target compass. Shape-preserving (zeroed, not removed). Off by default.
+    CRYSTAL_CAVES_DROP_LEAK_FEATURES: bool = False
 
     # =========================================================================
     # SCREEN SETTINGS
@@ -341,6 +447,11 @@ class Config:
     # Too low: very slow learning
     # Typical range: 0.0001 to 0.001
     LEARNING_RATE: float = 0.0001
+
+    # L2 weight decay (Adam). 0 = off (default). A small value (e.g. 1e-4) is a
+    # standard regularizer against memorization in procedurally generated tasks;
+    # exposed as an experiment lever for the Crystal Caves generalization work.
+    WEIGHT_DECAY: float = 0.0
 
     # Discount factor (gamma) - How much to value future rewards
     # 0.99 = far-sighted, considers distant future
@@ -726,6 +837,7 @@ class Config:
     def __post_init__(self):
         """Validation and derived calculations."""
         self._require(self.LEARNING_RATE > 0, "Learning rate must be positive")
+        self._require(self.WEIGHT_DECAY >= 0, "Weight decay must be non-negative")
         self._require(0 < self.GAMMA <= 1, "Gamma must be in (0, 1]")
         self._require(self.MEMORY_SIZE > 0, "Memory size must be positive")
         self._require(self.BATCH_SIZE > 0, "Batch size must be positive")
@@ -770,6 +882,19 @@ class Config:
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_CURRICULUM_P <= 1.0,
             "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
+        )
+        self._require(
+            0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,
+            "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P must be in [0, 1]",
+        )
+        self._require(
+            isinstance(self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES, int)
+            and self.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES >= 0,
+            "CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES must be a non-negative integer",
+        )
+        self._require(
+            math.isfinite(self.CRYSTAL_CAVES_NGU_BETA) and self.CRYSTAL_CAVES_NGU_BETA >= 0,
+            "CRYSTAL_CAVES_NGU_BETA must be finite and non-negative",
         )
         self._require(self.SCREEN_WIDTH > 0, "Screen width must be positive")
         self._require(self.SCREEN_HEIGHT > 0, "Screen height must be positive")

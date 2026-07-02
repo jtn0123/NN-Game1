@@ -877,7 +877,9 @@ def _near_miss_rollup_as_eval_payload(
         "num_games": games,
         "wins": wins,
         "win_rate": float(rollup.get("win_rate", 0.0) or 0.0),
-        "mean_crystal_frac": float(rollup.get("any_crystal_rate", 0.0) or 0.0),
+        # Audit R2-B: the TRUE mean collection fraction, not any_crystal_rate (collected-≥1),
+        # which over-reported multi-crystal collection into promotion/scorecard/reports.
+        "mean_crystal_frac": float(rollup.get("mean_crystal_frac", 0.0) or 0.0),
         "mean_depth_frac": float(rollup.get("mean_depth_frac", 0.0) or 0.0),
         "mean_score": float(np.mean(row_scores)) if row_scores else 0.0,
         "median_score": float(np.median(row_scores)) if row_scores else 0.0,

@@ -6,6 +6,15 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    # Audit R2-D: make CUDA TRAINING reproducible too — torch.manual_seed alone cannot
+    # control nondeterministic atomic-add backward kernels, so two same-seed sweeps on a GPU
+    # box can train different policies and flip near-zero A/B deltas run-to-run. warn_only so
+    # ops without a deterministic impl warn instead of hard-erroring; no-op on CPU/MPS.
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def timestamp_id(label: str) -> str:

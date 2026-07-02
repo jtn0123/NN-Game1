@@ -108,6 +108,95 @@ class TestPrioritizedNStepReplayBuffer:
         assert buffer._size == 3
         assert buffer.n_step_lengths[:3].tolist() == [3, 2, 1]
 
+    def test_truncation_bootstrap_stores_non_terminal_and_flushes(self, state_size: int) -> None:
+        """A truncated env stores done=False (bootstrap) but still flushes its trajectory."""
+        buffer = PrioritizedNStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.5,
+        )
+
+        # Two ongoing steps, then a step that ends the episode by TIMEOUT (truncated).
+        for step in range(2):
+            states = np.ones((1, state_size), dtype=np.float32) * step
+            buffer.push_batch(
+                states,
+                np.array([0]),
+                np.array([1.0]),
+                states + 1,
+                np.array([False]),
+                truncateds=np.array([False]),
+            )
+        # The truncated terminal step: dones=True but truncateds=True.
+        last = np.ones((1, state_size), dtype=np.float32) * 2
+        buffer.push_batch(
+            last,
+            np.array([0]),
+            np.array([4.0]),
+            last + 1,
+            np.array([True]),
+            truncateds=np.array([True]),
+        )
+
+        # All three transitions flushed (env reset boundary), so nothing bridges forward.
+        assert buffer._size == 3
+        assert len(buffer._env_buffers[0]) == 0
+        # None are stored as terminal — every transition bootstraps its final state.
+        assert np.all(buffer.dones[:3] == 0.0)
+        # The first transition accumulated the full 3-step return because no step in the
+        # trajectory was treated as terminal: 1.0 + 0.5*1.0 + 0.25*4.0 = 2.5.
+        assert buffer.rewards[0] == pytest.approx(2.5)
+        assert buffer.n_step_lengths[0] == 3
+
+    def test_real_terminal_still_stops_bootstrap(self, state_size: int) -> None:
+        """Without truncated, a real terminal keeps done=True and cuts the n-step return."""
+        buffer = PrioritizedNStepReplayBuffer(
+            capacity=100,
+            state_size=state_size,
+            n_steps=3,
+            gamma=0.5,
+        )
+
+        for step in range(2):
+            states = np.ones((1, state_size), dtype=np.float32) * step
+            buffer.push_batch(
+                states,
+                np.array([0]),
+                np.array([1.0]),
+                states + 1,
+                np.array([False]),
+            )
+        last = np.ones((1, state_size), dtype=np.float32) * 2
+        buffer.push_batch(
+            last,
+            np.array([0]),
+            np.array([4.0]),
+            last + 1,
+            np.array([True]),
+        )
+
+        assert buffer._size == 3
+        # Every transition's n-step return ends at the real terminal, so all bootstrap
+        # to a terminal (done=True) — the exact opposite of the truncated case above,
+        # where the same trajectory stores done=False so the value still bootstraps.
+        assert np.all(buffer.dones[:3] == 1.0)
+
+    def test_push_batch_rejects_misshaped_truncateds(self, state_size: int) -> None:
+        """A truncated mask whose length does not match the batch must raise, never
+        silently misalign env terminal flags."""
+        buffer = PrioritizedNStepReplayBuffer(capacity=100, state_size=state_size, n_steps=3)
+        states = np.ones((2, state_size), dtype=np.float32)
+        with pytest.raises(ValueError, match="truncateds length mismatch"):
+            buffer.push_batch(
+                states,
+                np.array([0, 1]),
+                np.array([1.0, 1.0]),
+                states + 1,
+                np.array([False, False]),
+                truncateds=np.array([False]),  # too short
+            )
+
     def test_prioritized_n_step_updates_priorities(self, state_size):
         """Priority updates should work for computed N-step transitions."""
         buffer = PrioritizedNStepReplayBuffer(capacity=100, state_size=state_size, n_steps=2)

@@ -885,6 +885,40 @@ def test_apply_reverse_exit_start_unlocks_exit_near_target(tmp_path):
         game.close()
 
 
+def test_apply_reverse_exit_far_start_is_distant_and_reachable(tmp_path):
+    """The FAR reverse-exit start clears+unlocks like the near one, but drops the agent
+    a real distance from the exit (long-range navigation) with the exit still oracle-
+    reachable — so the leg-2 probe measures routing, not the trivial final hop."""
+    cfg = full_tutorial_config(
+        tmp_path / "reverse-exit-far",
+        episodes=1,
+        seed=0,
+        eval_every=0,
+        train_eval_games=0,
+        log_every=1,
+        report_seconds=1.0,
+    )
+    cfg.CRYSTAL_CAVES_PROCEDURAL = False
+    game = ReverseStartCrystalCavesVec(
+        full_config=cfg,
+        full_envs=1,
+        reverse_envs=1,
+        headless=True,
+    ).envs[0]
+
+    try:
+        assert apply_reverse_start(game, "reverse_exit_far") is True
+        assert game.exit_unlocked is True
+        assert len(game.crystals) == 0
+        # Same post-collection world state, but a genuinely distant, reachable start.
+        col, row = game._player_tile()
+        assert game.exit_pos in game._oracle_reachable((col, row))
+        exit_col, exit_row = game.exit_pos
+        assert abs(col - exit_col) + abs(row - exit_row) >= 4
+    finally:
+        game.close()
+
+
 def test_archive_start_vec_env_stores_and_replays_full_milestones(tmp_path):
     """Archive lanes should replay deep-copied milestones discovered by full lanes."""
     cfg = full_tutorial_config(

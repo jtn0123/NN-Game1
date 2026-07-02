@@ -28,6 +28,21 @@ from typing import Any, Dict, List
 import numpy as np
 
 
+def final_target_progress(distances: List[float]) -> float:
+    """Closeness to the agent's CURRENT objective at the FINAL step, normalized by the
+    initial distance. Uses the terminal distance, NOT the best-ever minimum (audit B2):
+    the target re-aims the instant the first objective is touched, so min() saturated to
+    ~1.0 progress regardless of later behavior and corrupted keep-best/plateau selection.
+    1.0 = ended on the objective; 0.0 = ended at/beyond the start distance."""
+    if not distances:
+        return 0.0
+    initial = distances[0]
+    final = distances[-1]
+    if initial > 1e-6:
+        return float(np.clip(1.0 - final / initial, 0.0, 1.0))
+    return 1.0 if final <= 1e-6 else 0.0
+
+
 @dataclass
 class EvalResults:
     """Results from a deterministic evaluation run."""
@@ -194,13 +209,9 @@ class Evaluator:
                     depth_fracs.append(float(parts.get("depth_frac", 0.0) or 0.0))
                 exit_unlocked_rates.append(1.0 if info.get("exit_unlocked", False) else 0.0)
                 if target_distances:
-                    initial_distance = target_distances[0]
-                    min_distance = min(target_distances)
-                    if initial_distance > 1e-6:
-                        progress = 1.0 - min_distance / initial_distance
-                        target_distance_progress.append(float(np.clip(progress, 0.0, 1.0)))
-                    else:
-                        target_distance_progress.append(1.0 if min_distance <= 1e-6 else 0.0)
+                    # Audit B2: FINAL-step closeness, not best-ever min (which saturated on
+                    # the first objective and corrupted keep-best/plateau).
+                    target_distance_progress.append(final_target_progress(target_distances))
                 reason = str(info.get("end_reason", "") or "")
                 if not reason or reason == "running":
                     reason = "won" if won else ("timeout" if steps >= max_steps else "ended")

@@ -79,6 +79,13 @@ class CrystalCavesGeometryMixin:
         rect.y += self.gravity_dir
         return self._rect_collides_solid(rect)
 
+    def _is_on_ladder(self: Any) -> bool:
+        return any(
+            (col, row) in self.ladders or self.grid[row][col] == self.ELEVATOR
+            for col, row in self._tiles_for_rect(self._player_rect())
+            if 0 <= col < self.level_cols and 0 <= row < self.level_rows
+        )
+
     def _refresh_elevator_rects(self: Any) -> None:
         ts = self.TILE_SIZE
         self._elevator_solid = [
@@ -128,6 +135,7 @@ class CrystalCavesGeometryMixin:
             grid[r, c] = tc[self.CRYSTAL]
         for c, r in self.hazards:
             grid[r, c] = tc[self.hazard_kinds.get((c, r), self.SPIKE)]
+        grid[self._ladder_mask] = tc[self.LADDER]
         grid[self._elevator_mask] = tc[self.ELEVATOR]
         grid[self._wall_mask] = tc[self.SOLID]
         for c, r in self.doors:
@@ -170,6 +178,8 @@ class CrystalCavesGeometryMixin:
 
         if self._solid_at(col, row):
             return self.TILE_CODES[self.DOOR] if tile in self.doors else self.TILE_CODES[self.SOLID]
+        if self.grid[row][col] == self.LADDER:
+            return self.TILE_CODES[self.LADDER]
         if self.grid[row][col] == self.ELEVATOR:
             return self.TILE_CODES[self.ELEVATOR]
         if tile in self.hazards:

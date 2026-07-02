@@ -9,9 +9,10 @@ live in sibling mixin modules to keep each file focused and under budget.
 
 from __future__ import annotations
 
+import heapq
 import warnings
 from collections import deque
-from typing import Deque, Dict, List, Optional, Set, Tuple
+from typing import Deque, Dict, List, Mapping, Optional, Set, Tuple
 
 import numpy as np
 import pygame
@@ -89,10 +90,22 @@ class CrystalCaves(
     BASE_METADATA_SIZE = 20
     METADATA_SIZE = BASE_METADATA_SIZE
     HISTORY_FEATURES_PER_STEP = 7
+    # Geodesic corridor-compass scalars: [step_dx, step_dy, reachable, geo_dist_norm].
+    GEO_COMPASS_FEATURES = 4
+    # Enemy-motion perception: per tracked visible enemy [present, dx, dy, vx, is_flyer].
+    ENEMY_MOTION_MAX_TRACKED = 3
+    ENEMY_MOTION_FEATURES = ENEMY_MOTION_MAX_TRACKED * 5
+    ENEMY_MOTION_MAX_SPEED = 2.0  # normalisation bound; flyers move at 1.6 px/frame
     MAX_HEALTH = 3
     MAX_AMMO_FOR_STATE = 20
     MAX_STEPS = 3000
     MAX_STEPS_WITHOUT_PROGRESS = 720
+    # Most candidate standing tiles to oracle-verify when relocating the player for the
+    # reverse curriculum (closest-to-objective first); bounds the per-reset BFS cost.
+    REVERSE_RELOCATE_MAX_CANDIDATES = 48
+    # Min Manhattan distance (tiles) from the exit for a FAR reverse-exit curriculum start,
+    # so the drill trains real long-range navigation rather than the trivial final hop.
+    REVERSE_EXIT_CURRICULUM_FAR_MIN_DIST = 6
     MAX_POWER_TIMER = 420
 
     # Completion-progress potential (0..1); shaping uses PBRS with terminal Phi=0.
@@ -156,6 +169,7 @@ class CrystalCaves(
     SPIKE = "^"
     ACID = "~"
     ELEVATOR = "="
+    LADDER = "H"
     PLAYER = "P"
     CAVES: Tuple[CaveSpec, ...] = _CAVES
     CAVE_DRESSING: Dict[int, Tuple[DressingPiece, ...]] = _CAVE_DRESSING
@@ -178,6 +192,7 @@ class CrystalCaves(
         SPIKE: 0.96,
         ACID: 0.98,
         ELEVATOR: 0.52,
+        LADDER: 0.50,
         CRAWLER: 0.62,
         FLYER: 0.66,
         PLAYER: 1.0,
@@ -185,6 +200,8 @@ class CrystalCaves(
 
     # Elevator platform speed (tiles per physics step).
     ELEVATOR_SPEED = 0.06
+    LADDER_CLIMB_SPEED = 3.1
+    LADDER_DESCEND_SPEED = 2.0
 
     # Colour-keyed lever/door pairs: a lever opens only the door of its colour.
     DOOR_COLOR_OF: Dict[str, str] = {DOOR: "red", DOOR2: "blue"}
@@ -220,7 +237,36 @@ class CrystalCaves(
             else 0
         )
         self._history_metadata_size = self._history_steps * self.HISTORY_FEATURES_PER_STEP
-        self.METADATA_SIZE = self.BASE_METADATA_SIZE + self._history_metadata_size
+        # Geodesic corridor compass (RUN-11 nav fix): appended metadata scalars pointing
+        # down the real traversable route toward the active objective.
+        self._geo_compass_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS", False))
+        self._geo_compass_size = self.GEO_COMPASS_FEATURES if self._geo_compass_enabled else 0
+        # Hazard-aware routing for the compass (RUN-17 survival lever): route around static
+        # hazards instead of through them. Reads a separate weighted field, same dims.
+        self._geo_compass_hazard_aware = bool(
+            getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE", False)
+        )
+        self._geo_compass_hazard_cost = float(
+            getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS_HAZARD_COST", 8.0)
+        )
+        # Enemy-motion perception (RUN-22 survival lever): motion scalars for the nearest
+        # enemies INSIDE the perception window only — fair, screen-limited information.
+        self._enemy_motion_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_ENEMY_MOTION", False))
+        self._enemy_motion_size = self.ENEMY_MOTION_FEATURES if self._enemy_motion_enabled else 0
+        self.METADATA_SIZE = (
+            self.BASE_METADATA_SIZE
+            + self._geo_compass_size
+            + self._enemy_motion_size
+            + self._history_metadata_size
+        )
+        # Op 2 (learnable route): the geodesic next-step direction rides in TRAILING label
+        # slots, sliced off before the policy input (network reads STATE_LAYOUT["route_label"])
+        # so the policy can't see it; an aux head learns to PREDICT it from the rest of the
+        # observation. Distinct from the fed geo-compass: label-only, dropped at action time.
+        self._route_aux_geodesic = bool(
+            getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC", False)
+        )
+        self._route_label_dims = self.GEO_COMPASS_FEATURES if self._route_aux_geodesic else 0
 
         # Publish the spatial layout so a convolutional network (USE_CNN_STATE) can
         # reshape the flat state into the perception window + global map + metadata.
@@ -228,6 +274,9 @@ class CrystalCaves(
             "window": (self.WINDOW_ROWS, self.WINDOW_COLS),
             "gmap": (self.GLOBAL_MAP_ROWS, self.GLOBAL_MAP_COLS),
             "meta": self.METADATA_SIZE,
+            # Trailing label slots (Op 2): not part of the policy input — the network
+            # slices them off; only the route-aux head's target reads them.
+            "route_label": self._route_label_dims,
         }
 
         self.level_index = 0
@@ -244,12 +293,25 @@ class CrystalCaves(
         self._reverse_curriculum_p = float(
             getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_P", 0.0)
         )
+        # Per-episode NGU episodic-novelty visit counts, keyed by
+        # (tile_x, tile_y, crystals_remaining, switches_used).
+        self._ngu_visits: Dict[Tuple[int, int, int, int], int] = {}
         self._eval_mode = False
         self._eval_caves: Tuple[CaveSpec, ...] = ()
         self._eval_cursor = 0
+        self._eval_source = ""  # which set _eval_caves holds (stale-cache guard)
         # Drill mode: replace the cave set with the hand-authored single-skill drills
         # (for skill diagnostics and motor-skill pre-training). Takes precedence.
-        if getattr(self.config, "CRYSTAL_CAVES_DRILLS", False):
+        if getattr(self.config, "CRYSTAL_CAVES_IMPORTED", False):
+            # Hand-crafted Crystal-Caves-style levels, every one certified winnable by
+            # the physics-faithful reachability oracle (experiments/cc_status/level_reach).
+            # Replaces the procedural generator with a small, fair, fully-playable set.
+            from .crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS
+
+            self.CAVES = HANDCRAFTED_LEVELS
+            self.CAVE_DRESSING = {i: () for i in range(len(HANDCRAFTED_LEVELS))}
+            self._randomize_levels = len(HANDCRAFTED_LEVELS) > 1
+        elif getattr(self.config, "CRYSTAL_CAVES_DRILLS", False):
             from .crystal_caves_drills import DRILL_CAVES
 
             self.CAVES = DRILL_CAVES
@@ -318,6 +380,12 @@ class CrystalCaves(
             self.CAVE_DRESSING = {i: () for i in range(count)}
             # Sample a random cave per episode once the pool has variety to offer.
             self._randomize_levels = pool_size > 0 and count > 1
+        # Infinite-levels lever: counter for the per-episode regenerated training seed.
+        self._train_gen_counter = 0
+        # Cache the de-leak flag (read every step in get_state).
+        self._drop_leak_features = bool(
+            getattr(self.config, "CRYSTAL_CAVES_DROP_LEAK_FEATURES", False)
+        )
         self.level: CaveSpec = self.CAVES[0]
         self.grid: List[List[str]] = []
         self.level_cols = 0
@@ -352,6 +420,8 @@ class CrystalCaves(
         self.show_controls = False
         self.show_agent_overlay = False  # educational: draw the agent's view + goal
         self._end_reason = "running"
+        self._last_damage_source = "none"
+        self._won_level_index = self.level_index  # Audit B9: level actually played this episode
         self._max_depth_row = 0
         self._progress = 0.0
         self._progress_initial = 0.0
@@ -359,10 +429,18 @@ class CrystalCaves(
         self._progress_phi = 0.0
         self._geodesic_field: Optional[Dict[Tuple[int, int], int]] = None
         self._geodesic_field_key: Optional[Tuple] = None
+        self._hazard_field: Optional[Dict[Tuple[int, int], float]] = None
+        self._hazard_field_key: Optional[Tuple] = None
         self._visited_obj_cells: Set[Tuple[int, int]] = set()  # AI-2
         self._obj_region_total = 0.0  # AI-2
         self._visited_novelty_cells: Set[Tuple[int, int]] = set()
         self._novelty_bonus_total = 0.0
+        # Movement telemetry (RUN-23): hits taken, distinct tiles touched, idle steps —
+        # lets the report show HOW the agent moves, not just how episodes end.
+        self._damage_taken = 0
+        self._tiles_visited: Set[Tuple[int, int]] = set()
+        self._idle_steps = 0
+        self._prev_step_tile: Optional[Tuple[int, int]] = None
         self._anti_loop_tile: Optional[Tuple[int, int]] = None
         self._anti_loop_same_tile_steps = 0
         self._anti_loop_no_approach_steps = 0
@@ -385,6 +463,7 @@ class CrystalCaves(
         self.air_tanks: Set[Tuple[int, int]] = set()
         self.enemies: List[Enemy] = []
         self.elevators: List[Elevator] = []
+        self.ladders: Set[Tuple[int, int]] = set()
         self._elevator_solid: List[pygame.Rect] = []  # platform collision rects
         self.bullets: List[Bullet] = []
         self.visual_events: List[VisualEvent] = []
@@ -421,6 +500,7 @@ class CrystalCaves(
             self.WINDOW_COLS * self.WINDOW_ROWS
             + self.GLOBAL_MAP_COLS * self.GLOBAL_MAP_ROWS
             + self.METADATA_SIZE
+            + getattr(self, "_route_label_dims", 0)
         )
 
     @property
@@ -447,15 +527,51 @@ class CrystalCaves(
 
     def use_eval_levels(self, count: int) -> None:
         """Switch this instance into evaluation mode: reset() will deterministically
-        cycle a fixed HELD-OUT set of ``count`` caves (disjoint from the training
-        pool, identical across calls) so eval measures generalisation, not memory.
-        No-op for authored (non-procedural) caves, which are already a fixed set."""
-        if self._proc_params is None or count <= 0:
+        cycle a fixed set of caves in order. Procedural games build a HELD-OUT set of
+        ``count`` caves (disjoint seed offset — eval measures generalisation, not
+        memory). Authored/imported games cycle their own fixed CAVES: previously this
+        was a silent NO-OP, which left "eval" sampling levels randomly WITH
+        replacement and left training-only curriculum starts un-gated (eval-hygiene
+        audit finding #1)."""
+        if count <= 0:
+            return
+        if self._proc_params is None:
+            if not self.CAVES:
+                return
+            n = min(count, len(self.CAVES))
+            self._set_eval_caves(tuple(self.CAVES[:n]), source=f"authored:{n}")
             return
         # Build once; the seed range (offset 500000) is disjoint from the training
         # pool's offset-0 range, so these levels are never seen during training.
-        if len(self._eval_caves) != count:
-            self._eval_caves = self._build_cave_set(count, seed_offset=500000)
+        if self._eval_source != f"heldout:{count}":
+            self._set_eval_caves(
+                self._build_cave_set(count, seed_offset=500000), source=f"heldout:{count}"
+            )
+        else:
+            self._eval_mode = True
+            self._eval_cursor = 0
+
+    def use_train_levels(self, count: int) -> None:
+        """Switch into deterministic eval mode but over the TRAINING pool itself --
+        the caves the agent actually learned on. Lets us measure the train-vs-held-out
+        generalisation gap (train score >> held-out score => memorisation; both low =>
+        the agent never learned the skill). Cycles the first ``count`` training caves
+        in a fixed order, like use_eval_levels but WITHOUT the held-out seed offset.
+        For authored/imported games the train set IS the fixed set, so this equals
+        use_eval_levels."""
+        if count <= 0 or not self.CAVES:
+            return
+        n = min(count, len(self.CAVES))
+        self._set_eval_caves(tuple(self.CAVES[:n]), source=f"train:{n}")
+
+    def _set_eval_caves(self, caves: Tuple[CaveSpec, ...], *, source: str) -> None:
+        """Enter eval mode over ``caves``. Tracks the SOURCE of the current eval set so
+        switching between train/held-out/authored sets rebuilds instead of silently
+        reusing a stale cache (the old guard compared only len(), so use_train_levels
+        followed by use_eval_levels of the same count kept the wrong caves)."""
+        if self._eval_source != source:
+            self._eval_caves = caves
+            self._eval_source = source
         self._eval_mode = True
         self._eval_cursor = 0
 
@@ -468,10 +584,20 @@ class CrystalCaves(
         """Reset and return the initial state. In eval mode, deterministically cycle
         the held-out caves; in training with a pool, sample a random cave; otherwise
         fall back to the legacy CAVES[level_index] behaviour."""
+        regenerate = self._proc_params is not None and bool(
+            getattr(self.config, "CRYSTAL_CAVES_REGENERATE_EACH_EPISODE", False)
+        )
         if self._eval_mode and self._eval_caves:
             self.level_index = self._eval_cursor % len(self._eval_caves)
             self.level = self._eval_caves[self.level_index]
             self._eval_cursor += 1
+        elif regenerate:
+            # Infinite-levels: a brand-new procedural cave every training episode.
+            # Seed offset 1_000_000+ is disjoint from the fixed pool (offset 0) and
+            # the held-out eval block (offset 500000), so eval stays a true holdout.
+            self.level = self._build_cave_set(1, seed_offset=1_000_000 + self._train_gen_counter)[0]
+            self.level_index = 0
+            self._train_gen_counter += 1
         elif self._randomize_levels and len(self.CAVES) > 1:
             self.level_index = int(np.random.randint(len(self.CAVES)))
             self.level = self.CAVES[self.level_index]
@@ -508,6 +634,7 @@ class CrystalCaves(
         # Applied before the progress/closeness baselines so they reflect the start.
         if not self._eval_mode:
             self._apply_reverse_curriculum_start()
+            self._apply_reverse_exit_curriculum_start()
 
         # Completion-progress tracker (deepest row reached + PBRS potential).
         self._max_depth_row = self._player_tile()[1]
@@ -516,17 +643,29 @@ class CrystalCaves(
         # Invalidate the geodesic cache for the new level before computing closeness.
         self._geodesic_field = None
         self._geodesic_field_key = None
+        self._hazard_field = None
+        self._hazard_field_key = None
         # Capture initial closeness BEFORE the first PBRS potential so the geodesic
         # term (like the base term) telescopes to exactly 0 over a full episode.
         self._closeness_initial = self._target_closeness()
         self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
         self._end_reason = "running"
+        self._last_damage_source = "none"
+        self._won_level_index = self.level_index
         self._visited_obj_cells = set()
         self._obj_region_total = 0.0
         self._visited_novelty_cells = set()
         self._novelty_bonus_total = 0.0
+        self._damage_taken = 0
+        self._tiles_visited = set()
+        self._idle_steps = 0
+        self._prev_step_tile = None
+        self._ngu_visits = {}
         self._remember_current_novelty_cell()
         self._target_best_distances: Dict[Tuple[str, int, int], float] = {}
+        # Audit B8: closest-ever distance per target for the STALL timer (separate from the
+        # reward's best-distance map), so the stall timer resets only on NET progress.
+        self._stall_best: Dict[Tuple[str, int, int], float] = {}
         self._anti_loop_tile = None
         self._anti_loop_same_tile_steps = 0
         self._anti_loop_no_approach_steps = 0
@@ -580,12 +719,22 @@ class CrystalCaves(
         reward += self._collect_pickups()
         reward += self._update_bullets()
         reward += self._update_enemies()
-        reward += self._check_player_danger()
+        # Exit BEFORE danger: on the frame where the player both reaches the open exit
+        # and takes a fatal hit, score the win. The old order ruled it a death, while
+        # the first-crystal-goal win (inside _collect_pickups) already beat a same-frame
+        # death — the precedence between the two win mechanisms was inconsistent
+        # (metric-audit finding #7).
         reward += self._check_exit()
+        reward += self._check_player_danger()
         reward += self._target_progress_reward(previous_target, previous_distance)
         reward += self._anti_loop_penalty(previous_target, previous_distance)
 
-        self._max_depth_row = max(self._max_depth_row, self._player_tile()[1])
+        current_tile = self._player_tile()
+        self._tiles_visited.add(current_tile)
+        if current_tile == self._prev_step_tile:
+            self._idle_steps += 1
+        self._prev_step_tile = current_tile
+        self._max_depth_row = max(self._max_depth_row, current_tile[1])
 
         # AI-2: reward reaching a new region that holds a known uncollected objective
         region_bonus = self._objective_region_reward()
@@ -607,6 +756,7 @@ class CrystalCaves(
             reward -= 6.0
 
         reward += self._progress_shaping_reward(previous_progress_phi)
+        reward += self._ngu_bonus()
 
         self._record_history_step(action, previous_target, previous_distance)
         return self.get_state(), float(reward), self.game_over, self._info()
@@ -615,8 +765,13 @@ class CrystalCaves(
         """Monotonic 0..1 completion potential and its components — how close the
         player is to clearing the cave (collect all crystals, throw the switch,
         reach the exit). Drives progress reward shaping and info['progress']."""
-        total = max(1, self.initial_crystals)
-        crystal_frac = (self.initial_crystals - len(self.crystals)) / total
+        if self.initial_crystals == 0:
+            # A crystal-free cave is vacuously fully-collected (the exit is open from
+            # the start); the old max(1,..) denominator pinned it to 0 forever
+            # (metric-audit finding #9). Constant within the episode, so PBRS-safe.
+            crystal_frac = 1.0
+        else:
+            crystal_frac = (self.initial_crystals - len(self.crystals)) / self.initial_crystals
         switch_done = 0.0 if (self.switches - self.used_switches) else 1.0
         span = max(1, self.level_rows - self.sky_rows - 1)
         depth_frac = float(np.clip((self._max_depth_row - self.sky_rows) / span, 0.0, 1.0))
@@ -627,10 +782,13 @@ class CrystalCaves(
             + self.PROGRESS_W_DEPTH * depth_frac
             + self.PROGRESS_W_WIN * won
         )
+        # Unrounded: these feed metric rows that are AVERAGED downstream; rounding per
+        # episode before the mean biased every aggregate and made the best-checkpoint
+        # crystal_frac tiebreak sensitive to 5e-4 artifacts (metric-audit finding #5).
         return phi, {
-            "crystal_frac": round(crystal_frac, 3),
+            "crystal_frac": float(crystal_frac),
             "switch_done": switch_done,
-            "depth_frac": round(depth_frac, 3),
+            "depth_frac": depth_frac,
             "won": won,
         }
 
@@ -645,11 +803,21 @@ class CrystalCaves(
             return 0.0
         progress = self._progress_potential()[0] if raw_progress is None else raw_progress
         phi = self.PROGRESS_REWARD_SCALE * (float(progress) - self._progress_initial)
-        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+        if self._geodesic_active():
             weight = float(getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT", 0.3))
             closeness = self._target_closeness()
             phi += self.PROGRESS_REWARD_SCALE * weight * (closeness - self._closeness_initial)
         return phi
+
+    def _geodesic_active(self) -> bool:
+        """Whether geodesic route-shaping applies on the CURRENT step. When
+        CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK is set it engages only after the exit
+        unlocks (leg 2 only), so leg 1 keeps its normal approach reward."""
+        if not getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+            return False
+        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_AFTER_UNLOCK", False):
+            return self.exit_unlocked
+        return True
 
     def _active_target_tiles(self) -> frozenset:
         """The phase-ordered objective tiles the closeness potential aims at:
@@ -696,6 +864,79 @@ class CrystalCaves(
         self._geodesic_field = field
         self._geodesic_field_key = key
         return field
+
+    def _hazard_aware_distance_field(self) -> Dict[Tuple[int, int], float]:
+        """Like ``_geodesic_distance_field`` but charges ``_geo_compass_hazard_cost`` extra
+        per step ONTO a hazard tile, so the route prefers a detour up to that many tiles
+        longer rather than walking the agent through spikes. Hazards stay PASSABLE (still
+        relaxed), so a hazard-only corridor remains routable and the objective never becomes
+        unreachable — it just costs more. A weighted multi-source Dijkstra (not BFS) because
+        edge costs are no longer uniform. Separate cache from the plain field, and used ONLY
+        by the compass observation; the PBRS shaping field (``_target_closeness``) is
+        deliberately left hazard-blind so this lever changes perception, not reward."""
+        key = (self._active_target_tiles(), frozenset(self.open_colors), frozenset(self.hazards))
+        if self._hazard_field is not None and self._hazard_field_key == key:
+            return self._hazard_field
+
+        hazard_cost = self._geo_compass_hazard_cost
+        dist: Dict[Tuple[int, int], float] = {}
+        heap: List[Tuple[float, int, int]] = []
+        for col, row in key[0]:
+            if not self._solid_at(col, row):
+                dist[(col, row)] = 0.0
+                heapq.heappush(heap, (0.0, col, row))
+        while heap:
+            d, col, row = heapq.heappop(heap)
+            if d > dist.get((col, row), float("inf")):
+                continue
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nc, nr = col + dc, row + dr
+                if self._solid_at(nc, nr):
+                    continue
+                step = 1.0 + (hazard_cost if (nc, nr) in self.hazards else 0.0)
+                nd = d + step
+                if nd < dist.get((nc, nr), float("inf")):
+                    dist[(nc, nr)] = nd
+                    heapq.heappush(heap, (nd, nc, nr))
+
+        self._hazard_field = dist
+        self._hazard_field_key = key
+        return dist
+
+    def _geodesic_next_step_compass(self) -> List[float]:
+        """Corridor compass: point down the actual traversable route toward the active
+        objective, vs the euclidean target compass (metadata 15-16) which points straight
+        through walls. Reads the cached geodesic field and steps toward the neighbour
+        with the lowest route-distance. Returns [step_dx, step_dy, reachable, geo_dist_norm]
+        — all a function of LOCAL connectivity, so it transfers to unseen layouts, and it is
+        computed identically at eval (a legitimate observation, not a memorisation leak).
+
+        When ``_geo_compass_hazard_aware`` is set the route is read from the hazard-weighted
+        field, so the suggested step detours around hazards instead of through them."""
+        field: Mapping[Tuple[int, int], float]
+        if self._geo_compass_hazard_aware:
+            field = self._hazard_aware_distance_field()
+        else:
+            field = self._geodesic_distance_field()
+        pcol, prow = self._player_tile()
+        here = field.get((pcol, prow))
+        if here is None:
+            # Objective not reachable from the player's tile (e.g. mid-jump over a gap).
+            return [0.0, 0.0, 0.0, 1.0]
+        best_dist = here
+        best_dc = best_dr = 0
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            nd = field.get((pcol + dc, prow + dr))
+            if nd is not None and nd < best_dist:
+                best_dist = nd
+                best_dc, best_dr = dc, dr
+        norm = max(1, self.level_cols + self.level_rows)
+        return [
+            float(np.sign(best_dc)),
+            float(np.sign(best_dr)),
+            1.0,
+            min(1.0, here / norm),
+        ]
 
     def _target_closeness(self) -> float:
         """Normalized 0..1 geodesic closeness to the current objective (1 = on it).
@@ -755,6 +996,171 @@ class CrystalCaves(
         self.open_colors = set(self.door_color.values())
         self.exit_unlocked = not self.crystals
 
+        # Follow-up lever: also relocate the player toward the remaining objectives to
+        # shorten the navigation horizon (oracle-verified so the start stays solvable).
+        if getattr(self.config, "CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE", False):
+            self._relocate_player_for_curriculum()
+
+    def _oracle_reachable(self, start: Tuple[int, int]) -> Set[Tuple[int, int]]:
+        """Jump-aware tiles reachable from ``start`` under the engine's physics, via the
+        generator's solvability oracle. Builds a char grid from the live tiles with the
+        current door state so the check matches what the agent can actually traverse."""
+        from .crystal_caves_gen import cave_reachable
+
+        rows: List[str] = []
+        for r in range(self.level_rows):
+            chars: List[str] = []
+            for c in range(self.level_cols):
+                tile = self.grid[r][c]
+                if tile == self.SOLID:
+                    chars.append("#")
+                elif tile == self.ELEVATOR:
+                    chars.append("=")
+                elif tile == self.LADDER:
+                    chars.append("H")
+                elif (c, r) in self.doors and not self._door_open((c, r)):
+                    chars.append("#")
+                else:
+                    chars.append(".")
+            rows.append("".join(chars))
+        return cave_reachable(rows, start, doors_open=True)
+
+    def _relocate_player_for_curriculum(self) -> None:
+        """Move the player to the standing tile closest to a remaining objective from
+        which the oracle confirms every remaining crystal AND the exit are reachable.
+        Falls back to the spawn (no move) if no such tile is found, so the start is
+        always solvable."""
+        targets = set(self.crystals) | {self.exit_pos}
+
+        def nearest_objective_sq(tile: Tuple[int, int]) -> int:
+            return min((tile[0] - oc) ** 2 + (tile[1] - orow) ** 2 for oc, orow in targets)
+
+        candidates = [
+            (c, r)
+            for r in range(self.level_rows)
+            for c in range(self.level_cols)
+            if not self._solid_at(c, r) and self._solid_at(c, r + 1)  # a standing tile
+        ]
+        candidates.sort(key=nearest_objective_sq)
+
+        for col, row in candidates[: self.REVERSE_RELOCATE_MAX_CANDIDATES]:
+            if targets <= self._oracle_reachable((col, row)):
+                self.player_x = col * self.TILE_SIZE + 5
+                self.player_y = row * self.TILE_SIZE + 1
+                return
+
+    def _safe_near_exit_tile(self, col: int, row: int) -> bool:
+        """True if (col, row) is a valid standing tile to drop the player on for a
+        reverse-exit start: in-bounds, not an objective/hazard/door/solid, has solid (or
+        elevator) footing below, and the player rect there does not clip a wall."""
+        if not (1 <= col < self.level_cols - 1 and 1 <= row < self.level_rows - 1):
+            return False
+        tile = (col, row)
+        if tile == self.exit_pos:
+            return False
+        if (
+            tile in self.crystals
+            or tile in self.switches
+            or tile in self.hazards
+            or tile in self.doors
+        ):
+            return False
+        if self._solid_at(col, row):
+            return False
+        if not self._solid_at(col, row + 1) and self.grid[row + 1][col] != self.ELEVATOR:
+            return False
+        rect = self._player_rect(col * self.TILE_SIZE + 5, row * self.TILE_SIZE + 1)
+        return not self._rect_collides_solid(rect)
+
+    def _place_player_at_curriculum_tile(self, col: int, row: int) -> None:
+        """Drop the player on (col, row) and reset kinematics for a reverse-exit start."""
+        exit_col, _ = self.exit_pos
+        self.player_x = col * self.TILE_SIZE + 5
+        self.player_y = row * self.TILE_SIZE + 1
+        self.vx = 0.0
+        self.vy = 0.0
+        self.facing = 1 if exit_col >= col else -1
+        self.grounded = self._is_on_surface()
+        self.coyote_timer = 6 if self.grounded else 0
+        self.steps_since_progress = 0
+
+    def _apply_reverse_exit_curriculum_start(self) -> None:
+        """Begin the episode in the post-collection state to drill the documented leg-2
+        wall: clear ALL crystals, open every gate, unlock the exit, and drop the player on
+        a safe oracle-verified standing tile (so the start is never an unwinnable pocket).
+
+        Placement mode (RUN-11 diagnosis): the NEAR variant hugs the exit, which only
+        drills the trivial final hop (the agent already aces it, ~0.73 held-out) — that
+        was RUN-10's null result. The FAR variant (CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR)
+        drops the player on a random reachable tile a real distance from the exit, drilling
+        the genuine long-range route-to-exit navigation the FAR probe measured at ~0.12 —
+        the actual wall. Solvability-preserving and training-only (gated to ``not eval``)."""
+        if not getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM", False):
+            return
+        p = float(getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P", 0.0))
+        if p <= 0.0 or np.random.random() >= p:
+            return
+
+        # Post-collection world state: nothing left but the exit, all gates open.
+        self.crystals.clear()
+        self.used_switches = set(self.switches)
+        self.open_colors = set(self.switch_color.values())
+        self.exit_unlocked = True
+
+        exit_col, exit_row = self.exit_pos
+        far = getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR", False)
+        if far:
+            # Random reachable standing tile a real distance away (drills navigation).
+            min_dist = int(getattr(self, "REVERSE_EXIT_CURRICULUM_FAR_MIN_DIST", 6))
+            pool: List[Tuple[int, int]] = []
+            near_pool: List[Tuple[int, int]] = []
+            for row in range(1, self.level_rows - 1):
+                for col in range(1, self.level_cols - 1):
+                    if not self._safe_near_exit_tile(col, row):
+                        continue
+                    if abs(col - exit_col) + abs(row - exit_row) >= min_dist:
+                        pool.append((col, row))
+                    else:
+                        near_pool.append((col, row))
+            order = pool if pool else near_pool
+            for idx in np.random.permutation(len(order)):
+                col, row = order[int(idx)]
+                if self.exit_pos in self._oracle_reachable((col, row)):
+                    self._place_player_at_curriculum_tile(col, row)
+                    return
+            return
+
+        # NEAR: relocate near the open exit, preferring closer tiles, oracle-verified.
+        candidates: List[Tuple[int, int, int]] = []
+        for radius in range(1, 6):
+            for col in range(exit_col - radius, exit_col + radius + 1):
+                for row in range(exit_row - 2, exit_row + 3):
+                    if abs(col - exit_col) + abs(row - exit_row) <= radius:
+                        candidates.append((abs(col - exit_col) + abs(row - exit_row), col, row))
+        for _, col, row in sorted(candidates):
+            if not self._safe_near_exit_tile(col, row):
+                continue
+            if self.exit_pos not in self._oracle_reachable((col, row)):
+                continue
+            self._place_player_at_curriculum_tile(col, row)
+            return
+
+    def _ngu_bonus(self) -> float:
+        """NGU-style episodic novelty: a small reward for reaching a
+        (tile_x, tile_y, crystals_remaining, switches_used) cell not yet seen this
+        episode, decaying as beta/sqrt(visits). Encodes position x task-progress so
+        re-reaching a tile after collecting a crystal counts as new."""
+        if not getattr(self.config, "CRYSTAL_CAVES_NGU_BONUS", False):
+            return 0.0
+        beta = float(getattr(self.config, "CRYSTAL_CAVES_NGU_BETA", 0.0))
+        if beta <= 0.0:
+            return 0.0
+        col, row = self._player_tile()
+        key = (col, row, len(self.crystals), len(self.used_switches))
+        count = self._ngu_visits.get(key, 0) + 1
+        self._ngu_visits[key] = count
+        return beta / (float(count) ** 0.5)
+
     def _progress_shaping_reward(self, previous_phi: float) -> float:
         raw_progress = self._progress_potential()[0]
         if raw_progress > self._progress + 1e-9:
@@ -808,10 +1214,73 @@ class CrystalCaves(
             target_kind,
             min(1.0, self.steps_since_progress / self.MAX_STEPS_WITHOUT_PROGRESS),
         ]
+        if self._drop_leak_features:
+            # Zero the level-identity + absolute-position slots that enable
+            # memorisation (keep the egocentric window + target compass). Indices are
+            # positions in `metadata`: 0 = player_x, 1 = player_y, 10 = level_index.
+            metadata[0] = 0.0
+            metadata[1] = 0.0
+            metadata[10] = 0.0
+        if self._geo_compass_enabled:
+            # Appended AFTER the base 20 so route_aux (meta 15-18) and drop-leak
+            # (meta 0/1/10) indices stay valid; before history for a stable layout.
+            metadata.extend(self._geodesic_next_step_compass())
+        if self._enemy_motion_enabled:
+            # After the compass, before history, for a stable layout.
+            metadata.extend(self._enemy_motion_features())
         if self._history_state_enabled:
             metadata.extend(self._history_metadata())
+        if self._route_label_dims:
+            # Trailing LABEL slots (Op 2): the geodesic next-step direction, carried to the
+            # learner as the route-aux target. The network slices these off its input, so the
+            # policy never reads them — it must LEARN to predict the route from the rest.
+            metadata.extend(self._geodesic_next_step_compass())
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)
         return self._state_array.copy()
+
+    def _enemy_motion_features(self) -> List[float]:
+        """Motion scalars for the nearest enemies VISIBLE in the perception window.
+
+        Per tracked enemy: [present, dx, dy, vx, is_flyer], nearest first, zero/neutral
+        padded to ``ENEMY_MOTION_FEATURES``. A single-frame tile window cannot encode
+        which way an enemy is moving, so a feedforward net provably cannot dodge movers
+        from it; this exposes the velocity a human player SEES on screen. Enemies outside
+        the window contribute nothing — the agent's information stays field-of-view
+        limited, like the real game."""
+        px, py = self._player_center()
+        pcol, prow = self._player_tile()
+        half_c = self.WINDOW_COLS // 2
+        half_r = self.WINDOW_ROWS // 2
+        half_w = max(1.0, (half_c + 0.5) * self.TILE_SIZE)
+        half_h = max(1.0, (half_r + 0.5) * self.TILE_SIZE)
+
+        visible: List[Tuple[float, float, float, Enemy]] = []
+        for enemy in self.enemies:
+            if not enemy.alive:
+                continue
+            ecol, erow = self._tile_for_enemy(enemy)
+            if abs(ecol - pcol) > half_c or abs(erow - prow) > half_r:
+                continue  # off-screen: invisible to the agent
+            dx = enemy.x + enemy.width / 2 - px
+            dy = enemy.y + enemy.height / 2 - py
+            visible.append((abs(dx) + abs(dy), dx, dy, enemy))
+        visible.sort(key=lambda item: item[0])
+
+        features: List[float] = []
+        for _, dx, dy, enemy in visible[: self.ENEMY_MOTION_MAX_TRACKED]:
+            features.extend(
+                [
+                    1.0,
+                    self._normalize_signed(dx, half_w),
+                    self._normalize_signed(dy, half_h),
+                    self._normalize_signed(enemy.vx, self.ENEMY_MOTION_MAX_SPEED),
+                    1.0 if enemy.kind == "flyer" else 0.0,
+                ]
+            )
+        while len(features) < self.ENEMY_MOTION_FEATURES:
+            # absent slot: present=0, neutral midpoints for the signed dims
+            features.extend([0.0, 0.5, 0.5, 0.5, 0.0])
+        return features
 
     def _reset_history_state(self) -> None:
         self._action_history.clear()
@@ -1016,6 +1485,7 @@ class CrystalCaves(
         self.air_tanks.clear()
         self.enemies.clear()
         self.elevators.clear()
+        self.ladders.clear()
 
         for row, line in enumerate(rows):
             for col, char in enumerate(line):
@@ -1039,6 +1509,9 @@ class CrystalCaves(
                     self.hazard_kinds[(col, row)] = char
                 elif char == self.ELEVATOR:
                     self.grid[row][col] = self.ELEVATOR
+                elif char == self.LADDER:
+                    self.grid[row][col] = self.LADDER
+                    self.ladders.add((col, row))
                 elif char == self.AMMO:
                     self.ammo_pickups.add((col, row))
                 elif char == self.TREASURE:
@@ -1079,12 +1552,21 @@ class CrystalCaves(
                     row += 1
         self._refresh_elevator_rects()
 
-        # Cache static terrain masks for the vectorized state window. After load,
-        # self.grid only ever holds SOLID / ELEVATOR chars, and both are static for
-        # the level's lifetime — so these masks never need rebuilding mid-episode.
+        self._refresh_static_tile_masks()
+
+    def _refresh_static_tile_masks(self) -> None:
+        """Refresh static grid masks after loading or test-time tile edits."""
+
         grid_arr = np.array(self.grid, dtype="<U1")
         self._wall_mask = grid_arr == self.SOLID
         self._elevator_mask = grid_arr == self.ELEVATOR
+        self._ladder_mask = grid_arr == self.LADDER
+        self.ladders = {
+            (c, r)
+            for r in range(self.level_rows)
+            for c in range(self.level_cols)
+            if self.grid[r][c] == self.LADDER
+        }
 
     def _info(self) -> dict:
         return {
@@ -1097,7 +1579,9 @@ class CrystalCaves(
             "switches_used": len(self.used_switches),
             "exit_unlocked": self.exit_unlocked,
             "doors_open": self.doors_open,
-            "level": self.level_index,
+            # Audit B9: _check_exit advances level_index on a win before _info runs; report
+            # the level actually PLAYED so per-level win breakdowns aren't off-by-one.
+            "level": self._won_level_index if self.won else self.level_index,
             "level_name": self.level.name,
             "won": self.won,
             "steps": self.steps,
@@ -1105,10 +1589,14 @@ class CrystalCaves(
             "progress": round(self._progress, 3),
             "progress_parts": self._progress_potential()[1],
             "end_reason": self._end_reason,
+            "last_damage_source": self._last_damage_source,
             "anti_loop_penalty_total": round(self._anti_loop_total, 3),
             "invalid_interact_count": self._invalid_interact_count,
             "invalid_interact_penalty_total": round(self._invalid_interact_total, 3),
             "invalid_shoot_count": self._invalid_shoot_count,
             "invalid_shoot_penalty_total": round(self._invalid_shoot_total, 3),
             "novelty_bonus_total": round(self._novelty_bonus_total, 3),
+            "damage_taken": self._damage_taken,
+            "tiles_visited": len(self._tiles_visited),
+            "idle_frac": self._idle_steps / max(1, self.steps),
         }
