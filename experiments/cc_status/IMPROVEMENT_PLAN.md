@@ -100,3 +100,24 @@ don't fight it.
 
 Decision gates at each step; every level change re-verified by the oracle suite
 (winnable / gated / door-value) before training.
+
+
+## Post-RUN-24 addendum (long-horizon verdict + new lead)
+
+RUN-24 (16k episodes, best-so-far config) is decision-grade: longer training
+lifts crystal collection to a ~0.60-0.66 plateau and produces OCCASIONAL
+canonical wins (first ever: 2-3/48 around ep9-11k) but never sustains them —
+final checkpoint 0/48. "Train longer" is closed as an excuse for this config
+class.
+
+NEW LEAD from the final stall trace: **trapped = 0.354** — a third of stalls
+end with the remaining objective PHYSICALLY UNREACHABLE from where the agent
+stands, typically holding ~70% of the crystals. The winnability oracle proves
+all objectives reachable FROM SPAWN, but several levels contain deliberate
+one-way drops — after taking one, parts of the level can become unreachable.
+Two candidate responses, complementary to the demo path:
+1. Extend the oracle with a NO-TRAP audit (from every standable cell, all
+   remaining objectives + exit stay reachable) and repair the levels that fail
+   it (add return ladders). Design-side, verifiable, honest.
+2. Teach the route order that avoids trap commitment (exactly what planner
+   demos encode).

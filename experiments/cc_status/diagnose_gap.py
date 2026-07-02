@@ -23,6 +23,7 @@ Nothing here changes training; it only adds a second evaluation pass.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import Counter, deque
 from pathlib import Path
@@ -617,6 +618,13 @@ def run_diagnosis(
                 mean_q = _mean_q(trainer, config, games=games)
             finally:
                 np.random.set_state(rng_state)
+            # RUN-24 artifact gap: per-level rows were evaluated but never persisted,
+            # so a "per-level table at the best checkpoint" could not be reconstructed
+            # after the run. Append every milestone's rows to a JSONL sidecar.
+            rows_path = run_dir / "per_level_rows.jsonl"
+            with open(rows_path, "a") as handle:
+                for row in (*train_rows, *test_rows):
+                    handle.write(json.dumps({"seed": seed, "episode": milestone, **row}) + "\n")
             if checkpoint_every > 0:
                 curve.append(
                     {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
