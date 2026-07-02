@@ -221,7 +221,24 @@ class CrystalCavesLogicMixin:
             reward += self.FIRST_CRYSTAL_GOAL_BONUS
             return reward
 
-        if not self.crystals and not self.exit_unlocked:
+        # Win-at-K training tier: during TRAINING the exit opens once K crystals are
+        # held, giving dense practice at finishing episodes long before a full clear is
+        # in reach. Eval keeps the real all-crystals rule, and the full-clear bonus
+        # below still pays out if the agent goes on to collect everything.
+        win_at_k = int(getattr(self.config, "CRYSTAL_CAVES_WIN_AT_K", 0))
+        if (
+            win_at_k > 0
+            and not self._eval_mode
+            and not self.exit_unlocked
+            and self.crystals
+            and self.initial_crystals - len(self.crystals) >= win_at_k
+        ):
+            self.exit_unlocked = True
+            self._add_tile_event(self.exit_pos, "sparkle", "EXIT OPEN", EGA["G"], ttl=58)
+            self._mark_progress()
+
+        if not self.crystals and not self._all_crystals_bonus_given:
+            self._all_crystals_bonus_given = True
             self.exit_unlocked = True
             self.score += 500
             reward += self.ALL_CRYSTALS_COLLECTED_BONUS

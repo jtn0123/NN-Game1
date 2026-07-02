@@ -267,10 +267,11 @@ def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
     trail_window = 120
     near_tiles = 3
     n_stalled = 0
-    trapped = osc = near = far = 0
+    trapped = osc = near = far = clock_mislabel = 0
     geo_dists: list[float] = []
     crystal_fracs: list[float] = []
     agent_state = _enter_greedy_agent_eval(agent)
+    stall_clock = int(getattr(game, "MAX_STEPS_WITHOUT_PROGRESS", 720))
     try:
         for _ in range(games):
             state = game.reset()
@@ -278,8 +279,11 @@ def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
             steps = 0
             info: dict[str, Any] = {}
             trail: Deque[Tuple[int, int]] = deque(maxlen=trail_window)
+            geo_hist: list[float] = []
             while not done and steps < step_limit:
                 trail.append(game._player_tile())
+                gd = game._geodesic_distance_field().get(game._player_tile())
+                geo_hist.append(float(gd) if gd is not None else float("inf"))
                 action = agent.select_action(state, training=False)
                 state, _, done, info = game.step(action)
                 steps += 1
@@ -287,6 +291,13 @@ def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
             if reason != "stalled":
                 continue
             n_stalled += 1
+            # Red-team check #4: the 720-step clock resets on EUCLIDEAN new-best approach,
+            # but the compass the agent follows descends a GEODESIC field. If a new
+            # geodesic minimum was set inside the very window the clock declared dead,
+            # the episode was making real route progress and "stalled" is a mislabel.
+            window, before = geo_hist[-stall_clock:], geo_hist[:-stall_clock]
+            if before and window and min(window) < min(before):
+                clock_mislabel += 1
             ptile = game._player_tile()
             targets = game._active_target_tiles()
             reachable = game._oracle_reachable(ptile) if targets else set()
@@ -317,6 +328,7 @@ def _eval_stall_trace(trainer: Any, config: Any, *, games: int) -> dict[str, flo
         "near_objective_frac": near / s,
         "far_from_objective_frac": far / s,
         "oscillating_frac": osc / s,
+        "clock_mislabel_frac": clock_mislabel / s,
         "geo_dist_mean": float(np.mean(geo_dists)) if geo_dists else 0.0,
         "crystal_frac_mean": float(np.mean(crystal_fracs)) if crystal_fracs else 0.0,
     }
@@ -442,6 +454,9 @@ def run_diagnosis(
     hit_penalty: float | None = None,
     ngu_bonus: bool = False,
     ngu_beta: float | None = None,
+    enemy_motion: bool = False,
+    win_at_k: int = 0,
+    save_weights: bool = False,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -493,6 +508,13 @@ def run_diagnosis(
         overrides["CRYSTAL_CAVES_NGU_BONUS"] = True
     if ngu_beta is not None:
         overrides["CRYSTAL_CAVES_NGU_BETA"] = ngu_beta
+    if enemy_motion:
+        # FOV-limited per-enemy relative (dx, dy, vx, vy) for the 3 nearest visible
+        # enemies — a single-frame tile window cannot dodge movers without it.
+        overrides["CRYSTAL_CAVES_ENEMY_MOTION"] = True
+    if win_at_k > 0:
+        # Training-only win tier: exit opens at K crystals; eval keeps the real rule.
+        overrides["CRYSTAL_CAVES_WIN_AT_K"] = win_at_k
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -625,6 +647,15 @@ def run_diagnosis(
             with open(rows_path, "a") as handle:
                 for row in (*train_rows, *test_rows):
                     handle.write(json.dumps({"seed": seed, "episode": milestone, **row}) + "\n")
+            # Winner's-curse guard (RUN-24 lesson): the "best checkpoint" could never be
+            # re-evaluated because no weights were persisted, so a 3/48 win blip at one
+            # milestone was unverifiable. Persist per-milestone policy weights so any
+            # claimed winner can be replayed on fresh seeds before promotion.
+            if save_weights:
+                import torch
+
+                weights_path = run_dir / f"policy_seed{seed}_ep{milestone}.pth"
+                torch.save(trainer.agent.policy_net.state_dict(), weights_path)
             if checkpoint_every > 0:
                 curve.append(
                     {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
@@ -891,6 +922,12 @@ def _print_stall_trace(summary: dict[str, Any]) -> None:
     print(
         f"  mean geodesic dist to objective={st.get('geo_dist_mean', 0.0):.1f} tiles  "
         f"crystals at stall={st.get('crystal_frac_mean', 0.0):.2f}",
+        flush=True,
+    )
+    print(
+        f"  clock-mislabel (new GEODESIC minimum inside the euclidean stall window)="
+        f"{st.get('clock_mislabel_frac', 0.0):.2f}  -> that fraction of 'stalls' were "
+        "making real route progress when the clock killed them",
         flush=True,
     )
     print(
@@ -1254,6 +1291,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Override CRYSTAL_CAVES_NGU_BETA; implies the configured beta value only.",
     )
     parser.add_argument(
+        "--enemy-motion",
+        action="store_true",
+        help="Enable CRYSTAL_CAVES_ENEMY_MOTION: FOV-limited relative position/velocity "
+        "of the 3 nearest visible enemies in the observation. A single-frame tile window "
+        "cannot dodge movers; enemy deaths dominate the RUN-24 kill trace.",
+    )
+    parser.add_argument(
+        "--win-at-k",
+        type=int,
+        default=0,
+        metavar="K",
+        help="Training-only win tier: the exit opens once K crystals are held "
+        "(CRYSTAL_CAVES_WIN_AT_K). Eval keeps the real all-crystals rule, so reported "
+        "win rates stay canonical. 0 = off.",
+    )
+    parser.add_argument(
+        "--save-weights",
+        action="store_true",
+        help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
+        "'best checkpoint' can be re-evaluated on fresh seeds before promotion — the "
+        "RUN-24 winner's-curse guard.",
+    )
+    parser.add_argument(
         "--stall-trace",
         action="store_true",
         help="On held-out greedy play, characterise WHY episodes STALL (the dominant failure "
@@ -1289,6 +1349,9 @@ def main(argv: list[str] | None = None) -> int:
         hit_penalty=args.hit_penalty,
         ngu_bonus=args.ngu_bonus,
         ngu_beta=args.ngu_beta,
+        enemy_motion=args.enemy_motion,
+        win_at_k=args.win_at_k,
+        save_weights=args.save_weights,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,

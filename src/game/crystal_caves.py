@@ -417,6 +417,7 @@ class CrystalCaves(
         self.gravity_dir = 1
         self.open_colors: Set[str] = set()
         self.exit_unlocked = False
+        self._all_crystals_bonus_given = False
         self.show_controls = False
         self.show_agent_overlay = False  # educational: draw the agent's view + goal
         self._end_reason = "running"
@@ -626,6 +627,7 @@ class CrystalCaves(
         self.gravity_dir = 1
         self.open_colors = set()
         self.exit_unlocked = False
+        self._all_crystals_bonus_given = False
         self.bullets.clear()
         self.visual_events.clear()
 
@@ -1102,10 +1104,13 @@ class CrystalCaves(
             return
 
         # Post-collection world state: nothing left but the exit, all gates open.
+        # The full-clear bonus was not EARNED, so mark it spent — otherwise the first
+        # pickup sweep of the episode would pay ALL_CRYSTALS_COLLECTED_BONUS for free.
         self.crystals.clear()
         self.used_switches = set(self.switches)
         self.open_colors = set(self.switch_color.values())
         self.exit_unlocked = True
+        self._all_crystals_bonus_given = True
 
         exit_col, exit_row = self.exit_pos
         far = getattr(self.config, "CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR", False)
