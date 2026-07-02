@@ -665,9 +665,11 @@ def extract_level(level_index: int) -> Dict[str, Any]:
             exit_pos=game.exit_pos,
             open_door_chars=open_chars,
             enemies=[(e.x, e.y, e.vx, e.kind) for e in game.enemies if e.alive],
-            # Reserve one heart beyond survival as margin for UNplanned live hits
-            # (drift/knockback): at 3 HP plans may buy 1 hit, at <=2 HP none.
-            hp_budget=max(0, game.health - 2),
+            # The executor derails at the FIRST live hit, so planning more than one
+            # hit ahead is wasted search space: budget exactly one plannable hit
+            # while above the last heart (health-2 starved replans at 2 HP into
+            # plan_failed; health-1 let plans queue multiple hits they never used).
+            hp_budget=1 if game.health >= 2 else 0,
         )
         if plan is None:
             # No contact-free route: a patrol camps the corridor. Clear one enemy
