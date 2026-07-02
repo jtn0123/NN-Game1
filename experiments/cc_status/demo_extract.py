@@ -78,6 +78,8 @@ _PLAN_MACROS: List[List[Tuple[int, int, bool]]] = (
 
 _MAX_LEG_EXPANSIONS = 150_000
 _HAZARD_EDGE_COST = 600  # frames-equivalent price for clipping spikes/acid
+_ENEMY_HIT_COST = 900  # frames-equivalent price for tanking one enemy hit (-1 HP)
+_INVULN_FRAMES = 70  # engine post-hit invulnerability (crystal_caves INVULN_FRAMES)
 _STEP_BUDGET = 2900  # must win inside the engine's 3000-step horizon
 _MAX_REPLANS = 24
 
@@ -165,25 +167,39 @@ def _run_macro(
     stop_on: Optional[Tuple[int, int]] = None,
     t0: int = 0,
     tracks: Optional[List[List[Tuple[float, float]]]] = None,
-) -> Tuple[_Body, List[int], bool, int, bool]:
-    """Run one macro; return (end body, actions, hit stop_on, hazard clips, died).
+    contact_lethal: bool = True,
+    invuln_0: int = -1,
+) -> Tuple[_Body, List[int], bool, int, int, bool, int]:
+    """Run one macro; return (end body, actions, hit stop_on, hazard clips,
+    enemy clips, died, invuln_until).
 
     ``tracks`` are precomputed enemy trajectories: overlapping an enemy at the
-    absolute frame (t0 + local index) is LETHAL during planning, so routes get
-    timed through patrol gaps instead of patched around contact afterwards.
+    absolute frame (t0 + local index) is LETHAL during planning when
+    ``contact_lethal`` — otherwise it is COUNTED (enemy clips) and followed by
+    the engine's invulnerability window, so the planner can price hits as
+    spendable HP instead of demanding a 0-damage speedrun (the red-team finding:
+    perfectionism, not level difficulty, was why 0/16 routes planned).
+    ``invuln_0`` carries a still-running invulnerability window in from the
+    previous leg — a hit spent at the instant a crystal was touched must let
+    the NEXT leg walk out of the enemy for free, exactly like the engine does.
     ``stop_on`` cuts the macro at the exact frame the player rect overlaps that
     tile, so legs end at the pickup instead of overshooting a full stride."""
     b = _Body(start.x, start.y, 0.0, 0.0, start.grounded, start.coyote)
     actions: List[int] = []
     hazard_clips = 0
+    enemy_clips = 0
+    invuln_until = max(invuln_0, t0 - 1)
     t = t0
     for frames, move_dir, jump in program:
         for _ in range(frames):
             _step(sim, b, move_dir, jump)
             actions.append(_frame_action(move_dir, jump))
             t += 1
-            if tracks is not None and _contact(b.x, b.y, t, tracks):
-                return b, actions, False, hazard_clips, True
+            if tracks is not None and t > invuln_until and _contact(b.x, b.y, t, tracks):
+                if contact_lethal:
+                    return b, actions, False, hazard_clips, enemy_clips, True, invuln_until
+                enemy_clips += 1
+                invuln_until = t + _INVULN_FRAMES
             lo_c, hi_c = int(b.x) // TILE, (int(b.x) + PW - 1) // TILE
             lo_r, hi_r = int(b.y) // TILE, (int(b.y) + PH - 1) // TILE
             for row in range(lo_r, hi_r + 1):
@@ -192,18 +208,21 @@ def _run_macro(
                         if sim.grid[row][col] in "^~":
                             hazard_clips += 1
                         if stop_on == (col, row):
-                            return b, actions, True, hazard_clips, False
+                            return b, actions, True, hazard_clips, enemy_clips, False, invuln_until
             if b.y > (sim.rows + 2) * TILE:
-                return b, actions, False, hazard_clips, False
+                return b, actions, False, hazard_clips, enemy_clips, False, invuln_until
     for _ in range(MAX_FRAMES):  # settle so legs chain from stable footing
         if b.grounded or sim.on_ladder(b.x, b.y):
             break
         _step(sim, b, 0, False)
         actions.append(IDLE)
         t += 1
-        if tracks is not None and _contact(b.x, b.y, t, tracks):
-            return b, actions, False, hazard_clips, True
-    return b, actions, False, hazard_clips, False
+        if tracks is not None and t > invuln_until and _contact(b.x, b.y, t, tracks):
+            if contact_lethal:
+                return b, actions, False, hazard_clips, enemy_clips, True, invuln_until
+            enemy_clips += 1
+            invuln_until = t + _INVULN_FRAMES
+    return b, actions, False, hazard_clips, enemy_clips, False, invuln_until
 
 
 def _plan_leg(
@@ -214,19 +233,28 @@ def _plan_leg(
     reach: str,
     t0: int = 0,
     tracks: Optional[List[List[Tuple[float, float]]]] = None,
-) -> Optional[Tuple[_Body, List[int]]]:
+    hp_budget: int = 0,
+    start_invuln: int = -1,
+) -> Optional[Tuple[_Body, List[int], int, int]]:
     """Frame-cost Dijkstra over rest states until the target is satisfied.
 
     reach="touch": player rect overlaps the target tile (crystals, exit).
     reach="adjacent": end RESTING within Chebyshev 1 (a lever's INTERACT range).
+    ``hp_budget`` is how many enemy hits this leg may tank (priced at
+    _ENEMY_HIT_COST each, so contact-free routes still win when they exist);
+    ``start_invuln`` is a still-running invulnerability frame carried over from a
+    hit spent late in the previous leg.
+    Returns (end body, actions, enemy hits spent, invuln_until at leg end).
     """
-    if reach == "adjacent" and (tracks is None or not _contact(start.x, start.y, t0, tracks)):
+    if reach == "adjacent" and (
+        tracks is None or t0 <= start_invuln or not _contact(start.x, start.y, t0, tracks)
+    ):
         c0, r0 = _player_tile(start.x, start.y)
         if max(abs(c0 - target[0]), abs(r0 - target[1])) <= 1:
-            return start, []
+            return start, [], 0, start_invuln
     # A*: priority = elapsed frames + penalties + admissible walk-time heuristic;
-    # state keyed by (cell, time bucket) because the same cell can be lethal at one
-    # frame and safe 30 frames later (patrol phase).
+    # state keyed by (cell, time bucket, hits) because the same cell can be lethal
+    # at one frame and safe 30 frames later (patrol phase).
     walk_dist = _bfs_distances(sim, target)
     frames_per_tile = TILE / 4.2
 
@@ -234,31 +262,36 @@ def _plan_leg(
         return walk_dist.get(cell, 200) * frames_per_tile * 0.9
 
     start_cell = _player_tile(start.x, start.y)
-    best: Dict[Tuple[int, int, int], int] = {(start_cell[0], start_cell[1], t0 // 24): 0}
+    best: Dict[Tuple[int, int, int, int], int] = {(start_cell[0], start_cell[1], t0 // 24, 0): 0}
     counter = 0
-    heap: List[Tuple[float, int, int, int, _Body, List[int]]] = [
-        (h(start_cell), 0, counter, t0, start, [])
+    heap: List[Tuple[float, int, int, int, int, int, _Body, List[int]]] = [
+        (h(start_cell), 0, counter, t0, 0, start_invuln, start, [])
     ]
     expansions = 0
     while heap and expansions < _MAX_LEG_EXPANSIONS:
-        _f, cost, _, t, body, actions = heapq.heappop(heap)
+        _f, cost, _, t, hits, invuln, body, actions = heapq.heappop(heap)
         cell = _player_tile(body.x, body.y)
-        if cost > best.get((cell[0], cell[1], t // 24), 1 << 30):
+        if cost > best.get((cell[0], cell[1], t // 24, hits), 1 << 30):
             continue
         for program in _PLAN_MACROS:
             expansions += 1
-            end, macro_actions, hit, clips, died = _run_macro(
+            end, macro_actions, hit, clips, eclips, died, end_invuln = _run_macro(
                 sim,
                 body,
                 program,
                 stop_on=target if reach == "touch" else None,
                 t0=t,
                 tracks=tracks,
+                contact_lethal=hits >= hp_budget,
+                invuln_0=invuln,
             )
             if died:
                 continue
+            new_hits = hits + eclips
+            if new_hits > hp_budget:
+                continue
             if hit:
-                return end, actions + macro_actions
+                return end, actions + macro_actions, new_hits, end_invuln
             if not (end.grounded or sim.on_ladder(end.x, end.y)):
                 continue
             end_t = t + len(macro_actions)
@@ -269,9 +302,14 @@ def _plan_leg(
                 reach == "adjacent"
                 and max(abs(end_cell[0] - target[0]), abs(end_cell[1] - target[1])) <= 1
             ):
-                return end, actions + macro_actions
-            new_cost = cost + len(macro_actions) + (_HAZARD_EDGE_COST if clips else 0)
-            key = (end_cell[0], end_cell[1], end_t // 24)
+                return end, actions + macro_actions, new_hits, end_invuln
+            new_cost = (
+                cost
+                + len(macro_actions)
+                + (_HAZARD_EDGE_COST if clips else 0)
+                + _ENEMY_HIT_COST * eclips
+            )
+            key = (end_cell[0], end_cell[1], end_t // 24, new_hits)
             if new_cost < best.get(key, 1 << 30):
                 best[key] = new_cost
                 counter += 1
@@ -282,6 +320,8 @@ def _plan_leg(
                         new_cost,
                         counter,
                         end_t,
+                        new_hits,
+                        end_invuln,
                         end,
                         actions + macro_actions,
                     ),
@@ -332,11 +372,14 @@ def plan_from(
     exit_pos: Tuple[int, int],
     open_door_chars: Set[str],
     enemies: Optional[List[Tuple[float, float, float, str]]] = None,
+    hp_budget: int = 2,
 ) -> Optional[List[int]]:
     """Plan a winning action tail from an arbitrary (live) game state.
 
     ``enemies`` anchors the patrol simulation to the LIVE enemy states, so a
-    replan mid-episode is timed against where the enemies actually are."""
+    replan mid-episode is timed against where the enemies actually are.
+    ``hp_budget`` is the total enemy hits the whole route may tank (HP is a
+    spendable resource: 3 hearts = 2 affordable hits from full health)."""
     doors_present = {dc for dc in ("D", "d") if any(dc in row for row in layout)}
     opened = set(open_door_chars)
     if enemies is None:
@@ -375,13 +418,25 @@ def plan_from(
         _step(sim, body, 0, False)
         actions.append(IDLE)
 
+    hp_left = max(0, int(hp_budget))
+    invuln = -1  # a hit spent late in one leg still protects the start of the next
     switches = set(switches_left)
     while switches:
         tile = _nearest(sim, _player_tile(body.x, body.y), switches)
-        result = _plan_leg(sim, body, target=tile, reach="adjacent", t0=len(actions), tracks=tracks)
+        result = _plan_leg(
+            sim,
+            body,
+            target=tile,
+            reach="adjacent",
+            t0=len(actions),
+            tracks=tracks,
+            hp_budget=hp_left,
+            start_invuln=invuln,
+        )
         if result is None:
             return None
-        body, leg = result
+        body, leg, spent, invuln = result
+        hp_left -= spent
         actions.extend(leg)
         actions.append(INTERACT)
         switches.discard(tile)
@@ -394,19 +449,38 @@ def plan_from(
     remaining = set(crystals_left)
     while remaining:
         tile = _nearest(sim, _player_tile(body.x, body.y), remaining)
-        result = _plan_leg(sim, body, target=tile, reach="touch", t0=len(actions), tracks=tracks)
+        result = _plan_leg(
+            sim,
+            body,
+            target=tile,
+            reach="touch",
+            t0=len(actions),
+            tracks=tracks,
+            hp_budget=hp_left,
+            start_invuln=invuln,
+        )
         if result is None:
             return None
         prev = body
-        body, leg = result
+        body, leg, spent, invuln = result
+        hp_left -= spent
         actions.extend(leg)
         remaining.discard(tile)
         remaining -= _resim_touches(sim, prev, leg)
 
-    result = _plan_leg(sim, body, target=exit_pos, reach="touch", t0=len(actions), tracks=tracks)
+    result = _plan_leg(
+        sim,
+        body,
+        target=exit_pos,
+        reach="touch",
+        t0=len(actions),
+        tracks=tracks,
+        hp_budget=hp_left,
+        start_invuln=invuln,
+    )
     if result is None:
         return None
-    _body, leg = result
+    _body, leg, _spent, _invuln = result
     actions.extend(leg)
     return actions
 
@@ -515,11 +589,12 @@ class _Executor:
     ) -> str:
         """Execute a timed plan; returns 'done' | 'derailed' | 'budget'.
 
-        The plan is contact-free BY CONSTRUCTION (enemy patrols simulated during
-        planning), so the executor's job is fidelity, not combat: any health
-        loss or accumulated time drift means the timing assumption broke —
-        replan from live state rather than patch (injected frames shift enemy
-        phase, which is exactly what the plan is timed against)."""
+        The plan may PRICE IN enemy hits (HP is a spendable resource — 3 hearts
+        = 2 affordable hits), so a mid-route hit is tolerated while spare
+        health remains: the knockback shows up as positional drift and the
+        normal checkpoint re-sync recovers it. Only a hit that leaves the LAST
+        heart derails (any further contact would end the episode), and drift
+        beyond the injection allowance still derails as before."""
         g = self.game
         i = 0
         injected = 0
@@ -530,7 +605,10 @@ class _Executor:
             if self.steps >= step_budget:
                 return "budget"
             if g.health < start_health:
-                return "derailed"  # a hit means the timing model broke — replan
+                if g.health <= 1:
+                    return "derailed"  # last heart: replan with a 0-hit budget
+                start_health = g.health  # tank it; grant drift room to re-sync
+                injected = max(0, injected - 10)
             ex, ey = expected[i]
             dx_p = ex - g.player_x
             dy_p = ey - g.player_y
@@ -588,6 +666,7 @@ def extract_level(level_index: int) -> Dict[str, Any]:
             exit_pos=game.exit_pos,
             open_door_chars=open_chars,
             enemies=[(e.x, e.y, e.vx, e.kind) for e in game.enemies if e.alive],
+            hp_budget=max(0, game.health - 1),
         )
         if plan is None:
             # No contact-free route: a patrol camps the corridor. Clear one enemy
