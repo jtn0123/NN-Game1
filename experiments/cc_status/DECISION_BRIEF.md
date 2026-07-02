@@ -158,3 +158,32 @@ margin loss / backward curriculum from demo states — Tier 2 of the improvement
 plan, blocked only on demos existing). The demo recorder is built; the owner
 playtest is the demo source (planner retry with an HP budget is the fallback).
 RUN-26 should be the demo run.
+
+## DATA-1 verdict: the harness timers own 35-54% of all endings, and learning does not fix them
+
+M4 ran analyze_end_reasons over RUN-25 (older run dirs no longer on disk).
+Per-milestone end-reason percentages, 48 evals per point, 6 milestones:
+
+- Control (A): killed FLAT (0.46->0.46), stalled FLAT (0.50->0.50), timeout
+  FLAT (0.04). Harness-timer share at final: **0.542** — and it never moved
+  across 6k episodes of learning.
+- B/C/D: stalled SHRINKS with learning (0.58-0.71 -> 0.29-0.46) but killed
+  GROWS in lockstep (0.29-0.35 -> 0.50-0.65); wins stay 0.000 everywhere.
+  Learning converts stall-executions into deaths, not completions.
+- Note: train/test tables are identical by construction in imported mode
+  (both splits cycle the same 16 levels deterministically).
+
+Reading, combined with the validator's geometry data (best-case tours use
+47-82% of the episode clock; Ore Shaft's longest leg uses 87% of the stall
+window at perfect pace):
+1. The stall executioner is a material, permanent tax (half the control's
+   endings) that the levels' own geometry makes near-unavoidable.
+2. BUT loosening it alone is unlikely to create wins — the B/C/D pattern
+   shows episodes that escape the stall clock die to enemies instead. The
+   binding failure is still "doesn't know how to finish", which is the demo
+   path's job.
+3. RUN-26 shape: demos are the primary lever; stall-window widening (720 ->
+   ~1440) + truncation-aware bootstrapping ride along as fidelity fixes so
+   timer endings stop training as deaths and mid-route journeys stop being
+   executed. Requires making MAX_STEPS_WITHOUT_PROGRESS configurable (a
+   class constant today).
