@@ -1053,6 +1053,8 @@ class CrystalCaves(
         self._progress_phi = self._progress_pbrs_potential(raw_progress=self._progress)
         self._damage_taken = 0
         self._idle_steps = 0
+        self._ngu_visits = {}
+        self._visited_novelty_cells = set()
 
     def _oracle_reachable(self, start: Tuple[int, int]) -> Set[Tuple[int, int]]:
         """Jump-aware tiles reachable from ``start`` under the engine's physics, via the
@@ -1091,8 +1093,8 @@ class CrystalCaves(
         candidates = [
             (c, r)
             for r in range(self.level_rows)
-            for c in range(self.level_cols)
-            if not self._solid_at(c, r) and self._solid_at(c, r + 1)  # a standing tile
+            for c in range(self.level_cols - 1)
+            if self._safe_near_exit_tile(c, r)  # standing, non-objective, non-hazard
         ]
         candidates.sort(key=nearest_objective_sq)
 

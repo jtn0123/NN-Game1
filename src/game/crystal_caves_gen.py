@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import random
 from collections import deque
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from .crystal_caves_entities import CaveSpec
 
@@ -109,7 +109,7 @@ def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]
         below = rows[r + 1][c]
         return below == SOLID or (below in DOOR_CHARS and not door_open(below))
 
-    def shaft_run(c: int, r: int, ch: str):
+    def shaft_run(c: int, r: int, ch: str) -> Iterator[Cell]:
         """Yield every cell of the contiguous elevator/ladder shaft through (c, r)."""
         top = r
         while top - 1 >= 0 and rows[top - 1][c] == ch:

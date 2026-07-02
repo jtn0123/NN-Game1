@@ -124,7 +124,7 @@ def playthrough(game: CrystalCaves, max_steps: int = 6000) -> Dict:
         "best_frac": best_frac,
         "end": "step_cap",
         "crystals": (total_crystals - len(game.crystals), total_crystals),
-        "switches": (0, total_switches),
+        "switches": (len(game.used_switches), total_switches),
     }
 
 

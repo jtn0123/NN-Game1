@@ -103,6 +103,11 @@ def build_motion_graph(
             if nxt not in nodes:
                 nodes.add(nxt)
                 queue.append(nxt)
+    if queue:
+        raise RuntimeError(
+            f"motion graph truncated at MAX_RESTING={MAX_RESTING} nodes - "
+            "audit metrics would be computed from a partial graph"
+        )
     return sim, nodes, edges, touched_from
 
 
@@ -165,7 +170,7 @@ def audit_level(layout: Tuple[str, ...]) -> Dict:
             _, nearest = entry
             if nearest not in crystals_reach:
                 lies.append(node)
-            if not crystals_reach:
+            if not reach:
                 false_hope.append(node)
 
     n = len(nodes)

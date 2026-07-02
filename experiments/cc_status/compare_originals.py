@@ -38,9 +38,15 @@ CREDIBLE = {1, 2, 4, 5, 7, 8, 11, 12, 13, 15}
 
 
 def _load_originals():
-    src = subprocess.check_output(
-        ["git", "show", f"{_ORIGINALS_COMMIT}:{_ORIGINALS_PATH}"], cwd=_REPO_ROOT, text=True
-    )
+    try:
+        src = subprocess.check_output(
+            ["git", "show", f"{_ORIGINALS_COMMIT}:{_ORIGINALS_PATH}"], cwd=_REPO_ROOT, text=True
+        )
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(
+            f"could not read {_ORIGINALS_PATH} from commit {_ORIGINALS_COMMIT} "
+            "(shallow clone missing history?)"
+        ) from exc
     src = src.replace(
         "from .crystal_caves_entities import CaveSpec",
         "from src.game.crystal_caves_entities import CaveSpec",
@@ -89,7 +95,7 @@ def main(argv) -> int:
         f"{'PAIR':<34} {'side':>5} {'fill':>5} {'#':>4} {'cry':>4} {'lad':>4} "
         f"{'elev':>4} {'sw':>3} {'dr':>3} {'haz':>4} {'enemy':>5} {'loot':>4}"
     )
-    for i, (orig, mine) in enumerate(zip(originals, HANDCRAFTED_LEVELS), 1):
+    for i, (orig, mine) in enumerate(zip(originals, HANDCRAFTED_LEVELS, strict=True), 1):
         a, b = _shot(orig), _shot(mine)
         pad, cap = 8, 30
         sheet = pygame.Surface(

@@ -64,7 +64,10 @@ def _find(rows: Tuple[str, ...], chars: Set[str]) -> List[Cell]:
 
 
 def _spawn(rows: Tuple[str, ...]) -> Cell:
-    return _find(rows, {PLAYER})[0]
+    spawns = _find(rows, {PLAYER})
+    if not spawns:
+        raise ValueError("level layout has no player spawn ('P') tile")
+    return spawns[0]
 
 
 def _runs(rows: Tuple[str, ...], ch: str) -> List[List[Cell]]:

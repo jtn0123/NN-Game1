@@ -76,7 +76,8 @@ def test_pretrain_moves_weights_and_raises_demo_q(tmp_path):
     done = agent.pretrain_on_demos(25)
     assert done == 25
     changed = any(
-        not torch.equal(b, p.detach()) for b, p in zip(before, agent.policy_net.parameters())
+        not torch.equal(b, p.detach())
+        for b, p in zip(before, agent.policy_net.parameters(), strict=True)
     )
     assert changed, "pretraining must update policy weights"
 

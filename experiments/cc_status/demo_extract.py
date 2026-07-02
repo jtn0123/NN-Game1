@@ -343,7 +343,7 @@ def _bfs_distances(sim: LevelSim, start: Tuple[int, int]) -> Dict[Tuple[int, int
     return dist
 
 
-def _nearest(sim: LevelSim, here: Tuple[int, int], tiles: Set[Tuple[int, int]]):
+def _nearest(sim: LevelSim, here: Tuple[int, int], tiles: Set[Tuple[int, int]]) -> Tuple[int, int]:
     dist = _bfs_distances(sim, here)
     return min(tiles, key=lambda t: dist.get(t, 1 << 30))
 

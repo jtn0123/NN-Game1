@@ -257,7 +257,14 @@ def place_player_random_reachable(
 
 def apply_reverse_start(game: CrystalCaves, mode: str) -> bool:
     far = False
+    reverse_exit_snapshot = None
     if mode in ("reverse_exit", "reverse_exit_far"):
+        reverse_exit_snapshot = (
+            set(game.crystals),
+            set(game.used_switches),
+            set(game.open_colors),
+            bool(game.exit_unlocked),
+        )
         game.crystals.clear()
         game.used_switches = set(game.switches)
         game.open_colors = set(game.switch_color.values())
@@ -277,6 +284,15 @@ def apply_reverse_start(game: CrystalCaves, mode: str) -> bool:
         applied = place_player_random_reachable(game, target_tile)
     else:
         applied = place_player_near_tile(game, target_tile)
+    if not applied and reverse_exit_snapshot is not None:
+        # Placement failed AFTER the world was mutated: restore the pre-curriculum
+        # state so the caller does not train on a half-applied reverse-exit episode.
+        crystals, used_switches, open_colors, exit_unlocked = reverse_exit_snapshot
+        game.crystals.clear()
+        game.crystals.update(crystals)
+        game.used_switches = used_switches
+        game.open_colors = open_colors
+        game.exit_unlocked = exit_unlocked
     game._progress = game._progress_potential()[0]
     return applied
 

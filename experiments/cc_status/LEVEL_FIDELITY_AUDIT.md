@@ -9,6 +9,12 @@ for the real levels come from the level bytes we extracted from the game binary
 (`experiments/cc_status/data/cc1_levels_raw.json`). No original level layouts are
 reproduced here — only mechanics and aggregate statistics.
 
+> **2026-07-02 addendum:** the structural comparison below describes the ORIGINAL
+> hand-crafted set this audit reviewed. The levels were since REBUILT to address
+> exactly these gaps: the current set is 40x24 with 30-34 crystals, 6-7 enemies,
+> gun/ammo, and hazards per level (see LEVEL_COMPARISON_EVAL.md and the level
+> validator). The ladder-heavy vertical structure remains a documented deviation.
+
 ## Verdict in one line
 
 The levels are **mechanically authentic to a faithful SUBSET** of Crystal Caves and match

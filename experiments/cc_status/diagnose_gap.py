@@ -584,6 +584,9 @@ def run_diagnosis(
         config.CRYSTAL_CAVES_SEED = seed
         run_dir = out_dir / f"seed_{seed}"
         run_dir.mkdir(parents=True, exist_ok=True)
+        # Fresh sidecar per invocation: appends below are per-milestone, but a rerun
+        # into the same directory must not mix stale rows into trend analysis.
+        (run_dir / "per_level_rows.jsonl").unlink(missing_ok=True)
 
         # Difficulty curriculum (RUN-15): warm-start the target-difficulty phase from an
         # agent first trained on an easier tier, so it learns the full collect->exit chain
@@ -599,7 +602,9 @@ def run_diagnosis(
                 flush=True,
             )
             set_seed(seed)
-            pre_config = make_config(overrides, difficulty=curriculum_pretrain_difficulty)
+            pre_config = make_config(
+                overrides, difficulty=curriculum_pretrain_difficulty, imported=imported
+            )
             pre_config.CRYSTAL_CAVES_SEED = seed
             pre_dir = run_dir / "pretrain"
             pre_dir.mkdir(parents=True, exist_ok=True)

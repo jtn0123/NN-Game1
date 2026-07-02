@@ -392,7 +392,7 @@ def _summary_line(summary: dict[str, Any]) -> str:
     delta = summary["aggregate"]["paired_delta_b_minus_a"]
     return (
         f"paired-ab {summary['arms']['b']['label']} - {summary['arms']['a']['label']} "
-        f"{summary['metric']} IQM delta {delta['iqm']:.4f} "
+        f"{summary['metric']} mean delta {delta['mean']:.4f} "
         f"[{delta['ci_low']:.4f}, {delta['ci_high']:.4f}]"
     )
 
@@ -409,12 +409,12 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- A: `{summary['arms']['a']['label']}`",
         f"- B: `{summary['arms']['b']['label']}`",
         "",
-        "## IQM",
+        "## Mean",
         "",
-        f"- A IQM: `{aggregate['arm_a']['iqm']:.4f}`",
-        f"- B IQM: `{aggregate['arm_b']['iqm']:.4f}`",
+        f"- A mean: `{aggregate['arm_a']['mean']:.4f}`",
+        f"- B mean: `{aggregate['arm_b']['mean']:.4f}`",
         (
-            f"- Paired delta B-A IQM: `{delta['iqm']:.4f}` "
+            f"- Paired delta B-A mean: `{delta['mean']:.4f}` "
             f"95% CI `[{delta['ci_low']:.4f}, {delta['ci_high']:.4f}]`"
         ),
         "",

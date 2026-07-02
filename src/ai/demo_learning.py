@@ -40,11 +40,15 @@ def _load_demo_files(demo_dir: Path) -> List[dict]:
         won = rec.get("won", True)  # planner files only store verified wins
         if level is None or not actions or not won:
             continue
-        records.append({"level": int(level), "actions": [int(a) for a in actions]})
+        try:
+            record = {"level": int(level), "actions": [int(a) for a in actions]}
+        except (TypeError, ValueError):
+            continue  # one malformed demo file must not abort the whole store
+        records.append(record)
     return records
 
 
-def _pinned_game(config: Any, level: int):
+def _pinned_game(config: Any, level: int) -> Any:
     """A deterministic engine pinned to one hand-crafted level (same pinning the
     open-loop demo verifier uses, so replays here match verified replays)."""
     from src.game.crystal_caves import CrystalCaves
@@ -71,7 +75,7 @@ class DemoStore:
         dones: np.ndarray,
         n_step_lengths: np.ndarray,
         n_episodes: int,
-    ):
+    ) -> None:
         self.states = states
         self.actions = actions
         self.rewards = rewards

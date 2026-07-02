@@ -267,6 +267,8 @@ def analyze(layout: Tuple[str, ...], closed_doors: frozenset = frozenset()) -> D
                                 break
                     queue.append(nb)
 
+    search_truncated = bool(queue)  # MAX_RESTING hit with cells still unexplored
+
     def reached(tiles: Set[Tuple[int, int]]) -> Set[Tuple[int, int]]:
         return {t for t in tiles if t in touch}
 
@@ -280,6 +282,7 @@ def analyze(layout: Tuple[str, ...], closed_doors: frozenset = frozenset()) -> D
         "switches": (len(sw), len(sim.switches)),
         "exit": exit_ok,
         "winnable": got_obj == total_obj,
+        "search_truncated": search_truncated,
         "obj_frac": got_obj / total_obj,
         "missing_crystals": sorted(sim.crystals - cr),
         "missing_switches": sorted(sim.switches - sw),
