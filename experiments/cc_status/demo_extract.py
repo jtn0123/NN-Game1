@@ -589,12 +589,14 @@ class _Executor:
     ) -> str:
         """Execute a timed plan; returns 'done' | 'derailed' | 'budget'.
 
-        The plan may PRICE IN enemy hits (HP is a spendable resource — 3 hearts
-        = 2 affordable hits), so a mid-route hit is tolerated while spare
-        health remains: the knockback shows up as positional drift and the
-        normal checkpoint re-sync recovers it. Only a hit that leaves the LAST
-        heart derails (any further contact would end the episode), and drift
-        beyond the injection allowance still derails as before."""
+        The plan may PRICE IN enemy hits (HP is a spendable resource), but a
+        LIVE hit — planned or accidental — always derails: knockback throws
+        the player off the planned trajectory and every open-loop frame after
+        it is mistimed against the patrols (running on cost the first two hits
+        of every attempt to compounding desync). The caller replans from the
+        post-knockback reality with the remaining HP budget, so a planned hit
+        still buys passage through a camped corridor — it just hands control
+        straight back to the planner afterwards."""
         g = self.game
         i = 0
         injected = 0
@@ -605,10 +607,7 @@ class _Executor:
             if self.steps >= step_budget:
                 return "budget"
             if g.health < start_health:
-                if g.health <= 1:
-                    return "derailed"  # last heart: replan with a 0-hit budget
-                start_health = g.health  # tank it; grant drift room to re-sync
-                injected = max(0, injected - 10)
+                return "derailed"  # hit taken: replan from post-knockback reality
             ex, ey = expected[i]
             dx_p = ex - g.player_x
             dy_p = ey - g.player_y
@@ -666,7 +665,9 @@ def extract_level(level_index: int) -> Dict[str, Any]:
             exit_pos=game.exit_pos,
             open_door_chars=open_chars,
             enemies=[(e.x, e.y, e.vx, e.kind) for e in game.enemies if e.alive],
-            hp_budget=max(0, game.health - 1),
+            # Reserve one heart beyond survival as margin for UNplanned live hits
+            # (drift/knockback): at 3 HP plans may buy 1 hit, at <=2 HP none.
+            hp_budget=max(0, game.health - 2),
         )
         if plan is None:
             # No contact-free route: a patrol camps the corridor. Clear one enemy
