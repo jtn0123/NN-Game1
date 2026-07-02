@@ -62,6 +62,42 @@ def test_every_door_actually_gates_something():
             assert gates, f"{lv.name}: door {colour!r} is decorative (routable around)"
 
 
+def test_oracle_climbs_ladders():
+    """cave_reachable must model ladder climbing: before the fix it treated 'H'
+    as plain air, so anything above a ladder shaft was falsely 'unreachable' —
+    which inflated the trapped-stall diagnosis to ~0.35 on the ladder-heavy set."""
+    from src.game.crystal_caves_gen import cave_reachable
+
+    rows = (
+        "#####",
+        "#..*#",
+        "#..H#",
+        "#..H#",
+        "#P.H#",
+        "#####",
+    )
+    reach = cave_reachable(rows, (1, 4), True)
+    assert (3, 1) in reach, "crystal above the ladder must be reachable by climbing"
+
+
+def test_oracle_reaches_every_crystal_from_spawn():
+    """The live trapped detector (game._oracle_reachable) must agree with the
+    physics oracle: on the certified-winnable set, every crystal is reachable
+    from spawn with doors open. Fails if the tile oracle regresses (e.g. loses
+    ladder support again)."""
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_IMPORTED = True
+    game = CrystalCaves(cfg, headless=True)
+    game.use_eval_levels(len(HANDCRAFTED_LEVELS))
+    game.reset_eval_cursor()
+    for _ in range(len(HANDCRAFTED_LEVELS)):
+        game.reset()
+        game.open_colors = set(game.door_color.values())  # endgame: all doors open
+        reach = game._oracle_reachable(game._player_tile())
+        missing = set(game.crystals) - reach
+        assert not missing, f"{game.level.name}: oracle says unreachable: {sorted(missing)}"
+
+
 def test_engine_loads_and_plays_the_levels():
     cfg = Config()
     cfg.CRYSTAL_CAVES_IMPORTED = True

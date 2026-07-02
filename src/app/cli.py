@@ -127,6 +127,23 @@ TIPS
         "'normal' is the full game (default).",
     )
     parser.add_argument(
+        "--imported",
+        action="store_true",
+        help="Crystal Caves: play/train on the 16 hand-crafted Episode-1 levels "
+        "(sets CRYSTAL_CAVES_IMPORTED).",
+    )
+    parser.add_argument(
+        "--record-demos",
+        type=str,
+        nargs="?",
+        const="experiments/cc_status/demos/human",
+        default=None,
+        metavar="DIR",
+        help="Human mode: record every finished episode as a replayable "
+        "action-sequence JSON in DIR (default experiments/cc_status/demos/human). "
+        "Wins double as training demonstrations.",
+    )
+    parser.add_argument(
         "--crystal-curriculum",
         action="store_true",
         help="Crystal Caves: run the staged curriculum instead of one fixed "

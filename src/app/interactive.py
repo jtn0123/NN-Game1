@@ -385,6 +385,16 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
         action: int = 0
         info: dict = {}
 
+        # Optional demo recording: every finished episode becomes a replayable
+        # action-sequence JSON (wins double as training demonstrations).
+        recorder = None
+        demo_dir = getattr(self.config, "RECORD_DEMOS_DIR", None)
+        if demo_dir:
+            from src.app.demo_recorder import HumanDemoRecorder
+
+            recorder = HumanDemoRecorder(demo_dir)
+            print(f"   🎬 Recording demos to {recorder.out_dir}\n")
+
         while self.running:
             self._handle_events()
 
@@ -409,13 +419,16 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
 
             # Handle game-specific controls
             if game_name == "asteroids" and human_step_provider and human_action_provider:
-                # Asteroids supports simultaneous actions via step_human
+                # Asteroids supports simultaneous actions via step_human — there is no
+                # single discrete action to record, so demo recording skips this branch.
                 state, reward, done, info = human_step_provider.step_human(keys_dict)
                 action = human_action_provider.get_human_action(keys_dict)  # For display purposes
             elif human_action_provider:
                 # Use game's built-in human action helper
                 action = human_action_provider.get_human_action(keys_dict)
                 state, reward, done, info = self.game.step(action)
+                if recorder:
+                    recorder.after_step(self.game, action, done, info)
             else:
                 # Fallback: generic control mapping
                 action = 1  # STAY / IDLE
@@ -426,6 +439,8 @@ class GameApp(InteractiveDashboardMixin, InteractiveRenderingMixin):
                 elif pressed[pygame.K_SPACE] and game_name == "space_invaders":
                     action = 3  # SHOOT
                 state, reward, done, info = self.game.step(action)
+                if recorder:
+                    recorder.after_step(self.game, action, done, info)
 
             if done:
                 score = info.get("score", 0)

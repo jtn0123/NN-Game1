@@ -32,6 +32,7 @@ CRYSTAL, AMMO, TREASURE = "*", "A", "$"
 POWER, GRAV, FREEZE = "p", "g", "z"
 SPIKE, ACID, CRAWLER, FLYER = "^", "~", "M", "F"
 ELEVATOR = "="  # a vertical-shaft lift platform; rideable up/down within its run
+LADDER = "H"  # climbable both ways (hand-crafted levels; generators don't emit it)
 
 # Colour-keyed lever/door pairs: a switch opens only the door of its colour.
 DOOR_CHARS = {DOOR, DOOR2}
@@ -74,9 +75,10 @@ THEME_NAMES = tuple(THEMES.keys())
 def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]:
     """Tiles the player can occupy from ``start`` under jump-aware physics: walk
     or air-drift sideways, fall through EMPTY, jump up to ``jump`` tiles while
-    grounded. ``doors_open`` is either a bool (open/close every door) or a set of
-    open colours (a door opens only if its colour is in the set). Accepts rows of
-    strings or a list-of-lists grid (the single solvability oracle generators use)."""
+    grounded, climb ladders and ride elevator shafts vertically. ``doors_open`` is
+    either a bool (open/close every door) or a set of open colours (a door opens
+    only if its colour is in the set). Accepts rows of strings or a list-of-lists
+    grid (the single solvability oracle generators use)."""
     rows_n, cols_n = len(rows), len(rows[0])
 
     open_set = doors_open if isinstance(doors_open, (set, frozenset)) else None
@@ -98,21 +100,22 @@ def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]
 
     def grounded(c: int, r: int) -> bool:
         # standing inside an elevator shaft => the platform supports you (it rides
-        # the full run, so any shaft cell is a valid footing)
-        if rows[r][c] == ELEVATOR:
+        # the full run, so any shaft cell is a valid footing); gripping a ladder
+        # likewise lets the player hold position and launch again
+        if rows[r][c] in (ELEVATOR, LADDER):
             return True
         if r + 1 >= rows_n:
             return True
         below = rows[r + 1][c]
         return below == SOLID or (below in DOOR_CHARS and not door_open(below))
 
-    def elevator_run(c: int, r: int):
-        """Yield every cell of the contiguous elevator shaft through (c, r)."""
+    def shaft_run(c: int, r: int, ch: str):
+        """Yield every cell of the contiguous elevator/ladder shaft through (c, r)."""
         top = r
-        while top - 1 >= 0 and rows[top - 1][c] == ELEVATOR:
+        while top - 1 >= 0 and rows[top - 1][c] == ch:
             top -= 1
         bot = r
-        while bot + 1 < rows_n and rows[bot + 1][c] == ELEVATOR:
+        while bot + 1 < rows_n and rows[bot + 1][c] == ch:
             bot += 1
         for rr in range(top, bot + 1):
             yield c, rr
@@ -130,9 +133,9 @@ def cave_reachable(rows, start: Cell, doors_open, jump: int = JUMP) -> Set[Cell]
         tiles.add((c, r))
         if grounded(c, r):
             f = jump
-        # riding an elevator: free vertical travel to any cell in its shaft
-        if rows[r][c] == ELEVATOR:
-            for ec, er in elevator_run(c, r):
+        # riding an elevator / climbing a ladder: free vertical travel in its shaft
+        if rows[r][c] in (ELEVATOR, LADDER):
+            for ec, er in shaft_run(c, r, rows[r][c]):
                 queue.append((ec, er, jump))
         if is_open(c, r + 1):
             queue.append((c, r + 1, 0))

@@ -105,6 +105,9 @@ class Config:
     # reachability oracle (experiments/cc_status/level_reach.py), so they sidestep the
     # generator's fairness problems. See src/game/crystal_caves_handcrafted_levels.py.
     CRYSTAL_CAVES_IMPORTED: bool = False
+    # Human-play demo recording: when set (a directory path), --human mode saves every
+    # finished episode as a replayable action-sequence JSON (see src/app/demo_recorder.py).
+    RECORD_DEMOS_DIR: Optional[str] = None
     CRYSTAL_CAVES_SEED: int = 0
     CRYSTAL_CAVES_FAMILIES: str = ""
     # AI-1 rich state: a wider perception window (19x11 ~ the 1991 view) + a coarse

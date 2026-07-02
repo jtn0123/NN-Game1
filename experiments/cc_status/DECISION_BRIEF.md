@@ -88,3 +88,42 @@ live code checks), plus the session's own running analysis.
 **Explicitly deprioritized:** more planner engineering (optionally one cheap
 retry with an HP-budget: contact = high edge cost, tolerate 2 hits before
 replanning), CNN/capacity swings, immediate level repair.
+
+## Phase 0 results (same day — the autopsy landed immediately)
+
+**P0a executed as a static physics audit** (`compass_audit.py`): a
+physics-faithful motion graph (the oracle's macro simulator) over every
+resting cell of every level, doors open, cross-checked against both the
+compass field and the tile oracle. Three verdicts:
+
+1. **The levels contain ZERO real traps.** From every one of the 4,368
+   physics-reachable resting cells across all 16 levels, every crystal, every
+   switch and the exit remain reachable. There are no one-way-drop dead ends.
+   **Level repair is cancelled** — nothing to repair.
+2. **The trapped=0.354 stat was an instrument artifact.** The live trapped
+   detector (`game._oracle_reachable` → `cave_reachable`) had NO LADDER
+   support — 'H' was plain air, nothing above a ladder shaft was reachable.
+   Cross-check: the oracle called 35.3% of (cell, crystal) pairs unreachable
+   (45–76% on the nine ladder-heavy levels, 0% on the seven others); physics
+   truth is 0%. FIXED: `cave_reachable` now climbs ladders (shaft traversal +
+   grounded grip, mirroring elevators); regression tests added. The same fix
+   un-restricts the FAR reverse-exit curriculum placement pool, which used the
+   same blind oracle.
+3. **The compass tells no hard lies on this set** (statically, doors open):
+   its nearest-labeled objective is physically reachable from every resting
+   cell — red-team hypothesis #5's worst case (infinite pursuit of an
+   unreachable objective) cannot occur on these levels. Distance distortion
+   (4-connected symmetric vs real route length) remains possible and is left
+   to RUN-25 telemetry.
+
+**P0b delivered:** `--record-demos` human demo recorder
+(`src/app/demo_recorder.py`, wired into `--human` mode + `--imported` CLI
+flag), episode JSONs replay-verified via `demo_extract.verify_stored`,
+summary/verify CLI in `experiments/cc_status/human_demos.py`, 4 tests.
+Owner playtest: `python main.py --human --imported --record-demos`.
+
+**Consequence for RUN-25:** stall failures were ~50% of episodes and a third
+of those carried a false "trapped" label — the true residual stall mass is
+far/oscillating + clock semantics. RUN-25 arms stay as planned (enemy-motion
+ON, win-at-K tier, checkpoint hygiene) plus stall-clock geodesic telemetry;
+level repair is off the table.
