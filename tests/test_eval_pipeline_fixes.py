@@ -99,6 +99,36 @@ class TestAggregateMissingKeys:
         assert out["missing_crystal_frac"] == 1.0, "missingness must be surfaced"
         assert out["won"] == 1.0
 
+    def test_movement_telemetry_is_aggregated(self) -> None:
+        rows = [
+            {
+                "won": False,
+                "crystal_frac": 0.25,
+                "depth_frac": 0.5,
+                "target_distance_progress": 0.75,
+                "selection_score": 0.4,
+                "exit_unlocked_rate": False,
+                "damage_taken": 2,
+                "tiles_visited": 10,
+                "idle_frac": 0.2,
+            },
+            {
+                "won": True,
+                "crystal_frac": 0.75,
+                "depth_frac": 0.9,
+                "target_distance_progress": 0.25,
+                "selection_score": 0.8,
+                "exit_unlocked_rate": True,
+                "damage_taken": 4,
+                "tiles_visited": 20,
+                "idle_frac": 0.4,
+            },
+        ]
+        out = _aggregate(rows)
+        assert out["damage_taken"] == 3.0
+        assert out["tiles_visited"] == 15.0
+        assert abs(out["idle_frac"] - 0.3) < 1e-12
+
 
 class TestUnroundedFractions:
     def test_crystal_frac_not_pre_rounded(self) -> None:

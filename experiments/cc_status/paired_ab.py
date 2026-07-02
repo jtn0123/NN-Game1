@@ -283,6 +283,9 @@ def _evaluate_one_level(
         "exit_unlocked_rate": single_result.mean_exit_unlocked_rate,
         "selection_score": evaluator._selection_score(single_result),
         "steps": steps,
+        "damage_taken": float(info.get("damage_taken", 0.0) or 0.0),
+        "tiles_visited": float(info.get("tiles_visited", 0.0) or 0.0),
+        "idle_frac": float(info.get("idle_frac", 0.0) or 0.0),
         "end_reason": next(iter(single_result.end_reason_counts)),
     }
 

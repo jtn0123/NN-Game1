@@ -61,7 +61,14 @@ from src.game.crystal_caves import CrystalCaves  # noqa: E402
 # and matches what a reader assumes). target_distance_progress is now a FINAL-step closeness
 # (see paired_ab), not best-ever, which used to saturate to ~1.0 on the first objective.
 _RATE_METRICS = ("won", "exit_unlocked_rate", "crystal_frac")
-_MEAN_SURROGATE_METRICS = ("depth_frac", "target_distance_progress", "selection_score")
+_MEAN_SURROGATE_METRICS = (
+    "depth_frac",
+    "target_distance_progress",
+    "selection_score",
+    "damage_taken",
+    "tiles_visited",
+    "idle_frac",
+)
 
 
 def _eval_split(
@@ -404,6 +411,10 @@ def run_diagnosis(
     truncation_bootstrap: bool = False,
     force_cpu: bool = False,
     weight_decay: float = 0.0,
+    death_penalty: float | None = None,
+    hit_penalty: float | None = None,
+    ngu_bonus: bool = False,
+    ngu_beta: float | None = None,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -441,6 +452,14 @@ def run_diagnosis(
         overrides["CRYSTAL_CAVES_POOL_SIZE"] = pool_size
     if weight_decay > 0:
         overrides["WEIGHT_DECAY"] = weight_decay
+    if death_penalty is not None:
+        overrides["CRYSTAL_CAVES_DEATH_PENALTY"] = death_penalty
+    if hit_penalty is not None:
+        overrides["CRYSTAL_CAVES_HIT_PENALTY"] = hit_penalty
+    if ngu_bonus:
+        overrides["CRYSTAL_CAVES_NGU_BONUS"] = True
+    if ngu_beta is not None:
+        overrides["CRYSTAL_CAVES_NGU_BETA"] = ngu_beta
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -850,6 +869,9 @@ def _print_curve(curve: list[dict[str, Any]]) -> None:
         + "crystals".rjust(10)
         + "closeness".rjust(11)
         + "exitUnlk".rjust(10)
+        + "damage".rjust(9)
+        + "tiles".rjust(8)
+        + "idle".rjust(8)
         + "meanQ".rjust(10)
     )
     print(header, flush=True)
@@ -861,6 +883,9 @@ def _print_curve(curve: list[dict[str, Any]]) -> None:
             + f"{tr['crystal_frac']:10.3f}"
             + f"{tr['target_distance_progress']:11.3f}"
             + f"{tr['exit_unlocked_rate']:10.2f}"
+            + f"{tr.get('damage_taken', 0.0):9.2f}"
+            + f"{tr.get('tiles_visited', 0.0):8.1f}"
+            + f"{tr.get('idle_frac', 0.0):8.2f}"
             + f"{point.get('mean_q', 0.0):+10.2f}",
             flush=True,
         )
@@ -910,17 +935,13 @@ def _print_report(summary: dict[str, Any]) -> None:
         "target_distance_progress": "closeness to goal",
         "exit_unlocked_rate": "exit unlocked rate",
         "selection_score": "overall score",
+        "damage_taken": "damage taken",
+        "tiles_visited": "tiles visited",
+        "idle_frac": "idle fraction",
     }
-    for metric in (
-        "won",
-        "crystal_frac",
-        "depth_frac",
-        "target_distance_progress",
-        "exit_unlocked_rate",
-        "selection_score",
-    ):
+    for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
         print(
-            labels[metric].ljust(26)
+            labels.get(metric, metric).ljust(26)
             + f"{tr[metric]:10.3f}"
             + f"{te[metric]:11.3f}"
             + f"{gap[metric]:+11.3f}",
@@ -1159,6 +1180,29 @@ def main(argv: list[str] | None = None) -> int:
         help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
     )
     parser.add_argument(
+        "--death-penalty",
+        type=float,
+        default=None,
+        help="Override CRYSTAL_CAVES_DEATH_PENALTY, e.g. --death-penalty=-30.",
+    )
+    parser.add_argument(
+        "--hit-penalty",
+        type=float,
+        default=None,
+        help="Override CRYSTAL_CAVES_HIT_PENALTY.",
+    )
+    parser.add_argument(
+        "--ngu-bonus",
+        action="store_true",
+        help="Enable the Crystal Caves NGU-style episodic novelty bonus.",
+    )
+    parser.add_argument(
+        "--ngu-beta",
+        type=float,
+        default=None,
+        help="Override CRYSTAL_CAVES_NGU_BETA; implies the configured beta value only.",
+    )
+    parser.add_argument(
         "--stall-trace",
         action="store_true",
         help="On held-out greedy play, characterise WHY episodes STALL (the dominant failure "
@@ -1189,6 +1233,10 @@ def main(argv: list[str] | None = None) -> int:
         truncation_bootstrap=args.truncation_bootstrap,
         force_cpu=args.cpu,
         weight_decay=args.weight_decay,
+        death_penalty=args.death_penalty,
+        hit_penalty=args.hit_penalty,
+        ngu_bonus=args.ngu_bonus,
+        ngu_beta=args.ngu_beta,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
