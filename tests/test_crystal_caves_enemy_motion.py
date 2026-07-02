@@ -81,9 +81,9 @@ def test_offscreen_enemy_is_invisible() -> None:
     far_x = game.player_x + (game.WINDOW_COLS // 2 + 4) * game.TILE_SIZE
     game.enemies = [Enemy(x=far_x, y=game.player_y, vx=1.6, kind="flyer")]
     block = _motion_block(game)
-    assert block == [0.0, 0.5, 0.5, 0.5, 0.0] * CrystalCaves.ENEMY_MOTION_MAX_TRACKED, (
-        "an enemy outside the perception window must contribute nothing"
-    )
+    assert (
+        block == [0.0, 0.5, 0.5, 0.5, 0.0] * CrystalCaves.ENEMY_MOTION_MAX_TRACKED
+    ), "an enemy outside the perception window must contribute nothing"
 
 
 def test_nearest_visible_enemies_win_the_slots() -> None:
