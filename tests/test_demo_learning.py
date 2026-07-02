@@ -82,7 +82,7 @@ def test_pretrain_moves_weights_and_raises_demo_q(tmp_path):
 
 
 def test_demo_prefix_start_hands_over_mid_route(tmp_path):
-    actions = _write_demo(tmp_path, actions=[2, 2, 2, 5, 5, 2, 2, 2] * 20)
+    _write_demo(tmp_path, actions=[2, 2, 2, 5, 5, 2, 2, 2] * 20)
     cfg = _config(DEMO_DIR=str(tmp_path), CRYSTAL_CAVES_DEMO_RESET_P=1.0)
     game = CrystalCaves(cfg, headless=True)
     np.random.seed(3)
