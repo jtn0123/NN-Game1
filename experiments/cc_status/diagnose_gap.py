@@ -383,10 +383,23 @@ def _average_curve(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_episode.setdefault(int(point["episode"]), []).append(point)
     metrics = (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS)
     averaged: list[dict[str, Any]] = []
+
+    def _split_means(points: list[dict[str, Any]], split: str) -> dict[str, float]:
+        # Tolerate metrics absent from older rows (e.g. RUN-<=22 curves predate the
+        # damage/tiles/idle telemetry): average what exists, omit what doesn't —
+        # hard-indexing KeyError'd on any pre-telemetry curve, including reused
+        # baseline arms.
+        out: dict[str, float] = {}
+        for m in metrics:
+            vals = [p[split][m] for p in points if m in p[split]]
+            if vals:
+                out[m] = float(np.mean(vals))
+        return out
+
     for episode in sorted(by_episode):
         points = by_episode[episode]
-        train = {m: float(np.mean([p["train"][m] for p in points])) for m in metrics}
-        test = {m: float(np.mean([p["test"][m] for p in points])) for m in metrics}
+        train = _split_means(points, "train")
+        test = _split_means(points, "test")
         mean_q = float(np.mean([p.get("mean_q", 0.0) for p in points]))
         averaged.append(
             {
@@ -952,11 +965,13 @@ def _print_report(summary: dict[str, Any]) -> None:
         "idle_frac": "idle fraction",
     }
     for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
+        if metric not in tr or metric not in te:
+            continue  # telemetry absent from pre-RUN-23 summaries
         print(
             labels.get(metric, metric).ljust(26)
             + f"{tr[metric]:10.3f}"
             + f"{te[metric]:11.3f}"
-            + f"{gap[metric]:+11.3f}",
+            + f"{gap.get(metric, tr[metric] - te[metric]):+11.3f}",
             flush=True,
         )
 

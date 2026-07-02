@@ -98,7 +98,11 @@ def aggregate(paths: list[str]) -> dict[str, Any]:
     best = max(full_buckets, key=lambda pt: (pt["train"]["won"], pt["train"]["crystal_frac"]))
 
     base = summaries[0]
-    gap_final = {m: round(final["train"][m] - final["test"][m], 4) for m in metrics}
+    gap_final = {
+        m: round(final["train"][m] - final["test"][m], 4)
+        for m in metrics
+        if m in final["train"] and m in final["test"]
+    }
     agg = {
         "difficulty": base.get("difficulty"),
         "episodes": base.get("episodes"),
