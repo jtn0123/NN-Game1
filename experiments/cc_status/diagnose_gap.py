@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any, Deque, Tuple
 
@@ -330,13 +330,25 @@ def _present_values(rows: list[dict[str, Any]], metric: str) -> tuple[list[Any],
     return vals, len(rows) - len(vals)
 
 
-def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
+def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Per-split summary: rates for win/exit, true means for the surrogates."""
-    out: dict[str, float] = {"n": float(len(rows))}
+    out: dict[str, Any] = {"n": float(len(rows))}
     if not rows:
         for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
             out[metric] = 0.0
+        out["end_reason_counts"] = {}
+        out["kill_source_counts"] = {}
         return out
+    out["end_reason_counts"] = dict(
+        Counter(str(r.get("end_reason", "unknown") or "unknown") for r in rows)
+    )
+    out["kill_source_counts"] = dict(
+        Counter(
+            str(r.get("last_damage_source", "none") or "none")
+            for r in rows
+            if str(r.get("end_reason", "")) == "killed"
+        )
+    )
     for metric in (*_RATE_METRICS, *_MEAN_SURROGATE_METRICS):
         vals, missing = _present_values(rows, metric)
         if missing:

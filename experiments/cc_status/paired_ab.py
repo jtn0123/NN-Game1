@@ -287,6 +287,7 @@ def _evaluate_one_level(
         "tiles_visited": float(info.get("tiles_visited", 0.0) or 0.0),
         "idle_frac": float(info.get("idle_frac", 0.0) or 0.0),
         "end_reason": next(iter(single_result.end_reason_counts)),
+        "last_damage_source": str(info.get("last_damage_source", "none") or "none"),
     }
 
 

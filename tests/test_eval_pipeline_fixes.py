@@ -111,6 +111,8 @@ class TestAggregateMissingKeys:
                 "damage_taken": 2,
                 "tiles_visited": 10,
                 "idle_frac": 0.2,
+                "end_reason": "killed",
+                "last_damage_source": "enemy",
             },
             {
                 "won": True,
@@ -122,12 +124,16 @@ class TestAggregateMissingKeys:
                 "damage_taken": 4,
                 "tiles_visited": 20,
                 "idle_frac": 0.4,
+                "end_reason": "won",
+                "last_damage_source": "none",
             },
         ]
         out = _aggregate(rows)
         assert out["damage_taken"] == 3.0
         assert out["tiles_visited"] == 15.0
         assert abs(out["idle_frac"] - 0.3) < 1e-12
+        assert out["end_reason_counts"] == {"killed": 1, "won": 1}
+        assert out["kill_source_counts"] == {"enemy": 1}
 
 
 class TestUnroundedFractions:
