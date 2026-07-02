@@ -26,16 +26,13 @@ unlocks the two highest-evidence techniques in the completion literature
 
 ### Tier 1 — cheap, high-evidence, do first
 
-**A. Safe-action shield (RUN-22 candidate)** — ~50 lines, no training-loop change.
-Before action selection (greedy AND epsilon-random), simulate each action one
-tick; mask any that lands in a lethal tile or an enemy's predicted next cell
-(enemy patrols are deterministic). Set masked Q to -inf; fallback = least-bad
-action; keep the death penalty for multi-step traps. Evidence: shielded learners
-learn FASTER, not just safer (Alshiekh et al. AAAI'18; Huang & Ontañón). On a
-fixed level set a permanent shield is legitimate. Directly attacks the 60%
-killed rate.
+**A. ~~Safe-action shield~~ — VETOED by owner** (not true to the real game:
+the player gets no move-blocking protection, so neither should the agent).
+Recorded for history; do not build. The death rate must be earned via fair
+perception (B) and learning, not enforcement.
 
-**B. Enemy motion + danger channels in the observation** — a single-frame tile
+**B. Enemy motion in the observation (BUILT — RUN-22, `CRYSTAL_CAVES_ENEMY_MOTION`;
+FOV-limited per owner: only enemies inside the perception window)** — a single-frame tile
 window provably cannot dodge movers (two mirror states look identical). Add:
 per-enemy relative (dx, dy, vx, vy) for the 3 nearest enemies, and/or an
 "enemy-next-cell" map channel rolled 1-2 ticks forward (exact — dynamics are
