@@ -76,6 +76,89 @@ def test_hazard_budget_run(lv, reports):
     assert all(hits <= 2 for hits in rep["hazard_taxed_objectives"].values())
 
 
+@pytest.mark.parametrize("lv", _LEVELS)
+def test_harness_clock_run(lv, reports):
+    """A perfect walking player must fit the training clock (3000 steps) and no
+    single leg between consecutive objectives may exceed the 720-step stall
+    window. These are HARNESS budgets, not 1991 rules — the original has no
+    timers — but a level that busts them is unwinnable in training."""
+    clock = reports[lv.name]["clock"]
+    assert clock["budget_frac"] < 1.0, f"{lv.name}: best-case tour busts the episode clock"
+    assert clock["stall_frac"] < 1.0, f"{lv.name}: a route leg busts the stall window"
+
+
+@pytest.mark.parametrize("lv", _LEVELS)
+def test_fair_spawn_run(lv, reports):
+    """The drop from spawn to first footing crosses no hazard. (Enemies patrolling
+    the landing zone are reported as warnings, not failures — 4 authored levels
+    ship spawn-adjacent patrols pending an owner ruling.)"""
+    assert not reports[lv.name]["spawn_drop_hazards"], f"{lv.name}: hazard in the spawn drop"
+
+
+@pytest.mark.parametrize("lv", _LEVELS)
+def test_no_trap_run(lv, reports):
+    """From every reachable standing cell, every objective and the exit stay
+    reachable — no one-way drop may strand the player (an eternal softlock in a
+    game with no timer)."""
+    assert not reports[lv.name]["trapped_cells"], f"{lv.name}: {reports[lv.name]['trapped_cells']}"
+
+
+@pytest.mark.parametrize("lv", _LEVELS)
+def test_ammo_economy_run(lv, reports):
+    """True to 1991 (rocket gun starts with 5, pickups grant more): the accessible
+    arsenal must cover the enemies guarding objectives."""
+    ammo = reports[lv.name]["ammo"]
+    assert ammo["arsenal"] >= len(ammo["guards"]), f"{lv.name}: {ammo}"
+
+
+def test_engine_smoke_loads_every_level():
+    """Every authored level boots in the REAL engine: loads, produces the right
+    state size, and survives a step — a typo'd tile fails here."""
+    from config import Config
+    from src.game.crystal_caves import CrystalCaves
+
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_IMPORTED = True
+    game = CrystalCaves(cfg, headless=True)
+    expected = game.state_size
+    for index in range(len(HANDCRAFTED_LEVELS)):
+        game.level_index = index
+        state = game.reset()
+        assert len(state) == expected, f"level {index}: state size drifted"
+        state, _r, _d, _info = game.step(game.RIGHT)
+        assert len(state) == expected
+
+
+def test_engine_determinism_guard():
+    """The demo system (recording, verification, mid-route starts) requires the
+    engine to be a pure function of (level, actions): the same action script
+    must produce identical trajectories twice."""
+    from config import Config
+    from src.game.crystal_caves import CrystalCaves
+
+    actions = [2, 2, 5, 5, 1, 3, 2, 0, 2, 5] * 30
+
+    def trajectory(level_index):
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_IMPORTED = True
+        game = CrystalCaves(cfg, headless=True)
+        game.CAVES = (HANDCRAFTED_LEVELS[level_index],)
+        game._randomize_levels = False
+        game.use_eval_levels(1)
+        game.reset_eval_cursor()
+        game.reset()
+        trace = []
+        for action in actions:
+            _s, _r, done, _i = game.step(action)
+            trace.append((round(game.player_x, 3), round(game.player_y, 3), game.health))
+            if done:
+                break
+        return trace
+
+    for level_index in (0, 7, 15):
+        assert trajectory(level_index) == trajectory(level_index), f"level {level_index}"
+
+
 def test_validator_flags_junk_levels():
     """The validator must actually catch junk: a gem sealed in rock, an enemy in
     a wall, and an unreachable ladder must all fail."""

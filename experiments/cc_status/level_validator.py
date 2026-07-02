@@ -170,6 +170,153 @@ def _min_hits_to(rows: Tuple[str, ...], start: Cell) -> Dict[Cell, int]:
     return out
 
 
+# Engine movement rates (frames per tile) — optimistic straight-line pace, so a
+# tour estimate that ALREADY busts a budget proves the level is junk under that
+# budget; comfortable margins are reported for design review, never asserted.
+_FRAMES_PER_TILE = 32 / 4.2
+# Training-harness budgets. NOT 1991 rules (the original has no timers) — they
+# are the episode economics our agent actually lives under, so a level must at
+# minimum be completable inside them by a perfect player.
+_EPISODE_BUDGET = 3000
+_STALL_WINDOW = 720
+
+
+def _bfs_dist_map(rows: Tuple[str, ...], start: Cell) -> Dict[Cell, int]:
+    from collections import deque
+
+    dist = {start: 0}
+    queue = deque([start])
+    while queue:
+        c, r = queue.popleft()
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nxt = (c + dc, r + dr)
+            if nxt not in dist and not _solid(rows, *nxt):
+                dist[nxt] = dist[(c, r)] + 1
+                queue.append(nxt)
+    return dist
+
+
+def harness_clock_report(layout: Tuple[str, ...]) -> Dict:
+    """HARNESS-CLOCK run: greedy nearest-first tour over every objective and the
+    exit, timed at optimistic walking pace. The 1991 game has no timers; these
+    budgets are the TRAINING harness's episode clock (3000 steps) and stall
+    window (720 steps without progress). A level whose best-case tour busts the
+    clock, or with two consecutive objectives farther apart than the stall
+    window allows, is unwinnable-in-training no matter how fair its geometry."""
+    rows = tuple(layout)
+    here = _spawn(rows)
+    todo = set(_find(rows, {CRYSTAL})) | set(_find(rows, SWITCH_CHARS))
+    exits = _find(rows, {EXIT_CH})
+    tour_tiles = 0
+    max_leg = 0
+    while todo:
+        dist = _bfs_dist_map(rows, here)
+        reachable = [t for t in todo if t in dist]
+        if not reachable:
+            break  # unreachable objectives are the reachability runs' job
+        nxt = min(reachable, key=lambda t: dist[t])
+        tour_tiles += dist[nxt]
+        max_leg = max(max_leg, dist[nxt])
+        todo.discard(nxt)
+        here = nxt
+    if exits:
+        dist = _bfs_dist_map(rows, here)
+        leg = dist.get(exits[0], 0)
+        tour_tiles += leg
+        max_leg = max(max_leg, leg)
+    est_frames = int(tour_tiles * _FRAMES_PER_TILE)
+    return {
+        "tour_tiles": tour_tiles,
+        "est_frames": est_frames,
+        "budget_frac": est_frames / _EPISODE_BUDGET,
+        "max_leg_frames": int(max_leg * _FRAMES_PER_TILE),
+        "stall_frac": (max_leg * _FRAMES_PER_TILE) / _STALL_WINDOW,
+    }
+
+
+def spawn_safety(layout: Tuple[str, ...]) -> Dict:
+    """FAIR-SPAWN run: the player must not die (or be ambushed) before they can
+    react — the drop from spawn to first footing crosses no hazard, and no
+    enemy patrol band sweeps the landing cell or its neighbours."""
+    rows = tuple(layout)
+    sc, sr = _spawn(rows)
+    drop: List[Cell] = []
+    r = sr
+    while r < len(rows) and not _solid(rows, sc, r) and rows[r][sc] not in (LADDER, ELEVATOR):
+        drop.append((sc, r))
+        if r + 1 < len(rows) and _solid(rows, sc, r + 1):
+            break
+        r += 1
+    landing = drop[-1] if drop else (sc, sr)
+    drop_hazards = [cell for cell in drop if rows[cell[1]][cell[0]] in HAZARDS]
+    near = {(landing[0] + dc, landing[1] + dr) for dc in (-1, 0, 1) for dr in (-1, 0, 1)}
+    ambushers = []
+    for c, r in _find(rows, ENEMY_CHARS):
+        kind = "crawler" if rows[r][c] == "M" else "flyer"
+        if _enemy_patrol(rows, (c, r), kind) & near:
+            ambushers.append((c, r))
+    return {"drop_hazards": drop_hazards, "spawn_ambushers": ambushers}
+
+
+def no_trap_fast(layout: Tuple[str, ...]) -> List[Cell]:
+    """NO-TRAP run: from EVERY standing cell the player can reach (gates open),
+    every crystal, lever and the exit must still be reachable — a one-way drop
+    that strands the player is an eternal softlock (the 1991 game has no timer
+    to end the misery). Returns the trapped cells (empty = pass)."""
+    rows = tuple(layout)
+    spawn = _spawn(rows)
+    targets = (
+        set(_find(rows, {CRYSTAL})) | set(_find(rows, SWITCH_CHARS)) | set(_find(rows, {EXIT_CH}))
+    )
+    reach = cave_reachable(rows, spawn, True)
+    standing = [
+        (c, r) for (c, r) in reach if rows[r][c] in (LADDER, ELEVATOR) or _solid(rows, c, r + 1)
+    ]
+    trapped = []
+    for cell in standing:
+        if not targets <= cave_reachable(rows, cell, True):
+            trapped.append(cell)
+    return sorted(trapped)
+
+
+def ammo_economy(layout: Tuple[str, ...]) -> Dict:
+    """AMMO run (true to 1991: rocket gun starts with 5, pickups in-level): the
+    accessible arsenal must cover the enemies that GUARD objectives (patrol
+    within one tile of a crystal/lever/exit) — a guarded objective with no
+    affordable answer is an unwinnable fight."""
+    rows = tuple(layout)
+    spawn = _spawn(rows)
+    reach = cave_reachable(rows, spawn, True)
+    ammo_cells = [cell for cell in _find(rows, {"A"}) if cell in reach]
+    objectives = (
+        set(_find(rows, {CRYSTAL})) | set(_find(rows, SWITCH_CHARS)) | set(_find(rows, {EXIT_CH}))
+    )
+    near_obj = {(c + dc, r + dr) for c, r in objectives for dc in (-1, 0, 1) for dr in (-1, 0, 1)}
+    guards = []
+    for c, r in _find(rows, ENEMY_CHARS):
+        kind = "crawler" if rows[r][c] == "M" else "flyer"
+        if _enemy_patrol(rows, (c, r), kind) & near_obj:
+            guards.append((c, r))
+    arsenal = 5 + 5 * len(ammo_cells)  # each pickup grants 5 rockets
+    return {"guards": guards, "ammo_pickups": len(ammo_cells), "arsenal": arsenal}
+
+
+def scorecard(layout: Tuple[str, ...]) -> Dict:
+    """Report-only difficulty grade for design review — never pass/fail."""
+    rows = tuple(layout)
+    flat = "".join(rows)
+    clock = harness_clock_report(rows)
+    return {
+        "crystals": flat.count(CRYSTAL),
+        "enemies": sum(flat.count(ch) for ch in ENEMY_CHARS),
+        "hazards": sum(flat.count(ch) for ch in HAZARDS),
+        "ladder_runs": len(_runs(rows, LADDER)),
+        "tour_tiles": clock["tour_tiles"],
+        "budget_frac": round(clock["budget_frac"], 2),
+        "stall_frac": round(clock["stall_frac"], 2),
+    }
+
+
 def validate_level(layout: Tuple[str, ...]) -> Dict:
     """All validator runs for one level; see the module docstring for the list."""
     rows = tuple(layout)
@@ -217,6 +364,12 @@ def validate_level(layout: Tuple[str, ...]) -> Dict:
     }
     unaffordable = sorted(t for t, hits in taxed.items() if hits > MAX_AFFORDABLE_HITS)
 
+    # 6. HARNESS-CLOCK, FAIR-SPAWN, NO-TRAP and AMMO runs.
+    clock = harness_clock_report(rows)
+    safety = spawn_safety(rows)
+    trapped_cells = no_trap_fast(rows)
+    ammo = ammo_economy(rows)
+
     return {
         "win_requirements_missing": win_missing,
         "gems_missing": gems_missing,
@@ -227,12 +380,22 @@ def validate_level(layout: Tuple[str, ...]) -> Dict:
         "elevators_unreachable": elevator_unreachable,
         "hazard_taxed_objectives": {k: v for k, v in sorted(taxed.items())},
         "hazard_unaffordable": unaffordable,
+        "clock": clock,
+        "spawn_drop_hazards": safety["drop_hazards"],
+        "spawn_ambushers": safety["spawn_ambushers"],  # WARNING-level, not a failure
+        "trapped_cells": trapped_cells,
+        "ammo": ammo,
         "ok": not (
             win_missing
             or gems_missing
             or ladder_unreachable
             or elevator_unreachable
             or unaffordable
+            or clock["budget_frac"] >= 1.0
+            or clock["stall_frac"] >= 1.0
+            or safety["drop_hazards"]
+            or trapped_cells
+            or ammo["arsenal"] < len(ammo["guards"])
             or any(e["in_wall"] or not e["encounterable"] for e in enemy_report)
         ),
     }
@@ -244,7 +407,8 @@ def main() -> int:
     bad = 0
     print(
         f"{'level':<22} {'win':>4} {'gems':>5} {'enemy':>6} {'ladder':>7} "
-        f"{'elev':>5} {'hz-taxed':>9} {'verdict':>8}"
+        f"{'elev':>5} {'hz-tax':>7} {'clock%':>7} {'stall%':>7} {'trap':>5} "
+        f"{'ammo':>5} {'ambush':>7} {'verdict':>8}"
     )
     for lv in HANDCRAFTED_LEVELS:
         res = validate_level(lv.layout)
@@ -258,7 +422,12 @@ def main() -> int:
             f"{'ok' if not (res['enemies_in_walls'] or res['enemies_unencounterable']) else 'BAD':>6} "
             f"{'ok' if not res['ladders_unreachable'] else 'MISS':>7} "
             f"{'ok' if not res['elevators_unreachable'] else 'MISS':>5} "
-            f"{len(res['hazard_taxed_objectives']):>9} "
+            f"{len(res['hazard_taxed_objectives']):>7} "
+            f"{res['clock']['budget_frac']:>7.2f} "
+            f"{res['clock']['stall_frac']:>7.2f} "
+            f"{len(res['trapped_cells']):>5} "
+            f"{'ok' if res['ammo']['arsenal'] >= len(res['ammo']['guards']) else 'LOW':>5} "
+            f"{len(res['spawn_ambushers']):>7} "
             f"{verdict:>8}"
         )
         for key in (
@@ -269,10 +438,13 @@ def main() -> int:
             "ladders_unreachable",
             "elevators_unreachable",
             "hazard_unaffordable",
+            "spawn_drop_hazards",
+            "trapped_cells",
         ):
             if res[key]:
                 print(f"    {key}: {res[key][:8]}")
     print(f"\n{len(HANDCRAFTED_LEVELS) - bad}/{len(HANDCRAFTED_LEVELS)} levels pass")
+    print("(ambush > 0 is a WARNING: enemies patrol the spawn landing zone)")
     return 1 if bad else 0
 
 
