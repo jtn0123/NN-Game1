@@ -92,6 +92,10 @@ class CrystalCaves(
     HISTORY_FEATURES_PER_STEP = 7
     # Geodesic corridor-compass scalars: [step_dx, step_dy, reachable, geo_dist_norm].
     GEO_COMPASS_FEATURES = 4
+    # Enemy-motion perception: per tracked visible enemy [present, dx, dy, vx, is_flyer].
+    ENEMY_MOTION_MAX_TRACKED = 3
+    ENEMY_MOTION_FEATURES = ENEMY_MOTION_MAX_TRACKED * 5
+    ENEMY_MOTION_MAX_SPEED = 2.0  # normalisation bound; flyers move at 1.6 px/frame
     MAX_HEALTH = 3
     MAX_AMMO_FOR_STATE = 20
     MAX_STEPS = 3000
@@ -245,8 +249,15 @@ class CrystalCaves(
         self._geo_compass_hazard_cost = float(
             getattr(self.config, "CRYSTAL_CAVES_GEO_COMPASS_HAZARD_COST", 8.0)
         )
+        # Enemy-motion perception (RUN-22 survival lever): motion scalars for the nearest
+        # enemies INSIDE the perception window only — fair, screen-limited information.
+        self._enemy_motion_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_ENEMY_MOTION", False))
+        self._enemy_motion_size = self.ENEMY_MOTION_FEATURES if self._enemy_motion_enabled else 0
         self.METADATA_SIZE = (
-            self.BASE_METADATA_SIZE + self._geo_compass_size + self._history_metadata_size
+            self.BASE_METADATA_SIZE
+            + self._geo_compass_size
+            + self._enemy_motion_size
+            + self._history_metadata_size
         )
         # Op 2 (learnable route): the geodesic next-step direction rides in TRAILING label
         # slots, sliced off before the policy input (network reads STATE_LAYOUT["route_label"])
@@ -1163,6 +1174,9 @@ class CrystalCaves(
             # Appended AFTER the base 20 so route_aux (meta 15-18) and drop-leak
             # (meta 0/1/10) indices stay valid; before history for a stable layout.
             metadata.extend(self._geodesic_next_step_compass())
+        if self._enemy_motion_enabled:
+            # After the compass, before history, for a stable layout.
+            metadata.extend(self._enemy_motion_features())
         if self._history_state_enabled:
             metadata.extend(self._history_metadata())
         if self._route_label_dims:
@@ -1172,6 +1186,50 @@ class CrystalCaves(
             metadata.extend(self._geodesic_next_step_compass())
         self._state_array[idx:] = np.array(metadata, dtype=np.float32)
         return self._state_array.copy()
+
+    def _enemy_motion_features(self) -> List[float]:
+        """Motion scalars for the nearest enemies VISIBLE in the perception window.
+
+        Per tracked enemy: [present, dx, dy, vx, is_flyer], nearest first, zero/neutral
+        padded to ``ENEMY_MOTION_FEATURES``. A single-frame tile window cannot encode
+        which way an enemy is moving, so a feedforward net provably cannot dodge movers
+        from it; this exposes the velocity a human player SEES on screen. Enemies outside
+        the window contribute nothing — the agent's information stays field-of-view
+        limited, like the real game."""
+        px, py = self._player_center()
+        pcol, prow = self._player_tile()
+        half_c = self.WINDOW_COLS // 2
+        half_r = self.WINDOW_ROWS // 2
+        half_w = max(1.0, (half_c + 0.5) * self.TILE_SIZE)
+        half_h = max(1.0, (half_r + 0.5) * self.TILE_SIZE)
+
+        visible: List[Tuple[float, float, float, Enemy]] = []
+        for enemy in self.enemies:
+            if not enemy.alive:
+                continue
+            ecol, erow = self._tile_for_enemy(enemy)
+            if abs(ecol - pcol) > half_c or abs(erow - prow) > half_r:
+                continue  # off-screen: invisible to the agent
+            dx = enemy.x + enemy.width / 2 - px
+            dy = enemy.y + enemy.height / 2 - py
+            visible.append((abs(dx) + abs(dy), dx, dy, enemy))
+        visible.sort(key=lambda item: item[0])
+
+        features: List[float] = []
+        for _, dx, dy, enemy in visible[: self.ENEMY_MOTION_MAX_TRACKED]:
+            features.extend(
+                [
+                    1.0,
+                    self._normalize_signed(dx, half_w),
+                    self._normalize_signed(dy, half_h),
+                    self._normalize_signed(enemy.vx, self.ENEMY_MOTION_MAX_SPEED),
+                    1.0 if enemy.kind == "flyer" else 0.0,
+                ]
+            )
+        while len(features) < self.ENEMY_MOTION_FEATURES:
+            # absent slot: present=0, neutral midpoints for the signed dims
+            features.extend([0.0, 0.5, 0.5, 0.5, 0.0])
+        return features
 
     def _reset_history_state(self) -> None:
         self._action_history.clear()

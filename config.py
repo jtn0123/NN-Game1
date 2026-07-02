@@ -133,6 +133,13 @@ class Config:
     # aware compass field. Higher = wider detours around hazards; must stay finite so a
     # hazard-only corridor remains routable rather than infinitely avoided.
     CRYSTAL_CAVES_GEO_COMPASS_HAZARD_COST: float = 8.0
+    # Enemy-motion perception (RUN-22 survival lever): append per-enemy metadata for the
+    # nearest few enemies VISIBLE INSIDE the perception window — [present, dx, dy, vx,
+    # is_flyer] each. A single-frame tile window cannot distinguish an enemy moving toward
+    # vs away from the player (the killed-dominant failure mode of RUN-20/21), and a human
+    # player watching the screen DOES see motion — so this is fair perception, not an
+    # oracle: enemies outside the window contribute nothing. Off by default; A/B lever.
+    CRYSTAL_CAVES_ENEMY_MOTION: bool = False
     # Use a convolutional Q-network that reads the perception window as a 2D grid
     # (the right architecture for the spatial rich state). Requires the game to set
     # config.STATE_LAYOUT. Off by default; the MLP path keeps the live NN visualizer.
