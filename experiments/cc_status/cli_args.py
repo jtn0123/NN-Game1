@@ -46,6 +46,7 @@ def add_status_session_arguments(parser: argparse.ArgumentParser) -> None:
     _add_mode_argument(parser)
     _add_training_schedule_arguments(parser)
     _add_state_architecture_arguments(parser)
+    _add_reward_shaping_arguments(parser)
     _add_route_demo_arguments(parser)
     _add_demo_supervision_arguments(parser)
     _add_eval_logging_trace_arguments(parser)
@@ -139,6 +140,50 @@ def _add_state_architecture_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=120.0,
         help="Maximum categorical value support for --distributional-dqn.",
+    )
+
+
+def _add_reward_shaping_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--geodesic-potential",
+        action="store_true",
+        help=(
+            "Fold the telescoping BFS-geodesic closeness term into the PBRS potential "
+            "and disable the additive per-step approach reward (PR #35 lever)."
+        ),
+    )
+    parser.add_argument(
+        "--geodesic-potential-weight",
+        type=float,
+        default=0.3,
+        help="Weight of the geodesic closeness term when --geodesic-potential is enabled.",
+    )
+    parser.add_argument(
+        "--show-locked-exit",
+        action="store_true",
+        help=(
+            "Show the still-locked exit in the coarse global objective map at a "
+            "distinct value (PR #35 lever)."
+        ),
+    )
+    parser.add_argument(
+        "--reverse-curriculum-p",
+        type=float,
+        default=0.0,
+        help=(
+            "Fraction of TRAINING resets that start mid-solution (PR #36 lever). "
+            "0 disables the reverse curriculum; eval episodes are never affected."
+        ),
+    )
+    parser.add_argument(
+        "--reward-clip",
+        type=float,
+        default=None,
+        help=(
+            "Override the learn-time negative reward clamp (config REWARD_CLIP, "
+            "default 5.0). 0 disables clamping so terminal penalties (death -12, "
+            "timeout -8, stall -6) reach the learner at full magnitude."
+        ),
     )
 
 

@@ -208,6 +208,11 @@ def run_tutorial_demo_bc(
     selected_eval_games: int,
     history_state: bool,
     history_steps: int,
+    geodesic_potential: bool = False,
+    geodesic_potential_weight: float = 0.3,
+    show_locked_exit: bool = False,
+    reverse_curriculum_p: float = 0.0,
+    reward_clip: float | None = None,
     distributional_dqn: bool,
     c51_atoms: int,
     c51_v_min: float,
@@ -264,6 +269,14 @@ def run_tutorial_demo_bc(
         c51_atoms=c51_atoms,
         c51_v_min=c51_v_min,
         c51_v_max=c51_v_max,
+    )
+    apply_reward_shaping_override(
+        config,
+        geodesic_potential=geodesic_potential,
+        geodesic_potential_weight=geodesic_potential_weight,
+        show_locked_exit=show_locked_exit,
+        reverse_curriculum_p=reverse_curriculum_p,
+        reward_clip=reward_clip,
     )
     exp_config = cc_experiment_config(config)
     exp_config.CRYSTAL_CAVES_INVALID_SHOOT_PENALTY = invalid_shoot_penalty
