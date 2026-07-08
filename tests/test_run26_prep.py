@@ -208,3 +208,15 @@ def test_contact_head_offline_saves_standalone_checkpoint_source():
     assert "save_selected_weight_snapshot" in src
     assert "contact_head_checkpoint" in src
     assert "capture_weight_snapshot" in src
+
+
+def test_diagnose_gap_exposes_stall_window_lever():
+    """The Track B harness must expose --stall-window and wire it to the config
+    override, or the RUN-26 fidelity arm cannot run."""
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--stall-window"' in src
+    assert 'overrides["CRYSTAL_CAVES_STALL_WINDOW_STEPS"] = stall_window' in src

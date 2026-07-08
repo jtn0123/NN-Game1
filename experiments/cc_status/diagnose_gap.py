@@ -450,6 +450,7 @@ def run_diagnosis(
     force_cpu: bool = False,
     weight_decay: float = 0.0,
     reward_clip: float | None = None,
+    stall_window: int | None = None,
     death_penalty: float | None = None,
     hit_penalty: float | None = None,
     ngu_bonus: bool = False,
@@ -503,6 +504,10 @@ def run_diagnosis(
         # levers are invisible unless the clip is raised (or 0 = disabled; the agent code
         # guards `if REWARD_CLIP > 0`, so 0 is a safe off-switch, not a clamp-to-zero).
         overrides["REWARD_CLIP"] = reward_clip
+    if stall_window is not None:
+        # RUN-26 fidelity arm: widen the no-progress stall window (game default 720).
+        # DATA-1: harness timers own 35-54% of endings, flat across learning.
+        overrides["CRYSTAL_CAVES_STALL_WINDOW_STEPS"] = stall_window
     if death_penalty is not None:
         overrides["CRYSTAL_CAVES_DEATH_PENALTY"] = death_penalty
     if hit_penalty is not None:
@@ -1292,6 +1297,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
     )
     parser.add_argument(
+        "--stall-window",
+        type=int,
+        default=None,
+        help="Override the no-progress stall window in steps (game default 720). "
+        "RUN-26 fidelity arm widens it to ~1440 so mid-route journeys stop being "
+        "executed by the harness timer.",
+    )
+    parser.add_argument(
         "--reward-clip",
         type=float,
         default=None,
@@ -1400,6 +1413,7 @@ def main(argv: list[str] | None = None) -> int:
         force_cpu=args.cpu,
         weight_decay=args.weight_decay,
         reward_clip=args.reward_clip,
+        stall_window=args.stall_window,
         death_penalty=args.death_penalty,
         hit_penalty=args.hit_penalty,
         ngu_bonus=args.ngu_bonus,

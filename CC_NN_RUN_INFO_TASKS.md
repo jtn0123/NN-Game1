@@ -200,3 +200,86 @@ unchanged for existing checkpoints.
 
 Keep a running `## Blockers / tooling gaps` section at the bottom for anything
 skipped rather than fixed.
+
+---
+
+## Phase 3 — post-PR-#39 validation runs (the "did any of this help?" phase)
+
+**For the execution agent.** All work below runs on the PR #39 branch
+(`git fetch origin && git checkout claude/nn-performance-grading-2840b4`) —
+the levels, flags, and eval override only exist there. Report results as
+comments on PR #39 using the result-block format at the bottom of this file.
+The PR is the coordination channel; do not merge or rebase anything.
+
+**Why this phase exists:** the branch changed the experiment surface twice
+over — all 16 imported levels were rebalanced to the decoded 1991 stats
+(richer gems, more enemies/hazards, gated vaults), and the stall window
+became a lever. RUN-19..25 numbers are historical. Before RUN-26 we need
+(a) the honest full-objective baseline, (b) the level-change effect isolated,
+and (c) the new training baseline incl. the stall-window arm.
+
+### Task 3.1 — B3s full-objective eval — ✅ DONE (2026-07-07)
+
+First-ever full-game number for the promoted Track A policy, via the new
+`--objective full` override
+(artifact `20260707_191948_t02_b3s_full_objective_eval30`, validation ok):
+
+- **Full wins 2/30 (6.7%)** vs `10/30` on the first-crystal surrogate.
+- Crystals 33%, switch 100%, depth 78%, end reasons `{stalled: 28, won: 2}`.
+- Reading: the promoted policy's real completion rate is ~7%, and the failure
+  mass is almost entirely the stall clock — direct, cheap confirmation of the
+  DATA-1 diagnosis on the Track A surface too.
+
+### Task 3.2 — old checkpoints on new levels (eval-only, ~30-60 min)
+
+Isolates the level-rebalance effect with zero training. RUN-25 saved
+per-milestone weights (`runs/RUN-25/`, on the M4 box). Evaluate the ep6000
+arm-A (control) weights per seed on the REBALANCED imported set (48 games,
+canonical eval; check `python -m experiments.cc_status.diagnose_gap --help`
+for the checkpoint-eval/level_set_eval path referenced in RUN-24's
+artifact-gap note). If the RUN-25 weights are not on this machine, skip and
+report the gap.
+
+**Report:** win / crystal_frac / exit-unlock / end-reason split per seed,
+side-by-side with RUN-25's recorded finals (win 0.000, crystal 0.476,
+killed 0.458, stalled 0.500). Expected shifts worth flagging: crystal_frac
+is not comparable in absolute terms (46 gems/level now vs ~30), so also
+report absolute crystals collected.
+
+### Task 3.3 — THE deep run: post-rebalance baseline + stall-window arm (~4-6 h)
+
+Two arms, canonical protocol v2, on the rebalanced levels:
+
+```bash
+/Users/justin/.pyenv/versions/3.12.11/bin/python -m experiments.cc_status.diagnose_gap \
+  --imported --episodes 6000 --seeds 0,1,2 --games 48 --checkpoint-every 1000 \
+  --geo-compass --geo-compass-hazard-aware --reward-clip 35 \
+  --save-weights --stall-trace --death-trace --cpu \
+  --out runs/RUN-26a_rebalance_baseline/armA_control
+# arm B: identical plus --stall-window 1440
+#   --out runs/RUN-26a_rebalance_baseline/armB_stall1440
+```
+
+(Exact flag names: verify with `--help` first; `--stall-window` was added on
+this branch. Run arms sequentially or per the M4 worker convention.)
+
+**Decision rules:**
+- Arm A is the new frozen Track B baseline regardless of outcome — record
+  best-checkpoint and final win / crystal / exit-unlock / end-reason split.
+- Arm B (stall 1440) is judged on: completion (win/exit-unlock) up, AND
+  timer-ending share (stalled+timeout) down, without killed absorbing all of
+  it (the RUN-18/23 failure mode was hazard/stall mass converting to deaths).
+- A "winning" checkpoint must repeat on a fresh seed set before any claim
+  (winner's-curse guard from the RUN-24 postmortem).
+- Do NOT compare either arm against RUN-25 as if same-surface; the levels
+  changed. Task 3.2 provides the bridge.
+
+### Task 3.4 — gated: RUN-26 proper (demo path)
+
+Blocked on the owner playtest (`python main.py --human --imported
+--record-demos`, wins matter most; verify via
+`experiments/cc_status/human_demos.py`). Once demos exist: DQfD-lite margin
+loss / demo-prefix starts (machinery landed with PR #37, see
+`--demo-dir/--demo-pretrain/--demo-reset-p` on diagnose_gap) on top of the
+better of Task 3.3's arms. That is the first run with a credible shot at
+moving full-game completion.
