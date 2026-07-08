@@ -1,155 +1,133 @@
-# Crystal Caves NN — Run-Info Task Brief (2026-07-07)
+# Crystal Caves NN — Run-Info Task Brief (2026-07-07, rev 2)
 
 **Who this is for:** an execution agent tasked with *gathering run evidence only*.
 Do not change model code, rewards, or hyperparameters beyond the explicit CLI
-flags listed per task. Do not promote/demote baselines. Your job is to run the
-commands, wait, verify artifacts, and report numbers.
+flags listed per task. Do not promote/demote baselines. Run the commands,
+wait, verify artifacts, report numbers.
 
-**Why:** the 2026-07-07 performance grade
-(`.Codex/nn-performance-grade-2026-07-07.md`) found that the two most promising
-levers merged on 2026-06-26 — the geodesic PBRS potential (PR #35) and
-reverse-curriculum mid-solution starts (PR #36) — are off by default and have
-never been exercised by a single training run, and that the learn-time reward
-clamp (`REWARD_CLIP=5`) flattens death (−12) / timeout (−8) / stall (−6) into an
-indistinguishable −5. The last training artifact on disk is dated 2026-06-25.
-Everything below exists to close that evidence gap. The PR that ships this brief
-also adds the CLI flags the tasks use: `--geodesic-potential`,
-`--geodesic-potential-weight`, `--show-locked-exit`, `--reverse-curriculum-p`,
-and `--reward-clip` on `experiments/cc_status_session.py` (they apply to the
-`tutorial-demo-*` modes, including the B3s recipe).
+**Rev 2 note:** rev 1 of this brief queued A/Bs for geodesic PBRS (reward),
+reverse curriculum, and the reward clamp. PR #37's branch already ran all
+three families on its 16-level benchmark and closed them (RUN-06/07/08,
+RUN-10/12, RUN-23/23b — see `experiments/cc_status/RUN_LOG.md` on
+`claude/cc-reverse-curriculum`). Those tasks are DROPPED. What remains open is
+(a) baseline integrity on the main track, (b) the cross-track compass test,
+and (c) the demo-era prep the branch's decision brief calls RUN-26.
 
-**Ground rules (from the tracker — do not re-derive):**
+**Prerequisite decision (owner, not the execution agent):** merge PR #37 or
+declare it canonical. Tasks 2.x below require its code (`--geo-compass`,
+imported level set, `diagnose_gap.py` protocol v2) and assume it has been
+merged to main. Tasks 0.x and 1.x run on main as-is.
+
+**Ground rules:**
 
 - Python: `/Users/justin/.pyenv/versions/3.12.11/bin/python`.
-- All runs go through `experiments/cc_status_session.py`; artifacts land under
-  `.Codex/artifacts/cc_sessions/<timestamp>_<label>/`.
-- Trust only runs whose `artifact_validation.json` says `ok: true`.
-- The frozen pure-NN baseline is **B3s**: `10/30` selected first-crystal wins
-  seed 0, `19/60` expanded validation, `60.5%` selected depth. Its selected
-  checkpoint:
+- Track A (B-series) artifacts land under
+  `.Codex/artifacts/cc_sessions/<timestamp>_<label>/`; trust only runs whose
+  `artifact_validation.json` says `ok: true`. Track B (RUN-NN) runs follow the
+  RUN_LOG convention (`## M4 RESULT RUN-NN <tag>`, `--out scratchpad/RUN-NN_<tag>/`)
+  and protocol v2: best-checkpoint + seed-averaged grading, checkpoints saved,
+  a "winning" checkpoint must repeat on a fresh seed set.
+- Frozen Track A baseline **B3s**: `10/30` selected first-crystal wins seed 0,
+  `19/60` expanded validation. Checkpoint:
   `.Codex/artifacts/cc_sessions/20260624_120002_tutorial_demo_conservative_recovery_pool512_select30_300/tutorial_demo_conservative/models/crystal_caves/tutorial_demo_conservative_selected_ep300.pth`
-- Judge with `compare-artifact` (and `--validation` when a val60 exists), plus
-  the near-miss metrics. Never judge on training score alone.
-- A 300-episode recipe run takes roughly 2–3 hours on the M4 (CPU). Eval-only
-  tasks take minutes. Run tasks strictly in the order below; later tasks depend
-  on earlier results.
-- While a training run is live, report the artifact's `live_metrics.json` path
-  so progress can be watched.
-- After each task, append the result block (defined at the bottom) to
-  `CC_NN_RUN_INFO_RESULTS.md` (create it on first write). Include artifact paths
-  verbatim.
+- A 300-episode Track A recipe run ≈ 2–3 h on the M4; a 3-seed 4000-ep Track B
+  arm ≈ 1.5–2.5 h. Eval-only tasks take minutes.
+- After each task, append the result block (bottom of this file) to
+  `CC_NN_RUN_INFO_RESULTS.md`. Include artifact paths verbatim.
 
 ---
 
-## Phase 0 — cheap eval-only sanity (no training; ~30 min total)
+## Phase 0 — cheap eval-only sanity on main (no training; ~30 min)
 
-### Task 0.1 — Baseline drift check: does frozen B3s still reproduce on current main?
+### Task 0.1 — Baseline drift check: does frozen B3s still reproduce?
 
-PRs #34/#35/#36 changed eval selection, shaping plumbing, and reset paths after
-the B3s numbers were frozen. If the same checkpoint no longer reproduces
-~`10/30` on the same seed-0 held-out eval, every future comparison is invalid.
+PRs #34/#35/#36 changed eval selection and reset paths after B3s was frozen
+(and #37 will change more). Same checkpoint, same seed-0 held-out eval:
 
 ```bash
 /Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py eval-checkpoint \
   --checkpoint .Codex/artifacts/cc_sessions/20260624_120002_tutorial_demo_conservative_recovery_pool512_select30_300/tutorial_demo_conservative/models/crystal_caves/tutorial_demo_conservative_selected_ep300.pth \
-  --eval-games 30 --seed 0 --label t01_b3s_drift_check_main_eval30
+  --eval-games 30 --seed 0 --label t01_b3s_drift_check_eval30
 ```
 
-(If the exact flag names differ, run the mode with `--help` first; do not
-guess.)
+**Report:** wins/30, crystal %, depth %, end reasons; flag if wins deviate
+from 10/30 by more than ±3. Rerun once after #37 merges (label
+`t01b_post37`) — if #37's merge shifts this surface, every Track A comparison
+needs re-baselining.
 
-**Report:** wins/30, crystal %, depth %, end-reason counts, and whether the
-numbers are within noise of `10/30 / 33.3% / 60.5%`. If wins differ by more than
-±3, STOP and report — do not run Phase 1 on a drifted surface.
+### Task 0.2 — Full-level completion eval of B3s/B21 (not first-crystal)
 
-### Task 0.2 — Full-level completion eval (not first-crystal)
+Unchanged from rev 1: every Track A promoted number is a first-crystal
+metric. Evaluate B3s and the B21 adapter checkpoint (locate the `.pth` under
+`.Codex/artifacts/cc_sessions/20260625_181012_b21_stable_contact_head_offline_conf075_eval30/`)
+on the same seed-0 held-out surface, 30 games, full objective. The
+first-crystal early terminal is `CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL` in the
+config snapshot — confirm from the artifact's `summary.json` which objective
+the eval actually ran; if full-objective eval isn't reachable without code
+changes, log it as a tooling gap and skip.
 
-Every promoted number in the tracker is a *first-crystal* metric. We need the
-actual full-game number (all crystals + exit) for B3s and B21, same seed-0
-held-out surface, 30 games each:
-
-- B3s selected checkpoint (path above).
-- B21 adapter checkpoint (under
-  `.Codex/artifacts/cc_sessions/20260625_181012_b21_stable_contact_head_offline_conf075_eval30/`
-  — locate the `.pth` inside; report the exact path you used).
-
-The first-crystal early terminal is an experiment-config setting
-(`CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL`); `eval-checkpoint` restores the config the
-checkpoint was trained with, so check the run's `summary.json` config snapshot
-to confirm whether the eval ended at first crystal or ran the full objective.
-If there is no supported way to run these checkpoints under a full-objective
-eval without code changes, report that as a tooling gap and skip — do not
-modify code.
-
-**Report:** for each: full wins/30, crystal %, exit-unlocked rate, depth, end
-reasons — plus which objective mode the eval actually ran under.
+**Report:** full wins/30, crystal %, exit-unlocked rate, depth, end reasons,
+objective mode confirmed.
 
 ---
 
-## Phase 1 — A/B the never-run levers (one 300-ep run each, ~2–3 h each)
+## Phase 1 — post-#37-merge integrity (one day)
 
-All runs use the B3s recipe (`run-recipe b3s_conservative_demo_q`), seed 0, and
-change exactly ONE thing via the new CLI flags. Confirm in each artifact's
-`summary.json` config snapshot that the intended lever (and only that lever)
-changed: the snapshot now records `geodesic_potential`, `reverse_curriculum`,
-`reverse_curriculum_p`, `show_locked_exit`, and `reward_clip`.
+### Task 1.1 — Merged-tree verification
 
-### Task 1.1 — Geodesic PBRS potential ON
+After #37 merges: full test suite, then re-run Task 0.1 (`t01b_post37`), then
+the branch's own preflight (`python -m experiments.cc_status.compass_audit`
+— expect zero trapped/dead/compass-hard-lie cells on all 16 imported levels).
 
-```bash
-/Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py run-recipe b3s_conservative_demo_q \
-  --geodesic-potential --label t11_geodesic_pbrs_on_300_seed0
-```
-
-### Task 1.2 — Reverse curriculum ON (p=0.5)
-
-```bash
-/Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py run-recipe b3s_conservative_demo_q \
-  --reverse-curriculum-p 0.5 --label t12_reverse_curriculum_p05_300_seed0
-```
-
-### Task 1.3 — Reward clamp OFF
-
-Tests whether the −5 clamp has been suppressing the terminal signal.
-
-```bash
-/Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py run-recipe b3s_conservative_demo_q \
-  --reward-clip 0 --label t13_reward_clip_off_300_seed0
-```
-
-For each run:
-
-1. Verify `artifact_validation.json` is `ok`.
-2. Verify the config snapshot shows the intended lever.
-3. Run `compare-artifact <artifact>` against the frozen B3s bar.
-4. Extract: selected wins/30, crystal %, depth %, route/contact score,
-   near-miss `<=3`/`<=1.5` rates, loop-after-close, stuck-after-close, and
-   non-success depth via `metric-audit`.
-
-**Early-stop rule (same as tracker):** if the ep100 source eval shows depth
-below `35%` AND crystals below B3s, stop the run and report it as a regression
-probe rather than burning the full budget.
-
-**Report:** the metric block for each arm plus the `compare-artifact` verdict
-(`PROMOTE`/`HOLD`/`REGRESS`).
+**Report:** test counts, audit output, drift-check delta.
 
 ---
 
-## Phase 2 — only if directed after Phase 1 review
+## Phase 2 — the open experiments (requires #37 code)
 
-Do NOT start these without explicit direction; they exist so the follow-up
-instruction can be one line.
+### Task 2.1 — Cross-track compass A/B (the one big untested combination)
 
-- **2.1 Combined lever run:** best two Phase 1 arms together, same recipe
-  shape, seed 0 (label `t21_combined_300_seed0`).
-- **2.2 Seed robustness:** repeat the winning Phase 1 arm on seed 1, then
-  `paired-ab` between its selected checkpoint and B3s selected, seeds 0–1,
-  30 games (see the `paired-ab` example in `CC_NN_EXPERIMENT_TRACKER.md`).
-- **2.3 Expanded validation:** 60-game validation of the winning arm plus
-  `compare-artifact --validation`.
-- **2.4 Geodesic weight probe:** if 1.1 is positive, one run at
-  `--geodesic-potential-weight 0.6`.
-- **2.5 Locked-exit map probe:** `--show-locked-exit` alone.
+Track B's biggest lever (`--geo-compass`, +4 state dims, held-out tutorial
+wins 0.033 → 0.483) has never been tried on Track A's promoted lineage.
+Run the B3s recipe with the compass enabled, seed 0 (state size changes, so
+this is a fresh train, not a checkpoint restore — same caveat as the B8
+history-state probe):
+
+```bash
+/Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py run-recipe b3s_conservative_demo_q \
+  --geo-compass --label t21_b3s_geo_compass_300_seed0
+```
+
+(If the merged tree does not expose `--geo-compass` on the status-session CLI,
+report as a tooling gap — the flag exists on `diagnose_gap.py`; wiring it into
+`cc_status_session` follows the same pattern as `--geodesic-potential` in
+`experiments/cc_status/config_helpers.py`.)
+
+Judge with `compare-artifact` against the frozen B3s bar plus near-miss
+metrics. **This is the highest-information single run available:** if the
+compass lifts the first-crystal surrogate the way it lifted tutorial wins,
+Track A's whole lineage gets a step-change for four state dims.
+
+### Task 2.2 — RUN-26 demo run (BLOCKED on owner playtest — do not start)
+
+Per the branch decision brief, the demo path is the only high-evidence family
+never tried. It needs human demos first:
+
+- **Owner action (not the execution agent):**
+  `python main.py --human --imported --record-demos` — play the 16 imported
+  levels, wins matter most. Verify with
+  `experiments/cc_status/human_demos.py` (`verify_stored`).
+- Then RUN-26 shape (per DECISION_BRIEF.md): DQfD-lite margin loss and/or
+  backward curriculum from demo states, WITH the fidelity fixes riding along:
+  stall window 720 → ~1440 (needs `MAX_STEPS_WITHOUT_PROGRESS` made
+  configurable) and truncation-aware bootstrapping. Protocol v2, 3 seeds,
+  checkpoints saved, fresh-seed replication before any promotion claim.
+
+### Task 2.3 — (only if directed) selection-score rebalance validation
+
+After the evaluator's `selection_score` is rebalanced so win strictly
+dominates exit-unlock, re-run Task 0.1 to confirm keep-best ordering is
+unchanged for existing checkpoints.
 
 ---
 
@@ -157,18 +135,17 @@ instruction can be one line.
 
 ```markdown
 ## <task id> — <label>
-- artifact: <path>
-- validation: ok|failed
+- artifact/out dir: <path>
+- validation/preflight: ok|failed
 - command: <exact command run>
 - wall time: <h:mm>
-- config snapshot check: <lever values confirmed>
-- wins: X/N | crystals: % | depth: % | non-success depth: %
-- near-miss <=3: % | <=1.5: % | loop-after-close: % | stuck-after-close: %
-- route/contact score: X.XXX
-- compare-artifact: PROMOTE|HOLD|REGRESS — <one-line reason>
+- headline: wins X/N | crystals % | depth/progress % | exit-unlock %
+- support: near-miss <=3 % | <=1.5 % | loop-after-close % | stuck-after-close %  (Track A)
+           killed/stalled/timeout split | FAR/NEAR probe                          (Track B)
+- verdict vs baseline: PROMOTE|HOLD|REGRESS — <one line>
 - end reasons: {...}
 - anomalies: <anything unexpected, or "none">
 ```
 
 Keep a running `## Blockers / tooling gaps` section at the bottom for anything
-you were told to skip rather than fix.
+skipped rather than fixed.
