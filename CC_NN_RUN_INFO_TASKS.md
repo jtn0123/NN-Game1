@@ -43,7 +43,13 @@ task below runs on merged main.
 
 ## Phase 0 — cheap eval-only sanity on main (no training; ~30 min)
 
-### Task 0.1 — Baseline drift check: does frozen B3s still reproduce post-merge?
+### Task 0.1 — Baseline drift check — ✅ DONE (2026-07-07): NO DRIFT
+
+Result (`20260707_172317_t01_b3s_drift_check_post37_eval30`): B3s reproduced
+exactly at `10/30` first-crystal wins, `33.3%` crystals. The frozen Track A
+comparison surface survives the #34–#37 merges; all frozen bars remain valid.
+
+Original task spec kept for reference:
 
 PRs #34/#35/#36/#37 all changed eval selection, reset paths, seeding
 determinism, or shared game code after B3s was frozen. Same checkpoint, same
@@ -60,7 +66,19 @@ from 10/30 by more than ±3. If drifted, every Track A comparison needs
 re-baselining before Task 2.1 is judged against the frozen B3s bar — report
 and wait for direction rather than improvising a new baseline.
 
-### Task 0.2 — Full-level completion eval of B3s/B21 (not first-crystal)
+### Task 0.2 — Full-level completion eval — ⛔ CLOSED AS TOOLING GAP (2026-07-07)
+
+Correctly skipped by the execution agent: `eval-checkpoint` reconstructs the
+objective from the saved checkpoint config (`first_crystal_goal: true`) and
+exposes no full-objective override. Worse, **B21 has no standalone
+checkpoint** — its artifacts point back at the B3s `.pth`, so the promoted
+adapter (route trunk + contact head) may not be reloadable as promoted.
+Two code follow-ups queued for a separate PR (not execution-agent work):
+(1) an `--objective full|first-crystal` override on `eval-checkpoint`;
+(2) persist contact-head weights as a standalone artifact and audit whether
+B21 is reconstructable today.
+
+Original task spec kept for reference:
 
 Unchanged from rev 1: every Track A promoted number is a first-crystal
 metric. Evaluate B3s and the B21 adapter checkpoint (locate the `.pth` under
@@ -86,7 +104,20 @@ compass-hard-lie cells on all 16 imported levels). No agent action needed.
 
 ## Phase 2 — the open experiments
 
-### Task 2.1 — Cross-track compass A/B (the one big untested combination)
+### Task 2.1 — Cross-track compass A/B — ✅ DONE (2026-07-07): REGRESS, lane closed
+
+Result (`20260707_172512_t21_b3s_geo_compass_300_seed0`): selected `10/30`
+wins (tied B3s), but depth `47.4%` vs `60.5%`, route/contact score `1.640` vs
+`1.821`; `compare-artifact` = `REGRESS`. **Reading:** the compass is a
+routing-information lever, and the B3s recipe already gets route information
+from scripted demo-BC — on Track A it adds nothing and costs depth at equal
+budget. **Direction: do NOT sweep compass variants on Track A** (no
+hazard-aware arm, no weight/episode sweeps). The compass stays valuable where
+it was proven (Track B, no demo supervision). This also sharpens the overall
+picture: both tracks now agree the missing ingredient is not route
+information; it is completion behavior — the demo path.
+
+Original task spec kept for reference:
 
 Track B's biggest lever (`--geo-compass`, +4 state dims, held-out tutorial
 wins 0.033 → 0.483) has never been tried on Track A's promoted lineage.
@@ -106,6 +137,11 @@ compass lifts the first-crystal surrogate the way it lifted tutorial wins,
 Track A's whole lineage gets a step-change for four state dims.
 
 ### Task 2.2 — RUN-26 demo run (BLOCKED on owner playtest — do not start)
+
+**Status after Phase 0/2.1 (2026-07-07): this is now the ONLY live
+performance lever.** Everything else in this brief is done or closed. The
+critical path is: owner records demos → RUN-26-prep PR lands (stall-window
+configurability + eval objective override + B21 checkpoint audit) → RUN-26.
 
 Per the branch decision brief, the demo path is the only high-evidence family
 never tried. It needs human demos first:

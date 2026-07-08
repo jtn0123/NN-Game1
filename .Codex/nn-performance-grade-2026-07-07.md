@@ -125,10 +125,12 @@ unlocking common.
    window widening and truncation-aware bootstrapping riding along (the stall
    window is still a class constant, `MAX_STEPS_WITHOUT_PROGRESS = 720`; it
    must become configurable as RUN-26 prep).
-4. **Cross-pollination A/B:** geo-compass on the Track A B3s recipe (now
-   runnable: `run-recipe b3s_conservative_demo_q --geo-compass`) — if the
-   14× tutorial lift shows up as first-crystal gains there too, Track A's
-   whole promoted lineage gets a step-change for four extra state dims.
+4. ~~Cross-pollination A/B: geo-compass on the Track A B3s recipe~~ — **run
+   2026-07-07: REGRESS, lane closed.** Tied wins (10/30) with materially worse
+   depth (47.4% vs 60.5%); the B3s recipe's demo-BC already supplies route
+   information, so the compass adds nothing there. Both tracks now agree the
+   binding constraint is completion behavior, not routing — reinforcing the
+   demo path (items 2–3) as the critical path.
 5. **Rebalance `selection_score`** so winning strictly dominates unlocking.
 6. Stop spending on (now with branch evidence): reward scalar tuning of any
    kind, start-distribution curricula without demos, observation add-ons
