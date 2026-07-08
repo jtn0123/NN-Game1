@@ -33,6 +33,19 @@ class CrystalCavesLogicMixin:
         return move_dir, wants_jump, wants_shoot, wants_interact
 
     def _apply_player_input(self: Any, move_dir: int, wants_jump: bool) -> None:
+        if self._is_on_ladder():
+            self.grounded = False
+            self.coyote_timer = 0
+            if move_dir:
+                self.vx = move_dir * self.AIR_SPEED
+                self.facing = move_dir
+            else:
+                self.vx *= self.FRICTION
+                if abs(self.vx) < 0.05:
+                    self.vx = 0.0
+            self.vy = -self.LADDER_CLIMB_SPEED if wants_jump else self.LADDER_DESCEND_SPEED
+            return
+
         self.grounded = self._is_on_surface()
         if self.grounded:
             self.coyote_timer = 6
@@ -174,8 +187,11 @@ class CrystalCavesLogicMixin:
                     reward += self.INVALID_INTERACT_PENALTY
                     self._invalid_interact_count += 1
                     self._invalid_interact_total += self.INVALID_INTERACT_PENALTY
-                else:
-                    reward += 0.05
+                # Audit R2-A: re-interacting an ALREADY-THROWN switch is a NO-OP. It was a
+                # farmable +0.05/step (sign-flipped from the intended -0.05 penalty): INTERACT
+                # zeroes move, so a policy could park at a used lever harvesting positive
+                # reward while the stall timer ran out — corrupting the learned policy and the
+                # shaped-return signal. Now neutral (only the base step cost applies).
                 break
         else:
             if penalize_invalid:
@@ -205,7 +221,24 @@ class CrystalCavesLogicMixin:
             reward += self.FIRST_CRYSTAL_GOAL_BONUS
             return reward
 
-        if not self.crystals and not self.exit_unlocked:
+        # Win-at-K training tier: during TRAINING the exit opens once K crystals are
+        # held, giving dense practice at finishing episodes long before a full clear is
+        # in reach. Eval keeps the real all-crystals rule, and the full-clear bonus
+        # below still pays out if the agent goes on to collect everything.
+        win_at_k = int(getattr(self.config, "CRYSTAL_CAVES_WIN_AT_K", 0))
+        if (
+            win_at_k > 0
+            and not self._eval_mode
+            and not self.exit_unlocked
+            and self.crystals
+            and self.initial_crystals - len(self.crystals) >= win_at_k
+        ):
+            self.exit_unlocked = True
+            self._add_tile_event(self.exit_pos, "sparkle", "EXIT OPEN", EGA["G"], ttl=58)
+            self._mark_progress()
+
+        if not self.crystals and not self._all_crystals_bonus_given:
+            self._all_crystals_bonus_given = True
             self.exit_unlocked = True
             self.score += 500
             reward += self.ALL_CRYSTALS_COLLECTED_BONUS
@@ -322,30 +355,41 @@ class CrystalCavesLogicMixin:
         return reward
 
     def _check_player_danger(self: Any) -> float:
+        # Audit B7: if a terminal event already fired this frame (e.g. a FIRST_CRYSTAL_GOAL
+        # win in _collect_pickups), do not overwrite it with a same-frame death.
+        if self.game_over:
+            return 0.0
+
         reward = 0.0
         player_rect = self._player_rect()
-        danger = False
 
-        for tile in self.hazards:
-            if player_rect.colliderect(self._tile_rect(tile)):
-                danger = True
-                break
+        # Audit B6: detect hazard and enemy overlap INDEPENDENTLY. The old code checked
+        # hazards first and break'd, only checking enemies `if not danger`, so a frame
+        # overlapping both was always attributed to 'hazard' — biasing the death-source
+        # taxonomy that forks the survival remediation (static-hazard pathing vs
+        # moving-enemy survival). On simultaneous overlap, record a distinct 'both' source.
+        hazard_hit = any(player_rect.colliderect(self._tile_rect(tile)) for tile in self.hazards)
+        enemy_hit = any(
+            enemy.alive and player_rect.colliderect(enemy.rect) for enemy in self.enemies
+        )
 
-        if not danger:
-            for enemy in self.enemies:
-                if enemy.alive and player_rect.colliderect(enemy.rect):
-                    danger = True
-                    break
-
-        if danger:
-            reward += self._damage_player()
+        if hazard_hit or enemy_hit:
+            if hazard_hit and enemy_hit:
+                source = "both"
+            elif enemy_hit:
+                source = "enemy"
+            else:
+                source = "hazard"
+            reward += self._damage_player(source)
 
         return reward
 
-    def _damage_player(self: Any) -> float:
+    def _damage_player(self: Any, source: str = "hazard") -> float:
         if self.invuln_timer > 0:
             return 0.0
 
+        self._last_damage_source = source
+        self._damage_taken += 1
         self.health -= 1
         self.invuln_timer = self.INVULN_FRAMES
         self.shake_timer = self.SHAKE_FRAMES  # juice: kick the camera on a hit
@@ -366,17 +410,22 @@ class CrystalCavesLogicMixin:
             self.won = False
             self._end_reason = "killed"
             self.audio.play("lose")
-            return -12.0
+            return float(getattr(self.config, "CRYSTAL_CAVES_DEATH_PENALTY", -12.0))
 
         self.audio.play("damage")
-        return -3.0
+        return float(getattr(self.config, "CRYSTAL_CAVES_HIT_PENALTY", -3.0))
 
     def _check_exit(self: Any) -> float:
+        # Audit latent-2: a fatal hit earlier this frame (_check_player_danger) must not be
+        # overwritten by a same-frame exit touch — "first terminal event wins".
+        if self.game_over:
+            return 0.0
         if not self.exit_unlocked:
             return 0.0
 
         exit_rect = self._tile_rect(self.exit_pos).inflate(-6, -2)
         if self._player_rect().colliderect(exit_rect):
+            self._won_level_index = self.level_index  # Audit B9: report the PLAYED level
             self.game_over = True
             self.won = True
             self._end_reason = "won"
@@ -453,15 +502,20 @@ class CrystalCavesLogicMixin:
             return 0.0
 
         tile_progress = (previous_distance - current_distance) / self.TILE_SIZE
-        # Reset the stall timer on real approach regardless of which approach-signal
-        # source is active, so the agent is never timed out mid-approach to the exit.
-        if tile_progress > 0.03:
+        # Audit B8: reset the stall timer only on NET progress — a new closest-ever approach
+        # to the current target — not on any instantaneous toward-step. An oscillating agent
+        # with ~0 net displacement otherwise resets the timer every wiggle and never
+        # 'stalls', mislabeling the failure as 'timeout'. Works in every shaping mode (the
+        # additive path below also marks progress on its own new-best, which is idempotent).
+        stall_best = self._stall_best.get(current_target)
+        if stall_best is None or current_distance < stall_best - self.TILE_SIZE * 0.10:
+            self._stall_best[current_target] = current_distance
             self._mark_progress()
 
         # When the telescoping geodesic potential is on it supplies the (unfarmable)
         # approach gradient; skip the additive per-step approach reward to avoid
         # double-counting and the back-and-forth farming the additive term enables.
-        if getattr(self.config, "CRYSTAL_CAVES_GEODESIC_POTENTIAL", False):
+        if self._geodesic_active():
             return 0.0
 
         reward = self._target_best_approach_reward(current_target, current_distance)
@@ -612,4 +666,4 @@ class CrystalCavesLogicMixin:
         tank_x, tank_y = self._tile_center(tank)
         player_x, player_y = self._player_center()
         if np.hypot(tank_x - player_x, tank_y - player_y) <= self.TILE_SIZE * 2.2:
-            self._damage_player()
+            self._damage_player("air")

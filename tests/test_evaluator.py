@@ -17,8 +17,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from src.ai.agent import Agent
-from src.ai.evaluator import EvalResults, Evaluator
+from src.ai.evaluator import EvalResults, Evaluator, final_target_progress
 from src.game.breakout import Breakout
+
+
+def test_final_target_progress_uses_final_not_best():
+    # Audit B2 regression: reaches its first objective (distance 0), the target re-aims, and
+    # the agent ends FAR from the new objective. Best-ever (min) scored 1.0 ("solved");
+    # final-step scores ~0 (honest). This drives keep-best / plateau selection.
+    assert final_target_progress([10.0, 4.0, 0.0, 14.0, 13.0]) == pytest.approx(0.0)
+    assert final_target_progress([10.0, 6.0, 2.0, 0.0]) == pytest.approx(1.0)  # ended on goal
+    assert final_target_progress([10.0, 5.0]) == pytest.approx(0.5)  # ended halfway
+    assert final_target_progress([]) == 0.0
 
 
 class StaticEvalGame:

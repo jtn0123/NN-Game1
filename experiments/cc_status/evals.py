@@ -193,6 +193,22 @@ def classify_trace_failure(row: dict[str, Any]) -> list[str]:
     return modes
 
 
+def _mean_crystal_frac(rows: list[dict[str, Any]]) -> float:
+    """Audit R2-B: TRUE mean collection fraction = mean(crystals_collected / initial_crystals).
+    Distinct from any_crystal_rate (= fraction of games collecting >=1), which over-reports
+    multi-crystal difficulties (e.g. 0.83 collected-any vs ~0.20 mean fraction)."""
+    if not rows:
+        return 0.0
+    fracs = [
+        (
+            int(row.get("crystals_collected", 0) or 0)
+            / max(1, int(row.get("initial_crystals", 1) or 1))
+        )
+        for row in rows
+    ]
+    return float(np.mean(fracs))
+
+
 def trace_rollup(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if not rows:
         return {
@@ -200,6 +216,7 @@ def trace_rollup(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "wins": 0,
             "win_rate": 0.0,
             "any_crystal_rate": 0.0,
+            "mean_crystal_frac": 0.0,
             "all_crystals_rate": 0.0,
             "mean_progress": 0.0,
             "mean_depth_frac": 0.0,
@@ -224,6 +241,10 @@ def trace_rollup(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "wins": int(sum(1 for row in rows if row.get("won"))),
         "win_rate": float(np.mean([bool(row.get("won")) for row in rows])),
         "any_crystal_rate": float(np.mean([row.get("crystals_collected", 0) > 0 for row in rows])),
+        # Audit R2-B: TRUE mean collection fraction (NOT the collected-≥1 rate above). The
+        # near-miss payload mislabeled any_crystal_rate as mean_crystal_frac, over-reporting
+        # multi-crystal collection (e.g. 0.83 vs a real ~0.20) into promotion/scorecard.
+        "mean_crystal_frac": _mean_crystal_frac(rows),
         "all_crystals_rate": float(np.mean([bool(row.get("exit_unlocked")) for row in rows])),
         "mean_progress": float(np.mean([row.get("final_progress", 0.0) for row in rows])),
         "mean_depth_frac": float(np.mean([row.get("final_depth_frac", 0.0) for row in rows])),
@@ -280,6 +301,7 @@ def first_objective_near_miss_rollup(rows: list[dict[str, Any]]) -> dict[str, An
             "wins": 0,
             "win_rate": 0.0,
             "any_crystal_rate": 0.0,
+            "mean_crystal_frac": 0.0,
             "mean_progress": 0.0,
             "mean_depth_frac": 0.0,
             "mean_initial_target_distance_tiles": 0.0,
@@ -312,6 +334,7 @@ def first_objective_near_miss_rollup(rows: list[dict[str, Any]]) -> dict[str, An
         "wins": int(sum(1 for row in rows if row.get("won"))),
         "win_rate": float(np.mean([bool(row.get("won")) for row in rows])),
         "any_crystal_rate": float(np.mean([row.get("crystals_collected", 0) > 0 for row in rows])),
+        "mean_crystal_frac": _mean_crystal_frac(rows),  # Audit R2-B: true mean, not the rate
         "mean_progress": float(np.mean([row.get("final_progress", 0.0) for row in rows])),
         "mean_depth_frac": float(np.mean([row.get("final_depth_frac", 0.0) for row in rows])),
         "mean_target_distance_best_delta_tiles": float(

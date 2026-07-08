@@ -36,6 +36,16 @@ def interquartile_mean(values: list[float]) -> float:
     return float(np.mean(core if len(core) else ordered))
 
 
+def pipeline_mean(values: list[float]) -> float:
+    """Empty-safe PLAIN mean — the estimator the metrics/lever pipeline must use.
+
+    NOT interquartile_mean: trimming the outer 50% floored bottom-heavy sparse-RL
+    distributions to 0 and even flipped the SIGN of near-zero lever deltas (audit B1), so
+    a helpful lever could read as harmful. interquartile_mean is kept only as a generic
+    utility; nothing in the metric/A-B path should call it."""
+    return float(np.mean(values)) if values else 0.0
+
+
 def stratified_bootstrap_ci(
     rows: list[dict[str, Any]],
     *,
@@ -45,9 +55,9 @@ def stratified_bootstrap_ci(
     confidence: float = 0.95,
 ) -> dict[str, float]:
     values = [float(row.get(metric, 0.0) or 0.0) for row in rows]
-    point = interquartile_mean(values)
+    point = pipeline_mean(values)
     if not rows or n_bootstrap <= 0:
-        return {"iqm": point, "ci_low": point, "ci_high": point, "n": float(len(rows))}
+        return {"mean": point, "ci_low": point, "ci_high": point, "n": float(len(rows))}
 
     groups: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -63,12 +73,10 @@ def stratified_bootstrap_ci(
             group = groups[int(key)]
             indices = rng.integers(0, len(group), size=len(group))
             sampled_rows.extend(group[int(index)] for index in indices)
-        samples.append(
-            interquartile_mean([float(row.get(metric, 0.0) or 0.0) for row in sampled_rows])
-        )
+        samples.append(pipeline_mean([float(row.get(metric, 0.0) or 0.0) for row in sampled_rows]))
 
     return {
-        "iqm": point,
+        "mean": point,
         "ci_low": float(np.quantile(samples, alpha)),
         "ci_high": float(np.quantile(samples, 1.0 - alpha)),
         "n": float(len(rows)),
@@ -275,18 +283,27 @@ def _evaluate_one_level(
         "exit_unlocked_rate": single_result.mean_exit_unlocked_rate,
         "selection_score": evaluator._selection_score(single_result),
         "steps": steps,
+        "damage_taken": float(info.get("damage_taken", 0.0) or 0.0),
+        "tiles_visited": float(info.get("tiles_visited", 0.0) or 0.0),
+        "idle_frac": float(info.get("idle_frac", 0.0) or 0.0),
         "end_reason": next(iter(single_result.end_reason_counts)),
+        "last_damage_source": str(info.get("last_damage_source", "none") or "none"),
     }
 
 
 def _target_distance_progress(distances: list[float]) -> float:
+    """Closeness to the agent's CURRENT objective at the FINAL step, normalized by the
+    initial distance. Uses the terminal distance, NOT the best-ever minimum: the old min
+    form saturated to ~1.0 the instant the agent touched its first objective (the target
+    then switches and the distance jumps), badly overstating competence. 1.0 = ended on the
+    objective; 0.0 = ended at/beyond the starting distance."""
     if not distances:
         return 0.0
     initial = distances[0]
-    best = min(distances)
+    final = distances[-1]
     if initial > 1e-6:
-        return float(np.clip(1.0 - best / initial, 0.0, 1.0))
-    return 1.0 if best <= 1e-6 else 0.0
+        return float(np.clip(1.0 - final / initial, 0.0, 1.0))
+    return 1.0 if final <= 1e-6 else 0.0
 
 
 def paired_ab_main(argv: list[str] | None = None) -> int:
@@ -375,7 +392,7 @@ def _summary_line(summary: dict[str, Any]) -> str:
     delta = summary["aggregate"]["paired_delta_b_minus_a"]
     return (
         f"paired-ab {summary['arms']['b']['label']} - {summary['arms']['a']['label']} "
-        f"{summary['metric']} IQM delta {delta['iqm']:.4f} "
+        f"{summary['metric']} mean delta {delta['mean']:.4f} "
         f"[{delta['ci_low']:.4f}, {delta['ci_high']:.4f}]"
     )
 
@@ -392,12 +409,12 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- A: `{summary['arms']['a']['label']}`",
         f"- B: `{summary['arms']['b']['label']}`",
         "",
-        "## IQM",
+        "## Mean",
         "",
-        f"- A IQM: `{aggregate['arm_a']['iqm']:.4f}`",
-        f"- B IQM: `{aggregate['arm_b']['iqm']:.4f}`",
+        f"- A mean: `{aggregate['arm_a']['mean']:.4f}`",
+        f"- B mean: `{aggregate['arm_b']['mean']:.4f}`",
         (
-            f"- Paired delta B-A IQM: `{delta['iqm']:.4f}` "
+            f"- Paired delta B-A mean: `{delta['mean']:.4f}` "
             f"95% CI `[{delta['ci_low']:.4f}, {delta['ci_high']:.4f}]`"
         ),
         "",
@@ -411,6 +428,7 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
 __all__ = [
     "aggregate_paired_ab",
     "interquartile_mean",
+    "pipeline_mean",
     "paired_ab_main",
     "pair_level_rows",
     "stratified_bootstrap_ci",

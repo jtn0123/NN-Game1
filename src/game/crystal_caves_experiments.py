@@ -25,6 +25,11 @@ CRYSTAL_CAVES_EXPERIMENT_DEFAULTS: dict[str, Any] = {
     "CRYSTAL_CAVES_ROUTE_AUX_LOSS": False,
     "CRYSTAL_CAVES_ROUTE_AUX_WEIGHT": 0.05,
     "CRYSTAL_CAVES_ROUTE_AUX_DEADBAND": 0.01,
+    # Op 2 (learnable route): supervise the aux head with the GEODESIC next-step
+    # direction (the real route around walls) instead of the legacy euclidean target
+    # bearing, and carry that label in TRAILING state slots that are sliced off before
+    # the policy input — so the net must LEARN to predict the route, not copy it.
+    "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC": False,
     "CRYSTAL_CAVES_DEMO_ACTION_LOSS": False,
     "CRYSTAL_CAVES_DEMO_ACTION_WEIGHT": 0.05,
     "CRYSTAL_CAVES_DEMO_ACTION_MARGIN": 0.8,

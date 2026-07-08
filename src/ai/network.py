@@ -183,6 +183,14 @@ class DQN(nn.Module):
         self.config = config or Config()
         self.state_size = state_size
         self.action_size = action_size
+        # Op 2 (learnable route): the last `route_label_dims` of the state are a TRAILING
+        # supervision label (the geodesic route direction), NOT policy input — slice them off
+        # so the trunk reads only `core_in` features. route_label=0 (the default) leaves the
+        # network byte-identical to before.
+        layout = getattr(self.config, "STATE_LAYOUT", None)
+        self.route_label_dims = int(layout.get("route_label", 0)) if layout else 0
+        self.core_in = self.state_size - self.route_label_dims
+        self.route_aux_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_LOSS", False))
         self.distributional = _distributional_enabled(self.config)
         self.num_atoms = _distributional_num_atoms(self.config)
         self.register_buffer("support", _distributional_support(self.config), persistent=False)
@@ -212,7 +220,7 @@ class DQN(nn.Module):
     def _build_network(self) -> None:
         """Construct the neural network layers."""
         output_size = self.action_size * self.num_atoms if self.distributional else self.action_size
-        layer_sizes = [self.state_size] + self.hidden_sizes + [output_size]
+        layer_sizes = [self.core_in] + self.hidden_sizes + [output_size]
 
         for i in range(len(layer_sizes) - 1):
             layer = nn.Linear(layer_sizes[i], layer_sizes[i + 1])
@@ -254,7 +262,7 @@ class DQN(nn.Module):
             layer.register_forward_hook(get_activation(f"layer_{i}"))
 
     def _raw_output(self, state: torch.Tensor) -> torch.Tensor:
-        x = state
+        x = state[:, : self.core_in] if self.route_label_dims else state
 
         # Apply hidden layers with activation (use cached function for speed)
         for i, layer in enumerate(self.layers[:-1]):
@@ -391,6 +399,14 @@ class DuelingDQN(nn.Module):
         self.config = config or Config()
         self.state_size = state_size
         self.action_size = action_size
+        # Op 2 (learnable route): the last `route_label_dims` of the state are a TRAILING
+        # supervision label (the geodesic route direction), NOT policy input — slice them off
+        # so the trunk reads only `core_in` features. route_label=0 (the default) leaves the
+        # network byte-identical to before.
+        layout = getattr(self.config, "STATE_LAYOUT", None)
+        self.route_label_dims = int(layout.get("route_label", 0)) if layout else 0
+        self.core_in = self.state_size - self.route_label_dims
+        self.route_aux_enabled = bool(getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_LOSS", False))
         self.distributional = _distributional_enabled(self.config)
         self.num_atoms = _distributional_num_atoms(self.config)
         self.register_buffer("support", _distributional_support(self.config), persistent=False)
@@ -422,16 +438,16 @@ class DuelingDQN(nn.Module):
         self.feature_layers = nn.ModuleList()
 
         # Build shared feature extraction layers
-        layer_sizes = [self.state_size] + self.hidden_sizes[:-1]
+        layer_sizes = [self.core_in] + self.hidden_sizes[:-1]
         for i in range(len(layer_sizes) - 1):
             layer = nn.Linear(layer_sizes[i], layer_sizes[i + 1])
             self.feature_layers.append(layer)
 
-        # Get the size of the last shared layer (or state_size if no hidden layers)
+        # Get the size of the last shared layer (or core_in if no hidden layers)
         if len(self.hidden_sizes) > 1:
             shared_output_size = self.hidden_sizes[-2]
         else:
-            shared_output_size = self.state_size
+            shared_output_size = self.core_in
 
         # Final hidden layer size for streams
         stream_hidden_size = self.hidden_sizes[-1]
@@ -457,6 +473,12 @@ class DuelingDQN(nn.Module):
         else:
             self.value_output = nn.Linear(stream_hidden_size, value_output_size)  # type: ignore[assignment]
             self.advantage_output = nn.Linear(stream_hidden_size, advantage_output_size)  # type: ignore[assignment]
+
+        # Op 2 (learnable route): supervised head predicting the 9-way geodesic route
+        # direction from the SHARED trunk (the route label is sliced off the input, so this
+        # must be learned). Trained only as an auxiliary loss; unused at action time.
+        if self.route_aux_enabled:
+            self.route_aux_head = nn.Linear(shared_output_size, 9)
 
         # For compatibility with DQN interface, create a layers list
         self.layers = nn.ModuleList(
@@ -509,12 +531,19 @@ class DuelingDQN(nn.Module):
         self.advantage_output.register_forward_hook(get_activation("advantage_output"))
 
     def _shared_features(self, state: torch.Tensor) -> torch.Tensor:
-        x = state
+        # Slice off the trailing route-aux label (Op 2) so the policy never reads it.
+        x = state[:, : self.core_in] if self.route_label_dims else state
 
         # Pass through shared feature layers (use cached activation fn for speed)
         for layer in self.feature_layers:
             x = self._activation_fn(layer(x))
         return x
+
+    def route_aux_logits(self, state: torch.Tensor) -> torch.Tensor:
+        """9-way geodesic route-direction logits from the shared trunk (Op 2 aux head)."""
+        if not self.route_aux_enabled:
+            raise RuntimeError("route-aux head is disabled")
+        return self.route_aux_head(self._shared_features(state))
 
     def _dueling_outputs(self, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = self._shared_features(state)
@@ -724,7 +753,12 @@ class SpatialDQN(nn.Module):
         self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2)
-        conv_out = 32 * max(1, wr // 2) * max(1, wc // 2)
+        # Global average pooling over the conv feature map (translation-invariant) vs
+        # the default flatten (which preserves absolute position and tends to memorize
+        # layouts). Off by default to keep existing checkpoints/behavior; flag it on to
+        # test whether translation invariance closes the train/test generalization gap.
+        self.global_pool = bool(getattr(self.config, "CRYSTAL_CAVES_CNN_GLOBAL_POOL", False))
+        conv_out = 32 if self.global_pool else 32 * max(1, wr // 2) * max(1, wc // 2)
         hidden = (self.config.HIDDEN_LAYERS or [256, 128])[0]
         merged = conv_out + self.gmap_size + self.meta_size
         self.fc = nn.Linear(merged, hidden)
@@ -753,13 +787,14 @@ class SpatialDQN(nn.Module):
         win = state[:, : self.win_size].view(-1, 1, self.win_rows, self.win_cols)
         rest = state[:, self.win_size :]
         gmap = rest[:, : self.gmap_size]
-        meta = rest[:, self.gmap_size :]
+        # Bound the meta slice so any trailing route-aux label (Op 2) is excluded from input.
+        meta = rest[:, self.gmap_size : self.gmap_size + self.meta_size]
         x = F.relu(self.conv1(win))
         x = self.pool(F.relu(self.conv2(x)))
         if self.capture_activations:
             # one value per conv filter (mean over the spatial grid) for the viz
             self.activations["layer_0"] = x.mean(dim=(2, 3)).detach()
-        x = torch.flatten(x, 1)
+        x = x.mean(dim=(2, 3)) if self.global_pool else torch.flatten(x, 1)
         x = torch.cat([x, gmap, meta], dim=1)
         x = F.relu(self.fc(x))
         if self.capture_activations:

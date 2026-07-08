@@ -157,6 +157,13 @@ def apply_cli_config_overrides(config: Config, args) -> None:
     --cnn / --cave-difficulty / --random-caves / --early-stop / etc. and train a
     default-config run instead of the one the user asked for.
     """
+    # Crystal Caves: the 16 hand-crafted Episode-1 levels
+    if getattr(args, "imported", False):
+        config.CRYSTAL_CAVES_IMPORTED = True
+        print("🗺️  Crystal Caves: hand-crafted Episode-1 level set")
+    if getattr(args, "record_demos", None):
+        config.RECORD_DEMOS_DIR = args.record_demos
+        print(f"🎬 Human demos will be recorded to {args.record_demos}")
     # Crystal Caves: procedurally generated caves
     if getattr(args, "random_caves", False):
         config.CRYSTAL_CAVES_PROCEDURAL = True

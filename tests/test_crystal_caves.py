@@ -8,6 +8,7 @@ training support.
 
 import os
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pygame
@@ -17,10 +18,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from scripts.render_crystal_caves_gallery import render_gallery
+from src.app.headless import HeadlessTrainer, reverse_curriculum_p_for_episode
 from src.game import get_game_info, list_games
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_art import SPRITES
-from src.game.crystal_caves_entities import Elevator, Enemy
+from src.game.crystal_caves_entities import CaveSpec, Elevator, Enemy
 from src.game.crystal_caves_vec import VecCrystalCaves
 
 
@@ -641,6 +643,39 @@ class TestCrystalCavesObjectives:
         assert min(feet) <= 5 * ts  # rode up near the top
         assert max(feet) >= 10 * ts - ts  # and back down near the bottom
 
+    @pytest.mark.parametrize("climb_tile", [CrystalCaves.LADDER, CrystalCaves.ELEVATOR])
+    def test_ladder_and_elevator_rails_are_climbable(self, config, climb_tile):
+        layout = tuple(
+            row.replace("H", climb_tile)
+            for row in (
+                "########",
+                "#..H..*#",
+                "#..H...#",
+                "#..H..E#",
+                "#..H...#",
+                "#P.H...#",
+                "#..H...#",
+                "########",
+            )
+        )
+        spec = CaveSpec("climb test", layout, (0, 0, 0), (255, 255, 255))
+        game = CrystalCaves(config, headless=True)
+        game.level = spec
+        game._load_level(spec)
+        game.player_x = 3 * game.TILE_SIZE + 5
+        game.player_y = 5 * game.TILE_SIZE + 1
+        start_y = game.player_y
+
+        for _ in range(8):
+            game.step(CrystalCaves.JUMP)
+        climbed_y = game.player_y
+
+        for _ in range(8):
+            game.step(CrystalCaves.IDLE)
+
+        assert climbed_y < start_y - 12
+        assert game.player_y > climbed_y + 8
+
 
 class TestCrystalCavesCombatAndDanger:
     """Test enemies, bullets, ammo, hazards, and damage."""
@@ -1167,3 +1202,599 @@ class TestReverseCurriculum:
         assert game._reverse_curriculum_p == 1.0
         game.set_reverse_curriculum_p(-1.0)
         assert game._reverse_curriculum_p == 0.0
+
+
+class TestReverseCurriculumAnnealSchedule:
+    """The pure linear-anneal schedule for the reverse-curriculum probability."""
+
+    def test_starts_at_start_p(self) -> None:
+        assert reverse_curriculum_p_for_episode(0.5, 0, 100) == pytest.approx(0.5)
+
+    def test_zero_at_and_after_anneal_episodes(self) -> None:
+        assert reverse_curriculum_p_for_episode(0.5, 100, 100) == pytest.approx(0.0)
+        assert reverse_curriculum_p_for_episode(0.5, 250, 100) == pytest.approx(0.0)
+
+    def test_monotonically_decreasing_in_between(self) -> None:
+        values = [reverse_curriculum_p_for_episode(0.8, ep, 100) for ep in range(0, 101, 10)]
+        assert all(later <= earlier for earlier, later in zip(values, values[1:]))
+        # Strictly decreasing while annealing (no flat plateau before the end).
+        assert all(later < earlier for earlier, later in zip(values[:-1], values[1:]))
+
+    def test_midpoint_is_half_start_p(self) -> None:
+        assert reverse_curriculum_p_for_episode(0.6, 50, 100) == pytest.approx(0.3)
+
+    def test_anneal_episodes_zero_keeps_constant(self) -> None:
+        for ep in (0, 5, 1000):
+            assert reverse_curriculum_p_for_episode(0.5, ep, 0) == pytest.approx(0.5)
+
+    def test_config_validates_non_negative_anneal_episodes(self) -> None:
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES = -1
+        with pytest.raises(ValueError, match="ANNEAL_EPISODES"):
+            cfg.__post_init__()
+
+
+class TestReverseCurriculumTrainerHook:
+    """The trainer's per-episode hook anneals every env's reverse-curriculum p."""
+
+    def _make_trainer(self, config: Config, vec_envs: int) -> "HeadlessTrainer":
+        config.GAME_NAME = "crystal_caves"
+        config.MAX_EPISODES = 1
+        config.EVAL_EVERY = 0  # skip the evaluator (no extra game instance / I/O)
+        config.USE_NOISY_NETWORKS = False
+        args = SimpleNamespace(
+            lr=None,
+            episodes=None,
+            learn_every=None,
+            gradient_steps=None,
+            batch_size=None,
+            torch_compile=False,
+            turbo=False,
+            vec_envs=vec_envs,
+            model=None,
+            web=False,
+            port=0,
+            host="127.0.0.1",
+        )
+        return HeadlessTrainer(config, args)
+
+    def test_hook_anneals_each_vec_env_over_episodes(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 0.5
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES = 10
+        trainer = self._make_trainer(config, vec_envs=4)
+        assert trainer.vec_env is not None
+
+        trainer.current_episode = 0
+        trainer._apply_reverse_curriculum_schedule()
+        assert all(env._reverse_curriculum_p == pytest.approx(0.5) for env in trainer.vec_env.envs)
+
+        trainer.current_episode = 5
+        trainer._apply_reverse_curriculum_schedule()
+        assert all(env._reverse_curriculum_p == pytest.approx(0.25) for env in trainer.vec_env.envs)
+
+        trainer.current_episode = 10
+        trainer._apply_reverse_curriculum_schedule()
+        assert all(env._reverse_curriculum_p == pytest.approx(0.0) for env in trainer.vec_env.envs)
+
+    def test_hook_is_noop_when_anneal_disabled(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 0.5
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES = 0
+        trainer = self._make_trainer(config, vec_envs=2)
+        assert trainer.vec_env is not None
+
+        for env in trainer.vec_env.envs:
+            env.set_reverse_curriculum_p(0.5)
+        trainer.current_episode = 100
+        trainer._apply_reverse_curriculum_schedule()
+        # p left constant (no annealing) when ANNEAL_EPISODES == 0.
+        assert all(env._reverse_curriculum_p == pytest.approx(0.5) for env in trainer.vec_env.envs)
+
+    def test_hook_is_noop_for_non_crystal_game(self) -> None:
+        cfg = Config()
+        cfg.GAME_NAME = "breakout"
+        cfg.MAX_EPISODES = 1
+        cfg.EVAL_EVERY = 0
+        args = SimpleNamespace(
+            lr=None,
+            episodes=None,
+            learn_every=None,
+            gradient_steps=None,
+            batch_size=None,
+            torch_compile=False,
+            turbo=False,
+            vec_envs=1,
+            model=None,
+            web=False,
+            port=0,
+            host="127.0.0.1",
+        )
+        trainer = HeadlessTrainer(cfg, args)
+        # No crystal envs -> empty list, hook does nothing and must not raise.
+        assert trainer._crystal_caves_envs() == []
+        trainer._apply_reverse_curriculum_schedule()
+
+
+class TestReverseCurriculumRelocation:
+    """Oracle-verified player relocation toward the remaining objectives (#4 follow-up)."""
+
+    def _vanilla_spawn_tile(self) -> tuple[int, int]:
+        game = CrystalCaves(Config(), headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+        return game._player_tile()
+
+    def test_relocation_off_keeps_spawn(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE = False
+        game = CrystalCaves(config, headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+        assert game._player_tile() == self._vanilla_spawn_tile()
+
+    def test_relocation_keeps_objectives_oracle_reachable(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE = True
+        game = CrystalCaves(config, headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+
+        # Safety invariant: from the relocated start, every remaining crystal AND the
+        # exit are still reachable under the jump-aware oracle (start stays solvable).
+        targets = set(game.crystals) | {game.exit_pos}
+        assert targets <= game._oracle_reachable(game._player_tile())
+
+    def test_relocation_does_not_move_farther_from_objectives(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE = True
+        game = CrystalCaves(config, headless=True)
+        game._randomize_levels = False
+        game.level_index = 0
+        game.reset()
+
+        targets = set(game.crystals) | {game.exit_pos}
+
+        def nearest_sq(tile: tuple[int, int]) -> int:
+            return min((tile[0] - oc) ** 2 + (tile[1] - orow) ** 2 for oc, orow in targets)
+
+        spawn = self._vanilla_spawn_tile()
+        # The relocated start is at least as close to an objective as the spawn.
+        assert nearest_sq(game._player_tile()) <= nearest_sq(spawn)
+
+
+class TestReverseExitCurriculum:
+    """Reverse-EXIT curriculum: post-collection start near the open exit (leg-2 drill)."""
+
+    def test_off_keeps_crystals(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM is False
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) > 0
+        assert game.exit_unlocked is False
+
+    def test_on_clears_crystals_and_unlocks_exit(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) == 0
+        assert game.exit_unlocked is True
+        # Post-collection world state: every gate is open.
+        assert game.used_switches == set(game.switches)
+
+    def test_start_can_reach_exit_oracle(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        for _ in range(8):
+            game.reset()
+            # Safety invariant: the open exit is jump-aware reachable from the start.
+            assert game.exit_pos in game._oracle_reachable(game._player_tile())
+
+    def test_eval_mode_disables_curriculum(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        game = CrystalCaves(config, headless=True)
+        game._eval_mode = True
+        game.reset()
+        # Eval starts are always full-from-scratch (curriculum is training-only).
+        assert len(game.crystals) > 0
+        assert game.exit_unlocked is False
+
+    def test_p_zero_is_noop(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 0.0
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert len(game.crystals) > 0
+
+    def test_far_variant_starts_distant_and_reachable(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM = True
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P = 1.0
+        config.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_FAR = True
+        game = CrystalCaves(config, headless=True)
+        for _ in range(8):
+            game.reset()
+            assert len(game.crystals) == 0 and game.exit_unlocked is True
+            col, row = game._player_tile()
+            # FAR drill: a real distance from the exit, but still oracle-reachable.
+            exit_col, exit_row = game.exit_pos
+            assert (
+                abs(col - exit_col) + abs(row - exit_row)
+                >= game.REVERSE_EXIT_CURRICULUM_FAR_MIN_DIST
+            )
+            assert game.exit_pos in game._oracle_reachable((col, row))
+
+
+class TestGeoCompass:
+    """Geodesic next-step corridor compass (RUN-11 navigation fix)."""
+
+    def test_off_by_default_no_size_change(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_GEO_COMPASS is False
+        base = CrystalCaves(config, headless=True).state_size
+        cfg2 = Config()
+        cfg2.CRYSTAL_CAVES_GEO_COMPASS = True
+        assert (
+            CrystalCaves(cfg2, headless=True).state_size == base + CrystalCaves.GEO_COMPASS_FEATURES
+        )
+
+    def test_compass_points_down_the_route(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_GEO_COMPASS = True
+        game = CrystalCaves(config, headless=True)
+        for _ in range(6):
+            game.reset()
+            field = game._geodesic_distance_field()
+            pcol, prow = game._player_tile()
+            here = field.get((pcol, prow))
+            if here is None or here == 0:
+                continue
+            step_dx, step_dy, reachable, dist_norm = game._geodesic_next_step_compass()
+            assert reachable == 1.0
+            assert 0.0 <= dist_norm <= 1.0
+            # The suggested step must strictly reduce the route distance to the objective.
+            nd = field.get((pcol + int(step_dx), prow + int(step_dy)))
+            assert nd is not None and nd < here
+
+    def test_unreachable_returns_zero_reachable(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_GEO_COMPASS = True
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        # An empty field (no objective tiles in it) -> reachable flag is 0.
+        game._geodesic_field = {}
+        game._geodesic_field_key = (game._active_target_tiles(), frozenset(game.open_colors))
+        step_dx, step_dy, reachable, _ = game._geodesic_next_step_compass()
+        assert (step_dx, step_dy, reachable) == (0.0, 0.0, 0.0)
+
+
+class TestHazardAwareCompass:
+    """RUN-17 survival lever: the compass routes AROUND static hazards, not through them."""
+
+    @staticmethod
+    def _stub_corridor(game, *, hazard_aware: bool):
+        """Two parallel 5-wide corridors (rows 0 and 1) joined at every column. Objective at
+        (4,0); a hazard sits at (2,0) on the direct top-row route, with the bottom row a free
+        detour. Player at (1,0), one tile west of the hazard."""
+        free = {(c, r) for c in range(5) for r in range(2)}
+        game._solid_at = lambda c, r: (c, r) not in free
+        game._active_target_tiles = lambda: frozenset({(4, 0)})
+        game._player_tile = lambda: (1, 0)
+        game.hazards = {(2, 0)}
+        game.open_colors = set()
+        game.level_cols, game.level_rows = 5, 2
+        game._geo_compass_hazard_aware = hazard_aware
+        game._hazard_field = None
+        game._hazard_field_key = None
+        game._geodesic_field = None
+        game._geodesic_field_key = None
+
+    def test_plain_compass_steps_into_hazard(self, config):
+        # Control: the hazard-blind compass takes the shortest route, straight onto (2,0).
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=False)
+        step_dx, step_dy, reachable, _ = game._geodesic_next_step_compass()
+        assert reachable == 1.0
+        assert (step_dx, step_dy) == (1.0, 0.0)  # east, onto the hazard at (2,0)
+
+    def test_hazard_aware_compass_detours_around_hazard(self, config):
+        # Arm B: the hazard-aware compass detours down to the free bottom row instead.
+        config.CRYSTAL_CAVES_GEO_COMPASS = True
+        config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=True)
+        step_dx, step_dy, reachable, _ = game._geodesic_next_step_compass()
+        assert reachable == 1.0
+        # Leaves the hazard top row (dy=+1) and lands on a non-hazard detour tile, rather
+        # than stepping east onto (2,0) like the plain compass does.
+        assert step_dy == 1.0
+        landing = (1 + int(step_dx), 0 + int(step_dy))
+        assert landing not in game.hazards
+        assert (step_dx, step_dy) != (1.0, 0.0)
+
+    def test_hazard_cost_raises_route_distance(self, config):
+        # The hazard-weighted field must cost >= the plain field everywhere, and strictly
+        # more at the player tile where the cheap route crosses the hazard.
+        config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=True)
+        plain = game._geodesic_distance_field()
+        weighted = game._hazard_aware_distance_field()
+        for tile, d in plain.items():
+            assert weighted[tile] >= d - 1e-9
+        assert weighted[(1, 0)] > plain[(1, 0)]
+
+    def test_no_hazards_matches_plain_route(self, config):
+        # Degenerate safety: with no hazards the hazard-aware field equals the plain field,
+        # so arm B reduces exactly to the proven compass.
+        config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        game = CrystalCaves(config, headless=True)
+        self._stub_corridor(game, hazard_aware=True)
+        game.hazards = set()
+        game._hazard_field = None
+        plain = game._geodesic_distance_field()
+        weighted = game._hazard_aware_distance_field()
+        assert {k: float(v) for k, v in plain.items()} == {k: float(v) for k, v in weighted.items()}
+
+    def test_off_by_default_no_size_change(self, config):
+        # The lever adds no state dims (same 4 compass scalars) and is off by default.
+        assert config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE is False
+        base = CrystalCaves(config, headless=True)
+        base_compass = Config()
+        base_compass.CRYSTAL_CAVES_GEO_COMPASS = True
+        haz = Config()
+        haz.CRYSTAL_CAVES_GEO_COMPASS = True
+        haz.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = True
+        assert (
+            CrystalCaves(haz, headless=True).state_size
+            == CrystalCaves(base_compass, headless=True).state_size
+        )
+        assert base.state_size <= CrystalCaves(haz, headless=True).state_size
+
+
+class TestRouteAux:
+    """Op 2: learnable geodesic route via an auxiliary head + trailing label slots."""
+
+    def test_off_by_default(self, config: Config) -> None:
+        assert getattr(config, "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC", False) is False
+        game = CrystalCaves(config, headless=True)
+        assert game._route_label_dims == 0
+        assert game.config.STATE_LAYOUT["route_label"] == 0
+
+    def test_adds_trailing_label_slots(self, config: Config) -> None:
+        base = CrystalCaves(config, headless=True).state_size
+        cfg2 = Config()
+        cfg2.CRYSTAL_CAVES_ROUTE_AUX_GEODESIC = True
+        game = CrystalCaves(cfg2, headless=True)
+        assert game.state_size == base + CrystalCaves.GEO_COMPASS_FEATURES
+        assert game.config.STATE_LAYOUT["route_label"] == CrystalCaves.GEO_COMPASS_FEATURES
+        # the trailing slots ARE the geodesic compass (label-only; meta size is unchanged)
+        game.reset()
+        state = game.get_state()
+        trailing = state[-CrystalCaves.GEO_COMPASS_FEATURES :]
+        assert np.allclose(trailing, np.array(game._geodesic_next_step_compass(), dtype=np.float32))
+
+    def test_policy_is_route_blind(self, config: Config) -> None:
+        """The network must slice the label off — scrambling it cannot change Q-values."""
+        import torch
+
+        from src.ai.network import DuelingDQN
+
+        config.CRYSTAL_CAVES_ROUTE_AUX_GEODESIC = True
+        config.CRYSTAL_CAVES_ROUTE_AUX_LOSS = True
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        net = DuelingDQN(state_size=game.state_size, action_size=game.action_size, config=config)
+        assert net.core_in == game.state_size - CrystalCaves.GEO_COMPASS_FEATURES
+        assert hasattr(net, "route_aux_head")
+        t = torch.tensor(game.get_state().astype(np.float32)).unsqueeze(0)
+        q = net(t).detach().clone()
+        scrambled = t.clone()
+        scrambled[:, -CrystalCaves.GEO_COMPASS_FEATURES :] = torch.randn(
+            CrystalCaves.GEO_COMPASS_FEATURES
+        )
+        assert torch.allclose(q, net(scrambled).detach(), atol=1e-6)
+
+
+class TestNGUBonus:
+    """NGU-style episodic novelty bonus (#5)."""
+
+    def test_off_returns_zero(self, config: Config) -> None:
+        assert config.CRYSTAL_CAVES_NGU_BONUS is False
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        assert game._ngu_bonus() == 0.0
+
+    def test_decays_with_revisits(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_NGU_BONUS = True
+        config.CRYSTAL_CAVES_NGU_BETA = 0.1
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+
+        first = game._ngu_bonus()
+        second = game._ngu_bonus()
+        third = game._ngu_bonus()
+        assert first == pytest.approx(0.1)
+        assert second == pytest.approx(0.1 / (2**0.5))
+        assert third == pytest.approx(0.1 / (3**0.5))
+        assert first > second > third
+
+    def test_progress_change_is_novel_again(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_NGU_BONUS = True
+        config.CRYSTAL_CAVES_NGU_BETA = 0.1
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+
+        assert game._ngu_bonus() == pytest.approx(0.1)  # first visit at this state
+        # Simulate collecting a crystal: the (pos x progress) key changes -> novel.
+        game.crystals.pop()
+        assert game._ngu_bonus() == pytest.approx(0.1)
+
+    def test_reset_clears_visit_counts(self, config: Config) -> None:
+        config.CRYSTAL_CAVES_NGU_BONUS = True
+        config.CRYSTAL_CAVES_NGU_BETA = 0.1
+        game = CrystalCaves(config, headless=True)
+        game.reset()
+        game._ngu_bonus()
+        game.reset()
+        # After a fresh episode the same state is novel again.
+        assert game._ngu_bonus() == pytest.approx(0.1)
+
+    def test_step_reward_includes_ngu_bonus(self) -> None:
+        """The bonus must actually flow through the public step() reward, not just
+        _ngu_bonus(). Same level + action + RNG, so the only delta is the bonus."""
+
+        def first_step_reward(ngu_on: bool) -> float:
+            cfg = Config()
+            cfg.CRYSTAL_CAVES_NGU_BONUS = ngu_on
+            cfg.CRYSTAL_CAVES_NGU_BETA = 0.1
+            game = CrystalCaves(cfg, headless=True)
+            game._randomize_levels = False
+            game.level_index = 0
+            np.random.seed(0)
+            game.reset()
+            np.random.seed(0)  # match any per-step RNG across both runs
+            _, reward, _, _ = game.step(CrystalCaves.IDLE)
+            return reward
+
+        reward_off = first_step_reward(False)
+        reward_on = first_step_reward(True)
+        # First visit of the post-step (tile x progress) cell -> beta / sqrt(1).
+        assert reward_on == pytest.approx(reward_off + 0.1)
+
+    @pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf"), float("-inf")])
+    def test_invalid_beta_rejected(self, value: float) -> None:
+        cfg = Config()
+        cfg.CRYSTAL_CAVES_NGU_BETA = value
+        with pytest.raises(ValueError, match="CRYSTAL_CAVES_NGU_BETA"):
+            cfg.__post_init__()
+
+
+class TestDeathSourceAttribution:
+    """Audit B6: hazard vs enemy death attribution must be independent (no hazard bias)."""
+
+    def _attribute(self, game: CrystalCaves) -> str:
+        game.invuln_timer = 0
+        game.health = 3
+        game._last_damage_source = "none"
+        game._check_player_danger()
+        return game._last_damage_source
+
+    def test_independent_hazard_enemy_and_both_bucket(self, game: CrystalCaves) -> None:
+        import pygame
+
+        game.reset()
+        player_rect = game._player_rect()
+        pcol, prow = game._player_tile()
+
+        class _FakeEnemy:
+            alive = True
+
+            def __init__(self, rect: pygame.Rect) -> None:
+                self.rect = rect
+
+        # hazard only
+        game.hazards = {(pcol, prow)}
+        game.enemies = []
+        assert self._attribute(game) == "hazard"
+
+        # enemy only
+        game.hazards = set()
+        game.enemies = [_FakeEnemy(pygame.Rect(player_rect))]
+        assert self._attribute(game) == "enemy"
+
+        # BOTH overlap on the same frame — pre-fix this was forced to 'hazard'.
+        game.hazards = {(pcol, prow)}
+        game.enemies = [_FakeEnemy(pygame.Rect(player_rect))]
+        assert self._attribute(game) == "both"
+
+
+class TestTerminalPrecedence:
+    """Audit B7 / latent-2 / B9: first terminal event in a frame wins; correct level label."""
+
+    def test_b7_terminal_win_not_overwritten_by_same_frame_damage(self, game: CrystalCaves) -> None:
+        game.reset()
+        game.game_over = True  # e.g. a FIRST_CRYSTAL_GOAL win fired in _collect_pickups
+        game.won = True
+        game._end_reason = "first_crystal_goal"
+        pcol, prow = game._player_tile()
+        game.hazards = {(pcol, prow)}  # a fatal hazard overlaps the same frame
+        game.health = 1
+        game.invuln_timer = 0
+        game._check_player_danger()
+        assert game.won is True
+        assert game._end_reason == "first_crystal_goal"  # pre-fix: overwritten to "killed"
+
+    def test_latent2_death_not_overwritten_by_same_frame_exit(self, game: CrystalCaves) -> None:
+        game.reset()
+        game.game_over = True  # a fatal hit fired earlier this frame
+        game.won = False
+        game._end_reason = "killed"
+        game.exit_unlocked = True
+        ex, ey = game.exit_pos
+        game.player_x = float(ex * game.TILE_SIZE)
+        game.player_y = float(ey * game.TILE_SIZE)
+        game._check_exit()
+        assert game.won is False
+        assert game._end_reason == "killed"  # pre-fix: overwritten to "won"
+
+    def test_b9_won_episode_reports_played_level_not_next(self, game: CrystalCaves) -> None:
+        game.reset()
+        played = game.level_index
+        game.exit_unlocked = True
+        ex, ey = game.exit_pos
+        game.player_x = float(ex * game.TILE_SIZE)
+        game.player_y = float(ey * game.TILE_SIZE)
+        game._check_exit()
+        assert game.won is True
+        assert game.level_index != played  # internal cursor advanced
+        assert game._info()["level"] == played  # but the report shows the PLAYED level
+
+
+class TestStallTimerNetProgress:
+    """Audit B8: the stall timer resets only on NET progress, not instantaneous oscillation."""
+
+    def test_oscillation_does_not_reset_stall_timer(self, game: CrystalCaves, monkeypatch) -> None:
+        game.reset()
+        game.game_over = False
+        target = ("crystal", 5, 5)
+        game._stall_best = {target: 90.0}
+
+        def drive(current_distance: float, prev_distance: float) -> None:
+            monkeypatch.setattr(game, "_current_target", lambda: (target, current_distance))
+            game._target_progress_reward(target, prev_distance)
+
+        # Moves CLOSER than the previous step (instantaneous progress) but NOT past the
+        # closest-ever 90 -> pre-fix this reset the timer every wiggle; now it must not.
+        game.steps_since_progress = 50
+        drive(current_distance=95.0, prev_distance=99.0)
+        assert game.steps_since_progress == 50
+
+        # A genuine new closest-ever approach DOES reset the timer.
+        drive(current_distance=80.0, prev_distance=95.0)
+        assert game.steps_since_progress == 0
+
+
+class TestReInteractNotFarmable:
+    """Audit R2-A: re-interacting an already-thrown switch must not pay positive reward."""
+
+    def test_reinteract_used_switch_is_noop(self, game: CrystalCaves) -> None:
+        game.reset()
+        pcol, prow = game._player_tile()
+        game.switches = {(pcol, prow)}
+        game.used_switches = {(pcol, prow)}  # already thrown
+        game.config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY = False
+        assert game._try_interact() == 0.0  # pre-fix: +0.05 (farmable)
+
+    def test_reinteract_penalized_when_flag_on(self, game: CrystalCaves) -> None:
+        game.reset()
+        pcol, prow = game._player_tile()
+        game.switches = {(pcol, prow)}
+        game.used_switches = {(pcol, prow)}
+        game.config.CRYSTAL_CAVES_INVALID_INTERACT_PENALTY = True
+        assert game._try_interact() < 0.0

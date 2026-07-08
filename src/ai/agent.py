@@ -116,6 +116,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         self.optimizer = optim.Adam(
             self.policy_net.parameters(),  # type: ignore[attr-defined]
             lr=self.config.LEARNING_RATE,
+            weight_decay=getattr(self.config, "WEIGHT_DECAY", 0.0),
         )
 
         # Learning rate scheduler
@@ -442,6 +443,7 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         rewards: np.ndarray,
         next_states: np.ndarray,
         dones: np.ndarray,
+        truncateds: np.ndarray | None = None,
     ) -> None:
         """
         Store a batch of experiences in replay buffer.
@@ -452,16 +454,26 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
             rewards: Batch of rewards received, shape (batch_size,)
             next_states: Batch of next states, shape (batch_size, state_size)
             dones: Batch of done flags, shape (batch_size,)
+            truncateds: Optional mask (batch_size,) of transitions that ended on a
+                time/no-progress cutoff rather than a real terminal. Where set, the
+                stored done is cleared so the TD target bootstraps the final state
+                (truncation-aware bootstrapping). When None, behaviour is unchanged.
         """
         # Use push_batch if available (standard ReplayBuffer), otherwise fall back to loop
         if hasattr(self.memory, "push_batch"):
-            self.memory.push_batch(states, actions, rewards, next_states, dones)
+            self.memory.push_batch(
+                states, actions, rewards, next_states, dones, truncateds=truncateds
+            )
         else:
+            trunc = None if truncateds is None else np.asarray(truncateds).astype(bool)
             for i in range(len(states)):
                 # Use .item() for numpy scalar conversion (more reliable than int/float)
                 action = actions[i].item() if hasattr(actions[i], "item") else int(actions[i])
                 reward = rewards[i].item() if hasattr(rewards[i], "item") else float(rewards[i])
                 done = dones[i].item() if hasattr(dones[i], "item") else bool(dones[i])
+                # Truncation-aware bootstrapping for the non-push_batch fallback path.
+                if trunc is not None and trunc[i]:
+                    done = False
                 self.memory.push(states[i], action, reward, next_states[i], done)
 
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
@@ -709,6 +721,12 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         for contribution in auxiliary_contributions:
             if contribution.weight != 0.0:
                 loss = loss + contribution.weighted_loss()
+
+        # DQfD-lite: when a demo store is attached, every gradient step also
+        # trains on a small never-overwritten demo minibatch (TD + margin loss).
+        demo_loss = self._dqfd_loss()
+        if demo_loss is not None:
+            loss = loss + demo_loss
 
         # Optimize (outside autocast for numerical stability)
         self.optimizer.zero_grad()

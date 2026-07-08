@@ -593,6 +593,31 @@ class TestVectorizedTraining:
         # Check the last few entries match our done flags
         assert len(agent.memory) >= batch_size
 
+    def test_remember_batch_accepts_truncateds(self, agent: Agent, config: Config) -> None:
+        """remember_batch should accept a truncated mask and store those as non-terminal."""
+        batch_size = 4
+        # n_steps=1 keeps the n-step buffer order-preserving (one row per env, flushed
+        # immediately) so the stored done slice maps 1:1 to the input transitions.
+        agent.memory.n_steps = 1
+        states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
+        actions = np.array([0, 1, 2, 0])
+        rewards = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        next_states = np.random.randn(batch_size, config.STATE_SIZE).astype(np.float32)
+        dones = np.array([False, True, False, True])
+        # The second env ended by truncation; the fourth was a real terminal.
+        truncateds = np.array([False, True, False, False])
+
+        before = agent.memory._size
+        agent.remember_batch(states, actions, rewards, next_states, dones, truncateds=truncateds)
+
+        added = int(agent.memory._size - before)
+        assert added == batch_size  # n_steps=1: every transition is stored immediately
+        appended = agent.memory.dones[before : before + added]
+        # Exact pattern: env 1 (truncated) must be cleared to non-terminal, env 3 (real
+        # terminal) must stay terminal. Asserting the whole slice catches a swapped or
+        # misaligned truncateds->dones mapping, which a bare sum() check would miss.
+        assert appended.tolist() == [0.0, 0.0, 0.0, 1.0]
+
 
 class TestQValueComputation:
     """Test Q-value computation internals."""

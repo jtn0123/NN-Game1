@@ -1,3 +1,6 @@
+# Local scratch / experiment smoke artifacts (never committed)
+scratchpad/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -226,3 +229,4 @@ checkpoints/
 runs/
 wandb/
 tensorboard_logs/
+scratchpad_levels.py

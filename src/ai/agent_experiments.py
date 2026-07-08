@@ -168,6 +168,74 @@ class AgentExperimentMixin:
 
         return tuple(contributions)
 
+    # ------------------------------------------------------------------
+    # DQfD-lite: never-overwritten demo transitions + large-margin loss
+    # ------------------------------------------------------------------
+
+    def attach_demo_store(self: Any, store: Any) -> None:
+        """Install a fixed DemoStore (src/ai/demo_learning.py). Every learn() step
+        then adds a demo minibatch loss: n-step Double-DQN TD on demo transitions
+        plus the DQfD large-margin term that pushes the demonstrated action above
+        alternatives — the ingredient ablations show demos need to actually work."""
+        self._dqfd_store = store
+
+    def _dqfd_loss(self: Any) -> Optional[torch.Tensor]:
+        store = getattr(self, "_dqfd_store", None)
+        if store is None or len(store) == 0:
+            return None
+        fraction = float(getattr(self.config, "DEMO_BATCH_FRACTION", 0.125))
+        k = max(8, int(self.config.BATCH_SIZE * fraction))
+        s_np, a_np, r_np, ns_np, d_np, nl_np = store.sample(k)
+        device = self.device
+        states = torch.from_numpy(s_np).to(device)
+        actions = torch.from_numpy(a_np).to(device)
+        rewards = torch.from_numpy(r_np).to(device)
+        next_states = torch.from_numpy(ns_np).to(device)
+        dones = torch.from_numpy(d_np).to(device)
+        n_steps = torch.from_numpy(nl_np).to(device)
+        if self.config.REWARD_CLIP > 0:  # same clamp the replay path applies
+            rewards = torch.clamp(rewards, min=-self.config.REWARD_CLIP)
+
+        q = self.policy_net(states)
+        margin = float(getattr(self.config, "DEMO_MARGIN", 0.8))
+        penalties = torch.full_like(q, margin)
+        penalties.scatter_(1, actions.unsqueeze(1), 0.0)
+        q_demo = q.gather(1, actions.unsqueeze(1)).squeeze(1)
+        margin_loss = ((q + penalties).max(dim=1).values - q_demo).mean()
+
+        td_weight = float(getattr(self.config, "DEMO_TD_WEIGHT", 1.0))
+        total = float(getattr(self.config, "DEMO_MARGIN_WEIGHT", 1.0)) * margin_loss
+        if td_weight != 0.0 and not getattr(self, "_use_distributional_dqn", False):
+            current_q, target_q = self._compute_q_values(
+                states, actions, rewards, next_states, dones, n_step_lengths=n_steps
+            )
+            total = total + td_weight * F.smooth_l1_loss(current_q, target_q)
+        return total
+
+    def pretrain_on_demos(self: Any, steps: int) -> int:
+        """Gradient steps on demo loss alone before any environment interaction
+        (DQfD's pre-training phase). Syncs the target net afterwards. Returns the
+        number of steps actually performed."""
+        if steps <= 0 or getattr(self, "_dqfd_store", None) is None:
+            return 0
+        done_steps = 0
+        for _ in range(int(steps)):
+            if hasattr(self.policy_net, "reset_noise"):
+                self.policy_net.reset_noise()
+                self.target_net.reset_noise()
+            loss = self._dqfd_loss()
+            if loss is None:
+                break
+            self.optimizer.zero_grad()
+            loss.backward()
+            if self.config.GRAD_CLIP > 0:
+                torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.config.GRAD_CLIP)
+            self.optimizer.step()
+            done_steps += 1
+        if done_steps:
+            self.update_target_network()
+        return done_steps
+
     def _prepare_demo_action_tensors(
         self: Any, states: np.ndarray, actions: np.ndarray, *, label: str
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, int]:
@@ -356,10 +424,34 @@ class AgentExperimentMixin:
     def _route_auxiliary_targets(
         self: Any, states: torch.Tensor
     ) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        """Build 9-way objective-direction labels from Crystal Caves metadata."""
+        """Build 9-way objective-direction labels from Crystal Caves metadata.
+
+        Op 2 (geodesic): when enabled, the label is the GEODESIC next-step direction carried
+        in the trailing route-label slots (sliced off the policy input) — the real route
+        around walls, which the net must learn to predict. Otherwise falls back to the legacy
+        euclidean target bearing read from meta 15/16 (which the net can already see)."""
         layout = getattr(self.config, "STATE_LAYOUT", None)
         if not layout:
             return None
+        route_label = int(layout.get("route_label", 0))
+        if getattr(self.config, "CRYSTAL_CAVES_ROUTE_AUX_GEODESIC", False) and route_label >= 2:
+            if states.shape[1] < route_label:
+                return None
+            lab = states[:, -route_label:]
+            dx, dy = lab[:, 0], lab[:, 1]
+            reachable = lab[:, 2] if route_label > 2 else torch.ones_like(dx)
+            mask = (
+                torch.isfinite(dx)
+                & torch.isfinite(dy)
+                & (reachable > 0.5)
+                & ((dx != 0) | (dy != 0))  # a real directional step exists
+            )
+            if not bool(mask.any().item()):
+                return None
+            sx = dx.clamp(-1.0, 1.0).round().long()
+            sy = dy.clamp(-1.0, 1.0).round().long()
+            labels = (sy + 1) * 3 + (sx + 1)
+            return labels.long(), mask
         wr, wc = layout["window"]
         gr, gc = layout.get("gmap", (0, 0))
         meta_size = int(layout.get("meta", 0))
