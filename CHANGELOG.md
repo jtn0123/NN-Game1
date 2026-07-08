@@ -1,6 +1,159 @@
 # CHANGELOG
 
 
+## v0.8.0 (2026-07-08)
+
+### Bug Fixes
+
+- Address review — anneal int validation, paired-row overlap guard, arm dedupe, type hint
+  ([`dc70641`](https://github.com/jtn0123/NN-Game1/commit/dc70641c54cbe93200909c9936b2c25b22446458))
+
+CodeRabbit review on #37: - config: CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES now must be a
+  non-negative INTEGER (rejects math.inf / fractional, which int() in the trainer would crash on or
+  silently coerce). - lever_ab: when baseline and arm rows share no (seed, level_index) keys, mark
+  the comparison skipped instead of emitting bogus zero-valued CIs. - lever_ab: dedupe requested
+  --arms (order-preserving) so a repeated arm can't append rows twice and bias its summary. -
+  test_network: add -> None to the new GAP test signature (repo typing rule).
+
+test_network green (46); anneal validation verified to reject inf/1.5 and accept 150; ruff/black
+  clean. (No effect on the in-flight 2x2 run.)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+- **lever-ab**: Address review — won-key, repo-root sys.path, fresh rows, wrapping
+  ([`fdc625d`](https://github.com/jtn0123/NN-Game1/commit/fdc625d3e269c018ac4eca6c968cd2c885f48db0))
+
+CodeRabbit review on #37 (experiments/cc_status/lever_ab.py only): - PER_ARM_METRICS used "win" but
+  eval rows use "won" -> win IQM was silently 0 in summary.json. Use "won". - sys.path bootstrap
+  resolved to experiments/ (parents would miss repo root on direct execution); point it at the repo
+  root via Path(__file__).resolve().parents[2] and drop the now-unused os import. - Truncate
+  rows.jsonl at sweep start so a reused --out can't append stale rows. - Black-wrap the long
+  header/argparse lines; use list-unpacking for the arms prepend (RUF005).
+
+ruff + black clean. (No effect on the in-flight A/B run, which imported the prior module; its core
+  metrics are unaffected and wins are ~0 at this horizon.)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+### Chores
+
+- Gitignore local scratchpad/ experiment artifacts
+  ([`357cfb3`](https://github.com/jtn0123/NN-Game1/commit/357cfb3d170d92c0b3f1e2bee5b036f4f99b2487))
+
+Keeps ad-hoc smoke/experiment scratch files out of version control.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+### Features
+
+- **crystal-caves**: Cnn global-avg-pool option + representation×diversity A/B harness
+  ([`ccc7791`](https://github.com/jtn0123/NN-Game1/commit/ccc77916df03f8583dd8f5e5c52d8f9a1636b73e))
+
+Evidence-grounded follow-up: a trustworthy multi-seed A/B found all 5 reward/curriculum levers null,
+  but the research traced the real failure to a generalization gap (train Phi~0.99, held-out
+  crystals~0) driven by (a) the A/B harness training a flat MLP, not the CNN, and (b) a tiny
+  memorizable level pool — plus a noise-dominated measurement setup. This adds the tools to test
+  that hypothesis.
+
+- network.py: SpatialDQN gains a global-average-pool option (config CRYSTAL_CAVES_CNN_GLOBAL_POOL,
+  default off). Flatten preserves absolute tile position (memorizes layouts); GAP is
+  translation-invariant — the standard ProcGen fix. fc input becomes conv_channels(32)+gmap+meta,
+  independent of window size. - config.py: CRYSTAL_CAVES_CNN_GLOBAL_POOL flag. - lever_ab.py: add a
+  2x2 representation×diversity arm set (baseline=MLP/pool24, mlp_p256, cnn_p24 (CNN+GAP), cnn_p256);
+  switch the primary delta metric to the non-saturated target_distance_progress
+  (crystal_frac/selection_score are ~0 at this budget); add a PAIRED-ROW bootstrap CI (resamples
+  seed×level rows, not the 3 seed groups) reported across target_progress/depth/selection, fixing
+  the inflated-CI measurement flaw. - tests: SpatialDQN GAP option (fc in_features, forward, default
+  off).
+
+test_network/test_agent green (106); ruff/black clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+- **crystal-caves**: Reverse-curriculum annealing + multi-seed A/B harness
+  ([`61a0aac`](https://github.com/jtn0123/NN-Game1/commit/61a0aac6fff0b52544816b61db9c71411f48e329))
+
+The single-seed smoke showed fixed-p reverse curriculum (p=0.5) hurt held-out performance because
+  half of training never sees the full-from-spawn task. Add a linear anneal of p -> 0 so late
+  training is on the full task, and a trustworthy multi-seed A/B harness to evaluate the levers
+  properly.
+
+Annealing: - config: CRYSTAL_CAVES_REVERSE_CURRICULUM_ANNEAL_EPISODES (int, default 0 = constant p /
+  legacy), validated >= 0. - src/app/headless.py: pure helper
+  reverse_curriculum_p_for_episode(start_p, episode, anneal_episodes) (linear decay to 0, clamped),
+  HeadlessTrainer ._crystal_caves_envs() + ._apply_reverse_curriculum_schedule() wired once per
+  episode (single + vectorized paths). No-op unless REVERSE_CURRICULUM on AND ANNEAL_EPISODES > 0,
+  so defaults are unchanged. - tests: schedule shape (start at ep0, ~0 at/after anneal, monotone
+  decreasing, constant when 0) + a trainer-hook test that env p decays over episodes.
+
+Harness (experiments/cc_status/lever_ab.py): - Multi-seed paired A/B: per (arm, seed) train a short
+  vec-8 run, greedy-eval each held-out level, emit per-(arm,seed,level) rows in paired_ab's row
+  shape, and REUSE aggregate_paired_ab / interquartile_mean (IQM + 95% bootstrap CI on the paired
+  delta) rather than reimplementing stats. Per-arm surrogate IQMs + timeout/end-reason summary; JSON
+  rows + markdown report; CLI (--arms/--seeds/ --episodes/--games/--difficulty). Documents that
+  tutorial=1 crystal so the reverse arms need easy+. Annealed reverse/relocate arms + a fixed-p arm
+  to isolate the annealing effect.
+
+Full suite: 1118 passed, 115 skipped. ruff/black clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+- **crystal-caves**: Reverse-curriculum player relocation (#4 follow-up) + NGU bonus
+  ([#5](https://github.com/jtn0123/NN-Game1/pull/5),
+  [`6266185`](https://github.com/jtn0123/NN-Game1/commit/62661859acf777f72917e56ee4e50e81bf58f590))
+
+Two independently-flagged experiment levers (both off by default) so each can be A/B'd on its own.
+
+#4 follow-up — oracle-verified player relocation (CRYSTAL_CAVES_REVERSE_CURRICULUM_RELOCATE): when a
+  reverse-curriculum mid-solution start is applied, also move the player to the standing tile
+  closest to a remaining objective from which the jump-aware solvability oracle confirms every
+  remaining crystal AND the exit are still reachable. Falls back to the spawn if no verified tile is
+  found, so the start is always solvable. This shortens the navigation horizon (the part deferred
+  from #36's v1). Candidate count is capped (REVERSE_RELOCATE_MAX_CANDIDATES) to bound the per-reset
+  BFS cost; only runs on reverse-curriculum episodes, which are a fraction of training resets.
+
+#5 — NGU-style episodic novelty bonus (CRYSTAL_CAVES_NGU_BONUS / _NGU_BETA): a small per-step
+  intrinsic reward for reaching a (tile_x, tile_y, crystals_remaining, switches_used) cell not yet
+  seen THIS episode, decaying as beta/sqrt(visits). Encodes position x task-progress so re-reaching
+  a tile after collecting a crystal counts as new, directly attacking the "stops reaching new cells
+  -> times out" failure. Visit counts reset each episode; flows through n-step like any reward.
+  NGU_BETA validated finite/non-negative in Config.__post_init__.
+
+Tests: relocation keeps spawn when off, keeps all objectives+exit oracle-reachable when on
+  (solvability), and never lands farther from objectives than spawn; NGU returns 0 when off, decays
+  beta/sqrt(n) on revisits, treats a progress change as novel again, resets per episode, and rejects
+  negative beta. Full suite: 1105 passed, 115 skipped. ruff/black/mypy clean.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+### Testing
+
+- **crystal-caves**: Exercise NGU bonus through step() + cover non-finite beta
+  ([`7368279`](https://github.com/jtn0123/NN-Game1/commit/7368279531547b09cd6343b839a0230c0d10421e))
+
+Addresses two CodeRabbit review nitpicks on #37: - Add test_step_reward_includes_ngu_bonus: with the
+  same level/action/RNG, the public step() reward with NGU on equals the off reward + beta/sqrt(1),
+  so a regression in step()'s reward assembly (not just _ngu_bonus()) is caught. - Generalize the
+  beta-validation test to also reject nan/inf/-inf (parametrized), covering the non-finite branch of
+  Config.__post_init__, not just negative.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_018jGv8TVpr6WFFbGgnZjAwk
+
+
 ## v0.7.0 (2026-06-26)
 
 ### Features
