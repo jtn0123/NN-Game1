@@ -202,6 +202,26 @@ def _add_reward_shaping_arguments(parser: argparse.ArgumentParser) -> None:
             "timeout -8, stall -6) reach the learner at full magnitude."
         ),
     )
+    parser.add_argument(
+        "--stall-window",
+        type=int,
+        default=None,
+        help=(
+            "Override the Crystal Caves no-progress stall window in steps "
+            "(game default 720). RUN-26 fidelity arm widens it to ~1440 so "
+            "mid-route journeys stop being executed by the harness timer."
+        ),
+    )
+    parser.add_argument(
+        "--objective",
+        choices=["full", "first-crystal"],
+        default=None,
+        help=(
+            "For eval-checkpoint: evaluate under this objective instead of the one "
+            "restored from the checkpoint config — 'full' is collect-all-and-exit, "
+            "'first-crystal' ends at first crystal collection."
+        ),
+    )
 
 
 def _add_route_demo_arguments(parser: argparse.ArgumentParser) -> None:

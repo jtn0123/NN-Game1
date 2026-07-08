@@ -126,6 +126,7 @@ def apply_reward_shaping_override(
     show_locked_exit: bool,
     reverse_curriculum_p: float,
     reward_clip: float | None = None,
+    stall_window: int | None = None,
 ) -> None:
     """Opt in to the PR #35/#36 shaping/curriculum levers for a status-session run.
 
@@ -133,6 +134,8 @@ def apply_reward_shaping_override(
     so A/B runs stay attributable to exactly one config change. `reward_clip`
     overrides the learn-time negative reward clamp (`0` disables clamping) so the
     terminal-signal question can be A/B'd without editing `config.py`.
+    `stall_window` overrides the game's no-progress timeout (RUN-26 fidelity arm:
+    720 -> ~1440); None keeps the game default.
     """
     if not math.isfinite(geodesic_potential_weight) or geodesic_potential_weight < 0:
         raise ValueError("geodesic_potential_weight must be finite and non-negative")
@@ -142,6 +145,10 @@ def apply_reward_shaping_override(
         if not math.isfinite(reward_clip) or reward_clip < 0:
             raise ValueError("reward_clip must be finite and non-negative")
         config.REWARD_CLIP = float(reward_clip)
+    if stall_window is not None:
+        if stall_window <= 0:
+            raise ValueError("stall_window must be positive")
+        config.CRYSTAL_CAVES_STALL_WINDOW_STEPS = int(stall_window)
     config.CRYSTAL_CAVES_GEODESIC_POTENTIAL = bool(geodesic_potential)
     config.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT = float(geodesic_potential_weight)
     config.CRYSTAL_CAVES_SHOW_LOCKED_EXIT = bool(show_locked_exit)

@@ -1,0 +1,210 @@
+"""Tests for the RUN-26 prep tooling: eval objective override, contact-head
+checkpoint persistence, and the configurable stall window."""
+
+import argparse
+import os
+import sys
+
+import pytest
+import torch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import Config  # noqa: E402
+from experiments.cc_status.cli_args import add_status_session_arguments  # noqa: E402
+from experiments.cc_status.cli_helpers import tutorial_demo_bc_kwargs  # noqa: E402
+from experiments.cc_status.config_helpers import (  # noqa: E402
+    apply_reward_shaping_override,
+    cc_experiment_config,
+)
+from experiments.cc_status.reports import (  # noqa: E402
+    load_selected_weight_snapshot,
+    save_selected_weight_snapshot,
+)
+from experiments.cc_status.runs_transfer import config_from_selected_checkpoint  # noqa: E402
+from src.game.crystal_caves import CrystalCaves  # noqa: E402
+
+# --- stall window -----------------------------------------------------------
+
+
+def test_stall_window_default_unchanged():
+    config = Config()
+    assert config.CRYSTAL_CAVES_STALL_WINDOW_STEPS == 0
+    game = CrystalCaves(config, headless=True)
+    assert game.MAX_STEPS_WITHOUT_PROGRESS == 720
+    assert CrystalCaves.MAX_STEPS_WITHOUT_PROGRESS == 720
+
+
+def test_stall_window_config_overrides_game():
+    config = Config()
+    config.CRYSTAL_CAVES_STALL_WINDOW_STEPS = 1440
+    game = CrystalCaves(config, headless=True)
+    assert game.MAX_STEPS_WITHOUT_PROGRESS == 1440
+    # class constant untouched — other instances keep the default
+    assert CrystalCaves.MAX_STEPS_WITHOUT_PROGRESS == 720
+
+
+def test_stall_window_config_validation():
+    with pytest.raises(Exception):
+        Config(CRYSTAL_CAVES_STALL_WINDOW_STEPS=-1)
+
+
+def test_stall_window_override_helper():
+    config = Config()
+    apply_reward_shaping_override(
+        config,
+        geodesic_potential=False,
+        geodesic_potential_weight=0.3,
+        show_locked_exit=False,
+        reverse_curriculum_p=0.0,
+        stall_window=1440,
+    )
+    assert config.CRYSTAL_CAVES_STALL_WINDOW_STEPS == 1440
+    with pytest.raises(ValueError):
+        apply_reward_shaping_override(
+            config,
+            geodesic_potential=False,
+            geodesic_potential_weight=0.3,
+            show_locked_exit=False,
+            reverse_curriculum_p=0.0,
+            stall_window=0,
+        )
+
+
+def test_stall_window_cli_flag_and_kwargs():
+    parser = argparse.ArgumentParser()
+    add_status_session_arguments(parser)
+    defaults = parser.parse_args(["tutorial-demo-conservative"])
+    assert defaults.stall_window is None
+    opts = parser.parse_args(["tutorial-demo-conservative", "--stall-window", "1440"])
+    assert opts.stall_window == 1440
+    assert tutorial_demo_bc_kwargs(opts, ("direct",))["stall_window"] == 1440
+
+
+def test_config_snapshot_records_stall_window():
+    from experiments.cc_status.reports import config_snapshot
+    from src.game.crystal_caves_experiments import (
+        install_crystal_caves_experiment_defaults,
+    )
+
+    config = Config()
+    install_crystal_caves_experiment_defaults(config)
+    config.GAME_NAME = "crystal_caves"
+    config.CRYSTAL_CAVES_STALL_WINDOW_STEPS = 1440
+    assert config_snapshot(config)["stall_window"] == 1440
+
+
+# --- eval objective override ------------------------------------------------
+
+
+def _snapshot_with(first_crystal_goal: bool) -> dict:
+    return {
+        "config": {
+            "first_crystal_goal": first_crystal_goal,
+            "cave_difficulty": "tutorial",
+        }
+    }
+
+
+def test_objective_override_full_beats_saved_first_crystal(tmp_path):
+    config = config_from_selected_checkpoint(
+        tmp_path,
+        snapshot=_snapshot_with(True),
+        seed=0,
+        log_every=100,
+        report_seconds=0.0,
+        objective="full",
+    )
+    assert cc_experiment_config(config).CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL is False
+
+
+def test_objective_override_first_crystal_beats_saved_full(tmp_path):
+    config = config_from_selected_checkpoint(
+        tmp_path,
+        snapshot=_snapshot_with(False),
+        seed=0,
+        log_every=100,
+        report_seconds=0.0,
+        objective="first-crystal",
+    )
+    assert cc_experiment_config(config).CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL is True
+
+
+def test_objective_none_keeps_saved(tmp_path):
+    config = config_from_selected_checkpoint(
+        tmp_path,
+        snapshot=_snapshot_with(True),
+        seed=0,
+        log_every=100,
+        report_seconds=0.0,
+    )
+    assert cc_experiment_config(config).CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL is True
+
+
+def test_objective_invalid_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        config_from_selected_checkpoint(
+            tmp_path,
+            snapshot=_snapshot_with(True),
+            seed=0,
+            log_every=100,
+            report_seconds=0.0,
+            objective="everything",
+        )
+
+
+def test_objective_cli_flag():
+    parser = argparse.ArgumentParser()
+    add_status_session_arguments(parser)
+    assert parser.parse_args(["eval-checkpoint"]).objective is None
+    opts = parser.parse_args(["eval-checkpoint", "--objective", "full"])
+    assert opts.objective == "full"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["eval-checkpoint", "--objective", "everything"])
+
+
+# --- contact-head checkpoint persistence -------------------------------------
+
+
+def test_contact_head_snapshot_roundtrips_head_weights(tmp_path):
+    weights = {
+        "policy": {
+            "trunk.weight": torch.ones(2, 2),
+            "contact_action_head.weight": torch.full((2, 2), 3.0),
+        },
+        "target": {
+            "trunk.weight": torch.ones(2, 2),
+            "contact_action_head.weight": torch.full((2, 2), 3.0),
+        },
+    }
+    path = tmp_path / "with_head.pth"
+    save_selected_weight_snapshot(
+        path,
+        label="unit_with_head",
+        config_payload={"contact_action_head": True, "first_crystal_goal": True},
+        state_size=295,
+        action_size=10,
+        selected_episode=300,
+        source_eval={"win_rate": 0.33},
+        weights=weights,
+    )
+    loaded = load_selected_weight_snapshot(path)
+    assert loaded["config"]["contact_action_head"] is True
+    assert "contact_action_head.weight" in loaded["weights"]["policy"]
+    assert torch.equal(
+        loaded["weights"]["policy"]["contact_action_head.weight"],
+        weights["policy"]["contact_action_head.weight"],
+    )
+
+
+def test_contact_head_offline_saves_standalone_checkpoint_source():
+    """run_contact_head_offline must persist the combined trunk+head snapshot and
+    record its path — guards against regressing to the B21 empty-models/ state."""
+    import inspect
+
+    from experiments.cc_status.corrections import run_contact_head_offline
+
+    src = inspect.getsource(run_contact_head_offline)
+    assert "save_selected_weight_snapshot" in src
+    assert "contact_head_checkpoint" in src
+    assert "capture_weight_snapshot" in src

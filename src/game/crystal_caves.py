@@ -220,6 +220,14 @@ class CrystalCaves(
         self.width = self.config.SCREEN_WIDTH
         self.height = self.config.SCREEN_HEIGHT
 
+        # RUN-26 fidelity lever: the no-progress stall window is config-overridable so a
+        # training arm can widen it (720 -> ~1440; DATA-1 found harness timers own 35-54%
+        # of endings) without editing the class constant. Default keeps behaviour.
+        self.MAX_STEPS_WITHOUT_PROGRESS = int(
+            getattr(self.config, "CRYSTAL_CAVES_STALL_WINDOW_STEPS", 0)
+            or type(self).MAX_STEPS_WITHOUT_PROGRESS
+        )
+
         # AI-1 state toggle: legacy uses the old 11x9 window with no global map
         # (119-feature state); rich uses the class defaults (19x11 + 11x6 map).
         if not getattr(self.config, "CRYSTAL_CAVES_RICH_STATE", True):

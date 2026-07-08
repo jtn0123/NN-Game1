@@ -73,10 +73,22 @@ objective from the saved checkpoint config (`first_crystal_goal: true`) and
 exposes no full-objective override. Worse, **B21 has no standalone
 checkpoint** — its artifacts point back at the B3s `.pth`, so the promoted
 adapter (route trunk + contact head) may not be reloadable as promoted.
-Two code follow-ups queued for a separate PR (not execution-agent work):
-(1) an `--objective full|first-crystal` override on `eval-checkpoint`;
-(2) persist contact-head weights as a standalone artifact and audit whether
-B21 is reconstructable today.
+**Resolved on this branch (2026-07-07):**
+(1) `eval-checkpoint` now accepts `--objective full|first-crystal`, overriding
+the objective restored from the checkpoint config; the eval's effective
+objective is recorded in the artifact (`checkpoint_eval.objective`). Task 0.2
+is now runnable:
+`... eval-checkpoint --checkpoint <B3s.pth> --objective full --eval-games 30 --seed 0`.
+(2) **B21 audit verdict: NOT reconstructable from disk.** A full search of the
+B15/B16/B21-B30 artifact trees found only correction-label datasets (.npz) —
+no trained head weights exist anywhere; the promoted adapter lived only in
+process memory. B21 can be re-trained (seeded offline fit from the B20 stable
+labels + the B3s checkpoint with the recorded hyperparams) but the promoted
+weights themselves are gone. Fixed going forward: `contact-head-offline` now
+saves a standalone combined trunk+head selected-weight snapshot
+(`models/crystal_caves/<label>_with_head_ep<N>.pth`, loadable by
+`eval-checkpoint` since the saved config carries `contact_action_head: true`)
+and records the path as `contact_head_checkpoint` in the run summary.
 
 Original task spec kept for reference:
 
@@ -139,9 +151,15 @@ Track A's whole lineage gets a step-change for four state dims.
 ### Task 2.2 — RUN-26 demo run (BLOCKED on owner playtest — do not start)
 
 **Status after Phase 0/2.1 (2026-07-07): this is now the ONLY live
-performance lever.** Everything else in this brief is done or closed. The
-critical path is: owner records demos → RUN-26-prep PR lands (stall-window
-configurability + eval objective override + B21 checkpoint audit) → RUN-26.
+performance lever.** Everything else in this brief is done or closed.
+RUN-26 prep tooling landed on this branch: the stall window is configurable
+(`CRYSTAL_CAVES_STALL_WINDOW_STEPS`, CLI `--stall-window`, e.g. 1440 for the
+fidelity arm; default 0 keeps the game's 720), the eval objective override
+exists, and contact-head runs persist standalone checkpoints. NOTE: the
+2026-07-07 level rebalance changed all 16 imported levels — RUN-19..25
+numbers are historical and must not be compared against post-rebalance runs
+(the config snapshot's `stall_window` plus the level file's git blob identify
+the surface). The critical path is: owner records demos → RUN-26.
 
 Per the branch decision brief, the demo path is the only high-evidence family
 never tried. It needs human demos first:

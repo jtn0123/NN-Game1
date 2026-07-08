@@ -143,6 +143,7 @@ def config_snapshot(config: Config) -> dict[str, Any]:
         "procedural": config.CRYSTAL_CAVES_PROCEDURAL,
         "drills": config.CRYSTAL_CAVES_DRILLS,
         "reward_clip": config.REWARD_CLIP,
+        "stall_window": config.CRYSTAL_CAVES_STALL_WINDOW_STEPS,
         "geodesic_potential": config.CRYSTAL_CAVES_GEODESIC_POTENTIAL,
         "geodesic_potential_weight": config.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT,
         "geo_compass": config.CRYSTAL_CAVES_GEO_COMPASS,

@@ -215,6 +215,7 @@ def run_tutorial_demo_bc(
     show_locked_exit: bool = False,
     reverse_curriculum_p: float = 0.0,
     reward_clip: float | None = None,
+    stall_window: int | None = None,
     distributional_dqn: bool,
     c51_atoms: int,
     c51_v_min: float,
@@ -279,6 +280,7 @@ def run_tutorial_demo_bc(
         show_locked_exit=show_locked_exit,
         reverse_curriculum_p=reverse_curriculum_p,
         reward_clip=reward_clip,
+        stall_window=stall_window,
     )
     apply_geo_compass_override(
         config,

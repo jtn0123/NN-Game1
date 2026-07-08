@@ -77,6 +77,7 @@ def tutorial_demo_bc_kwargs(
         "show_locked_exit": opts.show_locked_exit,
         "reverse_curriculum_p": opts.reverse_curriculum_p,
         "reward_clip": opts.reward_clip,
+        "stall_window": opts.stall_window,
         "distributional_dqn": opts.distributional_dqn,
         "c51_atoms": opts.c51_atoms,
         "c51_v_min": opts.c51_v_min,

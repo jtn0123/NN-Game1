@@ -1148,6 +1148,25 @@ def run_contact_head_offline(
         label=f"{label}_final",
         episode=0,
     )
+
+    # Persist the adapter as a standalone loadable artifact (route trunk + trained
+    # head in one selected-weight snapshot). Before this, promoted adapters like
+    # B21 left an empty models/ dir — the head existed only in process memory and
+    # the promoted policy was not reconstructable from disk.
+    head_config_payload = dict(snapshot.get("config") or {})
+    head_config_payload["contact_action_head"] = True
+    head_config_payload["contact_head_source_checkpoint"] = str(checkpoint_path)
+    head_checkpoint_path = save_selected_weight_snapshot(
+        run_dir / "models" / "crystal_caves" / f"{label}_with_head_ep{selected_episode}.pth",
+        label=f"{label}_with_head",
+        config_payload=head_config_payload,
+        state_size=trainer.agent.state_size,
+        action_size=trainer.agent.action_size,
+        selected_episode=selected_episode,
+        source_eval=snapshot.get("source_eval") or {},
+        weights=capture_weight_snapshot(trainer.agent),
+    )
+
     offline_live = live_snapshot(
         trainer,
         label=label,
@@ -1175,6 +1194,7 @@ def run_contact_head_offline(
                 "source_episode": selected_episode,
                 "source_eval": snapshot.get("source_eval") or {},
             },
+            "contact_head_checkpoint": head_checkpoint_path,
             "contact_action_head_training": {
                 "mode": "offline_head_only",
                 "dataset_path": str(correction_dataset_path),

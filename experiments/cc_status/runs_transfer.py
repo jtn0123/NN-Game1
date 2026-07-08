@@ -418,10 +418,22 @@ def config_from_selected_checkpoint(
     seed: int,
     log_every: int,
     report_seconds: float,
+    objective: str | None = None,
 ) -> Config:
+    """Rebuild the eval config a selected checkpoint was trained under.
+
+    `objective` overrides the restored objective: "full" evaluates the real
+    collect-all-and-exit game even for checkpoints trained with the
+    first-crystal early terminal; "first-crystal" forces the surrogate;
+    None keeps whatever the checkpoint recorded.
+    """
+    if objective not in (None, "full", "first-crystal"):
+        raise ValueError("objective must be one of None, 'full', 'first-crystal'")
     saved_config = snapshot.get("config") or {}
     difficulty = str(saved_config.get("cave_difficulty", "tutorial") or "tutorial")
     first_crystal_goal = bool(saved_config.get("first_crystal_goal", True))
+    if objective is not None:
+        first_crystal_goal = objective == "first-crystal"
     if first_crystal_goal:
         config = first_crystal_config(
             out_dir,
@@ -1138,6 +1150,7 @@ def run_eval_checkpoint(
     trace_tail_steps: int,
     log_every: int,
     report_seconds: float,
+    objective: str | None = None,
     label: str = "eval_checkpoint",
 ) -> dict[str, Any]:
     set_seed(seed)
@@ -1149,6 +1162,7 @@ def run_eval_checkpoint(
         seed=seed,
         log_every=log_every,
         report_seconds=report_seconds,
+        objective=objective,
     )
     trainer = prepare_trainer(
         config,
@@ -1211,6 +1225,12 @@ def run_eval_checkpoint(
                 "source_label": snapshot.get("label", ""),
                 "source_episode": selected_episode,
                 "source_eval": snapshot.get("source_eval") or {},
+                "objective_override": objective,
+                "objective": (
+                    "first-crystal"
+                    if cc_experiment_config(config).CRYSTAL_CAVES_FIRST_CRYSTAL_GOAL
+                    else "full"
+                ),
             },
             "failure_diagnostics": diagnostics,
             "near_miss_eval": near_miss_eval,
