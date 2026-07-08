@@ -208,3 +208,36 @@ platform scaffolding in the original, not decor.
 
 Every fix must keep the `level_reach.py` oracle certification and re-run
 `level_validator` (16/16) + the handcrafted test suite.
+
+## 2026-07-07 Rebalance pass: F1-F3, F5, F6 executed; F4 partial
+
+All 16 handcrafted levels were rebalanced level-by-level against the decoded
+per-level originals (each handcrafted level i targets original Li's stats).
+Every level remains oracle-certified (plain + lock-ordering), every door
+gates a real objective, `level_validator` reports **16/16 OK with zero
+ambush warnings** (was 4), `compass_audit` stays clean, and the full suite
+passes (1484 tests).
+
+| Metric | Before | Now | Original |
+|---|---|---|---|
+| Crystals | 30-34 (mean 30.5), uniform | **28-93 (mean 46.0)**, incl. a 93-gem Mother-Lode-style farm | 27-108 (mean 46.6) |
+| Total crystals | 488 | **736** | 746 |
+| Enemies | 6 everywhere | **6-13 (mean 8.5)** | 6-16 (mean 9.2) |
+| Hazards | 1-6 (mean 3.1) | **2-12 (mean 7.6)**, incl. guarded crystals | 0-27 (mean 11.1, incl. mushrooms we lack) |
+| Switches / doors | 0.8 / 0.8 | **1.4 / 1.4** (engine caps at 2 colours) | 2.5 / 1.7 |
+| Pickups | 2-5 (mean 3.4) | **5-11 (mean 8.7)** | 4-28 (mean 15.6) |
+| Ladder cells | mean 46.3 | mean 43.4 (4 redundant shafts removed, ~46 cells) | vines mean 1.9 |
+
+Per-level character now varies like the original: hazard-light gem farms
+(Mother Lode 57, Elevator Exchange 93), the hazard gauntlet (Cavern Descent
+11 hazards), the enemy warren (Cavern of Echoes 13), a pickup-rich spire, and
+gated vaults on 12 of 16 levels (up from 8 gates total to 22 switch/door
+tiles). Also fixed en route: 6 spawn-ambush layouts (blockers/relocations)
+and a gated exit on Cavern of Echoes.
+
+**Still open (F4, the honest gap):** ladder dependence. Only redundant
+parallel shafts were removed; converting primary ladder verticality to
+jump-platform chains is a per-level structural redesign and remains the one
+big deviation from the 1991 game (43 ladder cells/level vs ~2 vine cells).
+F7 (hidden crystals) and F8 (dark level + light switch) remain engine
+decisions.
