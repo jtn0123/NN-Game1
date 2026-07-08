@@ -145,6 +145,8 @@ def config_snapshot(config: Config) -> dict[str, Any]:
         "reward_clip": config.REWARD_CLIP,
         "geodesic_potential": config.CRYSTAL_CAVES_GEODESIC_POTENTIAL,
         "geodesic_potential_weight": config.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT,
+        "geo_compass": config.CRYSTAL_CAVES_GEO_COMPASS,
+        "geo_compass_hazard_aware": config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE,
         "show_locked_exit": config.CRYSTAL_CAVES_SHOW_LOCKED_EXIT,
         "reverse_curriculum": config.CRYSTAL_CAVES_REVERSE_CURRICULUM,
         "reverse_curriculum_p": config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P,

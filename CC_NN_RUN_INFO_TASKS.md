@@ -1,4 +1,4 @@
-# Crystal Caves NN — Run-Info Task Brief (2026-07-07, rev 2)
+# Crystal Caves NN — Run-Info Task Brief (rev 3, 2026-07-07)
 
 **Who this is for:** an execution agent tasked with *gathering run evidence only*.
 Do not change model code, rewards, or hyperparameters beyond the explicit CLI
@@ -8,15 +8,19 @@ wait, verify artifacts, report numbers.
 **Rev 2 note:** rev 1 of this brief queued A/Bs for geodesic PBRS (reward),
 reverse curriculum, and the reward clamp. PR #37's branch already ran all
 three families on its 16-level benchmark and closed them (RUN-06/07/08,
-RUN-10/12, RUN-23/23b — see `experiments/cc_status/RUN_LOG.md` on
-`claude/cc-reverse-curriculum`). Those tasks are DROPPED. What remains open is
-(a) baseline integrity on the main track, (b) the cross-track compass test,
-and (c) the demo-era prep the branch's decision brief calls RUN-26.
+RUN-10/12, RUN-23/23b — see `experiments/cc_status/RUN_LOG.md`). Those tasks
+are DROPPED. What remains open is (a) baseline integrity on the main track,
+(b) the cross-track compass test, and (c) the demo-era prep the decision
+brief calls RUN-26.
 
-**Prerequisite decision (owner, not the execution agent):** merge PR #37 or
-declare it canonical. Tasks 2.x below require its code (`--geo-compass`,
-imported level set, `diagnose_gap.py` protocol v2) and assume it has been
-merged to main. Tasks 0.x and 1.x run on main as-is.
+**Rev 3 status:** PR #37 is MERGED to main (2026-07-08, merge commit
+`c03eddf`) and this PR is rebased on top of it. Post-merge verification is
+already done on this branch: full suite **1484 passed** and
+`python -m experiments.cc_status.compass_audit` reports **zero**
+trapped/dead/compass-hard-lie cells across all 16 imported levels. The
+`--geo-compass` / `--geo-compass-hazard-aware` flags are now wired into
+`cc_status_session.py` (this PR), so Task 2.1 is directly runnable. Every
+task below runs on merged main.
 
 **Ground rules:**
 
@@ -39,21 +43,22 @@ merged to main. Tasks 0.x and 1.x run on main as-is.
 
 ## Phase 0 — cheap eval-only sanity on main (no training; ~30 min)
 
-### Task 0.1 — Baseline drift check: does frozen B3s still reproduce?
+### Task 0.1 — Baseline drift check: does frozen B3s still reproduce post-merge?
 
-PRs #34/#35/#36 changed eval selection and reset paths after B3s was frozen
-(and #37 will change more). Same checkpoint, same seed-0 held-out eval:
+PRs #34/#35/#36/#37 all changed eval selection, reset paths, seeding
+determinism, or shared game code after B3s was frozen. Same checkpoint, same
+seed-0 held-out eval, now on merged main:
 
 ```bash
 /Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py eval-checkpoint \
   --checkpoint .Codex/artifacts/cc_sessions/20260624_120002_tutorial_demo_conservative_recovery_pool512_select30_300/tutorial_demo_conservative/models/crystal_caves/tutorial_demo_conservative_selected_ep300.pth \
-  --eval-games 30 --seed 0 --label t01_b3s_drift_check_eval30
+  --eval-games 30 --seed 0 --label t01_b3s_drift_check_post37_eval30
 ```
 
 **Report:** wins/30, crystal %, depth %, end reasons; flag if wins deviate
-from 10/30 by more than ±3. Rerun once after #37 merges (label
-`t01b_post37`) — if #37's merge shifts this surface, every Track A comparison
-needs re-baselining.
+from 10/30 by more than ±3. If drifted, every Track A comparison needs
+re-baselining before Task 2.1 is judged against the frozen B3s bar — report
+and wait for direction rather than improvising a new baseline.
 
 ### Task 0.2 — Full-level completion eval of B3s/B21 (not first-crystal)
 
@@ -71,37 +76,29 @@ objective mode confirmed.
 
 ---
 
-## Phase 1 — post-#37-merge integrity (one day)
+## Phase 1 — post-merge integrity — ✅ DONE (recorded here for the log)
 
-### Task 1.1 — Merged-tree verification
-
-After #37 merges: full test suite, then re-run Task 0.1 (`t01b_post37`), then
-the branch's own preflight (`python -m experiments.cc_status.compass_audit`
-— expect zero trapped/dead/compass-hard-lie cells on all 16 imported levels).
-
-**Report:** test counts, audit output, drift-check delta.
+Done on the PR #39 branch after the #37 merge and rebase, 2026-07-08:
+full suite **1484 passed**; `compass_audit` clean (zero trapped / dead /
+compass-hard-lie cells on all 16 imported levels). No agent action needed.
 
 ---
 
-## Phase 2 — the open experiments (requires #37 code)
+## Phase 2 — the open experiments
 
 ### Task 2.1 — Cross-track compass A/B (the one big untested combination)
 
 Track B's biggest lever (`--geo-compass`, +4 state dims, held-out tutorial
 wins 0.033 → 0.483) has never been tried on Track A's promoted lineage.
-Run the B3s recipe with the compass enabled, seed 0 (state size changes, so
+Run the B3s recipe with the compass enabled, seed 0. State size changes, so
 this is a fresh train, not a checkpoint restore — same caveat as the B8
-history-state probe):
+history-state probe. The flag is wired into the status-session CLI and the
+run's config snapshot records `geo_compass` for attribution:
 
 ```bash
 /Users/justin/.pyenv/versions/3.12.11/bin/python -u experiments/cc_status_session.py run-recipe b3s_conservative_demo_q \
   --geo-compass --label t21_b3s_geo_compass_300_seed0
 ```
-
-(If the merged tree does not expose `--geo-compass` on the status-session CLI,
-report as a tooling gap — the flag exists on `diagnose_gap.py`; wiring it into
-`cc_status_session` follows the same pattern as `--geodesic-potential` in
-`experiments/cc_status/config_helpers.py`.)
 
 Judge with `compare-artifact` against the frozen B3s bar plus near-miss
 metrics. **This is the highest-information single run available:** if the

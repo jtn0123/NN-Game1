@@ -96,6 +96,37 @@ def test_reward_shaping_override_rejects_invalid_values(kwargs):
         )
 
 
+def test_geo_compass_override_sets_and_validates():
+    from experiments.cc_status.config_helpers import apply_geo_compass_override
+
+    config = Config()
+    apply_geo_compass_override(config, geo_compass=True, hazard_aware=True)
+    assert config.CRYSTAL_CAVES_GEO_COMPASS is True
+    assert config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE is True
+
+    with pytest.raises(ValueError):
+        apply_geo_compass_override(config, geo_compass=False, hazard_aware=True)
+
+
+def test_status_session_parser_exposes_geo_compass_flags():
+    parser = argparse.ArgumentParser()
+    add_status_session_arguments(parser)
+
+    defaults = parser.parse_args(["tutorial-demo-conservative"])
+    assert defaults.geo_compass is False
+    assert defaults.geo_compass_hazard_aware is False
+
+    args = parser.parse_args(
+        ["tutorial-demo-conservative", "--geo-compass", "--geo-compass-hazard-aware"]
+    )
+    assert args.geo_compass is True
+    assert args.geo_compass_hazard_aware is True
+
+    kwargs = tutorial_demo_bc_kwargs(args, ("direct",))
+    assert kwargs["geo_compass"] is True
+    assert kwargs["geo_compass_hazard_aware"] is True
+
+
 def test_status_session_parser_exposes_reward_shaping_flags():
     parser = argparse.ArgumentParser()
     add_status_session_arguments(parser)

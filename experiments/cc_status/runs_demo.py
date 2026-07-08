@@ -208,6 +208,8 @@ def run_tutorial_demo_bc(
     selected_eval_games: int,
     history_state: bool,
     history_steps: int,
+    geo_compass: bool = False,
+    geo_compass_hazard_aware: bool = False,
     geodesic_potential: bool = False,
     geodesic_potential_weight: float = 0.3,
     show_locked_exit: bool = False,
@@ -277,6 +279,11 @@ def run_tutorial_demo_bc(
         show_locked_exit=show_locked_exit,
         reverse_curriculum_p=reverse_curriculum_p,
         reward_clip=reward_clip,
+    )
+    apply_geo_compass_override(
+        config,
+        geo_compass=geo_compass,
+        hazard_aware=geo_compass_hazard_aware,
     )
     exp_config = cc_experiment_config(config)
     exp_config.CRYSTAL_CAVES_INVALID_SHOOT_PENALTY = invalid_shoot_penalty

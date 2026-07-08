@@ -29,6 +29,12 @@ not use Track A's demo-BC/B3s machinery (it built its own DQfD-lite instead).
 This divergence is itself a top performance finding: evidence is not flowing
 to where decisions are made. (Rev 1 of this grade fell into the same trap.)
 
+**Update 2026-07-08:** PR #37 is merged (`c03eddf`), so both tracks now share
+one tree, and `--geo-compass` is wired into the Track A harness. The two
+tracker documents (`CC_NN_EXPERIMENT_TRACKER.md` and
+`experiments/cc_status/RUN_LOG.md`) still need folding into one
+decision surface.
+
 ## Executive Grade
 
 | Area | Grade | Basis |
@@ -110,16 +116,17 @@ unlocking common.
 
 ## What good looks like from here (revised)
 
-1. **Decide PR #37** (merge or declare canonical) — it holds the best lever
-   (compass), the corrected metrics, and the only trustworthy full-win
-   benchmark. Every week it stays unmerged, the two evidence bases drift
-   further.
+1. ~~Decide PR #37~~ — **done 2026-07-08**: merged to main; PR #39 rebased on
+   top; post-merge verification passed (1484 tests, compass audit clean).
 2. **Record human demos** (owner playtest, ~an hour:
    `python main.py --human --imported --record-demos`) — the single input that
    unblocks RUN-26, the highest-evidence untried lever.
 3. **RUN-26: DQfD-lite / backward-curriculum from demos**, with the stall
-   window widening and truncation-aware bootstrapping riding along.
-4. **Cross-pollination A/B:** geo-compass on the Track A B3s recipe — if the
+   window widening and truncation-aware bootstrapping riding along (the stall
+   window is still a class constant, `MAX_STEPS_WITHOUT_PROGRESS = 720`; it
+   must become configurable as RUN-26 prep).
+4. **Cross-pollination A/B:** geo-compass on the Track A B3s recipe (now
+   runnable: `run-recipe b3s_conservative_demo_q --geo-compass`) — if the
    14× tutorial lift shows up as first-crystal gains there too, Track A's
    whole promoted lineage gets a step-change for four extra state dims.
 5. **Rebalance `selection_score`** so winning strictly dominates unlocking.

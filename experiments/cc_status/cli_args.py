@@ -116,6 +116,23 @@ def _add_state_architecture_arguments(parser: argparse.ArgumentParser) -> None:
         help="Number of recent action/approach entries to append when --history-state is enabled.",
     )
     parser.add_argument(
+        "--geo-compass",
+        action="store_true",
+        help=(
+            "Append the RUN-13 geodesic corridor compass (4 route-direction "
+            "scalars) to the Crystal Caves state. Changes state size, so old "
+            "checkpoints cannot be restored directly."
+        ),
+    )
+    parser.add_argument(
+        "--geo-compass-hazard-aware",
+        action="store_true",
+        help=(
+            "Route the geo-compass around static hazards (RUN-18 variant). "
+            "Requires --geo-compass; same 4 dims, no extra state change."
+        ),
+    )
+    parser.add_argument(
         "--distributional-dqn",
         action="store_true",
         help=(

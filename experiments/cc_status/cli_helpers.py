@@ -70,6 +70,8 @@ def tutorial_demo_bc_kwargs(
         "selected_eval_games": opts.selected_eval_games,
         "history_state": opts.history_state,
         "history_steps": opts.history_steps,
+        "geo_compass": opts.geo_compass,
+        "geo_compass_hazard_aware": opts.geo_compass_hazard_aware,
         "geodesic_potential": opts.geodesic_potential,
         "geodesic_potential_weight": opts.geodesic_potential_weight,
         "show_locked_exit": opts.show_locked_exit,

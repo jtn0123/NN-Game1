@@ -149,6 +149,23 @@ def apply_reward_shaping_override(
     config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = float(reverse_curriculum_p)
 
 
+def apply_geo_compass_override(
+    config: Config,
+    *,
+    geo_compass: bool,
+    hazard_aware: bool,
+) -> None:
+    """Opt in to the RUN-13 geodesic corridor compass observation for a run.
+
+    Adds 4 route-direction scalars to the state, so checkpoints trained without
+    it cannot be restored directly (same caveat as the history-state probe).
+    """
+    if hazard_aware and not geo_compass:
+        raise ValueError("geo_compass_hazard_aware requires geo_compass")
+    config.CRYSTAL_CAVES_GEO_COMPASS = bool(geo_compass)
+    config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = bool(hazard_aware)
+
+
 def apply_history_state_override(
     config: Config,
     *,
