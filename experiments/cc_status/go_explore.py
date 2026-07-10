@@ -758,6 +758,22 @@ def explore_level(
         if res.best_remaining < last_best:
             last_best = res.best_remaining
             last_improve_steps = res.env_steps
+            # continuous endgame compaction: every deepening whose trace is
+            # already fat gets trimmed immediately — the sweep's finish-line
+            # failures all sit within ~125 steps of the 3000 clock
+            if res.best_remaining <= 8:
+                fcell = min(archive, key=lambda c: (c[2], archive[c].steps))
+                fent = archive[fcell]
+                if fent.steps > 2400:
+                    short = compact_trace(level_index, list(fent.trace))
+                    if len(short) < fent.steps:
+                        g4, _c4, d4 = _replay_cells(level_index, short)
+                        if not d4:
+                            archive[_cell(g4)] = Entry(
+                                snap=copy.deepcopy(g4),
+                                trace=short,
+                                steps=len(short),
+                            )
         elif res.env_steps - last_improve_steps > (40_000 if res.best_remaining <= 6 else 120_000):
             # stalled: compact the best frontier prefix and re-root exploration
             frontier_cell = min(archive, key=lambda c: (c[2], archive[c].steps))
