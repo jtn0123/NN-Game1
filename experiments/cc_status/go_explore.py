@@ -333,7 +333,7 @@ def _enemy_threat(game: CrystalCaves, next_move_dir: int):
             continue
         if abs(dx) < 26 or (next_move_dir and 0 < dx * next_move_dir < 56):
             if best is None or abs(dx) < abs(best[1]):
-                best = (str(getattr(e, "kind", "")), dx)
+                best = (str(getattr(e, "kind", "")), dx, dy)
     return best
 
 
@@ -568,7 +568,11 @@ def explore_level(
                     if g.health > 0 and getattr(g, "grounded", False)
                     else None
                 )
-                if threat is not None and threat[0] == "crawler" and int(getattr(g, "ammo", 0)) > 0:
+                if (
+                    threat is not None
+                    and (threat[0] == "crawler" or abs(threat[2]) <= 16)
+                    and int(getattr(g, "ammo", 0)) > 0
+                ):
                     # same-row crawler ahead: shoot it — a dead crawler clears
                     # the lane permanently, and shooting doesn't move the body,
                     # so the plan stays position-true (just paused).
