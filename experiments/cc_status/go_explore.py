@@ -365,6 +365,111 @@ def _hazard_reflex(game: CrystalCaves, sim, hazards, action: int, rng) -> int:
     return game.IDLE
 
 
+# --- tour-order optimization ---------------------------------------------------
+# The sweep's universal failure mode: greedy nearest-target collection wastes the
+# 3000-step episode clock, pinning frontiers at 2800-2900 steps with 1-6 gems
+# left. Order objectives like a delivery route instead: switches first, then
+# gems by a nearest-neighbour + 2-opt tour over true tile route distances.
+
+_TOUR_CACHE: Dict[Tuple[str, frozenset, frozenset], List[Tuple[int, int]]] = {}
+
+
+def _tile_walkable(layout, c: int, r: int) -> bool:
+    if r < 0 or c < 0 or r >= len(layout) or c >= len(layout[0]):
+        return False
+    return layout[r][c] != "#"  # doors treated as open (post-switch world)
+
+
+def _tile_field(layout, start):
+    from collections import deque as _dq
+
+    dist = {start: 0}
+    q = _dq([start])
+    while q:
+        c, r = q.popleft()
+        d = dist[(c, r)]
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            n = (c + dc, r + dr)
+            if n not in dist and _tile_walkable(layout, n[0], n[1]):
+                # vertical movement is ~2x slower than walking in real frames
+                # (ladder climb ~8 frames/tile vs walk ~4), so weight it or the
+                # "optimal" tour is physically expensive
+                dist[n] = d + (2 if dr else 1)
+                q.append(n)
+    return dist
+
+
+def _objective_tour(game: CrystalCaves) -> List[Tuple[int, int]]:
+    """Ordered objective list: unused switches (nearest-first), then gems by a
+    2-opt-improved tour over tile route distances. Cached per state."""
+    layout = tuple(game.level.layout)
+    gems = frozenset(game.crystals)
+    switches = frozenset(game.switches - game.used_switches)
+    key = (str(getattr(game.level, "name", "")), gems, switches)
+    hit = _TOUR_CACHE.get(key)
+    if hit is not None:
+        return hit
+
+    pos = game._player_tile()
+    exit_tile = tuple(getattr(game, "exit_pos", ()) or ()) or None
+    nodes = list(switches) + list(gems)
+    fields = {n: _tile_field(layout, n) for n in nodes}
+    pos_field = _tile_field(layout, pos)
+
+    def dist_from(node, target):
+        f = pos_field if node == pos else fields[node]
+        return f.get(target, 10_000)
+
+    order = []
+    cur = pos
+    todo = set(switches)
+    while todo:
+        nxt = min(todo, key=lambda n: dist_from(cur, n))
+        order.append(nxt)
+        todo.discard(nxt)
+        cur = nxt
+    gem_order = []
+    todo = set(gems)
+    while todo:
+        nxt = min(todo, key=lambda n: dist_from(cur, n))
+        gem_order.append(nxt)
+        todo.discard(nxt)
+        cur = nxt
+
+    start_anchor = order[-1] if order else pos
+
+    def tour_len(seq):
+        # anchor the tour at the EXIT: the last gem should leave the player
+        # near the door, or the final leg wastes the little clock that's left
+        total = 0
+        prev = start_anchor
+        for n in seq:
+            total += dist_from(prev, n)
+            prev = n
+        if exit_tile is not None and seq:
+            total += fields[seq[-1]].get(exit_tile, 10_000)
+        return total
+
+    improved = True
+    passes = 0
+    best_len = tour_len(gem_order)
+    while improved and passes < 30:
+        improved = False
+        passes += 1
+        for i in range(len(gem_order) - 1):
+            for j in range(i + 2, len(gem_order) + 1):
+                cand = gem_order[:i] + gem_order[i:j][::-1] + gem_order[j:]
+                cand_len = tour_len(cand)
+                if cand_len < best_len:
+                    gem_order, best_len = cand, cand_len
+                    improved = True
+    result = order + gem_order
+    if len(_TOUR_CACHE) > 500:
+        _TOUR_CACHE.clear()
+    _TOUR_CACHE[key] = result
+    return result
+
+
 def _select(archive: Dict[Cell, Entry], rng: random.Random) -> Cell:
     cells = list(archive.keys())
     roll = rng.random()
@@ -480,7 +585,6 @@ def explore_level(
     next_log = log_every
     last_improve_steps = 0
     last_best = res.best_remaining
-    hard_gems: set = set()
 
     while res.env_steps < budget and not res.won:
         cell = _select(archive, rng)
@@ -508,27 +612,19 @@ def explore_level(
         # gems for the low-HP endgame — the depth race otherwise crowns
         # HP-spending lineages that arrive broke at the guarded cluster.
         override_target: Tuple[int, int] | None = None
-        hp_now = int(getattr(g, "health", 0))
         ammo_left = int(getattr(g, "ammo", 0))
         restock = getattr(g, "ammo_pickups", None)
         if ammo_left <= 1 and restock:
             # rockets are the crawler answer; restock before anything else
             px, py = g._player_tile()
             override_target = min(restock, key=lambda a: abs(a[0] - px) + abs(a[1] - py))
-        elif hp_now >= 2 and hard_gems:
-            # empirically-hard gems (the ones stall reports keep listing):
-            # go for them while we can still afford hits
-            cands = [gem for gem in g.crystals if gem in hard_gems]
-            if cands:
-                px, py = g._player_tile()
-                override_target = min(cands, key=lambda gem: abs(gem[0] - px) + abs(gem[1] - py))
-        elif hp_now >= 3 and g.crystals:
-            hz = _hazard_cells(tuple(g.level.layout))
-            if hz:
-                override_target = min(
-                    g.crystals,
-                    key=lambda gem: min(abs(gem[0] - h[0]) + abs(gem[1] - h[1]) for h in hz),
-                )
+        elif g.crystals or (g.switches - g.used_switches):
+            # follow the optimized tour instead of nearest-Euclidean targeting
+            tour = _objective_tour(g)
+            for node in tour:
+                if node in g.crystals or node in (g.switches - g.used_switches):
+                    override_target = node
+                    break
         # Plan only from cache-warm cells or the exploit frontier (one cold
         # sweep, then warm) — cold-sweeping from every random diversity cell
         # collapses throughput ~100x.
@@ -673,7 +769,6 @@ def explore_level(
                 f"open={sorted(fe.snap.open_colors)} trace={fe.steps}",
                 flush=True,
             )
-            hard_gems = set(fe.snap.crystals)
             short = compact_trace(level_index, list(fe.trace))
             g3, cells3, done3 = _replay_cells(level_index, short)
             if not done3 and len(short) < fe.steps:
