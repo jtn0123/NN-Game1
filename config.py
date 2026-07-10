@@ -191,6 +191,11 @@ class Config:
     # default (720). RUN-26 fidelity lever: DATA-1 showed the stall clock owns a large,
     # learning-invariant share of endings, so arms may widen it (e.g. 1440) explicitly.
     CRYSTAL_CAVES_STALL_WINDOW_STEPS: int = 0
+    # Episode step cap override for Crystal Caves; 0 keeps the game's built-in
+    # default (3000). The 1991 original has NO level timer — the cap is a
+    # training-harness artifact, and the level-validity audit (PR #39) shows
+    # perfect tours already use 0.55-0.92 of it. Opt-in fidelity lever.
+    CRYSTAL_CAVES_MAX_STEPS_OVERRIDE: int = 0
     # Reverse curriculum: begin a fraction of TRAINING episodes from a valid
     # mid-solution state (a subset of crystals pre-collected, gates opened) so the
     # agent gets dense reps of finishing the collect->...->exit chain rather than only
@@ -912,6 +917,10 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_STALL_WINDOW_STEPS >= 0,
             "CRYSTAL_CAVES_STALL_WINDOW_STEPS must be non-negative (0 = game default)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE >= 0,
+            "CRYSTAL_CAVES_MAX_STEPS_OVERRIDE must be non-negative (0 = game default)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

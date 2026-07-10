@@ -227,6 +227,9 @@ class CrystalCaves(
             getattr(self.config, "CRYSTAL_CAVES_STALL_WINDOW_STEPS", 0)
             or type(self).MAX_STEPS_WITHOUT_PROGRESS
         )
+        self.MAX_STEPS = int(
+            getattr(self.config, "CRYSTAL_CAVES_MAX_STEPS_OVERRIDE", 0) or type(self).MAX_STEPS
+        )
 
         # AI-1 state toggle: legacy uses the old 11x9 window with no global map
         # (119-feature state); rich uses the class defaults (19x11 + 11x6 map).

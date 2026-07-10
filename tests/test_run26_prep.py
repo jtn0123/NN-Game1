@@ -220,3 +220,27 @@ def test_diagnose_gap_exposes_stall_window_lever():
     src = inspect.getsource(dg)
     assert '"--stall-window"' in src
     assert 'overrides["CRYSTAL_CAVES_STALL_WINDOW_STEPS"] = stall_window' in src
+
+
+def test_max_steps_override():
+    config = Config()
+    assert config.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE == 0
+    game = CrystalCaves(config, headless=True)
+    assert game.MAX_STEPS == 3000
+    config2 = Config()
+    config2.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE = 4500
+    game2 = CrystalCaves(config2, headless=True)
+    assert game2.MAX_STEPS == 4500
+    assert CrystalCaves.MAX_STEPS == 3000  # class default untouched
+    with pytest.raises(Exception):
+        Config(CRYSTAL_CAVES_MAX_STEPS_OVERRIDE=-1)
+
+
+def test_diagnose_gap_exposes_max_steps_lever():
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--max-steps"' in src
+    assert 'overrides["CRYSTAL_CAVES_MAX_STEPS_OVERRIDE"] = max_steps' in src

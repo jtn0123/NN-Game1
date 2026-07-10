@@ -71,10 +71,15 @@ class LevelResult:
     verify_ok: bool = False
 
 
+_MAX_STEPS_OVERRIDE = 0
+
+
 def _fresh_game(level_index: int) -> CrystalCaves:
     spec = HANDCRAFTED_LEVELS[level_index]
     cfg = Config()
     cfg.CRYSTAL_CAVES_IMPORTED = True
+    if _MAX_STEPS_OVERRIDE:
+        cfg.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE = _MAX_STEPS_OVERRIDE
     game = CrystalCaves(cfg, headless=True)
     game.CAVES = (spec,)
     game._eval_caves = (spec,)
@@ -568,7 +573,7 @@ def explore_level(
     budget: int = 200_000,
     rollout: int = 60,
     seed: int = 0,
-    max_trace: int = 2_900,
+    max_trace: int = 0,  # 0 = derive from the game's episode cap
     log_every: int = 25_000,
     scripted_p: float = 0.7,
 ) -> LevelResult:
@@ -578,6 +583,8 @@ def explore_level(
     started = time.time()
 
     game = _fresh_game(level_index)
+    if not max_trace:
+        max_trace = int(game.MAX_STEPS) - 100
     sample = _action_sampler(game, rng)
     root = _cell(game)
     archive: Dict[Cell, Entry] = {root: Entry(snap=copy.deepcopy(game), trace=[], steps=0)}
@@ -822,6 +829,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--scripted-p", type=float, default=0.7)
     parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=0,
+        help="Episode step-cap override (0 = game default 3000). Demos harvested "
+        "above the default cap are only valid for training runs using the same cap.",
+    )
+    parser.add_argument(
         "--out",
         default=os.path.join(_REPO_ROOT, "experiments", "cc_status", "data", "demos_goexplore"),
     )
@@ -829,6 +843,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    global _MAX_STEPS_OVERRIDE
+    _MAX_STEPS_OVERRIDE = int(args.max_steps or 0)
     indices = (
         [int(x) for x in args.levels.split(",") if x.strip() != ""]
         if args.levels

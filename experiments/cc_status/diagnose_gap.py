@@ -451,6 +451,7 @@ def run_diagnosis(
     weight_decay: float = 0.0,
     reward_clip: float | None = None,
     stall_window: int | None = None,
+    max_steps: int | None = None,
     death_penalty: float | None = None,
     hit_penalty: float | None = None,
     ngu_bonus: bool = False,
@@ -504,6 +505,10 @@ def run_diagnosis(
         # levers are invisible unless the clip is raised (or 0 = disabled; the agent code
         # guards `if REWARD_CLIP > 0`, so 0 is a safe off-switch, not a clamp-to-zero).
         overrides["REWARD_CLIP"] = reward_clip
+    if max_steps is not None:
+        # 1991-fidelity lever: the original has no level timer; see PR #39
+        # level-validity audit before using in comparable runs.
+        overrides["CRYSTAL_CAVES_MAX_STEPS_OVERRIDE"] = max_steps
     if stall_window is not None:
         # RUN-26 fidelity arm: widen the no-progress stall window (game default 720).
         # DATA-1: harness timers own 35-54% of endings, flat across learning.
@@ -1297,6 +1302,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
     )
     parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Override the Crystal Caves episode step cap (game default 3000). "
+        "The 1991 original has no level timer; perfect tours on the rebalanced "
+        "set already use 0.55-0.92 of the default cap.",
+    )
+    parser.add_argument(
         "--stall-window",
         type=int,
         default=None,
@@ -1414,6 +1427,7 @@ def main(argv: list[str] | None = None) -> int:
         weight_decay=args.weight_decay,
         reward_clip=args.reward_clip,
         stall_window=args.stall_window,
+        max_steps=args.max_steps,
         death_penalty=args.death_penalty,
         hit_penalty=args.hit_penalty,
         ngu_bonus=args.ngu_bonus,
