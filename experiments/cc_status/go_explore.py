@@ -662,7 +662,7 @@ def explore_level(
         if res.best_remaining < last_best:
             last_best = res.best_remaining
             last_improve_steps = res.env_steps
-        elif res.env_steps - last_improve_steps > 120_000:
+        elif res.env_steps - last_improve_steps > (40_000 if res.best_remaining <= 6 else 120_000):
             # stalled: compact the best frontier prefix and re-root exploration
             frontier_cell = min(archive, key=lambda c: (c[2], archive[c].steps))
             fe = archive[frontier_cell]
