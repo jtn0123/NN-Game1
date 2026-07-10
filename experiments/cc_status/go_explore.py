@@ -315,11 +315,15 @@ def oracle_route_actions(
     return _route_tree(game, max_nodes=max_nodes).get(target, [])
 
 
-def _enemy_too_close(game: CrystalCaves, next_move_dir: int) -> bool:
-    """True when a live enemy is within striking range in the direction we are
-    about to move (or overhead) — the cue to wait a frame and let it pass."""
+def _enemy_threat(game: CrystalCaves, next_move_dir: int):
+    """Nearest live enemy within striking range ahead/overhead.
+
+    Returns (kind, dx) or None. Callers hop over same-row crawlers (waiting is
+    fatal in narrow corridors — the crawler walks INTO an idle player) and wait
+    out everything else."""
     px = float(game.player_x)
     py = float(game.player_y)
+    best = None
     for e in getattr(game, "enemies", ()) or ():
         if not getattr(e, "alive", True):
             continue
@@ -327,11 +331,10 @@ def _enemy_too_close(game: CrystalCaves, next_move_dir: int) -> bool:
         dy = float(e.y) - py
         if abs(dy) > 40:
             continue
-        if abs(dx) < 26:
-            return True
-        if next_move_dir and 0 < dx * next_move_dir < 56:
-            return True
-    return False
+        if abs(dx) < 26 or (next_move_dir and 0 < dx * next_move_dir < 56):
+            if best is None or abs(dx) < abs(best[1]):
+                best = (str(getattr(e, "kind", "")), dx)
+    return best
 
 
 _ACTION_MJ = None
@@ -506,7 +509,13 @@ def explore_level(
         # HP-spending lineages that arrive broke at the guarded cluster.
         override_target: Tuple[int, int] | None = None
         hp_now = int(getattr(g, "health", 0))
-        if hp_now >= 2 and hard_gems:
+        ammo_left = int(getattr(g, "ammo", 0))
+        restock = getattr(g, "ammo_pickups", None)
+        if ammo_left <= 1 and restock:
+            # rockets are the crawler answer; restock before anything else
+            px, py = g._player_tile()
+            override_target = min(restock, key=lambda a: abs(a[0] - px) + abs(a[1] - py))
+        elif hp_now >= 2 and hard_gems:
             # empirically-hard gems (the ones stall reports keep listing):
             # go for them while we can still afford hits
             cands = [gem for gem in g.crystals if gem in hard_gems]
@@ -554,14 +563,26 @@ def explore_level(
                 # movement direction, idle this frame (do not consume the plan)
                 # and let the deterministic patrol pass. Cap the wait so a
                 # hovering flyer cannot freeze the rollout forever.
-                if (
-                    g.health > 0
-                    and getattr(g, "grounded", False)
-                    and _enemy_too_close(g, move_dir)
-                    and stale % 100 < 78
-                ):
-                    # pause the plan while the enemy passes; grounded friction
-                    # stops the body, so the plan resumes position-true
+                threat = (
+                    _enemy_threat(g, move_dir)
+                    if g.health > 0 and getattr(g, "grounded", False)
+                    else None
+                )
+                if threat is not None and threat[0] == "crawler" and int(getattr(g, "ammo", 0)) > 0:
+                    # same-row crawler ahead: shoot it — a dead crawler clears
+                    # the lane permanently, and shooting doesn't move the body,
+                    # so the plan stays position-true (just paused).
+                    burst_action = g.RIGHT_SHOOT if threat[1] > 0 else g.LEFT_SHOOT
+                elif threat is not None and threat[0] == "crawler" and 28 <= abs(threat[1]) <= 58:
+                    # out of ammo: hop over it (waiting is fatal — it walks
+                    # into an idle player); hop diverges, so drop the plan
+                    hop_dir = 1 if threat[1] > 0 else -1
+                    burst_action = _act_id(g, hop_dir, True)
+                    plan = []
+                    plan_i = 0
+                elif threat is not None and threat[0] != "crawler" and stale % 100 < 78:
+                    # flyers etc: pause and let them drift off; grounded
+                    # friction stops the body so the plan resumes position-true
                     burst_action = g.IDLE
                 else:
                     plan_i += 1
