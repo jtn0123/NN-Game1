@@ -283,3 +283,30 @@ loss / demo-prefix starts (machinery landed with PR #37, see
 `--demo-dir/--demo-pretrain/--demo-reset-p` on diagnose_gap) on top of the
 better of Task 3.3's arms. That is the first run with a credible shot at
 moving full-game completion.
+
+### Phase 3 results (2026-07-08) — recorded verdicts
+
+**Task 3.2 — ✅ DONE, accepted.** RUN-25's ep6000 control weights on the
+rebalanced levels: `0/144` wins, crystals `13.0%` (**6.4 absolute** vs ~14.3
+absolute on the old levels), killed `68.8%` (hazard-dominated, 63 vs 36 —
+the new crystal guards bite), exit-unlock `0`. The rebalanced surface is
+materially harder, as intended; RUN-19..25 numbers are formally historical.
+
+**Task 3.3 — ✅ DONE, accepted. Arm A is the frozen Track B baseline:**
+best/final ep6000 `0/144` wins, crystals `27.6%`, progress `42.5%`,
+exit-unlock `0.0%`, killed `52.1%` / stalled `47.9%`
+(`runs/RUN-26a_rebalance_baseline/armA_control`, weights saved).
+**Arm B (stall 1440): HOLD, keep as RUN-26 rider, not a promotion.** It
+moved every diagnostic the right way (+4.2pp crystals, +3.8pp progress,
+−8.3pp pure stalls) but completions stayed at zero and the freed failure
+mass went to deaths/timeouts — the same redistribution seen in RUN-18/23.
+Third independent confirmation that timer/reward/observation levers cannot
+create completions on this task.
+
+**Direction:** no further training runs until demos exist. The demo
+playtest MUST be recorded on this branch (rebalanced levels + current
+engine): `python main.py --human --imported --record-demos`. RUN-26 then
+runs demo-pretrain/demo-prefix arms on top of Arm A's config, with
+`--stall-window 1440` riding along. Minor tooling gap noted by the agent:
+`diagnose_gap` has no checkpoint-eval CLI path (they drove internal
+functions); wrap it later only if post-hoc checkpoint evals become routine.
