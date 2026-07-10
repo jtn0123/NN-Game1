@@ -165,8 +165,8 @@ def _route_tree(
         str(getattr(game.level, "name", "")),
         start_cell,
         doors,
-        int(game.player_x) // 8,
-        int(game.player_y) // 8,
+        int(game.player_x) // 2,
+        int(game.player_y) // 2,
     )
     hit = _ROUTE_CACHE.get(key)
     if hit is not None:
@@ -536,8 +536,8 @@ def explore_level(
             str(getattr(g.level, "name", "")),
             g._player_tile(),
             _door_chars_closed(g),
-            int(g.player_x) // 8,
-            int(g.player_y) // 8,
+            int(g.player_x) // 2,
+            int(g.player_y) // 2,
         )
         exploit_cell = min(archive, key=lambda cc: (cc[2], -cc[6], archive[cc].steps))
         if rng.random() < scripted_p and (cache_key in _ROUTE_CACHE or cell == exploit_cell):
