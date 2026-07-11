@@ -291,3 +291,37 @@ def test_demo_td_weight_zero_drops_td_term():
     assert loss is not None
     assert torch.isfinite(loss)
     assert float(loss.item()) < 1e3  # TD on 1e6 rewards would dwarf this
+
+
+def test_diagnose_gap_exposes_demo_margin_weight_lever():
+    """RUN-26d lever: --demo-margin-weight 0 with --demo-td-weight 0 must leave
+    demo-prefix starts as the only demo mechanism."""
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--demo-margin-weight"' in src
+    assert 'overrides["DEMO_MARGIN_WEIGHT"] = demo_margin_weight' in src
+
+
+def test_demo_loss_skipped_when_both_weights_zero():
+    """Both demo-loss weights at 0 must skip the demo gradient entirely
+    (prefix-starts-only arms attach a store but want no demo loss)."""
+    from src.ai.agent import Agent
+
+    config = Config()
+    config.DEMO_TD_WEIGHT = 0.0
+    config.DEMO_MARGIN_WEIGHT = 0.0
+    config.FORCE_CPU = True
+    agent = Agent(state_size=8, action_size=3, config=config)
+
+    class _ExplodingStore:
+        def __len__(self):
+            return 4
+
+        def sample(self, k):  # pragma: no cover - must never be called
+            raise AssertionError("demo store sampled despite zero weights")
+
+    agent.attach_demo_store(_ExplodingStore())
+    assert agent._dqfd_loss() is None

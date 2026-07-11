@@ -463,6 +463,7 @@ def run_diagnosis(
     demo_pretrain: int = 0,
     demo_reset_p: float = 0.0,
     demo_td_weight: float | None = None,
+    demo_margin_weight: float | None = None,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -540,6 +541,11 @@ def run_diagnosis(
             # targets from a tiny fixed set thousands of times (Q-inflation suspect);
             # 0.0 keeps only the large-margin supervised term.
             overrides["DEMO_TD_WEIGHT"] = demo_td_weight
+        if demo_margin_weight is not None:
+            # RUN-26d ablation: 0.0 together with --demo-td-weight 0 disables the
+            # demo gradient entirely, leaving demo-prefix starts (backward
+            # curriculum) as the only demo mechanism.
+            overrides["DEMO_MARGIN_WEIGHT"] = demo_margin_weight
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -1402,6 +1408,15 @@ def main(argv: list[str] | None = None) -> int:
         "(default: config DEMO_TD_WEIGHT). 0 = margin-only DQfD-lite.",
     )
     parser.add_argument(
+        "--demo-margin-weight",
+        type=float,
+        default=None,
+        metavar="W",
+        help="Weight of the large-margin term in the per-step demo minibatch loss "
+        "(default: config DEMO_MARGIN_WEIGHT). 0 with --demo-td-weight 0 = "
+        "demo-prefix starts only, no demo gradient.",
+    )
+    parser.add_argument(
         "--save-weights",
         action="store_true",
         help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
@@ -1453,6 +1468,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_pretrain=args.demo_pretrain,
         demo_reset_p=args.demo_reset_p,
         demo_td_weight=args.demo_td_weight,
+        demo_margin_weight=args.demo_margin_weight,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
