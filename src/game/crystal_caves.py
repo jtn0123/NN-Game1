@@ -1047,10 +1047,19 @@ class CrystalCaves(
         actions = demos[int(np.random.randint(len(demos)))]
         # 10-85% of the route: never far enough to trigger the demo's win.
         cut = int(len(actions) * float(np.random.uniform(0.10, 0.85)))
+        # The step/stall caps govern the AGENT's play, not the scripted prefix:
+        # relaxed-clock demos exceed 3000 steps, and a capped replay would hit
+        # the timeout mid-prefix and hand the agent a game-over episode.
+        saved_max_steps = self.MAX_STEPS
+        saved_stall_window = self.MAX_STEPS_WITHOUT_PROGRESS
+        self.MAX_STEPS = cut + saved_max_steps
+        self.MAX_STEPS_WITHOUT_PROGRESS = cut + saved_stall_window
         for action in actions[:cut]:
             if self.game_over:  # defensive: a verified win's prefix never terminates
                 break
             self.step(int(action))
+        self.MAX_STEPS = saved_max_steps
+        self.MAX_STEPS_WITHOUT_PROGRESS = saved_stall_window
         # Re-zero the episode accounting so the replayed prefix costs the agent
         # nothing: full step budget, fresh stall clock, PBRS baselines anchored to
         # the mid-route start (so shaping still telescopes from here).

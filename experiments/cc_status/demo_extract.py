@@ -707,11 +707,17 @@ def extract_level(level_index: int) -> Dict[str, Any]:
     }
 
 
-def verify_stored(level_index: int, actions: List[int]) -> bool:
-    """Pure open-loop replay of a stored action list must reproduce the win."""
+def verify_stored(level_index: int, actions: List[int], max_steps: int = 0) -> bool:
+    """Pure open-loop replay of a stored action list must reproduce the win.
+
+    ``max_steps`` must match the episode cap the trace was harvested under —
+    otherwise a relaxed-clock win (trace > 3000 steps) times out mid-replay
+    and a genuine win reports as unverified."""
     spec = HANDCRAFTED_LEVELS[level_index]
     cfg = Config()
     cfg.CRYSTAL_CAVES_IMPORTED = True
+    if max_steps:
+        cfg.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE = int(max_steps)
     game = CrystalCaves(cfg, headless=True)
     game.CAVES = (spec,)
     game._eval_caves = (spec,)

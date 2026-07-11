@@ -325,3 +325,39 @@ def test_demo_loss_skipped_when_both_weights_zero():
 
     agent.attach_demo_store(_ExplodingStore())
     assert agent._dqfd_loss() is None
+
+
+def test_verify_stored_respects_harvest_cap():
+    """A relaxed-clock winning trace (>3000 steps) must verify under the same
+    cap it was harvested with — the default-Config replay silently timed out
+    and reported genuine wins as unverified."""
+    import inspect
+
+    from experiments.cc_status import demo_extract, go_explore
+
+    sig = inspect.signature(demo_extract.verify_stored)
+    assert "max_steps" in sig.parameters
+    src = inspect.getsource(demo_extract.verify_stored)
+    assert "CRYSTAL_CAVES_MAX_STEPS_OVERRIDE" in src
+    # go_explore must pass its harvest cap through to verification
+    assert "max_steps=_MAX_STEPS_OVERRIDE" in inspect.getsource(go_explore)
+
+
+def test_demo_prefix_replay_not_killed_by_step_cap():
+    """Prefix replay of a demo longer than the episode cap must not game-over
+    mid-replay; caps govern the agent's play and are restored afterwards."""
+    import numpy as np
+
+    config = Config()
+    config.CRYSTAL_CAVES_IMPORTED = True
+    config.CRYSTAL_CAVES_DEMO_RESET_P = 1.0
+    config.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE = 60
+    game = CrystalCaves(config, headless=True)
+    assert game.MAX_STEPS == 60
+    # 800 no-op actions: any 10-85% cut (80-680 steps) exceeds the 60-step cap
+    game._demo_prefixes = {i: [[0] * 800] for i in range(len(game.CAVES))}
+    np.random.seed(0)
+    game.reset()
+    assert not game.game_over
+    assert game.steps == 0
+    assert game.MAX_STEPS == 60  # cap restored after replay

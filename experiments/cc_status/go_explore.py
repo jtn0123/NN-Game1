@@ -817,7 +817,7 @@ def explore_level(
     res.archive_size = len(archive)
     res.seconds = time.time() - started
     if res.won:
-        res.verify_ok = verify_stored(level_index, res.trace)
+        res.verify_ok = verify_stored(level_index, res.trace, max_steps=_MAX_STEPS_OVERRIDE)
     return res
 
 
