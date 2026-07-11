@@ -244,3 +244,50 @@ def test_diagnose_gap_exposes_max_steps_lever():
     src = inspect.getsource(dg)
     assert '"--max-steps"' in src
     assert 'overrides["CRYSTAL_CAVES_MAX_STEPS_OVERRIDE"] = max_steps' in src
+
+
+def test_diagnose_gap_exposes_demo_td_weight_lever():
+    """RUN-26c ablation lever: --demo-td-weight must wire to the DEMO_TD_WEIGHT
+    override (0 = margin-only DQfD-lite) so the demo-TD Q-inflation hypothesis
+    is testable."""
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--demo-td-weight"' in src
+    assert 'overrides["DEMO_TD_WEIGHT"] = demo_td_weight' in src
+
+
+def test_demo_td_weight_zero_drops_td_term():
+    """With DEMO_TD_WEIGHT=0 the demo loss must be the margin term only —
+    finite, and independent of the demo transitions' (large) rewards."""
+    import numpy as np
+    import torch
+
+    from src.ai.agent import Agent
+
+    config = Config()
+    config.DEMO_TD_WEIGHT = 0.0
+    config.FORCE_CPU = True
+    agent = Agent(state_size=8, action_size=3, config=config)
+
+    class _TinyStore:
+        def __len__(self):
+            return 4
+
+        def sample(self, k):
+            rng = np.random.default_rng(0)
+            s = rng.random((k, 8), dtype=np.float32)
+            a = np.zeros(k, dtype=np.int64)
+            r = np.full(k, 1e6, dtype=np.float32)  # absurd reward: must not matter
+            ns = rng.random((k, 8), dtype=np.float32)
+            d = np.zeros(k, dtype=np.float32)
+            nl = np.ones(k, dtype=np.float32)
+            return s, a, r, ns, d, nl
+
+    agent.attach_demo_store(_TinyStore())
+    loss = agent._dqfd_loss()
+    assert loss is not None
+    assert torch.isfinite(loss)
+    assert float(loss.item()) < 1e3  # TD on 1e6 rewards would dwarf this
