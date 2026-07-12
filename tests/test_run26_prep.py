@@ -399,3 +399,35 @@ def test_diagnose_gap_exposes_win_at_k_ramp_lever():
     src = inspect.getsource(dg)
     assert '"--win-at-k-ramp"' in src
     assert 'overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES"]' in src
+
+
+def test_win_at_k_ramp_delay_holds_floor():
+    """K must stay at the floor through the delay window, then ramp as before."""
+    config = Config()
+    config.CRYSTAL_CAVES_IMPORTED = True
+    config.CRYSTAL_CAVES_WIN_AT_K = 3
+    config.CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES = 10
+    config.CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY = 5
+    game = CrystalCaves(config, headless=True)
+    game.reset()
+    total = game.initial_crystals
+
+    def k_effective(episodes_seen):
+        frac = min(1.0, max(0, episodes_seen - 5) / 10)
+        return 3 + int(round((total - 3) * frac))
+
+    assert k_effective(0) == 3
+    assert k_effective(5) == 3  # still held at floor through the delay
+    assert k_effective(15) == total  # ramp completes after delay + ramp
+    with pytest.raises(Exception):
+        Config(CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY=-1)
+
+
+def test_diagnose_gap_exposes_win_at_k_ramp_delay_lever():
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--win-at-k-ramp-delay"' in src
+    assert 'overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY"]' in src

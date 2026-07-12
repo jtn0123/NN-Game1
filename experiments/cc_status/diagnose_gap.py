@@ -459,6 +459,7 @@ def run_diagnosis(
     enemy_motion: bool = False,
     win_at_k: int = 0,
     win_at_k_ramp: int = 0,
+    win_at_k_ramp_delay: int = 0,
     save_weights: bool = False,
     demo_dir: str | None = None,
     demo_pretrain: int = 0,
@@ -537,6 +538,10 @@ def run_diagnosis(
             overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES"] = max(
                 1, win_at_k_ramp // max(1, games)
             )
+            if win_at_k_ramp_delay > 0:
+                overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY"] = max(
+                    1, win_at_k_ramp_delay // max(1, games)
+                )
     if demo_dir:
         # DQfD-lite: fixed demo buffer + margin loss on every gradient step, plus
         # optional demo-only pre-training and demo-prefix (backward-curriculum) starts.
@@ -1393,6 +1398,14 @@ def main(argv: list[str] | None = None) -> int:
         "episodes internally), converging on the real win rule. 0 = static K.",
     )
     parser.add_argument(
+        "--win-at-k-ramp-delay",
+        type=int,
+        default=0,
+        metavar="EPISODES",
+        help="Hold K at the floor for this many GLOBAL episodes before the ramp "
+        "starts (win-consolidation phase). 0 = ramp immediately.",
+    )
+    parser.add_argument(
         "--demo-dir",
         type=str,
         default=None,
@@ -1480,6 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
         enemy_motion=args.enemy_motion,
         win_at_k=args.win_at_k,
         win_at_k_ramp=args.win_at_k_ramp,
+        win_at_k_ramp_delay=args.win_at_k_ramp_delay,
         save_weights=args.save_weights,
         demo_dir=args.demo_dir,
         demo_pretrain=args.demo_pretrain,

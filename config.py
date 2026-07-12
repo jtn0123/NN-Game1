@@ -272,6 +272,10 @@ class Config:
     # this many episodes, merging the training tier into the real all-crystals rule —
     # avoids overfitting a "grab K then leave" policy that eval would punish.
     CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES: int = 0
+    # Hold K at the floor for this many per-instance episodes before the ramp starts
+    # (0 = ramp immediately). The agent needs a consolidation phase of dense wins
+    # before the bar moves, or the ramp outruns it and wins never begin.
+    CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY: int = 0
     # Truncation-aware bootstrapping (Pardo et al. 2018, "Time Limits in RL").
     # When an episode ends only because it hit a time/no-progress cutoff ("timeout"
     # or "stalled") rather than a real environment terminal ("won"/"killed"), the
@@ -930,6 +934,10 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES >= 0,
             "CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES must be non-negative (0 = static K)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY >= 0,
+            "CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY must be non-negative (0 = no hold)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,
