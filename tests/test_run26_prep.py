@@ -431,3 +431,16 @@ def test_diagnose_gap_exposes_win_at_k_ramp_delay_lever():
     src = inspect.getsource(dg)
     assert '"--win-at-k-ramp-delay"' in src
     assert 'overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY"]' in src
+
+
+def test_win_at_k_ramp_divides_by_vec_envs_not_games():
+    """RUN-34/35 bug guard: the global->per-instance conversion must use the
+    TRAINING env count (vec_envs), not the eval split size (games)."""
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert "win_at_k_ramp // max(1, vec_envs)" in src
+    assert "win_at_k_ramp_delay // max(1, vec_envs)" in src
+    assert "win_at_k_ramp // max(1, games)" not in src

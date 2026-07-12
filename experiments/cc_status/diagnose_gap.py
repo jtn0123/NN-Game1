@@ -533,14 +533,16 @@ def run_diagnosis(
         # Training-only win tier: exit opens at K crystals; eval keeps the real rule.
         overrides["CRYSTAL_CAVES_WIN_AT_K"] = win_at_k
         if win_at_k_ramp > 0:
-            # CLI takes GLOBAL episodes; the game ramps on per-instance episodes,
-            # and each of the `games` vectorized instances sees ~1/games of them.
+            # CLI takes GLOBAL episodes; the game ramps on per-instance episodes.
+            # Divide by the TRAINING env count (vec_envs) — NOT `games`, which is
+            # the eval split size (RUN-34/35 bug: dividing by 48 instead of 8
+            # finished the whole ramp by global ep~2000).
             overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES"] = max(
-                1, win_at_k_ramp // max(1, games)
+                1, win_at_k_ramp // max(1, vec_envs)
             )
             if win_at_k_ramp_delay > 0:
                 overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY"] = max(
-                    1, win_at_k_ramp_delay // max(1, games)
+                    1, win_at_k_ramp_delay // max(1, vec_envs)
                 )
     if demo_dir:
         # DQfD-lite: fixed demo buffer + margin loss on every gradient step, plus
