@@ -596,6 +596,8 @@ class CrystalCaves(
         """Reset and return the initial state. In eval mode, deterministically cycle
         the held-out caves; in training with a pool, sample a random cave; otherwise
         fall back to the legacy CAVES[level_index] behaviour."""
+        # Per-instance episode counter (first reset -> 0); drives the win-at-K ramp.
+        self._episodes_seen = getattr(self, "_episodes_seen", -1) + 1
         regenerate = self._proc_params is not None and bool(
             getattr(self.config, "CRYSTAL_CAVES_REGENERATE_EACH_EPISODE", False)
         )

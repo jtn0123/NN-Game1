@@ -458,6 +458,7 @@ def run_diagnosis(
     ngu_beta: float | None = None,
     enemy_motion: bool = False,
     win_at_k: int = 0,
+    win_at_k_ramp: int = 0,
     save_weights: bool = False,
     demo_dir: str | None = None,
     demo_pretrain: int = 0,
@@ -530,6 +531,12 @@ def run_diagnosis(
     if win_at_k > 0:
         # Training-only win tier: exit opens at K crystals; eval keeps the real rule.
         overrides["CRYSTAL_CAVES_WIN_AT_K"] = win_at_k
+        if win_at_k_ramp > 0:
+            # CLI takes GLOBAL episodes; the game ramps on per-instance episodes,
+            # and each of the `games` vectorized instances sees ~1/games of them.
+            overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES"] = max(
+                1, win_at_k_ramp // max(1, games)
+            )
     if demo_dir:
         # DQfD-lite: fixed demo buffer + margin loss on every gradient step, plus
         # optional demo-only pre-training and demo-prefix (backward-curriculum) starts.
@@ -1377,6 +1384,15 @@ def main(argv: list[str] | None = None) -> int:
         "win rates stay canonical. 0 = off.",
     )
     parser.add_argument(
+        "--win-at-k-ramp",
+        type=int,
+        default=0,
+        metavar="EPISODES",
+        help="Ramp the win-at-K tier: K climbs linearly to the full crystal count "
+        "over this many GLOBAL training episodes (converted to per-instance "
+        "episodes internally), converging on the real win rule. 0 = static K.",
+    )
+    parser.add_argument(
         "--demo-dir",
         type=str,
         default=None,
@@ -1463,6 +1479,7 @@ def main(argv: list[str] | None = None) -> int:
         ngu_beta=args.ngu_beta,
         enemy_motion=args.enemy_motion,
         win_at_k=args.win_at_k,
+        win_at_k_ramp=args.win_at_k_ramp,
         save_weights=args.save_weights,
         demo_dir=args.demo_dir,
         demo_pretrain=args.demo_pretrain,

@@ -226,6 +226,12 @@ class CrystalCavesLogicMixin:
         # in reach. Eval keeps the real all-crystals rule, and the full-clear bonus
         # below still pays out if the agent goes on to collect everything.
         win_at_k = int(getattr(self.config, "CRYSTAL_CAVES_WIN_AT_K", 0))
+        ramp = int(getattr(self.config, "CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES", 0))
+        if win_at_k > 0 and ramp > 0:
+            # Curriculum ramp: K climbs linearly to the full count over `ramp`
+            # episodes, so the training tier converges to the real win rule.
+            frac = min(1.0, getattr(self, "_episodes_seen", 0) / ramp)
+            win_at_k += int(round((self.initial_crystals - win_at_k) * frac))
         if (
             win_at_k > 0
             and not self._eval_mode

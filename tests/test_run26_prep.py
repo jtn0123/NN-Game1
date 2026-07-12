@@ -361,3 +361,41 @@ def test_demo_prefix_replay_not_killed_by_step_cap():
     assert not game.game_over
     assert game.steps == 0
     assert game.MAX_STEPS == 60  # cap restored after replay
+
+
+def test_win_at_k_ramp_config_default_and_validation():
+    config = Config()
+    assert config.CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES == 0
+    with pytest.raises(Exception):
+        Config(CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES=-1)
+
+
+def test_win_at_k_ramp_unlocks_early_then_converges():
+    """K must sit at the floor on episode 0 and merge with the real all-crystals
+    rule once the ramp completes."""
+    config = Config()
+    config.CRYSTAL_CAVES_IMPORTED = True
+    config.CRYSTAL_CAVES_WIN_AT_K = 3
+    config.CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES = 10
+    game = CrystalCaves(config, headless=True)
+    game.reset()
+    total = game.initial_crystals
+
+    def k_effective(episodes_seen):
+        game._episodes_seen = episodes_seen
+        frac = min(1.0, episodes_seen / 10)
+        return 3 + int(round((total - 3) * frac))
+
+    assert k_effective(0) == 3  # floor at start
+    assert k_effective(10) == total  # merged with real rule
+    assert 3 < k_effective(5) < total  # monotone middle
+
+
+def test_diagnose_gap_exposes_win_at_k_ramp_lever():
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--win-at-k-ramp"' in src
+    assert 'overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES"]' in src

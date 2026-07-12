@@ -267,6 +267,11 @@ class Config:
     # a 30-crystal clear is within reach, instead of never reaching the endgame at all.
     # Eval always keeps the real win rule, so reported win rates stay canonical.
     CRYSTAL_CAVES_WIN_AT_K: int = 0
+    # Ramp for the win-at-K tier (per-game-instance episodes; 0 = static K). K climbs
+    # linearly from CRYSTAL_CAVES_WIN_AT_K to the level's full crystal count across
+    # this many episodes, merging the training tier into the real all-crystals rule —
+    # avoids overfitting a "grab K then leave" policy that eval would punish.
+    CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES: int = 0
     # Truncation-aware bootstrapping (Pardo et al. 2018, "Time Limits in RL").
     # When an episode ends only because it hit a time/no-progress cutoff ("timeout"
     # or "stalled") rather than a real environment terminal ("won"/"killed"), the
@@ -921,6 +926,10 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE >= 0,
             "CRYSTAL_CAVES_MAX_STEPS_OVERRIDE must be non-negative (0 = game default)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES >= 0,
+            "CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES must be non-negative (0 = static K)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,
