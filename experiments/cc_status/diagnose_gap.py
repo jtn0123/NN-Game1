@@ -471,6 +471,7 @@ def run_diagnosis(
     demo_backward_wins: int = 0,
     demo_level_bias: float = 0.0,
     demo_backward_window: int = 0,
+    demo_backward_deep: int = 0,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -569,6 +570,8 @@ def run_diagnosis(
             overrides["CRYSTAL_CAVES_DEMO_LEVEL_BIAS"] = demo_level_bias
         if demo_backward_window > 0:
             overrides["CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW"] = demo_backward_window
+        if demo_backward_deep > 0:
+            overrides["CRYSTAL_CAVES_DEMO_BACKWARD_DEEP"] = demo_backward_deep
         if demo_td_weight is not None:
             # RUN-26c ablation: the per-step demo TD term drills large winning-return
             # targets from a tiny fixed set thousands of times (Q-inflation suspect);
@@ -1488,6 +1491,14 @@ def main(argv: list[str] | None = None) -> int:
         "bank rung credit. 0 = frontier-only.",
     )
     parser.add_argument(
+        "--demo-backward-deep",
+        type=int,
+        default=0,
+        metavar="STEPS",
+        help="Deep-rung easing threshold: past this steps-from-win, rungs cost "
+        "1 win and retreat half-steps. 0 = off.",
+    )
+    parser.add_argument(
         "--demo-level-bias",
         type=float,
         default=0.0,
@@ -1564,6 +1575,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_backward_wins=args.demo_backward_wins,
         demo_level_bias=args.demo_level_bias,
         demo_backward_window=args.demo_backward_window,
+        demo_backward_deep=args.demo_backward_deep,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,

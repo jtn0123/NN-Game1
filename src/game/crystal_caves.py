@@ -1088,11 +1088,18 @@ class CrystalCaves(
                 getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
                 or self.DEMO_BACKWARD_WINS_PER_RUNG
             )
+            retreat = int(
+                getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
+                or self.DEMO_BACKWARD_RETREAT_STEP
+            )
+            # Deep-rung easing: past the threshold a win is rare (a full run of
+            # thousands of near-flawless steps), so each win buys a half-step
+            # rung immediately instead of banking toward a full-step one.
+            deep = int(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_DEEP", 0))
+            if deep > 0 and bc_offset.get(prev_level, 0) >= deep:
+                wins_per_rung = 1
+                retreat = max(20, retreat // 2)
             if wins >= wins_per_rung:
-                retreat = int(
-                    getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
-                    or self.DEMO_BACKWARD_RETREAT_STEP
-                )
                 new_offset = bc_offset.get(prev_level, self.DEMO_BACKWARD_START_OFFSET) + retreat
                 bc_offset[prev_level] = new_offset
                 wins = 0

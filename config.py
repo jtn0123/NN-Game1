@@ -277,6 +277,9 @@ class Config:
     # [frontier - WINDOW, frontier] so deep rungs keep a learning signal; only
     # exact-frontier attempts bank rung credit. 0 = frontier-only starts.
     CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW: int = 0
+    # Deep-rung easing threshold (steps-from-win): past it a rung costs 1 win
+    # and retreats half-steps. 0 = off.
+    CRYSTAL_CAVES_DEMO_BACKWARD_DEEP: int = 0
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
@@ -970,6 +973,10 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW >= 0,
             "CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW must be non-negative (0 = frontier only)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_DEEP >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_DEEP must be non-negative (0 = off)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

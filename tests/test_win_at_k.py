@@ -207,3 +207,19 @@ def test_backward_window_rehearses_but_only_frontier_banks():
         game.reset()
         game._bc_started_level = None
     assert CrystalCaves._BC_SHARED_OFFSET[level] == start + CrystalCaves.DEMO_BACKWARD_RETREAT_STEP
+
+
+def test_deep_rung_easing_single_win_half_retreat():
+    """Past the deep threshold a single win must advance the rung by half-step."""
+    game = _backward_game()
+    game.config.CRYSTAL_CAVES_DEMO_BACKWARD_DEEP = 200
+    game.reset()
+    level = game.level_index % max(1, len(game.CAVES))
+    CrystalCaves._BC_SHARED_OFFSET[level] = 300  # past threshold
+    game._bc_started_level = level
+    game._bc_frontier_attempt = True
+    game.won = True
+    game.reset()
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == 300 + max(
+        20, CrystalCaves.DEMO_BACKWARD_RETREAT_STEP // 2
+    )
