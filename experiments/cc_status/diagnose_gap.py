@@ -467,6 +467,8 @@ def run_diagnosis(
     demo_td_weight: float | None = None,
     demo_margin_weight: float | None = None,
     demo_backward: bool = False,
+    demo_backward_retreat: int = 0,
+    demo_backward_wins: int = 0,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -556,6 +558,10 @@ def run_diagnosis(
             # WIN and retreat on competence — the bottom rungs the random-cut
             # prefix curriculum (10-85%, never near the win) was missing.
             overrides["CRYSTAL_CAVES_DEMO_BACKWARD"] = True
+            if demo_backward_retreat > 0:
+                overrides["CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT"] = demo_backward_retreat
+            if demo_backward_wins > 0:
+                overrides["CRYSTAL_CAVES_DEMO_BACKWARD_WINS"] = demo_backward_wins
         if demo_td_weight is not None:
             # RUN-26c ablation: the per-step demo TD term drills large winning-return
             # targets from a tiny fixed set thousands of times (Q-inflation suspect);
@@ -1452,6 +1458,20 @@ def main(argv: list[str] | None = None) -> int:
         "Replaces the random 10-85%% prefix cuts. Needs --demo-dir and --demo-reset-p.",
     )
     parser.add_argument(
+        "--demo-backward-retreat",
+        type=int,
+        default=0,
+        metavar="STEPS",
+        help="Backward-ladder retreat per rung in steps (0 = game default 40).",
+    )
+    parser.add_argument(
+        "--demo-backward-wins",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Wins required per backward-ladder rung (0 = game default 3).",
+    )
+    parser.add_argument(
         "--demo-margin-weight",
         type=float,
         default=None,
@@ -1516,6 +1536,8 @@ def main(argv: list[str] | None = None) -> int:
         demo_td_weight=args.demo_td_weight,
         demo_margin_weight=args.demo_margin_weight,
         demo_backward=args.demo_backward,
+        demo_backward_retreat=args.demo_backward_retreat,
+        demo_backward_wins=args.demo_backward_wins,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
