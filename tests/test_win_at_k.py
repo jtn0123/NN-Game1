@@ -84,12 +84,13 @@ def _backward_game(offset_map=None):
     cfg.CRYSTAL_CAVES_IMPORTED = True
     cfg.CRYSTAL_CAVES_DEMO_RESET_P = 1.0
     cfg.CRYSTAL_CAVES_DEMO_BACKWARD = True
+    CrystalCaves._BC_SHARED_OFFSET.clear()  # ladder is process-shared; isolate tests
+    CrystalCaves._BC_SHARED_WINS.clear()
     game = CrystalCaves(cfg, headless=True)
     # inject a fake demo registry: 400 no-op actions for every level
     game._demo_prefixes = {i: [[0] * 400] for i in range(len(game.CAVES))}
     if offset_map is not None:
-        game._bc_offset = dict(offset_map)
-        game._bc_wins = {}
+        CrystalCaves._BC_SHARED_OFFSET.update(offset_map)
     return game
 
 
@@ -98,7 +99,7 @@ def test_backward_start_cuts_near_the_win():
     game.reset()
     level = game.level_index % max(1, len(game.CAVES))
     # first rung: offset = DEMO_BACKWARD_START_OFFSET from the end
-    assert game._bc_offset[level] == game.DEMO_BACKWARD_START_OFFSET
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == game.DEMO_BACKWARD_START_OFFSET
     assert game._bc_started_level == level
 
 
@@ -108,14 +109,14 @@ def test_backward_rung_retreats_after_enough_wins():
     game = _backward_game()
     game.reset()
     level = game.level_index % max(1, len(game.CAVES))
-    start_offset = game._bc_offset[level]
+    start_offset = CrystalCaves._BC_SHARED_OFFSET[level]
     for _ in range(game.DEMO_BACKWARD_WINS_PER_RUNG):
         game._bc_started_level = level
         game.won = True  # episode ended in a win...
         game.reset()  # ...and the NEXT reset must bank it despite clearing won
         game._bc_started_level = level  # re-arm for the loop (reset may not roll backward)
-    assert game._bc_offset[level] == start_offset + game.DEMO_BACKWARD_RETREAT_STEP
-    assert game._bc_wins[level] == 0  # counter reset at the new rung
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == start_offset + game.DEMO_BACKWARD_RETREAT_STEP
+    assert CrystalCaves._BC_SHARED_WINS[level] == 0  # counter reset at the new rung
 
 
 def test_backward_cut_never_triggers_win_and_clamps():
@@ -123,7 +124,7 @@ def test_backward_cut_never_triggers_win_and_clamps():
     game.reset()
     level = game.level_index % max(1, len(game.CAVES))
     # a huge offset must clamp to a plain from-spawn start (cut 0), not negative
-    game._bc_offset[level] = 10_000
+    CrystalCaves._BC_SHARED_OFFSET[level] = 10_000
     game.won = False
     game._bc_started_level = None
     game.reset()
@@ -137,10 +138,30 @@ def test_backward_ladder_pace_config_overrides():
     game.config.CRYSTAL_CAVES_DEMO_BACKWARD_WINS = 2
     game.reset()
     level = game.level_index % max(1, len(game.CAVES))
-    start = game._bc_offset[level]
+    start = CrystalCaves._BC_SHARED_OFFSET[level]
     for _ in range(2):  # only 2 wins needed now
         game._bc_started_level = level
         game.won = True
         game.reset()
         game._bc_started_level = level
-    assert game._bc_offset[level] == start + 60
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == start + 60
+
+
+def test_backward_ladder_shared_across_instances():
+    """Vectorized envs must pool rung wins: two instances contributing wins to
+    the same level advance ONE shared ladder (8x speedup in the real trainer)."""
+    game_a = _backward_game()
+    cfg = game_a.config
+    game_b = CrystalCaves(cfg, headless=True)
+    game_b._demo_prefixes = game_a._demo_prefixes
+    game_a.reset()
+    level = game_a.level_index % max(1, len(game_a.CAVES))
+    start = CrystalCaves._BC_SHARED_OFFSET[level]
+    # one win banked by each instance = WINS_PER_RUNG(3)? use 3 alternating
+    contributors = [game_a, game_b, game_a]
+    for g in contributors:
+        g._bc_started_level = level
+        g.won = True
+        g.reset()
+        g._bc_started_level = None
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == start + CrystalCaves.DEMO_BACKWARD_RETREAT_STEP

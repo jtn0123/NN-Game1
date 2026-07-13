@@ -105,6 +105,11 @@ class CrystalCaves(
     DEMO_BACKWARD_START_OFFSET = 50
     DEMO_BACKWARD_RETREAT_STEP = 40
     DEMO_BACKWARD_WINS_PER_RUNG = 3
+    # The ladder is SHARED across all game instances in the process (the
+    # vectorized trainer runs 8 envs): rung wins pool instead of each env
+    # re-earning every rung independently (8x ladder speedup).
+    _BC_SHARED_OFFSET: dict = {}
+    _BC_SHARED_WINS: dict = {}
     # Most candidate standing tiles to oracle-verify when relocating the player for the
     # reverse curriculum (closest-to-objective first); bounds the per-reset BFS cost.
     REVERSE_RELOCATE_MAX_CANDIDATES = 48
@@ -1061,8 +1066,10 @@ class CrystalCaves(
         # roll so every backward win counts (and self.won is already wiped by
         # this reset — RUN-38 bug #1; use the pre-reset snapshot).
         prev_level = getattr(self, "_bc_started_level", None)
+        bc_offset = type(self)._BC_SHARED_OFFSET
+        bc_wins = type(self)._BC_SHARED_WINS
         if backward and prev_level is not None and getattr(self, "_prev_episode_won", False):
-            wins = self._bc_wins.get(prev_level, 0) + 1
+            wins = bc_wins.get(prev_level, 0) + 1
             wins_per_rung = int(
                 getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
                 or self.DEMO_BACKWARD_WINS_PER_RUNG
@@ -1072,13 +1079,11 @@ class CrystalCaves(
                     getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
                     or self.DEMO_BACKWARD_RETREAT_STEP
                 )
-                new_offset = (
-                    self._bc_offset.get(prev_level, self.DEMO_BACKWARD_START_OFFSET) + retreat
-                )
-                self._bc_offset[prev_level] = new_offset
+                new_offset = bc_offset.get(prev_level, self.DEMO_BACKWARD_START_OFFSET) + retreat
+                bc_offset[prev_level] = new_offset
                 wins = 0
                 print(f"  [bc] level={prev_level} rung -> {new_offset} steps from win", flush=True)
-            self._bc_wins[prev_level] = wins
+            bc_wins[prev_level] = wins
         self._bc_started_level = None
         if not demos or np.random.random() >= p:
             return
@@ -1087,10 +1092,7 @@ class CrystalCaves(
             # Start `offset` steps from the WIN and walk backward as the agent
             # masters each rung; clamp so the replay never triggers the win and
             # a fully-retreated rung degenerates to a plain from-spawn start.
-            if not hasattr(self, "_bc_offset"):
-                self._bc_offset = {}
-                self._bc_wins = {}
-            offset = self._bc_offset.setdefault(level_key, self.DEMO_BACKWARD_START_OFFSET)
+            offset = bc_offset.setdefault(level_key, self.DEMO_BACKWARD_START_OFFSET)
             cut = max(0, min(len(actions) - 8, len(actions) - offset))
             self._bc_started_level = level_key
         else:
