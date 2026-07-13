@@ -603,6 +603,10 @@ class CrystalCaves(
         fall back to the legacy CAVES[level_index] behaviour."""
         # Per-instance episode counter (first reset -> 0); drives the win-at-K ramp.
         self._episodes_seen = getattr(self, "_episodes_seen", -1) + 1
+        # Snapshot the finished episode's outcome BEFORE this reset wipes it —
+        # the backward-ladder rung check runs at the END of reset and self.won
+        # is cleared early in the body (RUN-38 bug: rungs never advanced).
+        self._prev_episode_won = bool(getattr(self, "won", False))
         regenerate = self._proc_params is not None and bool(
             getattr(self.config, "CRYSTAL_CAVES_REGENERATE_EACH_EPISODE", False)
         )
@@ -1051,31 +1055,30 @@ class CrystalCaves(
         level_key = self.level_index % max(1, len(self.CAVES))
         demos = self._demo_prefixes.get(level_key)
         backward = bool(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD", False))
-        if backward and demos:
-            # Salimans & Chen backward algorithm: on WIN from a backward start,
-            # bank a success; after enough successes at this rung, retreat the
-            # start point deeper into the route. Checked BEFORE the reset-p roll
-            # so every backward win counts.
-            if getattr(self, "_bc_started_level", None) == level_key and self.won:
-                wins = self._bc_wins.get(level_key, 0) + 1
-                wins_per_rung = int(
-                    getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
-                    or self.DEMO_BACKWARD_WINS_PER_RUNG
+        # Salimans & Chen backward algorithm: bank a WIN from the PREVIOUS
+        # episode's backward start against ITS level (which is usually not the
+        # level this reset just sampled — RUN-38 bug #2), before any reset-p
+        # roll so every backward win counts (and self.won is already wiped by
+        # this reset — RUN-38 bug #1; use the pre-reset snapshot).
+        prev_level = getattr(self, "_bc_started_level", None)
+        if backward and prev_level is not None and getattr(self, "_prev_episode_won", False):
+            wins = self._bc_wins.get(prev_level, 0) + 1
+            wins_per_rung = int(
+                getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
+                or self.DEMO_BACKWARD_WINS_PER_RUNG
+            )
+            if wins >= wins_per_rung:
+                retreat = int(
+                    getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
+                    or self.DEMO_BACKWARD_RETREAT_STEP
                 )
-                if wins >= wins_per_rung:
-                    retreat = int(
-                        getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
-                        or self.DEMO_BACKWARD_RETREAT_STEP
-                    )
-                    new_offset = (
-                        self._bc_offset.get(level_key, self.DEMO_BACKWARD_START_OFFSET) + retreat
-                    )
-                    self._bc_offset[level_key] = new_offset
-                    wins = 0
-                    print(
-                        f"  [bc] level={level_key} rung -> {new_offset} steps from win", flush=True
-                    )
-                self._bc_wins[level_key] = wins
+                new_offset = (
+                    self._bc_offset.get(prev_level, self.DEMO_BACKWARD_START_OFFSET) + retreat
+                )
+                self._bc_offset[prev_level] = new_offset
+                wins = 0
+                print(f"  [bc] level={prev_level} rung -> {new_offset} steps from win", flush=True)
+            self._bc_wins[prev_level] = wins
         self._bc_started_level = None
         if not demos or np.random.random() >= p:
             return

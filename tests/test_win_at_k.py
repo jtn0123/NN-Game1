@@ -103,15 +103,17 @@ def test_backward_start_cuts_near_the_win():
 
 
 def test_backward_rung_retreats_after_enough_wins():
+    """Rungs must advance through the REAL path: a won episode followed by
+    reset() (which wipes self.won early — the RUN-38 bug this guards)."""
     game = _backward_game()
     game.reset()
     level = game.level_index % max(1, len(game.CAVES))
     start_offset = game._bc_offset[level]
-    # simulate WINS_PER_RUNG consecutive wins from backward starts on this level
     for _ in range(game.DEMO_BACKWARD_WINS_PER_RUNG):
         game._bc_started_level = level
-        game.won = True
-        game._apply_demo_prefix_start()
+        game.won = True  # episode ended in a win...
+        game.reset()  # ...and the NEXT reset must bank it despite clearing won
+        game._bc_started_level = level  # re-arm for the loop (reset may not roll backward)
     assert game._bc_offset[level] == start_offset + game.DEMO_BACKWARD_RETREAT_STEP
     assert game._bc_wins[level] == 0  # counter reset at the new rung
 
@@ -139,5 +141,6 @@ def test_backward_ladder_pace_config_overrides():
     for _ in range(2):  # only 2 wins needed now
         game._bc_started_level = level
         game.won = True
-        game._apply_demo_prefix_start()
+        game.reset()
+        game._bc_started_level = level
     assert game._bc_offset[level] == start + 60
