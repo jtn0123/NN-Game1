@@ -74,3 +74,55 @@ def test_reverse_exit_curriculum_start_does_not_gift_the_bonus():
             assert game._collect_pickups() < game.ALL_CRYSTALS_COLLECTED_BONUS
             return
     raise AssertionError("reverse-exit curriculum start never fired at p=1.0")
+
+
+# --- backward demo curriculum (Salimans & Chen) -------------------------------
+
+
+def _backward_game(offset_map=None):
+    cfg = Config()
+    cfg.CRYSTAL_CAVES_IMPORTED = True
+    cfg.CRYSTAL_CAVES_DEMO_RESET_P = 1.0
+    cfg.CRYSTAL_CAVES_DEMO_BACKWARD = True
+    game = CrystalCaves(cfg, headless=True)
+    # inject a fake demo registry: 400 no-op actions for every level
+    game._demo_prefixes = {i: [[0] * 400] for i in range(len(game.CAVES))}
+    if offset_map is not None:
+        game._bc_offset = dict(offset_map)
+        game._bc_wins = {}
+    return game
+
+
+def test_backward_start_cuts_near_the_win():
+    game = _backward_game()
+    game.reset()
+    level = game.level_index % max(1, len(game.CAVES))
+    # first rung: offset = DEMO_BACKWARD_START_OFFSET from the end
+    assert game._bc_offset[level] == game.DEMO_BACKWARD_START_OFFSET
+    assert game._bc_started_level == level
+
+
+def test_backward_rung_retreats_after_enough_wins():
+    game = _backward_game()
+    game.reset()
+    level = game.level_index % max(1, len(game.CAVES))
+    start_offset = game._bc_offset[level]
+    # simulate WINS_PER_RUNG consecutive wins from backward starts on this level
+    for _ in range(game.DEMO_BACKWARD_WINS_PER_RUNG):
+        game._bc_started_level = level
+        game.won = True
+        game._apply_demo_prefix_start()
+    assert game._bc_offset[level] == start_offset + game.DEMO_BACKWARD_RETREAT_STEP
+    assert game._bc_wins[level] == 0  # counter reset at the new rung
+
+
+def test_backward_cut_never_triggers_win_and_clamps():
+    game = _backward_game(offset_map=None)
+    game.reset()
+    level = game.level_index % max(1, len(game.CAVES))
+    # a huge offset must clamp to a plain from-spawn start (cut 0), not negative
+    game._bc_offset[level] = 10_000
+    game.won = False
+    game._bc_started_level = None
+    game.reset()
+    assert not game.game_over

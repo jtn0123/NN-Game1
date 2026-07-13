@@ -100,6 +100,11 @@ class CrystalCaves(
     MAX_AMMO_FOR_STATE = 20
     MAX_STEPS = 3000
     MAX_STEPS_WITHOUT_PROGRESS = 720
+    # Backward demo curriculum (Salimans & Chen): first rung starts this many steps
+    # before the demo's win, retreats by RETREAT_STEP after WINS_PER_RUNG successes.
+    DEMO_BACKWARD_START_OFFSET = 50
+    DEMO_BACKWARD_RETREAT_STEP = 40
+    DEMO_BACKWARD_WINS_PER_RUNG = 3
     # Most candidate standing tiles to oracle-verify when relocating the player for the
     # reverse curriculum (closest-to-objective first); bounds the per-reset BFS cost.
     REVERSE_RELOCATE_MAX_CANDIDATES = 48
@@ -1043,12 +1048,42 @@ class CrystalCaves(
                 self._demo_prefixes = demo_prefix_registry(demo_dir)
             else:
                 self._demo_prefixes = {}
-        demos = self._demo_prefixes.get(self.level_index % max(1, len(self.CAVES)))
+        level_key = self.level_index % max(1, len(self.CAVES))
+        demos = self._demo_prefixes.get(level_key)
+        backward = bool(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD", False))
+        if backward and demos:
+            # Salimans & Chen backward algorithm: on WIN from a backward start,
+            # bank a success; after enough successes at this rung, retreat the
+            # start point deeper into the route. Checked BEFORE the reset-p roll
+            # so every backward win counts.
+            if getattr(self, "_bc_started_level", None) == level_key and self.won:
+                wins = self._bc_wins.get(level_key, 0) + 1
+                if wins >= self.DEMO_BACKWARD_WINS_PER_RUNG:
+                    self._bc_offset[level_key] = (
+                        self._bc_offset.get(level_key, self.DEMO_BACKWARD_START_OFFSET)
+                        + self.DEMO_BACKWARD_RETREAT_STEP
+                    )
+                    wins = 0
+                self._bc_wins[level_key] = wins
+        self._bc_started_level = None
         if not demos or np.random.random() >= p:
             return
         actions = demos[int(np.random.randint(len(demos)))]
-        # 10-85% of the route: never far enough to trigger the demo's win.
-        cut = int(len(actions) * float(np.random.uniform(0.10, 0.85)))
+        if backward:
+            # Start `offset` steps from the WIN and walk backward as the agent
+            # masters each rung; clamp so the replay never triggers the win and
+            # a fully-retreated rung degenerates to a plain from-spawn start.
+            if not hasattr(self, "_bc_offset"):
+                self._bc_offset = {}
+                self._bc_wins = {}
+            offset = self._bc_offset.setdefault(level_key, self.DEMO_BACKWARD_START_OFFSET)
+            cut = max(0, min(len(actions) - 8, len(actions) - offset))
+            self._bc_started_level = level_key
+        else:
+            # Legacy random-cut mode: 10-85% of the route (never far enough to
+            # trigger the demo's win — which is also why it lacks the curriculum's
+            # bottom rungs; prefer backward mode).
+            cut = int(len(actions) * float(np.random.uniform(0.10, 0.85)))
         # The step/stall caps govern the AGENT's play, not the scripted prefix:
         # relaxed-clock demos exceed 3000 steps, and a capped replay would hit
         # the timeout mid-prefix and hand the agent a game-over episode.

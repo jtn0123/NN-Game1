@@ -466,6 +466,7 @@ def run_diagnosis(
     demo_reset_p: float = 0.0,
     demo_td_weight: float | None = None,
     demo_margin_weight: float | None = None,
+    demo_backward: bool = False,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -550,6 +551,11 @@ def run_diagnosis(
         overrides["DEMO_DIR"] = demo_dir
         overrides["DEMO_PRETRAIN_STEPS"] = demo_pretrain
         overrides["CRYSTAL_CAVES_DEMO_RESET_P"] = demo_reset_p
+        if demo_backward:
+            # Salimans & Chen backward algorithm: start each demo episode near the
+            # WIN and retreat on competence — the bottom rungs the random-cut
+            # prefix curriculum (10-85%, never near the win) was missing.
+            overrides["CRYSTAL_CAVES_DEMO_BACKWARD"] = True
         if demo_td_weight is not None:
             # RUN-26c ablation: the per-step demo TD term drills large winning-return
             # targets from a tiny fixed set thousands of times (Q-inflation suspect);
@@ -1439,6 +1445,13 @@ def main(argv: list[str] | None = None) -> int:
         "(default: config DEMO_TD_WEIGHT). 0 = margin-only DQfD-lite.",
     )
     parser.add_argument(
+        "--demo-backward",
+        action="store_true",
+        help="Backward demo curriculum (Salimans & Chen): episodes start near the "
+        "demo's WIN and the start point retreats as the agent banks wins. "
+        "Replaces the random 10-85%% prefix cuts. Needs --demo-dir and --demo-reset-p.",
+    )
+    parser.add_argument(
         "--demo-margin-weight",
         type=float,
         default=None,
@@ -1502,6 +1515,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_reset_p=args.demo_reset_p,
         demo_td_weight=args.demo_td_weight,
         demo_margin_weight=args.demo_margin_weight,
+        demo_backward=args.demo_backward,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,

@@ -261,6 +261,11 @@ class Config:
     # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
     # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
     CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
+    # Backward demo curriculum (Salimans & Chen / Go-Explore phase 2): instead of
+    # random 10-85% prefix cuts, start DEMO_BACKWARD_START_OFFSET steps before the
+    # demo's win and retreat the start point only as the agent banks wins at each
+    # rung. Requires DEMO_DIR + CRYSTAL_CAVES_DEMO_RESET_P > 0.
+    CRYSTAL_CAVES_DEMO_BACKWARD: bool = False
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
