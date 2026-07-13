@@ -1077,7 +1077,12 @@ class CrystalCaves(
         prev_level = getattr(self, "_bc_started_level", None)
         bc_offset = type(self)._BC_SHARED_OFFSET
         bc_wins = type(self)._BC_SHARED_WINS
-        if backward and prev_level is not None and getattr(self, "_prev_episode_won", False):
+        if (
+            backward
+            and prev_level is not None
+            and getattr(self, "_prev_episode_won", False)
+            and getattr(self, "_bc_frontier_attempt", True)
+        ):
             wins = bc_wins.get(prev_level, 0) + 1
             wins_per_rung = int(
                 getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
@@ -1101,9 +1106,19 @@ class CrystalCaves(
             # Start `offset` steps from the WIN and walk backward as the agent
             # masters each rung; clamp so the replay never triggers the win and
             # a fully-retreated rung degenerates to a plain from-spawn start.
-            offset = bc_offset.setdefault(level_key, self.DEMO_BACKWARD_START_OFFSET)
+            frontier = bc_offset.setdefault(level_key, self.DEMO_BACKWARD_START_OFFSET)
+            offset = frontier
+            # Windowed starts: most attempts rehearse just behind the frontier so
+            # deep rungs keep a win/learning signal (all-or-nothing frontier
+            # attempts starve once a full run takes 2000+ flawless steps); only
+            # true frontier attempts bank rung credit.
+            window = int(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW", 0))
+            if window > 0 and frontier > self.DEMO_BACKWARD_START_OFFSET:
+                back = int(np.random.randint(0, min(window, frontier - 8) + 1))
+                offset = frontier - back
             cut = max(0, min(len(actions) - 8, len(actions) - offset))
             self._bc_started_level = level_key
+            self._bc_frontier_attempt = offset >= frontier
         else:
             # Legacy random-cut mode: 10-85% of the route (never far enough to
             # trigger the demo's win — which is also why it lacks the curriculum's

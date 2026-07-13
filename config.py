@@ -273,6 +273,10 @@ class Config:
     # levels (0 = uniform over all levels). Level sampling dominates backward-
     # ladder throughput; bias concentrates rung attempts. Eval unaffected.
     CRYSTAL_CAVES_DEMO_LEVEL_BIAS: float = 0.0
+    # Windowed backward starts: sample the start offset uniformly from
+    # [frontier - WINDOW, frontier] so deep rungs keep a learning signal; only
+    # exact-frontier attempts bank rung credit. 0 = frontier-only starts.
+    CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW: int = 0
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
@@ -962,6 +966,10 @@ class Config:
         self._require(
             0.0 <= self.CRYSTAL_CAVES_DEMO_LEVEL_BIAS <= 1.0,
             "CRYSTAL_CAVES_DEMO_LEVEL_BIAS must be in [0, 1]",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW must be non-negative (0 = frontier only)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

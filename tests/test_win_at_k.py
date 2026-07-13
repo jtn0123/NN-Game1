@@ -179,3 +179,31 @@ def test_demo_level_bias_resamples_to_demoed_levels():
         game.reset()
         game._bc_started_level = None
         assert game.level_index % max(1, len(game.CAVES)) in (2, 5)
+
+
+def test_backward_window_rehearses_but_only_frontier_banks():
+    """Windowed starts must sample within [frontier-window, frontier] and only
+    exact-frontier attempts may bank rung credit."""
+    import numpy as np
+
+    game = _backward_game(offset_map=None)
+    game.config.CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW = 120
+    game.reset()
+    level = game.level_index % max(1, len(game.CAVES))
+    CrystalCaves._BC_SHARED_OFFSET[level] = 300
+    start = 300
+    # a rehearsal (non-frontier) win must NOT advance the rung
+    game._bc_started_level = level
+    game._bc_frontier_attempt = False
+    game.won = True
+    game.reset()
+    game._bc_started_level = None
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == start
+    # frontier wins still advance after WINS_PER_RUNG
+    for _ in range(CrystalCaves.DEMO_BACKWARD_WINS_PER_RUNG):
+        game._bc_started_level = level
+        game._bc_frontier_attempt = True
+        game.won = True
+        game.reset()
+        game._bc_started_level = None
+    assert CrystalCaves._BC_SHARED_OFFSET[level] == start + CrystalCaves.DEMO_BACKWARD_RETREAT_STEP
