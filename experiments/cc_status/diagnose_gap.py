@@ -473,6 +473,7 @@ def run_diagnosis(
     demo_backward_window: int = 0,
     demo_backward_deep: int = 0,
     resume_weights: str | None = None,
+    ladder_init: str | None = None,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -690,6 +691,18 @@ def run_diagnosis(
             transfer_weights = {"policy": sd, "target": dict(sd)}
             print(f"  [resume] warm-started from {resume_weights}", flush=True)
 
+        if ladder_init:
+            # Pin backward-ladder frontiers at run start ("14:2600,12:350") so a
+            # resumed brain practices from-spawn immediately instead of paying
+            # the re-climb tax (RUN-40: only reached 950/2600 re-climbing).
+            from src.game.crystal_caves import CrystalCaves as _CC
+
+            _CC._BC_SHARED_OFFSET.clear()
+            _CC._BC_SHARED_WINS.clear()
+            for pair in ladder_init.split(","):
+                lvl, off = pair.split(":")
+                _CC._BC_SHARED_OFFSET[int(lvl)] = int(off)
+            print(f"  [ladder-init] {_CC._BC_SHARED_OFFSET}", flush=True)
         trainer = prepare_trainer(
             config, episodes=episodes, vec_envs=vec_envs, transfer_weights=transfer_weights
         )
@@ -1524,6 +1537,13 @@ def main(argv: list[str] | None = None) -> int:
         "of relearning from scratch.",
     )
     parser.add_argument(
+        "--ladder-init",
+        type=str,
+        default=None,
+        metavar="LVL:OFF,...",
+        help='Pin backward-ladder frontiers at run start, e.g. "14:2600,12:350".',
+    )
+    parser.add_argument(
         "--demo-level-bias",
         type=float,
         default=0.0,
@@ -1602,6 +1622,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_backward_window=args.demo_backward_window,
         demo_backward_deep=args.demo_backward_deep,
         resume_weights=args.resume_weights,
+        ladder_init=args.ladder_init,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,

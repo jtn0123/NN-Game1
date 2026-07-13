@@ -457,3 +457,13 @@ def test_diagnose_gap_exposes_resume_weights_lever():
     assert '"--resume-weights"' in src
     assert 'transfer_weights = {"policy": sd, "target": dict(sd)}' in src
     assert "ladder_seed" in src
+
+
+def test_diagnose_gap_exposes_ladder_init_lever():
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--ladder-init"' in src
+    assert "_CC._BC_SHARED_OFFSET[int(lvl)] = int(off)" in src
