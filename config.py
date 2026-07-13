@@ -266,6 +266,9 @@ class Config:
     # demo's win and retreat the start point only as the agent banks wins at each
     # rung. Requires DEMO_DIR + CRYSTAL_CAVES_DEMO_RESET_P > 0.
     CRYSTAL_CAVES_DEMO_BACKWARD: bool = False
+    # Ladder pace overrides (0 = game-class defaults: retreat 40 steps / 3 wins).
+    CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT: int = 0
+    CRYSTAL_CAVES_DEMO_BACKWARD_WINS: int = 0
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
@@ -943,6 +946,14 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY >= 0,
             "CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY must be non-negative (0 = no hold)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT must be non-negative (0 = default)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_WINS >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_WINS must be non-negative (0 = default)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

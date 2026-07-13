@@ -126,3 +126,18 @@ def test_backward_cut_never_triggers_win_and_clamps():
     game._bc_started_level = None
     game.reset()
     assert not game.game_over
+
+
+def test_backward_ladder_pace_config_overrides():
+    """Config knobs must override the class-default ladder pace."""
+    game = _backward_game()
+    game.config.CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT = 60
+    game.config.CRYSTAL_CAVES_DEMO_BACKWARD_WINS = 2
+    game.reset()
+    level = game.level_index % max(1, len(game.CAVES))
+    start = game._bc_offset[level]
+    for _ in range(2):  # only 2 wins needed now
+        game._bc_started_level = level
+        game.won = True
+        game._apply_demo_prefix_start()
+    assert game._bc_offset[level] == start + 60

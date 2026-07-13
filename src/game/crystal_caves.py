@@ -1058,12 +1058,23 @@ class CrystalCaves(
             # so every backward win counts.
             if getattr(self, "_bc_started_level", None) == level_key and self.won:
                 wins = self._bc_wins.get(level_key, 0) + 1
-                if wins >= self.DEMO_BACKWARD_WINS_PER_RUNG:
-                    self._bc_offset[level_key] = (
-                        self._bc_offset.get(level_key, self.DEMO_BACKWARD_START_OFFSET)
-                        + self.DEMO_BACKWARD_RETREAT_STEP
+                wins_per_rung = int(
+                    getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
+                    or self.DEMO_BACKWARD_WINS_PER_RUNG
+                )
+                if wins >= wins_per_rung:
+                    retreat = int(
+                        getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
+                        or self.DEMO_BACKWARD_RETREAT_STEP
                     )
+                    new_offset = (
+                        self._bc_offset.get(level_key, self.DEMO_BACKWARD_START_OFFSET) + retreat
+                    )
+                    self._bc_offset[level_key] = new_offset
                     wins = 0
+                    print(
+                        f"  [bc] level={level_key} rung -> {new_offset} steps from win", flush=True
+                    )
                 self._bc_wins[level_key] = wins
         self._bc_started_level = None
         if not demos or np.random.random() >= p:
