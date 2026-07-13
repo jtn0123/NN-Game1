@@ -628,7 +628,16 @@ class CrystalCaves(
             self._train_gen_counter += 1
         elif self._randomize_levels and len(self.CAVES) > 1:
             self.level_index = int(np.random.randint(len(self.CAVES)))
-            self.level = self.CAVES[self.level_index]
+            # Ladder-focus bias: with probability CRYSTAL_CAVES_DEMO_LEVEL_BIAS,
+            # resample uniformly among DEMOED levels so backward-ladder rungs get
+            # concentrated attempts (level sampling, not reset-p, dominates ladder
+            # throughput). Eval level selection is unaffected (branch above).
+            bias = float(getattr(self.config, "CRYSTAL_CAVES_DEMO_LEVEL_BIAS", 0.0))
+            if bias > 0.0 and np.random.random() < bias:
+                demo_levels = sorted(getattr(self, "_demo_prefixes", None) or {})
+                if demo_levels:
+                    self.level_index = int(demo_levels[int(np.random.randint(len(demo_levels)))])
+            self.level = self.CAVES[self.level_index % len(self.CAVES)]
         else:
             self.level = self.CAVES[self.level_index % len(self.CAVES)]
         self._load_level(self.level)

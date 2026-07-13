@@ -469,6 +469,7 @@ def run_diagnosis(
     demo_backward: bool = False,
     demo_backward_retreat: int = 0,
     demo_backward_wins: int = 0,
+    demo_level_bias: float = 0.0,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -562,6 +563,9 @@ def run_diagnosis(
                 overrides["CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT"] = demo_backward_retreat
             if demo_backward_wins > 0:
                 overrides["CRYSTAL_CAVES_DEMO_BACKWARD_WINS"] = demo_backward_wins
+        if demo_level_bias > 0:
+            # Concentrate training episodes on demoed levels (ladder throughput).
+            overrides["CRYSTAL_CAVES_DEMO_LEVEL_BIAS"] = demo_level_bias
         if demo_td_weight is not None:
             # RUN-26c ablation: the per-step demo TD term drills large winning-return
             # targets from a tiny fixed set thousands of times (Q-inflation suspect);
@@ -1472,6 +1476,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Wins required per backward-ladder rung (0 = game default 3).",
     )
     parser.add_argument(
+        "--demo-level-bias",
+        type=float,
+        default=0.0,
+        metavar="P",
+        help="Probability a TRAINING episode resamples its level among DEMOED "
+        "levels (ladder-focus). Eval unaffected. 0 = uniform.",
+    )
+    parser.add_argument(
         "--demo-margin-weight",
         type=float,
         default=None,
@@ -1538,6 +1550,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_backward=args.demo_backward,
         demo_backward_retreat=args.demo_backward_retreat,
         demo_backward_wins=args.demo_backward_wins,
+        demo_level_bias=args.demo_level_bias,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,

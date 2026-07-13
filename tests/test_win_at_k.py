@@ -165,3 +165,17 @@ def test_backward_ladder_shared_across_instances():
         g.reset()
         g._bc_started_level = None
     assert CrystalCaves._BC_SHARED_OFFSET[level] == start + CrystalCaves.DEMO_BACKWARD_RETREAT_STEP
+
+
+def test_demo_level_bias_resamples_to_demoed_levels():
+    """With bias=1.0 every training reset must land on a demoed level."""
+    import numpy as np
+
+    game = _backward_game()
+    game.config.CRYSTAL_CAVES_DEMO_LEVEL_BIAS = 1.0
+    game._demo_prefixes = {2: [[0] * 400], 5: [[0] * 400]}
+    np.random.seed(3)
+    for _ in range(12):
+        game.reset()
+        game._bc_started_level = None
+        assert game.level_index % max(1, len(game.CAVES)) in (2, 5)

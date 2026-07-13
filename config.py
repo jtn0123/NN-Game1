@@ -269,6 +269,10 @@ class Config:
     # Ladder pace overrides (0 = game-class defaults: retreat 40 steps / 3 wins).
     CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT: int = 0
     CRYSTAL_CAVES_DEMO_BACKWARD_WINS: int = 0
+    # Probability a TRAINING episode resamples its level uniformly among DEMOED
+    # levels (0 = uniform over all levels). Level sampling dominates backward-
+    # ladder throughput; bias concentrates rung attempts. Eval unaffected.
+    CRYSTAL_CAVES_DEMO_LEVEL_BIAS: float = 0.0
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
@@ -954,6 +958,10 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_DEMO_BACKWARD_WINS >= 0,
             "CRYSTAL_CAVES_DEMO_BACKWARD_WINS must be non-negative (0 = default)",
+        )
+        self._require(
+            0.0 <= self.CRYSTAL_CAVES_DEMO_LEVEL_BIAS <= 1.0,
+            "CRYSTAL_CAVES_DEMO_LEVEL_BIAS must be in [0, 1]",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,
