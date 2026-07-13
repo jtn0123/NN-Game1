@@ -444,3 +444,16 @@ def test_win_at_k_ramp_divides_by_vec_envs_not_games():
     assert "win_at_k_ramp // max(1, vec_envs)" in src
     assert "win_at_k_ramp_delay // max(1, vec_envs)" in src
     assert "win_at_k_ramp // max(1, games)" not in src
+
+
+def test_diagnose_gap_exposes_resume_weights_lever():
+    """Phase-1 roadmap lever: --resume-weights warm-starts from a persisted
+    policy checkpoint, and ladder state persists per milestone."""
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--resume-weights"' in src
+    assert 'transfer_weights = {"policy": sd, "target": dict(sd)}' in src
+    assert "ladder_seed" in src

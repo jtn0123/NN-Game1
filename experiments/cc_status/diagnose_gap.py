@@ -472,6 +472,7 @@ def run_diagnosis(
     demo_level_bias: float = 0.0,
     demo_backward_window: int = 0,
     demo_backward_deep: int = 0,
+    resume_weights: str | None = None,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -679,6 +680,15 @@ def run_diagnosis(
             )
             transfer_weights = capture_weight_snapshot(pre_trainer.agent)
             set_seed(seed)  # realign RNG so the target phase mirrors the control's stream
+        if resume_weights:
+            # Warm-start from a persisted policy checkpoint (policy_seedX_epN.pth =
+            # raw policy_net state_dict). Target net starts as a copy — standard
+            # for resuming; the first target sync realigns it anyway.
+            import torch as _torch
+
+            sd = _torch.load(resume_weights, map_location="cpu")
+            transfer_weights = {"policy": sd, "target": dict(sd)}
+            print(f"  [resume] warm-started from {resume_weights}", flush=True)
 
         trainer = prepare_trainer(
             config, episodes=episodes, vec_envs=vec_envs, transfer_weights=transfer_weights
@@ -746,6 +756,12 @@ def run_diagnosis(
 
                 weights_path = run_dir / f"policy_seed{seed}_ep{milestone}.pth"
                 torch.save(trainer.agent.policy_net.state_dict(), weights_path)
+                from src.game.crystal_caves import CrystalCaves as _CC
+
+                if _CC._BC_SHARED_OFFSET:
+                    (run_dir / f"ladder_seed{seed}.json").write_text(
+                        json.dumps({str(k): v for k, v in _CC._BC_SHARED_OFFSET.items()})
+                    )
             if checkpoint_every > 0:
                 curve.append(
                     {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
@@ -1499,6 +1515,15 @@ def main(argv: list[str] | None = None) -> int:
         "1 win and retreat half-steps. 0 = off.",
     )
     parser.add_argument(
+        "--resume-weights",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Warm-start the policy from a persisted checkpoint "
+        "(policy_seedX_epN.pth). Continues training an existing brain instead "
+        "of relearning from scratch.",
+    )
+    parser.add_argument(
         "--demo-level-bias",
         type=float,
         default=0.0,
@@ -1576,6 +1601,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_level_bias=args.demo_level_bias,
         demo_backward_window=args.demo_backward_window,
         demo_backward_deep=args.demo_backward_deep,
+        resume_weights=args.resume_weights,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
