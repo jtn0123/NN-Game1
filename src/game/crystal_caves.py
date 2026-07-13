@@ -1113,8 +1113,16 @@ class CrystalCaves(
             # attempts starve once a full run takes 2000+ flawless steps); only
             # true frontier attempts bank rung credit.
             window = int(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW", 0))
-            if window > 0 and frontier > self.DEMO_BACKWARD_START_OFFSET:
-                back = int(np.random.randint(0, min(window, frontier - 8) + 1))
+            if (
+                window > 0
+                and frontier > self.DEMO_BACKWARD_START_OFFSET
+                and np.random.random() < 0.5
+            ):
+                # Rehearsal half: uniform in (frontier - window, frontier); the
+                # other half starts EXACTLY at the frontier so rung credit keeps
+                # real throughput (uniform-including-frontier made exact-frontier
+                # attempts a 1-in-window rarity and froze the ladder).
+                back = 1 + int(np.random.randint(0, min(window, frontier - 8)))
                 offset = frontier - back
             cut = max(0, min(len(actions) - 8, len(actions) - offset))
             self._bc_started_level = level_key
