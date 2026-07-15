@@ -1152,6 +1152,12 @@ class CrystalCaves(
             self.step(int(action))
         self.MAX_STEPS = saved_max_steps
         self.MAX_STEPS_WITHOUT_PROGRESS = saved_stall_window
+        if bool(getattr(self.config, "CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF", False)):
+            # The harvester's routes tank hits early (tank-and-grab), leaving
+            # HP-1 suffixes: deep rungs then demand near-perfect play the
+            # from-spawn agent wouldn't face (it can arrive healthier than the
+            # demo did). Training-only; eval untouched.
+            self.health = self.MAX_HEALTH
         # Re-zero the episode accounting so the replayed prefix costs the agent
         # nothing: full step budget, fresh stall clock, PBRS baselines anchored to
         # the mid-route start (so shaping still telescopes from here).

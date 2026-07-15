@@ -472,6 +472,7 @@ def run_diagnosis(
     demo_level_bias: float = 0.0,
     demo_backward_window: int = 0,
     demo_backward_deep: int = 0,
+    demo_heal: bool = False,
     resume_weights: str | None = None,
     ladder_init: str | None = None,
     regenerate_each_episode: bool = False,
@@ -574,6 +575,8 @@ def run_diagnosis(
             overrides["CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW"] = demo_backward_window
         if demo_backward_deep > 0:
             overrides["CRYSTAL_CAVES_DEMO_BACKWARD_DEEP"] = demo_backward_deep
+        if demo_heal:
+            overrides["CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF"] = True
         if demo_td_weight is not None:
             # RUN-26c ablation: the per-step demo TD term drills large winning-return
             # targets from a tiny fixed set thousands of times (Q-inflation suspect);
@@ -1544,6 +1547,12 @@ def main(argv: list[str] | None = None) -> int:
         help='Pin backward-ladder frontiers at run start, e.g. "14:2600,12:350".',
     )
     parser.add_argument(
+        "--demo-heal",
+        action="store_true",
+        help="Restore full health at demo-prefix handoff (training only) — "
+        "corrects the HP-1 bias of tank-and-grab harvester route suffixes.",
+    )
+    parser.add_argument(
         "--demo-level-bias",
         type=float,
         default=0.0,
@@ -1621,6 +1630,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_level_bias=args.demo_level_bias,
         demo_backward_window=args.demo_backward_window,
         demo_backward_deep=args.demo_backward_deep,
+        demo_heal=args.demo_heal,
         resume_weights=args.resume_weights,
         ladder_init=args.ladder_init,
         regenerate_each_episode=args.regenerate_each_episode,

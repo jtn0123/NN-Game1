@@ -280,6 +280,10 @@ class Config:
     # Deep-rung easing threshold (steps-from-win): past it a rung costs 1 win
     # and retreats half-steps. 0 = off.
     CRYSTAL_CAVES_DEMO_BACKWARD_DEEP: int = 0
+    # Restore full health when a demo-prefix start hands control to the agent
+    # (training only). Corrects the pessimistic HP-1 bias of tank-and-grab
+    # harvester routes.
+    CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF: bool = False
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before

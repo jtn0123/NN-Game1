@@ -223,3 +223,15 @@ def test_deep_rung_easing_single_win_half_retreat():
     assert CrystalCaves._BC_SHARED_OFFSET[level] == 300 + max(
         20, CrystalCaves.DEMO_BACKWARD_RETREAT_STEP // 2
     )
+
+
+def test_demo_heal_on_handoff_restores_health():
+    """Heal-on-handoff must hand the agent full HP after the prefix replay."""
+    game = _backward_game()
+    game.config.CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF = True
+    game.reset()
+    game.health = 1  # simulate a tanked prefix
+    game._bc_started_level = None
+    game.won = False
+    game.reset()
+    assert game.health == game.MAX_HEALTH
