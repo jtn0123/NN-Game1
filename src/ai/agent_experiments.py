@@ -183,6 +183,12 @@ class AgentExperimentMixin:
         store = getattr(self, "_dqfd_store", None)
         if store is None or len(store) == 0:
             return None
+        margin_weight = float(getattr(self.config, "DEMO_MARGIN_WEIGHT", 1.0))
+        td_weight = float(getattr(self.config, "DEMO_TD_WEIGHT", 1.0))
+        if margin_weight == 0.0 and td_weight == 0.0:
+            # Prefix-starts-only arms attach a store for demo bookkeeping but want
+            # no demo gradient at all — skip the forward pass entirely.
+            return None
         fraction = float(getattr(self.config, "DEMO_BATCH_FRACTION", 0.125))
         k = max(8, int(self.config.BATCH_SIZE * fraction))
         s_np, a_np, r_np, ns_np, d_np, nl_np = store.sample(k)
@@ -203,8 +209,7 @@ class AgentExperimentMixin:
         q_demo = q.gather(1, actions.unsqueeze(1)).squeeze(1)
         margin_loss = ((q + penalties).max(dim=1).values - q_demo).mean()
 
-        td_weight = float(getattr(self.config, "DEMO_TD_WEIGHT", 1.0))
-        total = float(getattr(self.config, "DEMO_MARGIN_WEIGHT", 1.0)) * margin_loss
+        total = margin_weight * margin_loss
         if td_weight != 0.0 and not getattr(self, "_use_distributional_dqn", False):
             current_q, target_q = self._compute_q_values(
                 states, actions, rewards, next_states, dones, n_step_lengths=n_steps

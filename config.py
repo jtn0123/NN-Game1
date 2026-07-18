@@ -187,6 +187,15 @@ class Config:
     # lower value than the unlocked exit) so the agent can learn the route to it before
     # the last crystal is collected, instead of the exit appearing only at unlock.
     CRYSTAL_CAVES_SHOW_LOCKED_EXIT: bool = False
+    # No-progress stall window (steps) for Crystal Caves; 0 keeps the game's built-in
+    # default (720). RUN-26 fidelity lever: DATA-1 showed the stall clock owns a large,
+    # learning-invariant share of endings, so arms may widen it (e.g. 1440) explicitly.
+    CRYSTAL_CAVES_STALL_WINDOW_STEPS: int = 0
+    # Episode step cap override for Crystal Caves; 0 keeps the game's built-in
+    # default (3000). The 1991 original has NO level timer — the cap is a
+    # training-harness artifact, and the level-validity audit (PR #39) shows
+    # perfect tours already use 0.55-0.92 of it. Opt-in fidelity lever.
+    CRYSTAL_CAVES_MAX_STEPS_OVERRIDE: int = 0
     # Reverse curriculum: begin a fraction of TRAINING episodes from a valid
     # mid-solution state (a subset of crystals pre-collected, gates opened) so the
     # agent gets dense reps of finishing the collect->...->exit chain rather than only
@@ -252,12 +261,44 @@ class Config:
     # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
     # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
     CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
+    # Backward demo curriculum (Salimans & Chen / Go-Explore phase 2): instead of
+    # random 10-85% prefix cuts, start DEMO_BACKWARD_START_OFFSET steps before the
+    # demo's win and retreat the start point only as the agent banks wins at each
+    # rung. Requires DEMO_DIR + CRYSTAL_CAVES_DEMO_RESET_P > 0.
+    CRYSTAL_CAVES_DEMO_BACKWARD: bool = False
+    # Ladder pace overrides (0 = game-class defaults: retreat 40 steps / 3 wins).
+    CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT: int = 0
+    CRYSTAL_CAVES_DEMO_BACKWARD_WINS: int = 0
+    # Probability a TRAINING episode resamples its level uniformly among DEMOED
+    # levels (0 = uniform over all levels). Level sampling dominates backward-
+    # ladder throughput; bias concentrates rung attempts. Eval unaffected.
+    CRYSTAL_CAVES_DEMO_LEVEL_BIAS: float = 0.0
+    # Windowed backward starts: sample the start offset uniformly from
+    # [frontier - WINDOW, frontier] so deep rungs keep a learning signal; only
+    # exact-frontier attempts bank rung credit. 0 = frontier-only starts.
+    CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW: int = 0
+    # Deep-rung easing threshold (steps-from-win): past it a rung costs 1 win
+    # and retreats half-steps. 0 = off.
+    CRYSTAL_CAVES_DEMO_BACKWARD_DEEP: int = 0
+    # Restore full health when a demo-prefix start hands control to the agent
+    # (training only). Corrects the pessimistic HP-1 bias of tank-and-grab
+    # harvester routes.
+    CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF: bool = False
     # Win-at-K training tier (RUN-25): during TRAINING the exit opens once K crystals
     # are held (0 = off, real all-crystals rule). A curriculum on the task definition —
     # the agent practices the full collect->route->exit chain thousands of times before
     # a 30-crystal clear is within reach, instead of never reaching the endgame at all.
     # Eval always keeps the real win rule, so reported win rates stay canonical.
     CRYSTAL_CAVES_WIN_AT_K: int = 0
+    # Ramp for the win-at-K tier (per-game-instance episodes; 0 = static K). K climbs
+    # linearly from CRYSTAL_CAVES_WIN_AT_K to the level's full crystal count across
+    # this many episodes, merging the training tier into the real all-crystals rule —
+    # avoids overfitting a "grab K then leave" policy that eval would punish.
+    CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES: int = 0
+    # Hold K at the floor for this many per-instance episodes before the ramp starts
+    # (0 = ramp immediately). The agent needs a consolidation phase of dense wins
+    # before the bar moves, or the ramp outruns it and wins never begin.
+    CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY: int = 0
     # Truncation-aware bootstrapping (Pardo et al. 2018, "Time Limits in RL").
     # When an episode ends only because it hit a time/no-progress cutoff ("timeout"
     # or "stalled") rather than a real environment terminal ("won"/"killed"), the
@@ -904,6 +945,42 @@ class Config:
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_CURRICULUM_P <= 1.0,
             "CRYSTAL_CAVES_REVERSE_CURRICULUM_P must be in [0, 1]",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_STALL_WINDOW_STEPS >= 0,
+            "CRYSTAL_CAVES_STALL_WINDOW_STEPS must be non-negative (0 = game default)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_MAX_STEPS_OVERRIDE >= 0,
+            "CRYSTAL_CAVES_MAX_STEPS_OVERRIDE must be non-negative (0 = game default)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES >= 0,
+            "CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES must be non-negative (0 = static K)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY >= 0,
+            "CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY must be non-negative (0 = no hold)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT must be non-negative (0 = default)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_WINS >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_WINS must be non-negative (0 = default)",
+        )
+        self._require(
+            0.0 <= self.CRYSTAL_CAVES_DEMO_LEVEL_BIAS <= 1.0,
+            "CRYSTAL_CAVES_DEMO_LEVEL_BIAS must be in [0, 1]",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW must be non-negative (0 = frontier only)",
+        )
+        self._require(
+            self.CRYSTAL_CAVES_DEMO_BACKWARD_DEEP >= 0,
+            "CRYSTAL_CAVES_DEMO_BACKWARD_DEEP must be non-negative (0 = off)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

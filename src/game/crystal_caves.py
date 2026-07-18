@@ -100,6 +100,16 @@ class CrystalCaves(
     MAX_AMMO_FOR_STATE = 20
     MAX_STEPS = 3000
     MAX_STEPS_WITHOUT_PROGRESS = 720
+    # Backward demo curriculum (Salimans & Chen): first rung starts this many steps
+    # before the demo's win, retreats by RETREAT_STEP after WINS_PER_RUNG successes.
+    DEMO_BACKWARD_START_OFFSET = 50
+    DEMO_BACKWARD_RETREAT_STEP = 40
+    DEMO_BACKWARD_WINS_PER_RUNG = 3
+    # The ladder is SHARED across all game instances in the process (the
+    # vectorized trainer runs 8 envs): rung wins pool instead of each env
+    # re-earning every rung independently (8x ladder speedup).
+    _BC_SHARED_OFFSET: dict = {}
+    _BC_SHARED_WINS: dict = {}
     # Most candidate standing tiles to oracle-verify when relocating the player for the
     # reverse curriculum (closest-to-objective first); bounds the per-reset BFS cost.
     REVERSE_RELOCATE_MAX_CANDIDATES = 48
@@ -219,6 +229,17 @@ class CrystalCaves(
         self.headless = headless
         self.width = self.config.SCREEN_WIDTH
         self.height = self.config.SCREEN_HEIGHT
+
+        # RUN-26 fidelity lever: the no-progress stall window is config-overridable so a
+        # training arm can widen it (720 -> ~1440; DATA-1 found harness timers own 35-54%
+        # of endings) without editing the class constant. Default keeps behaviour.
+        self.MAX_STEPS_WITHOUT_PROGRESS = int(
+            getattr(self.config, "CRYSTAL_CAVES_STALL_WINDOW_STEPS", 0)
+            or type(self).MAX_STEPS_WITHOUT_PROGRESS
+        )
+        self.MAX_STEPS = int(
+            getattr(self.config, "CRYSTAL_CAVES_MAX_STEPS_OVERRIDE", 0) or type(self).MAX_STEPS
+        )
 
         # AI-1 state toggle: legacy uses the old 11x9 window with no global map
         # (119-feature state); rich uses the class defaults (19x11 + 11x6 map).
@@ -585,6 +606,12 @@ class CrystalCaves(
         """Reset and return the initial state. In eval mode, deterministically cycle
         the held-out caves; in training with a pool, sample a random cave; otherwise
         fall back to the legacy CAVES[level_index] behaviour."""
+        # Per-instance episode counter (first reset -> 0); drives the win-at-K ramp.
+        self._episodes_seen = getattr(self, "_episodes_seen", -1) + 1
+        # Snapshot the finished episode's outcome BEFORE this reset wipes it —
+        # the backward-ladder rung check runs at the END of reset and self.won
+        # is cleared early in the body (RUN-38 bug: rungs never advanced).
+        self._prev_episode_won = bool(getattr(self, "won", False))
         regenerate = self._proc_params is not None and bool(
             getattr(self.config, "CRYSTAL_CAVES_REGENERATE_EACH_EPISODE", False)
         )
@@ -601,7 +628,16 @@ class CrystalCaves(
             self._train_gen_counter += 1
         elif self._randomize_levels and len(self.CAVES) > 1:
             self.level_index = int(np.random.randint(len(self.CAVES)))
-            self.level = self.CAVES[self.level_index]
+            # Ladder-focus bias: with probability CRYSTAL_CAVES_DEMO_LEVEL_BIAS,
+            # resample uniformly among DEMOED levels so backward-ladder rungs get
+            # concentrated attempts (level sampling, not reset-p, dominates ladder
+            # throughput). Eval level selection is unaffected (branch above).
+            bias = float(getattr(self.config, "CRYSTAL_CAVES_DEMO_LEVEL_BIAS", 0.0))
+            if bias > 0.0 and np.random.random() < bias:
+                demo_levels = sorted(getattr(self, "_demo_prefixes", None) or {})
+                if demo_levels:
+                    self.level_index = int(demo_levels[int(np.random.randint(len(demo_levels)))])
+            self.level = self.CAVES[self.level_index % len(self.CAVES)]
         else:
             self.level = self.CAVES[self.level_index % len(self.CAVES)]
         self._load_level(self.level)
@@ -1030,16 +1066,98 @@ class CrystalCaves(
                 self._demo_prefixes = demo_prefix_registry(demo_dir)
             else:
                 self._demo_prefixes = {}
-        demos = self._demo_prefixes.get(self.level_index % max(1, len(self.CAVES)))
+        level_key = self.level_index % max(1, len(self.CAVES))
+        demos = self._demo_prefixes.get(level_key)
+        backward = bool(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD", False))
+        # Salimans & Chen backward algorithm: bank a WIN from the PREVIOUS
+        # episode's backward start against ITS level (which is usually not the
+        # level this reset just sampled — RUN-38 bug #2), before any reset-p
+        # roll so every backward win counts (and self.won is already wiped by
+        # this reset — RUN-38 bug #1; use the pre-reset snapshot).
+        prev_level = getattr(self, "_bc_started_level", None)
+        bc_offset = type(self)._BC_SHARED_OFFSET
+        bc_wins = type(self)._BC_SHARED_WINS
+        if (
+            backward
+            and prev_level is not None
+            and getattr(self, "_prev_episode_won", False)
+            and getattr(self, "_bc_frontier_attempt", True)
+        ):
+            wins = bc_wins.get(prev_level, 0) + 1
+            wins_per_rung = int(
+                getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINS", 0)
+                or self.DEMO_BACKWARD_WINS_PER_RUNG
+            )
+            retreat = int(
+                getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT", 0)
+                or self.DEMO_BACKWARD_RETREAT_STEP
+            )
+            # Deep-rung easing: past the threshold a win is rare (a full run of
+            # thousands of near-flawless steps), so each win buys a half-step
+            # rung immediately instead of banking toward a full-step one.
+            deep = int(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_DEEP", 0))
+            if deep > 0 and bc_offset.get(prev_level, 0) >= deep:
+                wins_per_rung = 1
+                retreat = max(20, retreat // 2)
+            if wins >= wins_per_rung:
+                new_offset = bc_offset.get(prev_level, self.DEMO_BACKWARD_START_OFFSET) + retreat
+                bc_offset[prev_level] = new_offset
+                wins = 0
+                print(f"  [bc] level={prev_level} rung -> {new_offset} steps from win", flush=True)
+            bc_wins[prev_level] = wins
+        self._bc_started_level = None
         if not demos or np.random.random() >= p:
             return
         actions = demos[int(np.random.randint(len(demos)))]
-        # 10-85% of the route: never far enough to trigger the demo's win.
-        cut = int(len(actions) * float(np.random.uniform(0.10, 0.85)))
+        if backward:
+            # Start `offset` steps from the WIN and walk backward as the agent
+            # masters each rung; clamp so the replay never triggers the win and
+            # a fully-retreated rung degenerates to a plain from-spawn start.
+            frontier = bc_offset.setdefault(level_key, self.DEMO_BACKWARD_START_OFFSET)
+            offset = frontier
+            # Windowed starts: most attempts rehearse just behind the frontier so
+            # deep rungs keep a win/learning signal (all-or-nothing frontier
+            # attempts starve once a full run takes 2000+ flawless steps); only
+            # true frontier attempts bank rung credit.
+            window = int(getattr(self.config, "CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW", 0))
+            if (
+                window > 0
+                and frontier > self.DEMO_BACKWARD_START_OFFSET
+                and np.random.random() < 0.5
+            ):
+                # Rehearsal half: uniform in (frontier - window, frontier); the
+                # other half starts EXACTLY at the frontier so rung credit keeps
+                # real throughput (uniform-including-frontier made exact-frontier
+                # attempts a 1-in-window rarity and froze the ladder).
+                back = 1 + int(np.random.randint(0, min(window, frontier - 8)))
+                offset = frontier - back
+            cut = max(0, min(len(actions) - 8, len(actions) - offset))
+            self._bc_started_level = level_key
+            self._bc_frontier_attempt = offset >= frontier
+        else:
+            # Legacy random-cut mode: 10-85% of the route (never far enough to
+            # trigger the demo's win — which is also why it lacks the curriculum's
+            # bottom rungs; prefer backward mode).
+            cut = int(len(actions) * float(np.random.uniform(0.10, 0.85)))
+        # The step/stall caps govern the AGENT's play, not the scripted prefix:
+        # relaxed-clock demos exceed 3000 steps, and a capped replay would hit
+        # the timeout mid-prefix and hand the agent a game-over episode.
+        saved_max_steps = self.MAX_STEPS
+        saved_stall_window = self.MAX_STEPS_WITHOUT_PROGRESS
+        self.MAX_STEPS = cut + saved_max_steps
+        self.MAX_STEPS_WITHOUT_PROGRESS = cut + saved_stall_window
         for action in actions[:cut]:
             if self.game_over:  # defensive: a verified win's prefix never terminates
                 break
             self.step(int(action))
+        self.MAX_STEPS = saved_max_steps
+        self.MAX_STEPS_WITHOUT_PROGRESS = saved_stall_window
+        if bool(getattr(self.config, "CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF", False)):
+            # The harvester's routes tank hits early (tank-and-grab), leaving
+            # HP-1 suffixes: deep rungs then demand near-perfect play the
+            # from-spawn agent wouldn't face (it can arrive healthier than the
+            # demo did). Training-only; eval untouched.
+            self.health = self.MAX_HEALTH
         # Re-zero the episode accounting so the replayed prefix costs the agent
         # nothing: full step budget, fresh stall clock, PBRS baselines anchored to
         # the mid-route start (so shaping still telescopes from here).

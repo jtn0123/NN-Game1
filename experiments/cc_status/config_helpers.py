@@ -1,4 +1,6 @@
 # ruff: noqa: F401,F403,F405,I001
+import math
+
 from .common import *
 
 
@@ -114,6 +116,61 @@ def apply_cave_pool_override(config: Config, cave_pool_size: int | None) -> None
         if cave_pool_size <= 0:
             raise ValueError("cave_pool_size must be positive")
         config.CRYSTAL_CAVES_POOL_SIZE = cave_pool_size
+
+
+def apply_reward_shaping_override(
+    config: Config,
+    *,
+    geodesic_potential: bool,
+    geodesic_potential_weight: float,
+    show_locked_exit: bool,
+    reverse_curriculum_p: float,
+    reward_clip: float | None = None,
+    stall_window: int | None = None,
+) -> None:
+    """Opt in to the PR #35/#36 shaping/curriculum levers for a status-session run.
+
+    All three levers default off in `Config`; this is the only runner-side switch,
+    so A/B runs stay attributable to exactly one config change. `reward_clip`
+    overrides the learn-time negative reward clamp (`0` disables clamping) so the
+    terminal-signal question can be A/B'd without editing `config.py`.
+    `stall_window` overrides the game's no-progress timeout (RUN-26 fidelity arm:
+    720 -> ~1440); None keeps the game default.
+    """
+    if not math.isfinite(geodesic_potential_weight) or geodesic_potential_weight < 0:
+        raise ValueError("geodesic_potential_weight must be finite and non-negative")
+    if not 0.0 <= reverse_curriculum_p <= 1.0:
+        raise ValueError("reverse_curriculum_p must be in [0, 1]")
+    if reward_clip is not None:
+        if not math.isfinite(reward_clip) or reward_clip < 0:
+            raise ValueError("reward_clip must be finite and non-negative")
+        config.REWARD_CLIP = float(reward_clip)
+    if stall_window is not None:
+        if stall_window <= 0:
+            raise ValueError("stall_window must be positive")
+        config.CRYSTAL_CAVES_STALL_WINDOW_STEPS = int(stall_window)
+    config.CRYSTAL_CAVES_GEODESIC_POTENTIAL = bool(geodesic_potential)
+    config.CRYSTAL_CAVES_GEODESIC_POTENTIAL_WEIGHT = float(geodesic_potential_weight)
+    config.CRYSTAL_CAVES_SHOW_LOCKED_EXIT = bool(show_locked_exit)
+    config.CRYSTAL_CAVES_REVERSE_CURRICULUM = reverse_curriculum_p > 0.0
+    config.CRYSTAL_CAVES_REVERSE_CURRICULUM_P = float(reverse_curriculum_p)
+
+
+def apply_geo_compass_override(
+    config: Config,
+    *,
+    geo_compass: bool,
+    hazard_aware: bool,
+) -> None:
+    """Opt in to the RUN-13 geodesic corridor compass observation for a run.
+
+    Adds 4 route-direction scalars to the state, so checkpoints trained without
+    it cannot be restored directly (same caveat as the history-state probe).
+    """
+    if hazard_aware and not geo_compass:
+        raise ValueError("geo_compass_hazard_aware requires geo_compass")
+    config.CRYSTAL_CAVES_GEO_COMPASS = bool(geo_compass)
+    config.CRYSTAL_CAVES_GEO_COMPASS_HAZARD_AWARE = bool(hazard_aware)
 
 
 def apply_history_state_override(

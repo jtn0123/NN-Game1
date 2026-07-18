@@ -46,6 +46,7 @@ def add_status_session_arguments(parser: argparse.ArgumentParser) -> None:
     _add_mode_argument(parser)
     _add_training_schedule_arguments(parser)
     _add_state_architecture_arguments(parser)
+    _add_reward_shaping_arguments(parser)
     _add_route_demo_arguments(parser)
     _add_demo_supervision_arguments(parser)
     _add_eval_logging_trace_arguments(parser)
@@ -115,6 +116,23 @@ def _add_state_architecture_arguments(parser: argparse.ArgumentParser) -> None:
         help="Number of recent action/approach entries to append when --history-state is enabled.",
     )
     parser.add_argument(
+        "--geo-compass",
+        action="store_true",
+        help=(
+            "Append the RUN-13 geodesic corridor compass (4 route-direction "
+            "scalars) to the Crystal Caves state. Changes state size, so old "
+            "checkpoints cannot be restored directly."
+        ),
+    )
+    parser.add_argument(
+        "--geo-compass-hazard-aware",
+        action="store_true",
+        help=(
+            "Route the geo-compass around static hazards (RUN-18 variant). "
+            "Requires --geo-compass; same 4 dims, no extra state change."
+        ),
+    )
+    parser.add_argument(
         "--distributional-dqn",
         action="store_true",
         help=(
@@ -139,6 +157,70 @@ def _add_state_architecture_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=120.0,
         help="Maximum categorical value support for --distributional-dqn.",
+    )
+
+
+def _add_reward_shaping_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--geodesic-potential",
+        action="store_true",
+        help=(
+            "Fold the telescoping BFS-geodesic closeness term into the PBRS potential "
+            "and disable the additive per-step approach reward (PR #35 lever)."
+        ),
+    )
+    parser.add_argument(
+        "--geodesic-potential-weight",
+        type=float,
+        default=0.3,
+        help="Weight of the geodesic closeness term when --geodesic-potential is enabled.",
+    )
+    parser.add_argument(
+        "--show-locked-exit",
+        action="store_true",
+        help=(
+            "Show the still-locked exit in the coarse global objective map at a "
+            "distinct value (PR #35 lever)."
+        ),
+    )
+    parser.add_argument(
+        "--reverse-curriculum-p",
+        type=float,
+        default=0.0,
+        help=(
+            "Fraction of TRAINING resets that start mid-solution (PR #36 lever). "
+            "0 disables the reverse curriculum; eval episodes are never affected."
+        ),
+    )
+    parser.add_argument(
+        "--reward-clip",
+        type=float,
+        default=None,
+        help=(
+            "Override the learn-time negative reward clamp (config REWARD_CLIP, "
+            "default 5.0). 0 disables clamping so terminal penalties (death -12, "
+            "timeout -8, stall -6) reach the learner at full magnitude."
+        ),
+    )
+    parser.add_argument(
+        "--stall-window",
+        type=int,
+        default=None,
+        help=(
+            "Override the Crystal Caves no-progress stall window in steps "
+            "(game default 720). RUN-26 fidelity arm widens it to ~1440 so "
+            "mid-route journeys stop being executed by the harness timer."
+        ),
+    )
+    parser.add_argument(
+        "--objective",
+        choices=["full", "first-crystal"],
+        default=None,
+        help=(
+            "For eval-checkpoint: evaluate under this objective instead of the one "
+            "restored from the checkpoint config — 'full' is collect-all-and-exit, "
+            "'first-crystal' ends at first crystal collection."
+        ),
     )
 
 

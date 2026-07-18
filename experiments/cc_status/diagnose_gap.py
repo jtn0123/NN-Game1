@@ -450,16 +450,31 @@ def run_diagnosis(
     force_cpu: bool = False,
     weight_decay: float = 0.0,
     reward_clip: float | None = None,
+    stall_window: int | None = None,
+    max_steps: int | None = None,
     death_penalty: float | None = None,
     hit_penalty: float | None = None,
     ngu_bonus: bool = False,
     ngu_beta: float | None = None,
     enemy_motion: bool = False,
     win_at_k: int = 0,
+    win_at_k_ramp: int = 0,
+    win_at_k_ramp_delay: int = 0,
     save_weights: bool = False,
     demo_dir: str | None = None,
     demo_pretrain: int = 0,
     demo_reset_p: float = 0.0,
+    demo_td_weight: float | None = None,
+    demo_margin_weight: float | None = None,
+    demo_backward: bool = False,
+    demo_backward_retreat: int = 0,
+    demo_backward_wins: int = 0,
+    demo_level_bias: float = 0.0,
+    demo_backward_window: int = 0,
+    demo_backward_deep: int = 0,
+    demo_heal: bool = False,
+    resume_weights: str | None = None,
+    ladder_init: str | None = None,
     regenerate_each_episode: bool = False,
     drop_leak_features: bool = False,
     use_cnn: bool = False,
@@ -503,6 +518,14 @@ def run_diagnosis(
         # levers are invisible unless the clip is raised (or 0 = disabled; the agent code
         # guards `if REWARD_CLIP > 0`, so 0 is a safe off-switch, not a clamp-to-zero).
         overrides["REWARD_CLIP"] = reward_clip
+    if max_steps is not None:
+        # 1991-fidelity lever: the original has no level timer; see PR #39
+        # level-validity audit before using in comparable runs.
+        overrides["CRYSTAL_CAVES_MAX_STEPS_OVERRIDE"] = max_steps
+    if stall_window is not None:
+        # RUN-26 fidelity arm: widen the no-progress stall window (game default 720).
+        # DATA-1: harness timers own 35-54% of endings, flat across learning.
+        overrides["CRYSTAL_CAVES_STALL_WINDOW_STEPS"] = stall_window
     if death_penalty is not None:
         overrides["CRYSTAL_CAVES_DEATH_PENALTY"] = death_penalty
     if hit_penalty is not None:
@@ -518,12 +541,52 @@ def run_diagnosis(
     if win_at_k > 0:
         # Training-only win tier: exit opens at K crystals; eval keeps the real rule.
         overrides["CRYSTAL_CAVES_WIN_AT_K"] = win_at_k
+        if win_at_k_ramp > 0:
+            # CLI takes GLOBAL episodes; the game ramps on per-instance episodes.
+            # Divide by the TRAINING env count (vec_envs) — NOT `games`, which is
+            # the eval split size (RUN-34/35 bug: dividing by 48 instead of 8
+            # finished the whole ramp by global ep~2000).
+            overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_EPISODES"] = max(
+                1, win_at_k_ramp // max(1, vec_envs)
+            )
+            if win_at_k_ramp_delay > 0:
+                overrides["CRYSTAL_CAVES_WIN_AT_K_RAMP_DELAY"] = max(
+                    1, win_at_k_ramp_delay // max(1, vec_envs)
+                )
     if demo_dir:
         # DQfD-lite: fixed demo buffer + margin loss on every gradient step, plus
         # optional demo-only pre-training and demo-prefix (backward-curriculum) starts.
         overrides["DEMO_DIR"] = demo_dir
         overrides["DEMO_PRETRAIN_STEPS"] = demo_pretrain
         overrides["CRYSTAL_CAVES_DEMO_RESET_P"] = demo_reset_p
+        if demo_backward:
+            # Salimans & Chen backward algorithm: start each demo episode near the
+            # WIN and retreat on competence — the bottom rungs the random-cut
+            # prefix curriculum (10-85%, never near the win) was missing.
+            overrides["CRYSTAL_CAVES_DEMO_BACKWARD"] = True
+            if demo_backward_retreat > 0:
+                overrides["CRYSTAL_CAVES_DEMO_BACKWARD_RETREAT"] = demo_backward_retreat
+            if demo_backward_wins > 0:
+                overrides["CRYSTAL_CAVES_DEMO_BACKWARD_WINS"] = demo_backward_wins
+        if demo_level_bias > 0:
+            # Concentrate training episodes on demoed levels (ladder throughput).
+            overrides["CRYSTAL_CAVES_DEMO_LEVEL_BIAS"] = demo_level_bias
+        if demo_backward_window > 0:
+            overrides["CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW"] = demo_backward_window
+        if demo_backward_deep > 0:
+            overrides["CRYSTAL_CAVES_DEMO_BACKWARD_DEEP"] = demo_backward_deep
+        if demo_heal:
+            overrides["CRYSTAL_CAVES_DEMO_HEAL_ON_HANDOFF"] = True
+        if demo_td_weight is not None:
+            # RUN-26c ablation: the per-step demo TD term drills large winning-return
+            # targets from a tiny fixed set thousands of times (Q-inflation suspect);
+            # 0.0 keeps only the large-margin supervised term.
+            overrides["DEMO_TD_WEIGHT"] = demo_td_weight
+        if demo_margin_weight is not None:
+            # RUN-26d ablation: 0.0 together with --demo-td-weight 0 disables the
+            # demo gradient entirely, leaving demo-prefix starts (backward
+            # curriculum) as the only demo mechanism.
+            overrides["DEMO_MARGIN_WEIGHT"] = demo_margin_weight
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -621,7 +684,28 @@ def run_diagnosis(
             )
             transfer_weights = capture_weight_snapshot(pre_trainer.agent)
             set_seed(seed)  # realign RNG so the target phase mirrors the control's stream
+        if resume_weights:
+            # Warm-start from a persisted policy checkpoint (policy_seedX_epN.pth =
+            # raw policy_net state_dict). Target net starts as a copy — standard
+            # for resuming; the first target sync realigns it anyway.
+            import torch as _torch
 
+            sd = _torch.load(resume_weights, map_location="cpu")
+            transfer_weights = {"policy": sd, "target": dict(sd)}
+            print(f"  [resume] warm-started from {resume_weights}", flush=True)
+
+        if ladder_init:
+            # Pin backward-ladder frontiers at run start ("14:2600,12:350") so a
+            # resumed brain practices from-spawn immediately instead of paying
+            # the re-climb tax (RUN-40: only reached 950/2600 re-climbing).
+            from src.game.crystal_caves import CrystalCaves as _CC
+
+            _CC._BC_SHARED_OFFSET.clear()
+            _CC._BC_SHARED_WINS.clear()
+            for pair in ladder_init.split(","):
+                lvl, off = pair.split(":")
+                _CC._BC_SHARED_OFFSET[int(lvl)] = int(off)
+            print(f"  [ladder-init] {_CC._BC_SHARED_OFFSET}", flush=True)
         trainer = prepare_trainer(
             config, episodes=episodes, vec_envs=vec_envs, transfer_weights=transfer_weights
         )
@@ -688,6 +772,12 @@ def run_diagnosis(
 
                 weights_path = run_dir / f"policy_seed{seed}_ep{milestone}.pth"
                 torch.save(trainer.agent.policy_net.state_dict(), weights_path)
+                from src.game.crystal_caves import CrystalCaves as _CC
+
+                if _CC._BC_SHARED_OFFSET:
+                    (run_dir / f"ladder_seed{seed}.json").write_text(
+                        json.dumps({str(k): v for k, v in _CC._BC_SHARED_OFFSET.items()})
+                    )
             if checkpoint_every > 0:
                 curve.append(
                     {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
@@ -1292,6 +1382,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Adam L2 weight decay (e.g. 1e-4) as a regularization lever; 0 = off.",
     )
     parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Override the Crystal Caves episode step cap (game default 3000). "
+        "The 1991 original has no level timer; perfect tours on the rebalanced "
+        "set already use 0.55-0.92 of the default cap.",
+    )
+    parser.add_argument(
+        "--stall-window",
+        type=int,
+        default=None,
+        help="Override the no-progress stall window in steps (game default 720). "
+        "RUN-26 fidelity arm widens it to ~1440 so mid-route journeys stop being "
+        "executed by the harness timer.",
+    )
+    parser.add_argument(
         "--reward-clip",
         type=float,
         default=None,
@@ -1339,6 +1445,23 @@ def main(argv: list[str] | None = None) -> int:
         "win rates stay canonical. 0 = off.",
     )
     parser.add_argument(
+        "--win-at-k-ramp",
+        type=int,
+        default=0,
+        metavar="EPISODES",
+        help="Ramp the win-at-K tier: K climbs linearly to the full crystal count "
+        "over this many GLOBAL training episodes (converted to per-instance "
+        "episodes internally), converging on the real win rule. 0 = static K.",
+    )
+    parser.add_argument(
+        "--win-at-k-ramp-delay",
+        type=int,
+        default=0,
+        metavar="EPISODES",
+        help="Hold K at the floor for this many GLOBAL episodes before the ramp "
+        "starts (win-consolidation phase). 0 = ramp immediately.",
+    )
+    parser.add_argument(
         "--demo-dir",
         type=str,
         default=None,
@@ -1360,6 +1483,91 @@ def main(argv: list[str] | None = None) -> int:
         metavar="P",
         help="Probability a TRAINING episode starts mid-route from a random 10-85%% "
         "prefix of a winning demo (backward curriculum). Eval unaffected.",
+    )
+    parser.add_argument(
+        "--demo-td-weight",
+        type=float,
+        default=None,
+        metavar="W",
+        help="Weight of the n-step TD term in the per-step demo minibatch loss "
+        "(default: config DEMO_TD_WEIGHT). 0 = margin-only DQfD-lite.",
+    )
+    parser.add_argument(
+        "--demo-backward",
+        action="store_true",
+        help="Backward demo curriculum (Salimans & Chen): episodes start near the "
+        "demo's WIN and the start point retreats as the agent banks wins. "
+        "Replaces the random 10-85%% prefix cuts. Needs --demo-dir and --demo-reset-p.",
+    )
+    parser.add_argument(
+        "--demo-backward-retreat",
+        type=int,
+        default=0,
+        metavar="STEPS",
+        help="Backward-ladder retreat per rung in steps (0 = game default 40).",
+    )
+    parser.add_argument(
+        "--demo-backward-wins",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Wins required per backward-ladder rung (0 = game default 3).",
+    )
+    parser.add_argument(
+        "--demo-backward-window",
+        type=int,
+        default=0,
+        metavar="STEPS",
+        help="Sample backward starts uniformly from [frontier-WINDOW, frontier] "
+        "(rehearsal keeps deep rungs learnable); only exact-frontier attempts "
+        "bank rung credit. 0 = frontier-only.",
+    )
+    parser.add_argument(
+        "--demo-backward-deep",
+        type=int,
+        default=0,
+        metavar="STEPS",
+        help="Deep-rung easing threshold: past this steps-from-win, rungs cost "
+        "1 win and retreat half-steps. 0 = off.",
+    )
+    parser.add_argument(
+        "--resume-weights",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Warm-start the policy from a persisted checkpoint "
+        "(policy_seedX_epN.pth). Continues training an existing brain instead "
+        "of relearning from scratch.",
+    )
+    parser.add_argument(
+        "--ladder-init",
+        type=str,
+        default=None,
+        metavar="LVL:OFF,...",
+        help='Pin backward-ladder frontiers at run start, e.g. "14:2600,12:350".',
+    )
+    parser.add_argument(
+        "--demo-heal",
+        action="store_true",
+        help="Restore full health at demo-prefix handoff (training only) — "
+        "corrects the HP-1 bias of tank-and-grab harvester route suffixes.",
+    )
+    parser.add_argument(
+        "--demo-level-bias",
+        type=float,
+        default=0.0,
+        metavar="P",
+        help="Probability a TRAINING episode resamples its level among DEMOED "
+        "levels (ladder-focus). Eval unaffected. 0 = uniform.",
+    )
+    parser.add_argument(
+        "--demo-margin-weight",
+        type=float,
+        default=None,
+        metavar="W",
+        help="Weight of the large-margin term in the per-step demo minibatch loss "
+        "(default: config DEMO_MARGIN_WEIGHT). 0 with --demo-td-weight 0 = "
+        "demo-prefix starts only, no demo gradient.",
     )
     parser.add_argument(
         "--save-weights",
@@ -1400,16 +1608,31 @@ def main(argv: list[str] | None = None) -> int:
         force_cpu=args.cpu,
         weight_decay=args.weight_decay,
         reward_clip=args.reward_clip,
+        stall_window=args.stall_window,
+        max_steps=args.max_steps,
         death_penalty=args.death_penalty,
         hit_penalty=args.hit_penalty,
         ngu_bonus=args.ngu_bonus,
         ngu_beta=args.ngu_beta,
         enemy_motion=args.enemy_motion,
         win_at_k=args.win_at_k,
+        win_at_k_ramp=args.win_at_k_ramp,
+        win_at_k_ramp_delay=args.win_at_k_ramp_delay,
         save_weights=args.save_weights,
         demo_dir=args.demo_dir,
         demo_pretrain=args.demo_pretrain,
         demo_reset_p=args.demo_reset_p,
+        demo_td_weight=args.demo_td_weight,
+        demo_margin_weight=args.demo_margin_weight,
+        demo_backward=args.demo_backward,
+        demo_backward_retreat=args.demo_backward_retreat,
+        demo_backward_wins=args.demo_backward_wins,
+        demo_level_bias=args.demo_level_bias,
+        demo_backward_window=args.demo_backward_window,
+        demo_backward_deep=args.demo_backward_deep,
+        demo_heal=args.demo_heal,
+        resume_weights=args.resume_weights,
+        ladder_init=args.ladder_init,
         regenerate_each_episode=args.regenerate_each_episode,
         drop_leak_features=args.drop_leak_features,
         use_cnn=args.cnn,
