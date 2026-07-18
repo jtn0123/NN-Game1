@@ -184,8 +184,6 @@ def test_demo_level_bias_resamples_to_demoed_levels():
 def test_backward_window_rehearses_but_only_frontier_banks():
     """Windowed starts must sample within [frontier-window, frontier] and only
     exact-frontier attempts may bank rung credit."""
-    import numpy as np
-
     game = _backward_game(offset_map=None)
     game.config.CRYSTAL_CAVES_DEMO_BACKWARD_WINDOW = 120
     game.reset()
