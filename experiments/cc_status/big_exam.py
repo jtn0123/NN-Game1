@@ -62,9 +62,7 @@ def main() -> None:
         trainer.agent.policy_net.eval()
 
     game = trainer.game if hasattr(trainer, "game") else trainer.games[0]
-    game.use_eval_levels(
-        len(game.CAVES) if not game._eval_caves else len(game._eval_caves)
-    )
+    game.use_eval_levels(len(game.CAVES) if not game._eval_caves else len(game._eval_caves))
 
     wins = 0
     best = 0.0
