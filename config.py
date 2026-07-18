@@ -258,6 +258,10 @@ class Config:
     DEMO_MARGIN_WEIGHT: float = 1.0
     DEMO_TD_WEIGHT: float = 1.0
     DEMO_PRETRAIN_STEPS: int = 0  # demo-only gradient steps before env interaction
+    # Opening-focused imitation (phase 2): keep only the first N steps of each demo
+    # route in the demo store, so the margin loss becomes a pure prior on the route
+    # OPENING — the segment the backward ladder's win-banking never reaches (0 = all).
+    DEMO_OPENING_ONLY_STEPS: int = 0
     # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
     # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
     CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
@@ -981,6 +985,10 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_DEMO_BACKWARD_DEEP >= 0,
             "CRYSTAL_CAVES_DEMO_BACKWARD_DEEP must be non-negative (0 = off)",
+        )
+        self._require(
+            self.DEMO_OPENING_ONLY_STEPS >= 0,
+            "DEMO_OPENING_ONLY_STEPS must be non-negative (0 = keep full routes)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

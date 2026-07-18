@@ -466,6 +466,7 @@ def run_diagnosis(
     demo_reset_p: float = 0.0,
     demo_td_weight: float | None = None,
     demo_margin_weight: float | None = None,
+    demo_opening_steps: int = 0,
     demo_backward: bool = False,
     demo_backward_retreat: int = 0,
     demo_backward_wins: int = 0,
@@ -587,6 +588,10 @@ def run_diagnosis(
             # demo gradient entirely, leaving demo-prefix starts (backward
             # curriculum) as the only demo mechanism.
             overrides["DEMO_MARGIN_WEIGHT"] = demo_margin_weight
+        if demo_opening_steps:
+            # Phase-2 opening imitation: demo store keeps only each route's first
+            # N transitions, making the margin loss a pure route-opening prior.
+            overrides["DEMO_OPENING_ONLY_STEPS"] = demo_opening_steps
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -1570,6 +1575,15 @@ def main(argv: list[str] | None = None) -> int:
         "demo-prefix starts only, no demo gradient.",
     )
     parser.add_argument(
+        "--demo-opening-steps",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Keep only the first N transitions of each demo route in the demo "
+        "store (opening-focused imitation; pair with --demo-margin-weight > 0 "
+        "and --demo-td-weight 0). 0 = full routes.",
+    )
+    parser.add_argument(
         "--save-weights",
         action="store_true",
         help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
@@ -1624,6 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_reset_p=args.demo_reset_p,
         demo_td_weight=args.demo_td_weight,
         demo_margin_weight=args.demo_margin_weight,
+        demo_opening_steps=args.demo_opening_steps,
         demo_backward=args.demo_backward,
         demo_backward_retreat=args.demo_backward_retreat,
         demo_backward_wins=args.demo_backward_wins,
