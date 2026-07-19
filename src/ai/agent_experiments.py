@@ -184,6 +184,7 @@ class AgentExperimentMixin:
         if store is None or len(store) == 0:
             return None
         margin_weight = float(getattr(self.config, "DEMO_MARGIN_WEIGHT", 1.0))
+        margin_weight *= float(getattr(self, "_demo_margin_scale", 1.0))
         td_weight = float(getattr(self.config, "DEMO_TD_WEIGHT", 1.0))
         if margin_weight == 0.0 and td_weight == 0.0:
             # Prefix-starts-only arms attach a store for demo bookkeeping but want

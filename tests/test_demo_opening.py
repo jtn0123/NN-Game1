@@ -78,3 +78,76 @@ def test_diagnose_gap_exposes_demo_opening_lever():
     src = inspect.getsource(dg)
     assert '"--demo-opening-steps"' in src
     assert 'overrides["DEMO_OPENING_ONLY_STEPS"] = demo_opening_steps' in src
+
+
+# --- margin-weight decay (RUN-62 iteration) ---------------------------------
+
+
+def test_margin_decay_config_default_and_validation():
+    config = Config()
+    assert config.DEMO_MARGIN_DECAY_EPISODES == 0
+    with pytest.raises(Exception):
+        Config(DEMO_MARGIN_DECAY_EPISODES=-1)
+
+
+def _cpu_agent(**overrides):
+    from src.ai.agent import Agent
+
+    config = Config()
+    config.FORCE_CPU = True
+    for key, value in overrides.items():
+        setattr(config, key, value)
+    return Agent(state_size=8, action_size=3, config=config)
+
+
+def test_margin_decay_scale_tracks_episodes():
+    agent = _cpu_agent(DEMO_MARGIN_DECAY_EPISODES=100)
+    assert getattr(agent, "_demo_margin_scale", 1.0) == 1.0
+    agent.decay_epsilon(episode=0)
+    assert agent._demo_margin_scale == 1.0
+    agent.decay_epsilon(episode=50)
+    assert agent._demo_margin_scale == pytest.approx(0.5)
+    agent.decay_epsilon(episode=100)
+    assert agent._demo_margin_scale == 0.0
+    agent.decay_epsilon(episode=250)  # past the horizon: clamps, never negative
+    assert agent._demo_margin_scale == 0.0
+
+
+def test_margin_decay_updates_during_epsilon_warmup():
+    """The scale must track episodes even while epsilon decay is warmup-gated."""
+    agent = _cpu_agent(DEMO_MARGIN_DECAY_EPISODES=100, EPSILON_WARMUP=1000)
+    agent.decay_epsilon(episode=50)
+    assert agent._demo_margin_scale == pytest.approx(0.5)
+
+
+def test_margin_decay_off_leaves_scale_untouched():
+    agent = _cpu_agent()
+    agent.decay_epsilon(episode=50)
+    assert not hasattr(agent, "_demo_margin_scale")
+
+
+def test_fully_decayed_margin_skips_demo_forward_pass():
+    """Once the scale hits zero (with td weight 0) the demo store must not even
+    be sampled — the demo gradient is gone, not just multiplied by zero."""
+    agent = _cpu_agent(DEMO_MARGIN_DECAY_EPISODES=10, DEMO_TD_WEIGHT=0.0, DEMO_MARGIN_WEIGHT=0.3)
+
+    class _ExplodingStore:
+        def __len__(self):
+            return 4
+
+        def sample(self, k):  # pragma: no cover - must never be called
+            raise AssertionError("demo store sampled after full decay")
+
+    agent.attach_demo_store(_ExplodingStore())
+    agent.decay_epsilon(episode=10)
+    assert agent._dqfd_loss() is None
+
+
+def test_diagnose_gap_exposes_margin_decay_lever():
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--demo-margin-decay"' in src
+    assert 'overrides["DEMO_MARGIN_DECAY_EPISODES"] = demo_margin_decay' in src

@@ -262,6 +262,10 @@ class Config:
     # route in the demo store, so the margin loss becomes a pure prior on the route
     # OPENING — the segment the backward ladder's win-banking never reaches (0 = all).
     DEMO_OPENING_ONLY_STEPS: int = 0
+    # Linear decay of the margin weight to zero over this many GLOBAL episodes
+    # (0 = constant). RUN-62 showed constant weight is an early accelerant but a
+    # deep-regime anchor; decay keeps the first phase and removes the second.
+    DEMO_MARGIN_DECAY_EPISODES: int = 0
     # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
     # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
     CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
@@ -989,6 +993,10 @@ class Config:
         self._require(
             self.DEMO_OPENING_ONLY_STEPS >= 0,
             "DEMO_OPENING_ONLY_STEPS must be non-negative (0 = keep full routes)",
+        )
+        self._require(
+            self.DEMO_MARGIN_DECAY_EPISODES >= 0,
+            "DEMO_MARGIN_DECAY_EPISODES must be non-negative (0 = constant weight)",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

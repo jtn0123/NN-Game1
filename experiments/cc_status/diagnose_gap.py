@@ -467,6 +467,7 @@ def run_diagnosis(
     demo_td_weight: float | None = None,
     demo_margin_weight: float | None = None,
     demo_opening_steps: int = 0,
+    demo_margin_decay: int = 0,
     demo_backward: bool = False,
     demo_backward_retreat: int = 0,
     demo_backward_wins: int = 0,
@@ -592,6 +593,10 @@ def run_diagnosis(
             # Phase-2 opening imitation: demo store keeps only each route's first
             # N transitions, making the margin loss a pure route-opening prior.
             overrides["DEMO_OPENING_ONLY_STEPS"] = demo_opening_steps
+        if demo_margin_decay:
+            # RUN-62 iteration: linear-decay the margin weight to zero over this
+            # many GLOBAL episodes — keep the early accelerant, drop the anchor.
+            overrides["DEMO_MARGIN_DECAY_EPISODES"] = demo_margin_decay
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -1584,6 +1589,14 @@ def main(argv: list[str] | None = None) -> int:
         "and --demo-td-weight 0). 0 = full routes.",
     )
     parser.add_argument(
+        "--demo-margin-decay",
+        type=int,
+        default=0,
+        metavar="EPISODES",
+        help="Linearly decay the demo margin weight to zero over this many "
+        "GLOBAL episodes (0 = constant weight for the whole run).",
+    )
+    parser.add_argument(
         "--save-weights",
         action="store_true",
         help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
@@ -1639,6 +1652,7 @@ def main(argv: list[str] | None = None) -> int:
         demo_td_weight=args.demo_td_weight,
         demo_margin_weight=args.demo_margin_weight,
         demo_opening_steps=args.demo_opening_steps,
+        demo_margin_decay=args.demo_margin_decay,
         demo_backward=args.demo_backward,
         demo_backward_retreat=args.demo_backward_retreat,
         demo_backward_wins=args.demo_backward_wins,
