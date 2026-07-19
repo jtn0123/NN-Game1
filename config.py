@@ -266,6 +266,12 @@ class Config:
     # (0 = constant). RUN-62 showed constant weight is an early accelerant but a
     # deep-regime anchor; decay keeps the first phase and removes the second.
     DEMO_MARGIN_DECAY_EPISODES: int = 0
+    # Re-ignition (RUN-63 insight): from this GLOBAL episode on, the margin scale
+    # floors at DEMO_MARGIN_REIGNITE_SCALE — for when the backward ladder's
+    # frontier reaches the demo-covered opening, where episode starts and demo
+    # states finally overlap and imitation aligns instead of anchoring (0 = off).
+    DEMO_MARGIN_REIGNITE_EPISODE: int = 0
+    DEMO_MARGIN_REIGNITE_SCALE: float = 0.5
     # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
     # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
     CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
@@ -997,6 +1003,14 @@ class Config:
         self._require(
             self.DEMO_MARGIN_DECAY_EPISODES >= 0,
             "DEMO_MARGIN_DECAY_EPISODES must be non-negative (0 = constant weight)",
+        )
+        self._require(
+            self.DEMO_MARGIN_REIGNITE_EPISODE >= 0,
+            "DEMO_MARGIN_REIGNITE_EPISODE must be non-negative (0 = off)",
+        )
+        self._require(
+            0.0 <= self.DEMO_MARGIN_REIGNITE_SCALE <= 1.0,
+            "DEMO_MARGIN_REIGNITE_SCALE must be in [0, 1]",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,

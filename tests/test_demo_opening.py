@@ -151,3 +151,55 @@ def test_diagnose_gap_exposes_margin_decay_lever():
     src = inspect.getsource(dg)
     assert '"--demo-margin-decay"' in src
     assert 'overrides["DEMO_MARGIN_DECAY_EPISODES"] = demo_margin_decay' in src
+
+
+# --- re-ignition (RUN-63 iteration) -----------------------------------------
+
+
+def test_reignite_config_defaults_and_validation():
+    config = Config()
+    assert config.DEMO_MARGIN_REIGNITE_EPISODE == 0
+    assert config.DEMO_MARGIN_REIGNITE_SCALE == 0.5
+    with pytest.raises(Exception):
+        Config(DEMO_MARGIN_REIGNITE_EPISODE=-1)
+    with pytest.raises(Exception):
+        Config(DEMO_MARGIN_REIGNITE_SCALE=1.5)
+
+
+def test_reignite_schedule_v_shape():
+    """Scale must decay to zero, stay there, then floor at the re-ignite scale."""
+    agent = _cpu_agent(
+        DEMO_MARGIN_DECAY_EPISODES=100,
+        DEMO_MARGIN_REIGNITE_EPISODE=300,
+        DEMO_MARGIN_REIGNITE_SCALE=0.4,
+    )
+    agent.decay_epsilon(episode=50)
+    assert agent._demo_margin_scale == pytest.approx(0.5)  # decaying
+    agent.decay_epsilon(episode=200)
+    assert agent._demo_margin_scale == 0.0  # dead zone between decay and reignite
+    agent.decay_epsilon(episode=300)
+    assert agent._demo_margin_scale == pytest.approx(0.4)  # re-ignited
+    agent.decay_epsilon(episode=5000)
+    assert agent._demo_margin_scale == pytest.approx(0.4)  # holds
+
+
+def test_reignite_floor_never_lowers_live_decay():
+    """If re-ignition overlaps the decay window, it floors — never clips — the scale."""
+    agent = _cpu_agent(
+        DEMO_MARGIN_DECAY_EPISODES=100,
+        DEMO_MARGIN_REIGNITE_EPISODE=10,
+        DEMO_MARGIN_REIGNITE_SCALE=0.2,
+    )
+    agent.decay_epsilon(episode=10)
+    assert agent._demo_margin_scale == pytest.approx(0.9)  # decay still above floor
+
+
+def test_diagnose_gap_exposes_reignite_lever():
+    import inspect
+
+    import experiments.cc_status.diagnose_gap as dg
+
+    src = inspect.getsource(dg)
+    assert '"--demo-margin-reignite"' in src
+    assert 'overrides["DEMO_MARGIN_REIGNITE_EPISODE"] = demo_margin_reignite' in src
+    assert 'overrides["DEMO_MARGIN_REIGNITE_SCALE"] = demo_margin_reignite_scale' in src

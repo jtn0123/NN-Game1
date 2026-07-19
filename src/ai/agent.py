@@ -983,7 +983,16 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         # during the epsilon warmup window, so update before the warmup gate.
         decay_eps = int(getattr(self.config, "DEMO_MARGIN_DECAY_EPISODES", 0))
         if decay_eps > 0 and episode is not None:
-            self._demo_margin_scale = max(0.0, 1.0 - episode / decay_eps)
+            scale = max(0.0, 1.0 - episode / decay_eps)
+            # Re-ignition: once the ladder frontier lives in the demo-covered
+            # opening, floor the scale so imitation fires where it aligns.
+            reignite = int(getattr(self.config, "DEMO_MARGIN_REIGNITE_EPISODE", 0))
+            if reignite > 0 and episode >= reignite:
+                scale = max(
+                    scale,
+                    float(getattr(self.config, "DEMO_MARGIN_REIGNITE_SCALE", 0.5)),
+                )
+            self._demo_margin_scale = scale
 
         warmup = getattr(self.config, "EPSILON_WARMUP", 0)
 

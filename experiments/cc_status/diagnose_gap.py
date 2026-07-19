@@ -468,6 +468,8 @@ def run_diagnosis(
     demo_margin_weight: float | None = None,
     demo_opening_steps: int = 0,
     demo_margin_decay: int = 0,
+    demo_margin_reignite: int = 0,
+    demo_margin_reignite_scale: float = 0.5,
     demo_backward: bool = False,
     demo_backward_retreat: int = 0,
     demo_backward_wins: int = 0,
@@ -597,6 +599,11 @@ def run_diagnosis(
             # RUN-62 iteration: linear-decay the margin weight to zero over this
             # many GLOBAL episodes — keep the early accelerant, drop the anchor.
             overrides["DEMO_MARGIN_DECAY_EPISODES"] = demo_margin_decay
+        if demo_margin_reignite:
+            # RUN-63 iteration: floor the scale again from this episode, once the
+            # frontier reaches the demo-covered opening where imitation aligns.
+            overrides["DEMO_MARGIN_REIGNITE_EPISODE"] = demo_margin_reignite
+            overrides["DEMO_MARGIN_REIGNITE_SCALE"] = demo_margin_reignite_scale
     if use_cnn:
         # Position-preserving spatial CNN (SpatialDQN, flatten — NOT global-average-pool,
         # which was disconfirmed). Tests whether a conv inductive bias beats the flat MLP.
@@ -1597,6 +1604,22 @@ def main(argv: list[str] | None = None) -> int:
         "GLOBAL episodes (0 = constant weight for the whole run).",
     )
     parser.add_argument(
+        "--demo-margin-reignite",
+        type=int,
+        default=0,
+        metavar="EPISODE",
+        help="From this GLOBAL episode on, floor the decayed margin scale at "
+        "--demo-margin-reignite-scale (imitation re-fires once the ladder "
+        "frontier reaches the demo-covered opening). 0 = off.",
+    )
+    parser.add_argument(
+        "--demo-margin-reignite-scale",
+        type=float,
+        default=0.5,
+        metavar="S",
+        help="Scale floor applied from --demo-margin-reignite onward.",
+    )
+    parser.add_argument(
         "--save-weights",
         action="store_true",
         help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
@@ -1653,6 +1676,8 @@ def main(argv: list[str] | None = None) -> int:
         demo_margin_weight=args.demo_margin_weight,
         demo_opening_steps=args.demo_opening_steps,
         demo_margin_decay=args.demo_margin_decay,
+        demo_margin_reignite=args.demo_margin_reignite,
+        demo_margin_reignite_scale=args.demo_margin_reignite_scale,
         demo_backward=args.demo_backward,
         demo_backward_retreat=args.demo_backward_retreat,
         demo_backward_wins=args.demo_backward_wins,
