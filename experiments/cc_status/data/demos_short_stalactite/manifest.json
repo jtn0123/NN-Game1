@@ -1,0 +1,12 @@
+[
+  {
+    "level": 4,
+    "name": "Stalactite Chasm",
+    "status": "won",
+    "env_steps": 394585,
+    "archive": 9169,
+    "best_remaining": 0,
+    "exit_unlocked_seen": true,
+    "trace_len": 2652
+  }
+]
