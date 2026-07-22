@@ -32,7 +32,8 @@ progress; cp1252 crashes on the harness's emoji).
 |---|---|---|---|---|
 | M4 MacBook (14C) | stock | canceled at 4,869 eps (81%) | 1,523 (partial avg) | reference only — user decision 2026-07-21: all testing moves to the rig; treat M4 as "slightly faster" and free for daily use |
 | 9800X3D rig (8C/16T) | stock, native Windows | 92.9 min | 1,389 | torch 2.13 Win, defaults |
-| **9800X3D rig, WSL2 Ubuntu** | stock, Linux runtime | **79.7 min** | **1,562** | **WINNER: +12.5% over native Windows, ahead of the M4 reference. Adopted as the rig's standard runtime (Python 3.12.13 via uv, repo in ext4 at ~/nn).** |
+| 9800X3D rig, WSL2 Ubuntu | stock, Linux runtime | 79.7 min | 1,562 | +12.5% over native; adopted runtime (py3.12.13/uv, ext4 ~/nn) |
+| **9800X3D rig, WSL2 TUNED** | + _current_target memo (9675b94) | **70.9 min** | **1,754** | **OFFICIAL OPERATING SPEC (2026-07-22): +26.3% over native-Windows start, +15% over the M4 reference. All production campaigns run this config.** |
 
 ## Lever board (research-ranked 2026-07-21; one at a time, every row re-runs the standard bench)
 
