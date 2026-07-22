@@ -38,7 +38,7 @@ progress; cp1252 crashes on the harness's emoji).
 
 | # | Lever | Machine | Expected | Effort | Status |
 |---|---|---|---|---|---|
-| P1 | Thread hygiene: `OMP_WAIT_POLICY=PASSIVE`, `torch.set_num_threads` sweep {1,2,4}, interop=1 — spinning OMP workers currently steal cycles from the GIL-bound env loop | both | best free win | trivial | queued |
+| P1 | Thread hygiene: OMP thread sweep + PASSIVE wait | both | — | trivial | **DEAD (2026-07-22): defaults 1,411 beat OMP=1 (1,276), OMP=2 (925), OMP=4 (766), OMP=1+default-wait (1,265) on matched 1,500-ep probes. Torch's heuristics win; do not override.** |
 | P2 | Profile split (py-spy): env-step vs act() vs learn() vs PER — everything below re-ranks on this | both | information | 30 min | queued |
 | P3 | Freebies: `torch.inference_mode()` in act, `set_flush_denormal(True)` | both | +0–10% | small | queued |
 | P4 | **Learner in a background thread** (torch C++ ops release the GIL → learn() overlaps env stepping) | both | removes learn() from critical path | small-med | queued |
