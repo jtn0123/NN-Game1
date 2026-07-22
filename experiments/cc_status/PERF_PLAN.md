@@ -39,10 +39,10 @@ progress; cp1252 crashes on the harness's emoji).
 | # | Lever | Machine | Expected | Effort | Status |
 |---|---|---|---|---|---|
 | P1 | Thread hygiene: OMP thread sweep + PASSIVE wait | both | — | trivial | **DEAD (2026-07-22): defaults 1,411 beat OMP=1 (1,276), OMP=2 (925), OMP=4 (766), OMP=1+default-wait (1,265) on matched 1,500-ep probes. Torch's heuristics win; do not override.** |
-| P2 | Profile split (py-spy): env-step vs act() vs learn() vs PER — everything below re-ranks on this | both | information | 30 min | queued |
+| P2 | Profile split (py-spy) | both | information | 30 min | **DONE (2026-07-22): env code ~35% (─current_target alone 14.9%, geometry helpers ~12%), PER sample_no_copy 8.9%, torch total only ~14% — the net was never the bottleneck. Profile: pyspy_profile.json (rig). Levers re-ranked accordingly.** |
 | P3 | Freebies: `torch.inference_mode()` in act, `set_flush_denormal(True)` | both | +0–10% | small | queued |
 | P4 | **Learner in a background thread** (torch C++ ops release the GIL → learn() overlaps env stepping) | both | removes learn() from critical path | small-med | queued |
-| P5 | Numba `@njit` game-step kernels (flatten physics state to numpy first) | both | 10–100× on kernels | 1–3 days | queued |
+| P5 | Hot-spot fixes from the profile (then Numba on what remains) | both | large | incremental | **first fix LANDED (commit 9675b94): _current_target memo + math.hypot = 1,558 vs 1,411 control (+10.4%) on matched probes; 5 correctness guards. Next candidates: geometry-helper caching (~12%), _code_grid base-grid cache (3%), PER sampling (8.9%).** |
 | P6 | **Parallel campaigns** (2–3 independent runs per machine) | rig esp. | ~linear ×N | none | ready now |
 | P7 | Vectorize PER sampling (`np.searchsorted` stratified + batched priority updates) | both | kills Python-loop tail | half day | queued |
 | P8 | PufferLib-style multiprocess envs (shared-mem obs, several envs/worker, batch-as-ready) — NOT naive AsyncVectorEnv (regresses for cheap envs per Gymnasium's own docs) | both | 3–6× env throughput | large | after P5 |
