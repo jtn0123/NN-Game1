@@ -258,6 +258,20 @@ class Config:
     DEMO_MARGIN_WEIGHT: float = 1.0
     DEMO_TD_WEIGHT: float = 1.0
     DEMO_PRETRAIN_STEPS: int = 0  # demo-only gradient steps before env interaction
+    # Opening-focused imitation (phase 2): keep only the first N steps of each demo
+    # route in the demo store, so the margin loss becomes a pure prior on the route
+    # OPENING — the segment the backward ladder's win-banking never reaches (0 = all).
+    DEMO_OPENING_ONLY_STEPS: int = 0
+    # Linear decay of the margin weight to zero over this many GLOBAL episodes
+    # (0 = constant). RUN-62 showed constant weight is an early accelerant but a
+    # deep-regime anchor; decay keeps the first phase and removes the second.
+    DEMO_MARGIN_DECAY_EPISODES: int = 0
+    # Re-ignition (RUN-63 insight): from this GLOBAL episode on, the margin scale
+    # floors at DEMO_MARGIN_REIGNITE_SCALE — for when the backward ladder's
+    # frontier reaches the demo-covered opening, where episode starts and demo
+    # states finally overlap and imitation aligns instead of anchoring (0 = off).
+    DEMO_MARGIN_REIGNITE_EPISODE: int = 0
+    DEMO_MARGIN_REIGNITE_SCALE: float = 0.5
     # Backward curriculum: probability a TRAINING episode starts mid-route by replaying
     # a random 10-85% prefix of a winning demo (imported set only; eval unaffected).
     CRYSTAL_CAVES_DEMO_RESET_P: float = 0.0
@@ -981,6 +995,22 @@ class Config:
         self._require(
             self.CRYSTAL_CAVES_DEMO_BACKWARD_DEEP >= 0,
             "CRYSTAL_CAVES_DEMO_BACKWARD_DEEP must be non-negative (0 = off)",
+        )
+        self._require(
+            self.DEMO_OPENING_ONLY_STEPS >= 0,
+            "DEMO_OPENING_ONLY_STEPS must be non-negative (0 = keep full routes)",
+        )
+        self._require(
+            self.DEMO_MARGIN_DECAY_EPISODES >= 0,
+            "DEMO_MARGIN_DECAY_EPISODES must be non-negative (0 = constant weight)",
+        )
+        self._require(
+            self.DEMO_MARGIN_REIGNITE_EPISODE >= 0,
+            "DEMO_MARGIN_REIGNITE_EPISODE must be non-negative (0 = off)",
+        )
+        self._require(
+            0.0 <= self.DEMO_MARGIN_REIGNITE_SCALE <= 1.0,
+            "DEMO_MARGIN_REIGNITE_SCALE must be in [0, 1]",
         )
         self._require(
             0.0 <= self.CRYSTAL_CAVES_REVERSE_EXIT_CURRICULUM_P <= 1.0,
