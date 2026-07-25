@@ -266,6 +266,12 @@ class Config:
     # (0 = constant). RUN-62 showed constant weight is an early accelerant but a
     # deep-regime anchor; decay keeps the first phase and removes the second.
     DEMO_MARGIN_DECAY_EPISODES: int = 0
+    # Full-state snapshots (pause/resume without progress loss): every N GLOBAL
+    # episodes, bundle nets + optimizer + replay buffer + counters + ladder to
+    # <run>/snapshots/ (~1.4GB each; SNAPSHOT_KEEP rotation caps disk ≤ ~3GB,
+    # honoring the 5GB per-device budget). 0 = off.
+    SNAPSHOT_EVERY_EPISODES: int = 0
+    SNAPSHOT_KEEP: int = 2
     # Re-ignition (RUN-63 insight): from this GLOBAL episode on, the margin scale
     # floors at DEMO_MARGIN_REIGNITE_SCALE — for when the backward ladder's
     # frontier reaches the demo-covered opening, where episode starts and demo
@@ -1003,6 +1009,14 @@ class Config:
         self._require(
             self.DEMO_MARGIN_DECAY_EPISODES >= 0,
             "DEMO_MARGIN_DECAY_EPISODES must be non-negative (0 = constant weight)",
+        )
+        self._require(
+            self.SNAPSHOT_EVERY_EPISODES >= 0,
+            "SNAPSHOT_EVERY_EPISODES must be non-negative (0 = off)",
+        )
+        self._require(
+            self.SNAPSHOT_KEEP >= 1,
+            "SNAPSHOT_KEEP must be at least 1",
         )
         self._require(
             self.DEMO_MARGIN_REIGNITE_EPISODE >= 0,

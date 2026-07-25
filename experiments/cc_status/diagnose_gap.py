@@ -470,6 +470,8 @@ def run_diagnosis(
     demo_margin_decay: int = 0,
     demo_margin_reignite: int = 0,
     demo_margin_reignite_scale: float = 0.5,
+    snapshot_every: int = 0,
+    resume_snapshot: str | None = None,
     demo_backward: bool = False,
     demo_backward_retreat: int = 0,
     demo_backward_wins: int = 0,
@@ -726,6 +728,28 @@ def run_diagnosis(
         trainer = prepare_trainer(
             config, episodes=episodes, vec_envs=vec_envs, transfer_weights=transfer_weights
         )
+        if resume_snapshot:
+            # Full-state resume: nets + optimizer + replay buffer + counters +
+            # ladder, so training continues instead of self-destructing (the
+            # weights-only "resume law"). Episode-driven schedules (epsilon
+            # warmup, demo-margin decay) continue via the epsilon offset.
+            from src.ai.snapshot import load_training_snapshot
+            from src.game.crystal_caves import CrystalCaves as _CC
+
+            snap_meta = load_training_snapshot(trainer.agent, resume_snapshot)
+            if snap_meta["ladder_offsets"]:
+                _CC._BC_SHARED_OFFSET.clear()
+                _CC._BC_SHARED_WINS.clear()
+                _CC._BC_SHARED_OFFSET.update(snap_meta["ladder_offsets"])
+                _CC._BC_SHARED_WINS.update(snap_meta["ladder_wins"])
+            if hasattr(trainer, "epsilon_episode_offset"):
+                trainer.epsilon_episode_offset = -int(snap_meta["episode"])
+            print(
+                f"  [resume] FULL-STATE from {resume_snapshot} "
+                f"(ep {snap_meta['episode']}, buffer {trainer.agent.memory._size}, "
+                f"ladder {snap_meta['ladder_offsets'] or 'empty'})",
+                flush=True,
+            )
         if trainer.agent.epsilon < TUTORIAL_MIN_EPSILON:
             trainer.agent.epsilon = TUTORIAL_MIN_EPSILON
 
@@ -795,6 +819,18 @@ def run_diagnosis(
                     (run_dir / f"ladder_seed{seed}.json").write_text(
                         json.dumps({str(k): v for k, v in _CC._BC_SHARED_OFFSET.items()})
                     )
+                if snapshot_every and milestone % snapshot_every == 0:
+                    from src.ai.snapshot import save_training_snapshot
+
+                    snap_path = save_training_snapshot(
+                        trainer.agent,
+                        run_dir / "snapshots",
+                        episode=milestone,
+                        ladder_offsets=dict(_CC._BC_SHARED_OFFSET),
+                        ladder_wins=dict(_CC._BC_SHARED_WINS),
+                        keep=int(getattr(config, "SNAPSHOT_KEEP", 2)),
+                    )
+                    print(f"  [snapshot] full state -> {snap_path}", flush=True)
             if checkpoint_every > 0:
                 curve.append(
                     {"seed": seed, "episode": milestone, "train": tr, "test": te, "mean_q": mean_q}
@@ -1620,6 +1656,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Scale floor applied from --demo-margin-reignite onward.",
     )
     parser.add_argument(
+        "--snapshot-every",
+        type=int,
+        default=0,
+        metavar="EPISODES",
+        help="Save a FULL training-state snapshot (nets+optimizer+replay buffer+"
+        "counters+ladder, ~1.4GB) every N global episodes to <out>/snapshots/, "
+        "keep-2 rotation. Use a multiple of --checkpoint-every. 0 = off.",
+    )
+    parser.add_argument(
+        "--resume-snapshot",
+        default=None,
+        metavar="PATH",
+        help="Resume training from a full-state snapshot bundle (continues the "
+        "buffer, optimizer, schedules, and ladder — unlike --resume-weights).",
+    )
+    parser.add_argument(
         "--save-weights",
         action="store_true",
         help="Persist per-milestone policy weights (policy_seed<S>_ep<N>.pth) so any "
@@ -1678,6 +1730,8 @@ def main(argv: list[str] | None = None) -> int:
         demo_margin_decay=args.demo_margin_decay,
         demo_margin_reignite=args.demo_margin_reignite,
         demo_margin_reignite_scale=args.demo_margin_reignite_scale,
+        snapshot_every=args.snapshot_every,
+        resume_snapshot=args.resume_snapshot,
         demo_backward=args.demo_backward,
         demo_backward_retreat=args.demo_backward_retreat,
         demo_backward_wins=args.demo_backward_wins,
