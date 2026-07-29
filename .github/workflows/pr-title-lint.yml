@@ -25,8 +25,15 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # Dependabot emits two title styles depending on whether the update
+          # is grouped and whether commit-message.prefix is configured:
+          #   "Bump foo from 1.0 to 1.1"
+          #   "build(deps): bump the python group with 8 updates"
+          # Accept both; the second form is already conventional-commit clean.
           if [[ "${PR_TITLE}" =~ ^Bump[[:space:]].+[[:space:]]from[[:space:]].+[[:space:]]to[[:space:]].+$ ]]; then
             echo "Dependabot bump title accepted: ${PR_TITLE}"
+          elif [[ "${PR_TITLE}" =~ ^(build|chore|ci|fix)(\(.+\))?!?:[[:space:]].+$ ]]; then
+            echo "Dependabot conventional-commit title accepted: ${PR_TITLE}"
           else
             echo "Unexpected Dependabot title: ${PR_TITLE}" >&2
             exit 1
