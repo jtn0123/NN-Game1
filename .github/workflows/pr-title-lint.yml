@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Allow Dependabot-generated bump titles
-        if: github.actor == 'dependabot[bot]'
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
@@ -40,7 +40,7 @@ jobs:
           fi
 
       - name: Check title matches Conventional Commits
-        if: github.actor != 'dependabot[bot]'
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
         uses: amannn/action-semantic-pull-request@v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
