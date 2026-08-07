@@ -111,6 +111,7 @@ class DemoStore:
             else 1
         )
         gamma = float(config.GAMMA)
+        opening = int(getattr(config, "DEMO_OPENING_ONLY_STEPS", 0))
 
         all_s: List[np.ndarray] = []
         all_a: List[int] = []
@@ -132,7 +133,10 @@ class DemoStore:
             # R = sum_{i<n} gamma^i r_{t+i}; next_state/dones taken at t+n (or the
             # terminal), n_step_lengths = the actual horizon used.
             length = len(episode)
-            for t in range(length):
+            # Opening-only mode keeps just the route's first `opening` transitions;
+            # n-step tails may still look past the cutoff into the full episode.
+            kept = min(length, opening) if opening > 0 else length
+            for t in range(kept):
                 horizon = min(n_step, length - t)
                 ret = 0.0
                 for i in range(horizon):

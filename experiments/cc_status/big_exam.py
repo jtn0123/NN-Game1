@@ -58,6 +58,10 @@ def main() -> None:
     sd = torch.load(ckpt, map_location="cpu")
     trainer.agent.policy_net.load_state_dict(sd)
     trainer.agent.epsilon = 0.0
+    if mode.startswith("eps"):
+        # "eps2" = 2% random actions: the exploration floor the TRAINING policy
+        # actually played with — "policy as defined" includes epsilon.
+        trainer.agent.epsilon = float(mode[3:]) / 100.0
     if mode == "det":
         trainer.agent.policy_net.eval()
 
