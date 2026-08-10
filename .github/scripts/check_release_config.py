@@ -65,11 +65,22 @@ def pr_title_lint_types(workflow_text: str) -> list[str]:
     return [line.strip() for line in match.group("body").splitlines() if line.strip()]
 
 
+def require_action(workflow_text: str, action: str, context: str) -> None:
+    """Assert an action is used, without pinning the assertion to a version.
+
+    Pinning the expected version here means every Dependabot action bump fails
+    this check. The contract we care about is "this workflow uses this action",
+    not "it uses exactly v6".
+    """
+    if not re.search(re.escape(action) + r"@[\w.+-]+", workflow_text):
+        raise ValueError(f"{context} missing {action!r}")
+
+
 def validate_pr_title_lint(workflow_text: str) -> None:
     require_equal("PR title lint types", pr_title_lint_types(workflow_text), EXPECTED_ALLOWED_TAGS)
+    require_action(workflow_text, "action-semantic-pull-request", "PR title lint")
     for required in (
         "Allow Dependabot-generated bump titles",
-        "action-semantic-pull-request@v6.1.1",
         "subjectPattern:",
         "requireScope: false",
     ):
@@ -93,15 +104,10 @@ def validate_release_workflow(workflow_text: str) -> None:
 
 
 def validate_ci_workflow(workflow_text: str) -> None:
-    required_snippets = [
-        "python .github/scripts/check_release_config.py",
-        "actions/checkout@v7",
-        "actions/setup-python@v6",
-        "actions/setup-node@v6",
-    ]
-    for snippet in required_snippets:
-        if snippet not in workflow_text:
-            raise ValueError(f"CI workflow missing {snippet!r}")
+    if "python .github/scripts/check_release_config.py" not in workflow_text:
+        raise ValueError("CI workflow missing the release-config check step")
+    for action in ("actions/checkout", "actions/setup-python", "actions/setup-node"):
+        require_action(workflow_text, action, "CI workflow")
 
 
 def main() -> int:
