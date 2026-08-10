@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, List, Optional, Tuple
 
 import numpy as np
@@ -447,6 +448,22 @@ class CrystalCavesLogicMixin:
 
     def _current_target(self: Any) -> Tuple[Optional[Tuple[str, int, int]], float]:
         player_x, player_y = self._player_center()
+        # Profiling (2026-07-22): this is the single hottest function in training
+        # (14.9% self-time) and is called up to 3x per step with identical state
+        # (target features, reward shaping, compass). Memoize per (step, player
+        # position, objective state); the key covers everything the result reads,
+        # so teleporting starts and mid-step collections can never serve stale.
+        key = (
+            self.steps,
+            player_x,
+            player_y,
+            len(self.crystals),
+            len(self.used_switches),
+            self.exit_unlocked,
+        )
+        cached = getattr(self, "_current_target_memo", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
         candidates: List[Tuple[str, int, int]] = []
 
         unused_switches = self.switches - self.used_switches
@@ -469,12 +486,16 @@ class CrystalCavesLogicMixin:
         for target in candidates:
             _, col, row = target
             target_x, target_y = self._tile_center((col, row))
-            distance = float(np.hypot(target_x - player_x, target_y - player_y))
+            # math.hypot: same IEEE result as np.hypot without numpy's ~50x
+            # scalar-call overhead — this loop runs per candidate per call.
+            distance = math.hypot(target_x - player_x, target_y - player_y)
             if distance < best_distance:
                 best_target = target
                 best_distance = distance
 
-        return best_target, best_distance
+        result = (best_target, best_distance)
+        self._current_target_memo = (key, result)
+        return result
 
     def _target_features(self: Any) -> Tuple[float, float, float, float]:
         target, distance = self._current_target()
