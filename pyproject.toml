@@ -31,6 +31,7 @@ test = [
 dev = [
     "build>=1.2.0",
     "black>=23.0.0",
+    "click>=8.3.3",  # patched for PYSEC-2026-2132; audit resolves outside constraints.txt
     "mypy>=1.0.0",
     "pip-audit>=2.7.0",
     "pre-commit>=4.6.0",
