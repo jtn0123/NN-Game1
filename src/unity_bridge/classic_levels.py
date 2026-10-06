@@ -5,11 +5,13 @@ from dataclasses import replace
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS
 
+from .classic_layouts import CLASSIC_LEVELS
+
 
 def apply_classic_caves(game: CrystalCaves) -> None:
     if game.CAVES is not HANDCRAFTED_LEVELS:
         return
-    caves = list(game.CAVES)
+    caves = list(CLASSIC_LEVELS)
     # Connect existing platforms, preserving every collectible, gate and spawn.
     # The training maps remain unchanged; these repairs accompany human tuning.
     ladders = {3: ((13, 3, 6), (23, 3, 6)), 9: ((8, 5, 16),)}

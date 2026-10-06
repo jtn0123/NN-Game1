@@ -119,7 +119,8 @@ def test_lower_jump_can_reach_repaired_cave_objectives(level, monkeypatch):
     from experiments.cc_status import level_reach as reach
 
     classic = CaveSession().game
-    training = CaveSession(classic_controls=False).game
+    from src.unity_bridge.classic_layouts import CLASSIC_LEVELS
+
     for field, value in {
         "MOVE_SPEED": classic.MOVE_SPEED,
         "AIR_SPEED": classic.AIR_SPEED,
@@ -138,11 +139,11 @@ def test_lower_jump_can_reach_repaired_cave_objectives(level, monkeypatch):
     ]
     monkeypatch.setattr(reach, "MAX_FRAMES", 240)
     monkeypatch.setattr(reach, "_MACROS", macros)
-    before = reach.analyze_gated(training.CAVES[level].layout)
+    before = reach.analyze_gated(CLASSIC_LEVELS[level].layout)
     assert not before["gated_winnable"]
     after = reach.analyze_gated(classic.CAVES[level].layout)
     assert after["gated_winnable"] and not after["search_truncated"]
-    for old_row, new_row in zip(training.CAVES[level].layout, classic.CAVES[level].layout):
+    for old_row, new_row in zip(CLASSIC_LEVELS[level].layout, classic.CAVES[level].layout):
         assert len(old_row) == len(new_row)
         for old, new in zip(old_row, new_row):
             assert old == new or old in ".#" and new == "H"
@@ -508,3 +509,18 @@ def test_creature_identities_survive_patrols_and_tall_art_clears_the_entire_rout
             if entity["id"].startswith("enemy_")
         }
     assert roster == {"bat_enemy", "eye_flyer", "slug_enemy", "walking_rock", "dinosaur_enemy"}
+
+
+def test_training_rebalances_do_not_move_the_accepted_classic_game():
+    from src.game.crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS
+    from src.unity_bridge.classic_layouts import CLASSIC_LEVELS
+
+    training = CaveSession(classic_controls=False).game
+    classic = CaveSession().game
+    assert training.CAVES is HANDCRAFTED_LEVELS
+    assert classic.CAVES is not HANDCRAFTED_LEVELS
+    assert CLASSIC_LEVELS[0].layout[21][8] == "^"
+    assert classic.CAVES[0].layout[21][8] == "t"
+    assert CLASSIC_LEVELS[0].layout != HANDCRAFTED_LEVELS[0].layout
+    # Native terrain/catalog are exported from this fixed human-game profile.
+    assert sum(row.count("*") for row in classic.CAVES[0].layout) == 32

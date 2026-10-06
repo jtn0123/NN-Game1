@@ -16,6 +16,8 @@ Crystal Caves has its own Unity game experience, with Python retaining authorita
 | Accessibility | Reduced motion, damage flashes, HUD position/scale/margins/contrast, item symbols and screenshot HUD preference. |
 | Screenshot | Paused cave with frozen visual time, optional hidden HUD, F12 capture and visible saved-path feedback. |
 
+The accepted game layouts are pinned in `src/unity_bridge/classic_layouts.py`; training-map rebalances therefore cannot move exported terrain, collectibles or trap sites. The newer research layouts remain available through the training profile.
+
 The live cave preview stays paused while settings change. Presets preserve window dimensions, audio and accessibility choices. Reduced motion keeps essential enemy/lift/projectile/hazard poses. World grading leaves HUD/menu colors unchanged. Rendering frame caps retain the simulation's fixed 60 Hz clock.
 
 ## Native validation

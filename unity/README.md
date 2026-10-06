@@ -53,6 +53,8 @@ from the training game's simplified creatures. The original enemy-hurt and
 empty-gun effects are used. The complete original enemy roster and original
 cave layouts have not been reproduced.
 
+The accepted sixteen game layouts are pinned in `src/unity_bridge/classic_layouts.py`,
+so training-map rebalances cannot move native terrain, pickups or trap sites.
 Python advances the repository's game simulation and optionally runs a trained PyTorch policy.
 Unity sessions use a classic control profile: 140 world pixels per second,
 immediate stopping on release and an approximately 80-pixel, one-second jump.
@@ -117,7 +119,7 @@ green alongside `ALL CRYSTALS / EXIT OPEN`. The exit still needs to be reached.
 Health and the all-crystals-then-exit win condition remain in effect. Normal
 Unity play removes the AI training time and inactivity cutoffs and their HUD
 countdown. Two caves have small ladder connections for the lower jump; the
-training maps retain their original layouts. Geometry checks reach every
+training maps follow their separate experimental definitions. Geometry checks reach every
 crystal, switch and exit in all sixteen caves with the classic profile; these
 checks exclude enemies, hazards and full winning-route ordering.
 
