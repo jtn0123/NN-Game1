@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "error": "",
+  "screenshot": "",
+  "checks": [
+    "Native player advances without V-sync",
+    "V-sync advances native frames after initialization",
+    "V-sync can return to capped presentation",
+    "Native frame cap renders near 30 FPS",
+    "Native frame cap renders near 60 FPS"
+  ],
+  "skipped": [],
+  "width": 1280,
+  "height": 800
+}

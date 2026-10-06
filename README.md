@@ -1,8 +1,23 @@
-# 🧠 Neural Network Game AI
+# Crystal Caves
 
-A complete, educational implementation of a Deep Q-Learning (DQN) agent that learns to play classic arcade games **in real-time** with a **live neural network visualizer**.
+Explore sixteen handcrafted caves, collect every crystal, and find the exit.
+The Unity game has its own title screen, cave selection, sound settings, pause
+menu and saved cave progress. The cave fills the window during play.
 
-**Supported Games:** 🎮 Breakout | 👾 Space Invaders | 🏓 Pong | 🐍 Snake | ☄️ Asteroids
+```bash
+python scripts/unity_pilot.py
+```
+
+See [the game setup and controls](unity/README.md). The launcher builds Unity when
+needed and runs the original Python simulation locally. No AI checkpoint is
+required to play. An optional AI Lab lets you watch a trained agent and take over.
+
+## AI research workspace
+
+This repository also contains the existing educational Deep Q-Learning (DQN)
+training tools and neural network visualizer for Crystal Caves, Breakout, Space
+Invaders, Pong, Snake and Asteroids. The documentation below covers that separate
+workspace; `main.py` continues to launch the research tools.
 
 ![Project Architecture](docs/architecture.png)
 

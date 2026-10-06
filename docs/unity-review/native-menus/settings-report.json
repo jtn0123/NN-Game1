@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "error": "",
+  "screenshot": "Saved PNG verified; see saved-game.png",
+  "checks": [
+    "Settings preview keeps simulation paused",
+    "Focused graphics row responds to keyboard/controller adjustment",
+    "Shoulder/Tab navigation changes pages",
+    "Back returns to the originating screen",
+    "Screenshot mode can hide HUD and reclaim the camera strip",
+    "Screenshot action writes a PNG and reports its path",
+    "Screenshot back restores options and the normal HUD",
+    "Sound settings update the live audio player",
+    "Sound preview plays the actual raygun cue while settings are paused"
+  ],
+  "skipped": [],
+  "width": 1280,
+  "height": 800
+}
