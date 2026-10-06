@@ -1,0 +1,15 @@
+{
+  "python_regressions": 173,
+  "settings_checks": 16,
+  "native_menus": 9,
+  "native_display_windowed": 4,
+  "native_render": 6,
+  "native_vsync": 5,
+  "total_behavior_checks": 42,
+  "native_bridge": true,
+  "fullscreen": "verified: native apply and revert passed on unlocked desktop, 2026-10-06",
+  "physical_controller": "unverified",
+  "default_pixel_match": true,
+  "world_fx_preserve_hud_pixels": true,
+  "native_display_fullscreen": 2
+}

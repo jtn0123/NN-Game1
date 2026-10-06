@@ -1,0 +1,21 @@
+{
+    "success": true,
+    "checks": [
+        "Retro defaults preserve the original presentation",
+        "Corrupt/out-of-range values are bounded",
+        "All settings round-trip through JSON",
+        "Legacy HUD, motion and audio preferences migrate",
+        "Malformed saved data falls back safely",
+        "Enhanced preset preserves display/audio/accessibility",
+        "Low Power reduces presentation work",
+        "Current Retro restores baseline effects",
+        "Manual overrides mark the preset Custom",
+        "Frame cap applies with V-sync disabled",
+        "V-sync controls presentation pacing",
+        "Unlimited frame cap works",
+        "Automated review never writes player preferences",
+        "Navigation wraps backward",
+        "Navigation adjusts and consumes a submit once",
+        "Controller/keyboard back and tab actions share navigation"
+    ]
+}

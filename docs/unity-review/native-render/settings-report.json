@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "error": "",
+  "screenshot": "",
+  "checks": [
+    "World-only CRT/brightness/palette pass is active",
+    "Large HUD reserves its own camera strip",
+    "Reduced motion keeps the creature's actual movement pose",
+    "Reduced motion retains the authoritative gameplay snapshot",
+    "Oversized integer scaling safely fits the window",
+    "Wide framing fills width without stretching pixel art"
+  ],
+  "skipped": [],
+  "width": 1280,
+  "height": 800
+}

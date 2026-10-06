@@ -230,3 +230,29 @@ runs/
 wandb/
 tensorboard_logs/
 scratchpad_levels.py
+
+# Unity pilot sources and reproducible assets; caches and players stay local.
+unity/[Ll]ibrary/
+unity/[Tt]emp/
+unity/[Oo]bj/
+unity/[Ll]ogs/
+unity/[Uu]ser[Ss]ettings/
+unity/[Bb]uilds/
+unity/*.csproj
+unity/*.sln
+unity/*.slnx
+!unity/Packages/manifest.json
+!unity/Packages/packages-lock.json
+!unity/Assets/Resources/PilotPreview.json
+!unity/Assets/Resources/CaveCatalog.json
+!unity/Assets/Resources/ClassicAudio.json
+!unity/ProjectSettings/*.json
+
+# Native plugin is compiled from source by CaveNativeBuild.
+unity/Assets/Plugins/macOS/libCaveDisplay.dylib
+unity/Assets/Plugins/macOS/libCaveDisplay.dylib.meta
+
+# Keep the large local audit archive out of source control.
+.Codex/ui-ux-audit/
+.Codex/ui-ux-grade-report.md
+!docs/unity-review/**/*.json

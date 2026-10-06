@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "error": "",
+  "screenshot": "",
+  "checks": [
+    "Window size applies with confirmation pending",
+    "Explicit revert restores the prior window dimensions",
+    "Unconfirmed display automatically reverts after 15 seconds",
+    "Fullscreen applies at the display's native size with confirmation",
+    "Fullscreen revert restores the original native window",
+    "Keep commits the requested window size"
+  ],
+  "skipped": [],
+  "width": 960,
+  "height": 600
+}
