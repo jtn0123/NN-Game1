@@ -245,6 +245,7 @@ unity/*.slnx
 !unity/Packages/packages-lock.json
 !unity/Assets/Resources/PilotPreview.json
 !unity/Assets/Resources/CaveCatalog.json
+!unity/Assets/Resources/ClassicAudio.json
 !unity/ProjectSettings/*.json
 
 # Native plugin is compiled from source by CaveNativeBuild.
