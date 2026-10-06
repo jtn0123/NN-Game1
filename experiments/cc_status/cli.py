@@ -142,6 +142,7 @@ def _run_checkpoint_correction_mode(
                 trace_tail_steps=opts.trace_tail_steps,
                 log_every=opts.log_every,
                 report_seconds=opts.report_seconds,
+                objective=opts.objective,
                 label="eval_checkpoint",
             )
         )

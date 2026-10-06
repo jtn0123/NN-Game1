@@ -978,6 +978,22 @@ class Agent(AgentExperimentMixin, AgentPersistenceMixin):
         # Allow epsilon decay even with NoisyNets if EPSILON_START > 0
         # This provides hybrid exploration (NoisyNets + epsilon-greedy fallback)
 
+        # Demo-margin decay rides the same per-episode hook (global episode
+        # numbers in both scalar and vectorized training); it must track even
+        # during the epsilon warmup window, so update before the warmup gate.
+        decay_eps = int(getattr(self.config, "DEMO_MARGIN_DECAY_EPISODES", 0))
+        if decay_eps > 0 and episode is not None:
+            scale = max(0.0, 1.0 - episode / decay_eps)
+            # Re-ignition: once the ladder frontier lives in the demo-covered
+            # opening, floor the scale so imitation fires where it aligns.
+            reignite = int(getattr(self.config, "DEMO_MARGIN_REIGNITE_EPISODE", 0))
+            if reignite > 0 and episode >= reignite:
+                scale = max(
+                    scale,
+                    float(getattr(self.config, "DEMO_MARGIN_REIGNITE_SCALE", 0.5)),
+                )
+            self._demo_margin_scale = scale
+
         warmup = getattr(self.config, "EPSILON_WARMUP", 0)
 
         # Skip decay during warmup period (only if episode is explicitly provided)
