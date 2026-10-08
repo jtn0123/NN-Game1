@@ -6,6 +6,8 @@ from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_handcrafted_levels import HANDCRAFTED_LEVELS
 
 from .classic_layouts import CLASSIC_LEVELS
+from .classic_polish import polish_caves
+from .classic_secrets import ClassicSecrets
 
 
 def apply_classic_caves(game: CrystalCaves) -> None:
@@ -50,4 +52,6 @@ def apply_classic_caves(game: CrystalCaves) -> None:
                 raise ValueError("classic stalactite site must be clear beneath stone")
             layout[row][col] = "v"
         caves[level] = replace(caves[level], layout=tuple("".join(line) for line in layout))
-    game.CAVES = tuple(caves)
+    game.CAVES = polish_caves(tuple(caves))
+    if isinstance(game, ClassicSecrets):
+        game.secrets_enabled = True

@@ -17,6 +17,9 @@ namespace CrystalCaves.Pilot
         public int hudScale = 1, safeMargin;
         public int masterVolume = 70, effectsVolume = 100;
         public bool muted;
+        // Zero keeps the familiar keyboard alternatives for that action.
+        public int keyMoveLeft, keyMoveRight, keyJump, keyShoot, keyInteract, keyPause;
+        public bool controlsHintSeen;
         public string preset = "Current Retro";
 
         public CaveSettingsData Copy() => JsonUtility.FromJson<CaveSettingsData>(JsonUtility.ToJson(this));
@@ -32,6 +35,7 @@ namespace CrystalCaves.Pilot
             scanlines = Mathf.Clamp(scanlines, 0, 60); phosphor = Mathf.Clamp(phosphor, 0, 40);
             hudScale = Mathf.Clamp(hudScale, 1, 2); safeMargin = Mathf.Clamp(safeMargin, 0, 24);
             masterVolume = Mathf.Clamp(masterVolume, 0, 100); effectsVolume = Mathf.Clamp(effectsVolume, 0, 100);
+            CaveControls.Sanitize(this);
             if (preset != "Current Retro" && preset != "Enhanced Retro" && preset != "Low Power") preset = "Custom";
         }
 

@@ -5,12 +5,14 @@ import numpy as np
 from src.unity_bridge.session import CaveSession
 
 
-def test_real_thorn_damage_keeps_airborne_motion_pose_and_original_immunity():
+def test_real_spike_damage_keeps_airborne_motion_pose_and_original_immunity():
     session = CaveSession()
-    for action in [0] * 12 + [2] * 58 + [5] * 23:
+    # Walking into the real trench spike causes damage; jumping clears it.
+    for action in [0] * 12 + [2] * 85:
         snapshot = session.handle({"op": "step", "actions": [action]})
     game = session.game
-    assert game.steps == 93 and game.health == 2 and game.invuln_timer == 70
+    assert game.steps == 97 and game.health == 2 and game.invuln_timer == 70
+    assert game._player_rect().colliderect(game._tile_rect((9, 22)))
     player = snapshot["player"]
     assert player["invulnerable"] and not player["grounded"]
     assert player["sprite"] == "mylo_jump"

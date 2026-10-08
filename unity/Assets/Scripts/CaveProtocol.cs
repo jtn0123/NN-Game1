@@ -6,8 +6,15 @@ namespace CrystalCaves.Pilot
     {
         public string op;
         public int[] actions, cleared;
+        public CaveHumanControl[] controls;
         public int level;
         public string mode;
+    }
+
+    [Serializable] public sealed class CaveHumanControl
+    {
+        public int move;
+        public bool jump, shoot, interact;
     }
 
     [Serializable] public sealed class CavePlayer
@@ -42,7 +49,7 @@ namespace CrystalCaves.Pilot
         public CavePlayer player;
         public CaveEntity[] entities;
         public CaveEffect[] effects;
-        public int health, ammo, score, crystals, initial_crystals, steps, max_steps, freeze_timer;
+        public int health, ammo, score, crystals, initial_crystals, steps, max_steps, freeze_timer, super_timer;
         public int stall_steps, stall_limit, state_size, action, demos_saved;
         public bool exit_unlocked, done, won, ai_available, recording, human_only, training_limits;
         public float last_reward, total_reward;

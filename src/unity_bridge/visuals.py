@@ -53,6 +53,7 @@ from .visual_rooms import (
     slate_platform,
 )
 from .visual_scenery import DressingPlacement, placement_cells, scenery_placements, scenery_sprites
+from .visual_secrets import secret_sprites
 
 
 @dataclass(frozen=True)
@@ -709,6 +710,7 @@ def art_sprites() -> dict[str, pygame.Surface]:
     images.update(pickup_sprites())
     images.update(scenery_sprites())
     images.update(equipment_sprites())
+    images.update(secret_sprites())
     return images
 
 
@@ -821,7 +823,15 @@ def title_scene() -> pygame.Surface:
 
 def dressing_placements(layout: Sequence[str], level: int) -> list[DressingPlacement]:
     """Room fixtures use clear bays, with breathing room around gameplay objects."""
-    placements = scenery_placements(layout, theme_index(level))
+    priority_signs: list[DressingPlacement] = []
+    if level == 0 and len(layout) > 22 and layout[22][8:10] == "t^":
+        # Keep the opening trench warning above the takeoff approach. Scenery
+        # otherwise occupies its clear bay before automatic warning placement.
+        priority_signs.append({"sprite": "danger_sign", "col": 10, "row": 20})
+    if level == 8 and len(layout) > 12 and layout[6][1:4] == "##H" and layout[12][4] == "#":
+        # Warn about the top-vault dinosaur before decorating its small room.
+        priority_signs.append({"sprite": "danger_sign", "col": 3, "row": 1})
+    placements = scenery_placements(layout, theme_index(level), priority_signs)
     reserved = {
         (col + dx, row)
         for placement in placements
