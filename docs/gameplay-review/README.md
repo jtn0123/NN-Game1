@@ -101,10 +101,18 @@ chain cells. Training layouts and checkpoint action/observation dimensions stay
 compatible. New independent human button combinations are never saved as
 misleading legacy demonstrations.
 
-Reproduce the Python gate with `make verify`. Run the native editor checks with
-Unity's `-executeMethod CrystalCaves.Pilot.Editor.CaveGameplayChecks.Run`, and
-build using `python scripts/unity_pilot.py --build-only`. The raw local logs are
-kept outside the tracked review package; PR checks separately establish Linux CI.
+Reproduce the CI commands with `make check dashboard-smoke release-config audit build`.
+The broader `make verify` also checks repository hygiene and the 1,000-line file
+budget. Its size guard currently rejects five files that are byte-identical to
+the PR base: `src/game/crystal_caves.py`, `config.py`, `src/ai/agent.py`,
+`src/app/headless.py` and `src/ai/replay_buffer.py`. None of the new or changed
+source files exceeds that limit. The required CI commands, hygiene, dependency
+audit and package build are validated separately.
+
+Run the native editor checks with Unity's
+`-executeMethod CrystalCaves.Pilot.Editor.CaveGameplayChecks.Run`, and build using
+`python scripts/unity_pilot.py --build-only`. The raw local logs are kept outside
+the tracked review package; PR checks separately establish Linux CI.
 
 ## Native keyboard
 
