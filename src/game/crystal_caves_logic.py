@@ -201,9 +201,12 @@ class CrystalCavesLogicMixin:
                 self._invalid_interact_total += self.INVALID_INTERACT_PENALTY
         return reward
 
+    def _pickup_tiles(self: Any) -> set[tuple[int, int]]:
+        return self._tiles_for_rect(self._player_rect())
+
     def _collect_pickups(self: Any) -> float:
         reward = 0.0
-        touched_tiles = self._tiles_for_rect(self._player_rect())
+        touched_tiles = self._pickup_tiles()
         collected_crystal = False
 
         for tile in list(self.crystals.intersection(touched_tiles)):

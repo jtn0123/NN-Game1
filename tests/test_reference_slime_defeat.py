@@ -35,12 +35,19 @@ def test_fatal_slime_hit_emits_signed_pulse_with_unchanged_rewards(powered, dire
 
 def test_real_climb_and_shot_kills_slime_with_original_score_health_and_ammo():
     session = CaveSession(1)
-    for action in [0] * 12 + [2] * 14 + [3] * 115 + [6] + [2] * 7:
+    # Meet the two-axis eye at its current patrol height. The older 115-tick
+    # climb assumed a horizontal-only target and now correctly misses it.
+    # Walking off this higher ladder position also collects one 100-point gem.
+    for action in [0] * 12 + [2] * 14 + [3] * 121 + [6] + [2] * 10:
         snapshot = session.handle({"op": "step", "actions": [action]})
-    assert snapshot["steps"] == 149 and snapshot["health"] == 3
+    assert snapshot["steps"] == 158 and snapshot["health"] == 3
     assert not session.game.enemies[2].alive
-    assert any(effect["kind"] == "slime_pulse" for effect in snapshot["effects"])
-    assert session.game.score == 200 and session.game.ammo == 4
+    assert any(
+        effect["kind"] == "slime_pulse" and effect["text"] == "+200"
+        for effect in snapshot["effects"]
+    )
+    assert snapshot["crystals"] == snapshot["initial_crystals"] - 1
+    assert session.game.score == 300 and session.game.ammo == 4
 
 
 def test_headless_and_training_keep_their_feedback_contract():

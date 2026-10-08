@@ -8,6 +8,8 @@ from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_entities import CaveSpec, Enemy, VisualEvent
 
 from .classic_mechanisms import ClassicMechanisms, GreenThorn, Stalactite
+from .classic_secrets import ClassicSecrets
+from .human_controls import HumanControlsMixin
 
 
 @dataclass
@@ -64,11 +66,14 @@ def tall_patrol_fits(game: CrystalCaves, enemy: Enemy) -> bool:
     )
 
 
-class ClassicCaves(ClassicMechanisms, CrystalCaves):
+class ClassicCaves(HumanControlsMixin, ClassicSecrets, ClassicMechanisms, CrystalCaves):
     """Use the original engine, with species-specific combat and patrol rules."""
 
     def _load_level(self, level: CaveSpec) -> None:
         super()._load_level(level)
+        self._setup_secrets(level)
+        self.bat_eggs = []
+        self._next_egg = 0
         self.thorns = [
             GreenThorn(col, row)
             for row, line in enumerate(level.layout)
@@ -214,15 +219,7 @@ class ClassicCaves(ClassicMechanisms, CrystalCaves):
                 enemy.charging = enemy.charging or self._sees_player(enemy, True)
                 enemy.vx = (136 if enemy.charging else 68) / 60 * (1 if enemy.vx > 0 else -1)
             if enemy.kind == "flyer":
-                # Irregular horizontal bat reversals, without a fabricated sine-wave swoop.
-                if enemy.appearance == "bat_enemy":
-                    interval = 60 + (index * 137 + self.level_index * 73) % 540
-                    if self.steps > 0 and self.steps % interval == 0:
-                        enemy.vx *= -1
-                enemy.x += enemy.vx
-                if self._rect_collides_solid(enemy.rect):
-                    enemy.x -= enemy.vx
-                    enemy.vx *= -1
+                self._advance_flyer(enemy, index)
             else:
                 enemy.x += enemy.vx
                 ahead = enemy.x + (enemy.width + 2 if enemy.vx > 0 else -2)

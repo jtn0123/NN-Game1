@@ -9,6 +9,8 @@ import pygame
 
 from src.game.crystal_caves_geometry import CrystalCavesGeometryMixin
 
+from .classic_flyers import ClassicFlyers
+
 
 @dataclass
 class GreenThorn:
@@ -41,7 +43,7 @@ class Stalactite:
         return pygame.Rect(self.col * 32 + 10, self.y + 2, 12, 30)
 
 
-class ClassicMechanisms:
+class ClassicMechanisms(ClassicFlyers):
     def _is_on_ladder(self: Any) -> bool:
         # An elevator shaft is not an invisible ladder. Jump leaves the platform.
         return any(tile in self.ladders for tile in self._tiles_for_rect(self._player_rect()))
@@ -111,10 +113,12 @@ class ClassicMechanisms:
             return 0.0
         self._update_thorns()
         falling_hit = self._update_stalactites()
+        egg_hit = self._update_bat_eggs()
         player = self._player_rect()
         hazard = any(player.colliderect(self._tile_rect(tile)) for tile in self.hazards)
         hazard = hazard or any(player.colliderect(thorn.rect) for thorn in self.thorns)
         hazard = hazard or falling_hit
+        hazard = hazard or egg_hit
         enemy = any(e.alive and player.colliderect(e.rect) for e in self.enemies)
         if not hazard and not enemy:
             return 0.0
@@ -158,6 +162,8 @@ class ClassicMechanisms:
         for trap in getattr(self, "stalactites", []):
             if trap.alive:
                 tiles.update(self._tiles_for_rect(trap.rect))
+        for egg in getattr(self, "bat_eggs", []):
+            tiles.update(self._tiles_for_rect(egg.rect))
         return tiles
 
     def _tile_code(self: Any, col: int, row: int) -> float:

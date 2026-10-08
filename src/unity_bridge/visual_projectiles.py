@@ -34,7 +34,21 @@ def capsule(frame: int = 0) -> pygame.Surface:
     return image
 
 
+def bat_egg() -> pygame.Surface:
+    image = canvas((12, 16))
+    pygame.draw.polygon(
+        image, INK, [(5, 0), (8, 1), (11, 8), (10, 13), (7, 15), (3, 14), (0, 10), (1, 5)]
+    )
+    pygame.draw.polygon(
+        image, STEEL[3], [(5, 2), (7, 2), (9, 8), (8, 12), (5, 13), (2, 10), (3, 5)]
+    )
+    pygame.draw.line(image, WHITE, (5, 3), (4, 7), 2)
+    pygame.draw.line(image, STEEL[1], (7, 9), (6, 12), 2)
+    return image
+
+
 def projectile_sprites() -> dict[str, pygame.Surface]:
     images = {f"bullet_{frame}": capsule(frame) for frame in range(4)}
     images["bullet"] = images["bullet_0"]
+    images["bat_egg"] = bat_egg()
     return images

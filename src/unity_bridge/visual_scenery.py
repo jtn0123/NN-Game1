@@ -144,7 +144,9 @@ def placement_cells(placement: DressingPlacement) -> set[tuple[int, int]]:
     }
 
 
-def scenery_placements(layout: Sequence[str], theme: int) -> list[DressingPlacement]:
+def scenery_placements(
+    layout: Sequence[str], theme: int, priority_signs: Sequence[DressingPlacement] = ()
+) -> list[DressingPlacement]:
     """Reserve complete clear footprints; supports attach to existing platforms."""
     placements: list[DressingPlacement] = []
     occupied = service_pipe_cells(layout) | door_headroom_cells(layout)
@@ -164,6 +166,10 @@ def scenery_placements(layout: Sequence[str], theme: int) -> list[DressingPlacem
         placements.append(placement)
         for c, r in placement_cells(placement):
             occupied.update((c + dx, r) for dx in (-1, 0, 1))
+
+    for warning in priority_signs:
+        if clear(warning["col"], warning["row"], 1, 2):
+            place(warning["sprite"], warning["col"], warning["row"])
 
     if theme in (4, 5, 7):
         count = 0
@@ -242,7 +248,7 @@ def scenery_placements(layout: Sequence[str], theme: int) -> list[DressingPlacem
                 break
     # Signs describe actual nearby hazards/effects, not arbitrary wall panels.
     # Place them after the room's plants/supports so they cannot cover that art.
-    warnings = 0
+    warnings = sum(placement["sprite"] == "danger_sign" for placement in placements)
     for row in range(len(layout) - 1, -1, -1):
         for col, symbol in enumerate(layout[row]):
             if symbol == "g":
