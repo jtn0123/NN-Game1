@@ -5,7 +5,6 @@ from __future__ import annotations
 import pygame
 
 from .visual_materials import (
-    BLUE,
     CYAN,
     GOLD,
     GREEN,
@@ -235,23 +234,6 @@ def organic(kind: str) -> pygame.Surface:
             image.set_at((xx, yy), WHITE)
         pygame.draw.line(image, (87, 17, 37), (4, 16), (28, 16))
         pygame.draw.line(image, (22, 151, 70), (8, 30), (22, 30), 2)
-    elif kind == "walking_rock":
-        pygame.draw.polygon(
-            image, INK, [(4, 11), (10, 4), (20, 3), (28, 11), (29, 23), (22, 28), (6, 27), (2, 20)]
-        )
-        pygame.draw.polygon(
-            image,
-            (39, 49, 176),
-            [(5, 12), (11, 6), (19, 5), (26, 12), (26, 23), (20, 26), (7, 25), (4, 20)],
-        )
-        pygame.draw.polygon(image, BLUE, [(6, 12), (12, 7), (19, 6), (22, 10), (16, 14)])
-        pygame.draw.lines(image, (20, 23, 85), False, [(21, 9), (18, 14), (21, 18), (19, 24)])
-        for xx in (9, 19):
-            pygame.draw.rect(image, WHITE, (xx, 15, 3, 3))
-            image.set_at((xx + 1, 16), INK)
-        pygame.draw.line(image, STEEL[0], (7, 30), (11, 30), 2)
-        pygame.draw.line(image, STEEL[0], (21, 30), (25, 30), 2)
-        scratch(image, 7, 22, 3, (20, 23, 85), (142, 183, 255))
     elif kind == "crawler":
         pygame.draw.ellipse(image, INK, (1, 5, 30, 16))
         pygame.draw.ellipse(image, (22, 151, 70), (3, 6, 26, 13))
@@ -314,12 +296,7 @@ def extra_sprites() -> dict[str, pygame.Surface]:
         for name in ("generator", "terminal", "vacuum", "power", "zapper", "pipe_stack")
     }
     images.update({name: sign(name) for name in ("mine_sign", "warning_post", "beacon", "lamp")})
-    images.update(
-        {
-            name: organic(name)
-            for name in ("mushroom", "walking_rock", "crawler", "flyer", "eye_flyer")
-        }
-    )
+    images.update({name: organic(name) for name in ("mushroom", "crawler", "flyer")})
     images.update({name: tool(name) for name in ("pickaxe", "hammer_marker", "raygun")})
     images.update({"crate": crate(), "eye_turret": eye_turret(), "clear_block": clear_block()})
     # The standalone weapon and HUD share the same worn metal and grip detail.
