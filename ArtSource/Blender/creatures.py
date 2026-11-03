@@ -162,105 +162,119 @@ def spike(base, tip, radius, slot="dark", layer=BODY):
 
 
 def dinosaur(frame: int) -> None:
-    """Upright green dinosaur, facing right, feet on the bottom row.
+    """Tyrannosaurus, facing right, feet on the bottom row.
 
-    One continuous spine (tail tip, hips, chest, S-curved neck) carries the
-    body, so the silhouette reads as a single animal rather than stacked
-    shapes; the head is a wedge of cranium, snout and lower jaw.
+    A huge boxy head with a deep jaw on a short thick neck, a forward-leaning
+    body on massive thighs, tiny two-fingered arms, and a heavy tail that
+    sweeps back down to the ground as a counterweight. One continuous spine
+    carries tail, body and neck so the silhouette reads as a single animal.
     """
     near_x, near_lift, far_x, far_lift, bob = (
-        (-4.5, 0.0, 4.0, 0.0, 0.0),
-        (-0.5, 0.0, 0.5, 3.0, 1.0),
-        (4.0, 0.0, -4.5, 0.0, 0.0),
-        (0.5, 3.0, -0.5, 0.0, 1.0),
+        (-3.5, 0.0, 4.5, 0.0, 0.0),
+        (0.5, 0.0, 1.0, 3.0, 1.0),
+        (4.5, 0.0, -3.5, 0.0, 0.0),
+        (1.0, 3.0, 0.5, 0.0, 1.0),
     )[frame]
     up = Vector((0, 0, bob))
     sway = (0.0, 0.6, 0.0, -0.6)[frame]
-    nod = Vector((0, 0, (0.0, -0.4, 0.0, 0.4)[frame]))
-    # (x, z, radius) from the tail tip to the base of the skull.
+    nod = Vector((0, 0, (0.0, -0.5, 0.0, 0.5)[frame]))
+    # (x, z, radius) from the tail tip to the back of the skull.
     spine = [
-        (-10.6 + sway, 4.2, 0.8),
-        (-9.0 + sway * 0.8, 9.5, 2.1),
-        (-6.4 + sway * 0.4, 15.5, 3.8),
-        (-2.6, 22.5, 5.7),
-        (0.6, 29.5, 6.0),
-        (2.6, 36.0, 5.0),
-        (2.0, 41.5, 3.6),
-        (2.2, 46.0, 3.1),
-        (3.2, 50.0, 3.4),
+        (-11.0 + sway, 3.2, 0.8),
+        (-9.8 + sway * 0.8, 8.5, 2.3),
+        (-7.6 + sway * 0.4, 14.5, 4.0),
+        (-4.0, 21.5, 6.0),
+        (-0.4, 28.0, 6.6),
+        (2.0, 33.5, 5.9),
+        (2.2, 38.5, 5.0),
+        (1.6, 43.0, 4.6),
     ]
-    points = [Vector((x, 0.5, z)) + up + (nod * (i / 8) ** 2) for i, (x, z, _) in enumerate(spine)]
+    points = [
+        Vector((x, 0.5, z)) + up + nod * (i / (len(spine) - 1)) ** 2
+        for i, (x, z, _) in enumerate(spine)
+    ]
     tube(points, [r for _, _, r in spine])
-    # Pale belly running up the front of the chest and throat.
+    # Pale belly up the front of the chest and throat into the lower jaw.
     belly = [
-        (1.0, 21.5, 2.6),
-        (3.2, 29.0, 3.8),
-        (4.6, 35.5, 3.0),
-        (3.8, 41.5, 2.0),
-        (4.6, 46.5, 1.5),
+        (0.2, 21.0, 2.8),
+        (3.0, 28.5, 4.0),
+        (4.4, 35.0, 3.4),
+        (4.2, 40.5, 2.6),
+        (5.0, 44.5, 2.0),
     ]
     tube([Vector((x, -3.0, z)) + up for x, z, _ in belly], [r for _, _, r in belly], "belly")
     for foot_x, lift, depth, layer in (
-        (far_x, far_lift, 3.2, FAR),
-        (near_x, near_lift, -3.2, NEAR),
+        (far_x, far_lift, 3.4, FAR),
+        (near_x, near_lift, -3.4, NEAR),
     ):
-        # Digitigrade leg: drumstick thigh, shin, raised ankle, three clawed toes.
-        hip = Vector((-1.2, depth, 21.5)) + up
+        # Massive drumstick thigh, long shin, raised ankle, three clawed toes.
+        hip = Vector((-1.6, depth, 21.0)) + up
         ankle = Vector((foot_x - 0.8, depth, 5.4 + lift))
-        knee = Vector(((hip.x + foot_x) / 2 + 2.6, depth, 12.5 + lift / 2)) + up * 0.5
+        knee = Vector(((hip.x + foot_x) / 2 + 2.8, depth, 12.5 + lift / 2)) + up * 0.5
         # The near thigh is part of the body mass, so no contour rings it.
         thigh_layer = BODY if layer == NEAR else FAR
-        blob(hip + Vector((0.6, 0, -1.2)), (6.0, 3.6, 7.6), "body", thigh_layer, (0, -18, 0))
-        limb(hip, knee, 3.4, "body", layer, 2.6)
-        limb(knee, ankle, 2.6, "body", layer, 1.9)
+        blob(hip + Vector((0.6, 0, -1.0)), (6.4, 3.8, 8.0), "body", thigh_layer, (0, -20, 0))
+        limb(hip, knee, 3.6, "body", layer, 2.7)
+        limb(knee, ankle, 2.7, "body", layer, 2.0)
         ball = Vector((foot_x + 1.6, depth, 1.9 + lift))
-        limb(ankle, ball, 1.9, "body", layer, 1.5)
-        for spread, reach in ((-1.1, 2.5), (0.0, 3.1), (1.1, 2.5)):
+        limb(ankle, ball, 2.0, "body", layer, 1.6)
+        for spread, reach in ((-1.2, 2.5), (0.0, 3.1), (1.2, 2.5)):
             toe = ball + Vector((reach, spread - 0.6, -0.5))
-            limb(ball, toe, 1.05, "body", layer, 0.75)
+            limb(ball, toe, 1.1, "body", layer, 0.8)
             spike(toe, toe + Vector((1.3, -0.3, -0.5)), 0.6, "accent", layer)
-    # Head: cranium, long upper snout, cheek, slightly open lower jaw.
+    # Head: a long, deep, boxy skull with a heavy lower jaw, mouth agape.
     head = up + nod
-    blob(Vector((3.6, 0.0, 54.6)) + head, (4.7, 4.1, 4.3), "body")
-    blob(Vector((4.0, 0.0, 51.4)) + head, (3.0, 3.3, 2.6), "body")
-    limb(Vector((5.0, 0.0, 53.6)) + head, Vector((9.4, 0.0, 52.4)) + head, 2.9, "body", BODY, 1.7)
-    limb(Vector((4.0, 0.0, 49.6)) + head, Vector((8.8, 0.0, 49.0)) + head, 1.7, "body", BODY, 1.0)
-    blob(Vector((5.4, -1.0, 49.0)) + head, (2.6, 2.6, 0.9), "belly", BODY, (0, -6, 0))
-    blob(Vector((7.0, -1.4, 50.8)) + head, (3.0, 1.6, 0.85), "ink", BODY, (0, -4, 0))
-    for x, keep in ((5.8, True), (7.2, False), (8.5, True)):
-        tooth = Vector((x, -2.2, 51.6 - (x - 5.8) * 0.2)) + head
-        part = spike(tooth, tooth + Vector((0.1, 0, -1.2)), 0.45, "white")
+    scale = 1.18
+
+    def hp(x: float, y: float, z: float) -> Vector:
+        # Head parts are authored around the jaw hinge, then enlarged.
+        return Vector(((x - 2.4) * scale + 1.6, y * scale, (z - 50.0) * scale + 49.2)) + head
+
+    def hr(x: float, y: float, z: float) -> tuple[float, float, float]:
+        return (x * scale, y * scale, z * scale)
+
+    blob(hp(2.4, 0.0, 52.6), hr(4.4, 4.0, 4.4), "body")  # cranium
+    blob(hp(2.2, 0.0, 48.0), hr(3.8, 3.8, 3.4), "body")  # jaw muscle
+    blob(hp(6.6, 0.0, 52.6), hr(4.8, 3.4, 2.8), "body", BODY, (0, 4, 0))  # snout
+    blob(hp(9.6, 0.0, 52.2), hr(1.5, 2.8, 2.3), "body")  # blunt nose
+    blob(hp(6.2, 0.0, 47.6), hr(4.6, 3.0, 1.7), "body", BODY, (0, -4, 0))  # lower jaw
+    blob(hp(5.8, -1.2, 47.0), hr(4.0, 2.4, 1.0), "belly", BODY, (0, -4, 0))
+    blob(hp(7.0, -1.6, 49.7), hr(4.2, 1.6, 0.9), "ink", BODY, (0, 2, 0))  # mouth
+    for x, keep in ((4.2, False), (5.6, True), (7.0, False), (8.4, True), (9.6, False)):
+        tooth = hp(x, -2.6, 50.6 + (x - 4.2) * 0.07)
+        part = spike(tooth, tooth + Vector((0.1, 0, -1.3)), 0.45, "white")
         if not keep:
             detail(part)
-    for x, keep in ((6.4, False), (7.8, True)):
-        tooth = Vector((x, -1.8, 49.6)) + head
-        part = spike(tooth, tooth + Vector((0, 0, 1.0)), 0.4, "white")
+    for x, keep in ((5.0, False), (6.4, True), (7.8, False), (9.0, True)):
+        tooth = hp(x, -2.3, 48.9 - (x - 5.0) * 0.05)
+        part = spike(tooth, tooth + Vector((0, 0, 1.1)), 0.4, "white")
         if not keep:
             detail(part)
-    blob(Vector((5.0, -2.9, 55.2)) + head, (1.3, 1.0, 1.3), "white")
-    blob(Vector((5.6, -3.6, 55.1)) + head, (0.5, 0.6, 0.9), "ink")
-    blob(Vector((4.8, -2.8, 56.7)) + head, (2.0, 1.3, 0.7), "dark", BODY, (0, 14, 0))
-    catchlight(Vector((5.9, -4.2, 55.6)) + head, 0.26)
-    blob(Vector((10.0, -1.2, 53.4)) + head, (0.5, 0.5, 0.4), "ink")
-    # Back plates grow out of the spine, largest over the shoulders.
-    for index in range(1, 8):
+    # Small fierce eye under a heavy brow ridge, set back on the skull.
+    blob(hp(3.6, -3.4, 54.0), hr(1.1, 0.9, 1.1), "white")
+    blob(hp(4.1, -4.1, 53.9), hr(0.45, 0.5, 0.8), "ink")
+    blob(hp(3.8, -3.2, 55.6), hr(2.2, 1.3, 0.75), "dark", BODY, (0, 18, 0))
+    catchlight(hp(4.3, -4.5, 54.3), 0.24)
+    blob(hp(10.4, -1.4, 53.6), hr(0.5, 0.5, 0.4), "ink")  # nostril
+    detail(limb(hp(0.6, -3.4, 50.8), hp(3.4, -3.6, 49.4), 0.3, "dark"))
+    # A row of small scutes down the back.
+    for index in range(2, 7):
         (x0, z0, _), (x1, z1, _) = spine[index - 1], spine[index + 1]
         x, z, r = spine[index]
         tangent = Vector((x1 - x0, 0, z1 - z0)).normalized()
-        back = Vector((-tangent.z, 0, tangent.x))  # perpendicular, toward the back
-        base = Vector((x, 0.5, z)) + up + back * r * 0.82
-        size = (0.6, 1.0, 1.35, 1.6, 1.6, 1.35, 1.0)[index - 1]
-        detail(spike(base, base + back * 2.0 * size + tangent * 0.6, 0.9 * size, "dark", BODY))
-    # Short arm with two clawed fingers.
+        back = Vector((-tangent.z, 0, tangent.x))
+        base = Vector((x, 0.5, z)) + up + back * r * 0.9
+        detail(spike(base, base + back * 1.0 + tangent * 0.4, 0.7, "dark", BODY))
+    # Tiny arms with two clawed fingers.
     swing = (1.0, 0.0, -1.0, 0.0)[frame]
-    shoulder = Vector((3.6, -4.2, 38.5)) + up
-    elbow = Vector((5.4, -4.6, 35.4 + swing * 0.4)) + up
-    hand = Vector((8.0 + swing * 0.6, -4.7, 35.6 + swing)) + up
-    limb(shoulder, elbow, 1.7, "body", NEAR, 1.35)
-    limb(elbow, hand, 1.35, "body", NEAR, 1.0)
-    for spread in (-0.6, 0.6):
-        finger = hand + Vector((0.9, 0.0, spread - 0.4))
-        spike(finger, finger + Vector((1.0, -0.2, -0.6)), 0.55, "accent", NEAR)
+    shoulder = Vector((6.0, -4.6, 35.5)) + up
+    elbow = Vector((7.6, -5.0, 33.4 + swing * 0.3)) + up
+    hand = Vector((9.2 + swing * 0.4, -5.1, 34.0 + swing * 0.6)) + up
+    limb(shoulder, elbow, 1.3, "body", NEAR, 1.05)
+    limb(elbow, hand, 1.05, "body", NEAR, 0.8)
+    for spread in (-0.5, 0.5):
+        finger = hand + Vector((0.6, 0.0, spread - 0.3))
+        spike(finger, finger + Vector((0.8, -0.2, -0.5)), 0.45, "accent", NEAR)
 
 
 def bat(frame: int) -> None:
