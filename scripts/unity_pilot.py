@@ -1,4 +1,8 @@
-"""Build and launch Crystal Caves with its local Python simulation."""
+"""Build and launch Crystal Caves.
+
+The game runs standalone on its C# simulation. The Python bridge starts only
+for an AI checkpoint (--model), demo recording, or an explicit --python-bridge.
+"""
 
 from __future__ import annotations
 
@@ -63,6 +67,11 @@ def main() -> None:
     parser.add_argument("--cnn-state", action="store_true")
     parser.add_argument("--legacy-state", action="store_true")
     parser.add_argument("--record-demos", type=Path)
+    parser.add_argument(
+        "--python-bridge",
+        action="store_true",
+        help="use the Python simulation instead of the built-in C# one",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or not 0 <= args.level < 16:
         parser.error("port must be 1-65535 and level must be 0-15")
@@ -71,6 +80,13 @@ def main() -> None:
     if args.build or args.build_only or not PLAYER.is_file():
         build(unity_editor(args.unity), artifact_dir)
     if args.build_only:
+        return
+    if not (args.python_bridge or args.model or args.record_demos):
+        if args.level or args.cnn_state or args.legacy_state:
+            parser.error("--level, --cnn-state and --legacy-state need the Python bridge")
+        log = artifact_dir / "player.log"
+        print(f"Starting Crystal Caves (standalone C# simulation). Log: {log}", flush=True)
+        subprocess.run([str(PLAYER), "-logFile", str(log)], cwd=ROOT, check=False)
         return
     with socket.socket() as probe:
         try:

@@ -6,9 +6,13 @@ namespace CrystalCaves.Pilot
     [Serializable]
     public sealed class CaveSettingsData
     {
-        public int version = 1, width = 1600, height = 1000;
-        public bool fullscreen, vSync, showFps;
+        public const int CurrentVersion = 2;
+        public int version = CurrentVersion, width = 1600, height = 1000;
+        // Presentation follows the display refresh by default; the game still steps at 60 Hz.
+        public bool fullscreen, vSync = true, showFps;
         public int frameCap = 60, pixelScale, aspect;
+        /// <summary>0 classic 60 Hz steps, 1 interpolated on the authored pixel grid, 2 interpolated on display pixels.</summary>
+        public int motion = 2;
         public int shake = 100, effectDensity = 2, lighting, brightness = 100, palette;
         public bool particles = true, gemGlints = true, damageFlashes = true, environment;
         public bool contactShadows = true;
@@ -25,7 +29,12 @@ namespace CrystalCaves.Pilot
         public CaveSettingsData Copy() => JsonUtility.FromJson<CaveSettingsData>(JsonUtility.ToJson(this));
         public void Sanitize()
         {
-            version = 1;
+            // Version 1 shipped a fixed 60 FPS presentation default. Interpolated motion
+            // makes higher refresh rates meaningful, so move untouched defaults to display sync.
+            if (version < 2 && !vSync && frameCap == 60) vSync = true;
+            if (version < 2) motion = 2;
+            version = CurrentVersion;
+            motion = Mathf.Clamp(motion, 0, 2);
             width = Mathf.Clamp(width, 640, 7680); height = Mathf.Clamp(height, 384, 4320);
             frameCap = frameCap == 0 ? 0 : Mathf.Clamp(frameCap, 30, 360);
             pixelScale = Mathf.Clamp(pixelScale, 0, 6); aspect = Mathf.Clamp(aspect, 0, 2);
@@ -45,7 +54,7 @@ namespace CrystalCaves.Pilot
             shake = 100; particles = gemGlints = damageFlashes = contactShadows = true;
             effectDensity = 2; shadowStrength = 45; environment = false;
             lighting = scanlines = phosphor = palette = 0; brightness = 100;
-            vSync = false; frameCap = 60;
+            vSync = true; frameCap = 60;
             preset = index == 1 ? "Enhanced Retro" : index == 2 ? "Low Power" : "Current Retro";
             if (index == 1) { lighting = 25; environment = true; }
             if (index == 2)

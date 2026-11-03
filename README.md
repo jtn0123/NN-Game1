@@ -9,8 +9,13 @@ python scripts/unity_pilot.py
 ```
 
 See [the game setup and controls](unity/README.md). The launcher builds Unity when
-needed and runs the original Python simulation locally. No AI checkpoint is
-required to play. An optional AI Lab lets you watch a trained agent and take over.
+needed. The game runs entirely inside Unity on a C# simulation that is verified
+frame by frame against the original Python game (`dotnet test unity/SimTests/Tests`).
+Movement steps at a fixed 60 Hz, as in 1991; drawing follows your display's refresh
+rate and blends between steps, so 120 Hz and faster displays show genuinely smoother
+motion. No Python or AI checkpoint is needed to play. The optional AI Lab
+(`--model <checkpoint>`) starts the Python bridge so you can watch a trained agent
+and take over.
 
 ## AI research workspace
 

@@ -95,10 +95,12 @@ namespace CrystalCaves.Pilot
                     var size = sizes[Cycle(index < 0 ? 2 : index, n, sizes.Length)]; stagedWidth = size.x; stagedHeight = size.y;
                 });
                 Add("APPLY DISPLAY", "APPLY / CONFIRM", "An unconfirmed change automatically reverts. Escape also restores the previous display.", n => game.Presentation.ApplyDisplay(stagedWidth, stagedHeight, stagedFullscreen));
-                Toggle("V-SYNC", d.vSync, "Matches display refresh to prevent tearing. Frame cap takes effect when V-sync is off.", v => v.vSync = !v.vSync);
+                Toggle("V-SYNC", d.vSync, "Matches your display's refresh rate (120 Hz ProMotion included) and prevents tearing. Frame cap takes effect when V-sync is off.", v => v.vSync = !v.vSync);
                 var caps = new[] { 0,30,60,90,120,144,165,240,360 };
                 Add("FRAME CAP", d.vSync ? "V-SYNC ACTIVE" : d.frameCap == 0 ? "UNLIMITED" : d.frameCap + " FPS", "Presentation speed only. Game movement always runs at 60 simulation steps per second.", n => CaveSettings.Change(v => v.frameCap = caps[Cycle(Array.IndexOf(caps, d.frameCap), n, caps.Length)]), !d.vSync);
-                Toggle("FPS COUNTER", d.showFps, "A small counter reports rendered frames per second; it does not change gameplay.", v => v.showFps = !v.showFps, false);
+                var motions = new[] { "CLASSIC 60 HZ", "RETRO PIXEL", "SMOOTH" };
+                Add("MOTION", motions[d.motion], "Smooth draws every display frame between the 60 Hz game steps on your display's pixel grid. Retro Pixel blends on the original 1991 pixel grid. Classic shows each game step as-is. Gameplay timing is identical in all three.", n => CaveSettings.Change(v => v.motion = Cycle(d.motion, n, 3), false));
+                Toggle("PERFORMANCE OVERLAY", d.showFps, "Shows rendered frames per second, frame time and game steps per second. It does not change gameplay.", v => v.showFps = !v.showFps, false);
                 Add("PIXEL SCALE", d.pixelScale == 0 ? "AUTO INTEGER" : d.pixelScale + "× (" + CaveViewport.Scale + "× FIT)", "Whole pixels only. An oversized choice falls back to the largest scale that fits your window.", n => CaveSettings.Change(v => v.pixelScale = Cycle(d.pixelScale, n, 7), false));
                 var aspects = new[] { "ADAPTIVE CLASSIC", "CLASSIC 16:10", "WIDE / LETTERBOX" };
                 Add("CAVE FRAMING", aspects[d.aspect], "Adaptive preserves the existing framing. Classic fixes a 640×400 frame. Wide uses available width without stretching sprites.", n => CaveSettings.Change(v => v.aspect = Cycle(d.aspect, n, 3), false));
@@ -262,7 +264,13 @@ namespace CrystalCaves.Pilot
                     Text(378,851,850,78,"SCREENSHOT MODE    F12 / A  SAVE    H / X  HUD    ESC / B  BACK\n"+(game.HideHud?"HUD hidden":"HUD visible"),20,paper,true,TextAnchor.MiddleCenter);
                 }
             }
-            if(CaveSettings.Data.showFps&&!game.CapturingScreenshot) { Plate(new Rect(1390,14,192,40)); Text(1400,14,170,40,Mathf.RoundToInt(game.Presentation.Fps)+" FPS",18,paper,true,TextAnchor.MiddleRight); }
+            if(CaveSettings.Data.showFps&&!game.CapturingScreenshot)
+            {
+                var fps=game.Presentation.Fps;
+                Plate(new Rect(1302,14,280,64));
+                Text(1312,14,260,34,Mathf.RoundToInt(fps)+" FPS  ·  "+(fps>0?(1000f/fps).ToString("F1"):"–")+" MS",18,paper,true,TextAnchor.MiddleRight);
+                Text(1312,44,260,28,(game.InProcess?"C# GAME  ":"PYTHON BRIDGE  ")+Mathf.RoundToInt(game.StepsPerSecond)+" STEPS/S",13,dim,true,TextAnchor.MiddleRight);
+            }
             if(Time.unscaledTime<game.ScreenshotToastUntil&&!game.CapturingScreenshot)
             { Plate(new Rect(260,30,1080,86)); Text(280,37,1040,72,game.ScreenshotMessage,19,paper,true); }
         }

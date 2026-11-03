@@ -64,13 +64,15 @@ cave layouts have not been reproduced.
 
 The accepted sixteen game layouts are pinned in `src/unity_bridge/classic_layouts.py`,
 so training-map rebalances cannot move native terrain, pickups or trap sites.
-Python advances the repository's game simulation and optionally runs a trained PyTorch policy.
+The player runs the game on a pure C# simulation (`Assets/Sim`, no Unity dependency,
+warnings as errors). It is a port of the Python session and is verified frame by frame
+against it: see [Simulation parity](#simulation-parity). Python is needed only for the
+optional AI Lab and demo recording.
 Unity sessions use a classic control profile: 140 world pixels per second,
 immediate stopping on release and an approximately 80-pixel, one-second jump.
 This is reference-informed tuning, not a claim of exact 1991 engine parity.
 The training engine's class defaults and checkpoint files are unchanged.
-This migration still requires the local Python runtime; the built app is not yet
-a standalone simulation. The rejected painted experiment is archived outside
+The rejected painted experiment is archived outside
 Unity's Assets directory in `ArtSource/RejectedModern`; it is not imported or
 included in the player. The direction is documented in `ArtSource/STYLE.md`. Source art is
 `src/unity_bridge/visuals.py`, exported with
@@ -78,16 +80,19 @@ included in the player. The direction is documented in `ArtSource/STYLE.md`. Sou
 
 ## Launch on this Mac
 
-From the repository root, using the project's Python 3.10–3.12 environment:
+From the repository root:
 
 ```bash
 python scripts/unity_pilot.py
 ```
 
-The launcher builds the player if needed, starts the loopback bridge, then starts
-Unity. Closing the game or pressing Ctrl-C in the launcher stops both processes.
-Unity 6000.3.25f1 is the version used for this project. An installed editor is required
-for the initial build; an existing player only needs Python and the project dependencies.
+The launcher builds the player if needed, then starts the standalone game. You can
+also open `unity/Builds/Crystal Caves.app` directly. Unity 6000.3.25f1 is the version
+used for this project; an installed editor is required only to build.
+
+`--model`, `--record-demos` or `--python-bridge` start the loopback Python bridge
+first, and the player then uses Python as the authoritative simulation. Closing the
+game or pressing Ctrl-C in the launcher stops both processes.
 
 ```bash
 # Rebuild after changing Unity code or the source artwork/levels.
@@ -158,15 +163,22 @@ game copyright.
 ## Presentation settings
 
 Display, Graphics, Sound and Accessibility pages share a live cave preview.
-Opening Settings pauses Python simulation; changing render FPS never changes
-its 60 Hz step clock. Settings migrate the old HUD, motion and volume choices,
+Opening Settings pauses the simulation; changing render FPS never changes its
+60 Hz step clock. The game logic runs in fixed 1/60 s steps from an accumulator
+every frame: input is sampled each frame, every due step runs immediately, and the
+leftover fraction blends sprites, shadows, lights and the camera between the last
+two steps. 120 Hz ProMotion and faster displays therefore show distinct positions
+every refresh. Respawns, doors and other jumps over 48 px cut rather than smear.
+MOTION chooses Smooth (blended on display pixels, the default), Retro Pixel (blended
+on the authored 1991 pixel grid) or Classic 60 Hz (each step as-is). Version 1 saves
+that still had the old fixed 60 FPS default move to V-sync; a chosen cap is kept. Settings migrate the old HUD, motion and volume choices,
 then save to the versioned `cave-settings-v1` PlayerPrefs record. Defaults reset
 presentation, audio and accessibility; the default display is staged separately
 and still requires Apply/Keep. Test and replay modes do not write this record.
 
 | Page | Controls |
 | --- | --- |
-| Display | Window/fullscreen, remembered window size, 15-second Keep/Revert, VSync, 30–360 FPS or unlimited, FPS counter, automatic or 1–6× integer scaling, adaptive/classic/wide framing |
+| Display | Window/fullscreen, remembered window size, 15-second Keep/Revert, VSync (default), 30–360 FPS or unlimited, Smooth/Retro Pixel/Classic motion, performance overlay (FPS, frame time, steps per second), automatic or 1–6× integer scaling, adaptive/classic/wide framing |
 | Graphics | Current Retro / Enhanced Retro / Low Power presets, independent shake/particles/glints, Off/Low/Normal density, environmental motion, local light, contact shadows and strength, brightness, original/warm/cool palette, CRT scanlines and phosphor |
 | Sound | Master/effects volume, mute, paused-menu preview of the actual raygun sound |
 | Accessibility | Reduced motion, damage flashes, top/bottom HUD, standard/large HUD, safe margin, high contrast, letter/symbol item cues, screenshot HUD preference |
@@ -210,21 +222,32 @@ after building the player. Fullscreen requires an unlocked active desktop.
 ## Open in Unity Editor
 
 Open the `unity/` directory as a Unity project, open
-`Assets/Scenes/CrystalCaves.unity`, and press Play after starting:
+`Assets/Scenes/CrystalCaves.unity`, and press Play. The C# simulation runs in the
+editor too. To use Python instead, start `python -m src.unity_bridge` and launch the
+player with `--bridge-port PORT` (or `--python-bridge` for port 8766); the launcher
+forwards `--port PORT` to both processes. Native smoke checks (`--smoke-report`)
+always use the bridge because they drive numbered AI actions.
+
+The runtime tilemap is constructed from the Python-authored levels, exported to
+`Assets/Sim/Generated/CaveData.g.cs`. Painting a Unity tilemap does not edit the
+level data in this version.
+
+## Simulation parity
+
+The Python session stays the reference: AI training and checkpoints use it. The C#
+port must reproduce it exactly.
 
 ```bash
-python -m src.unity_bridge
+python -m src.unity_bridge.export_sim_data   # regenerate C# cave data after level edits
+python -m src.unity_bridge.sim_trace         # re-record golden traces after rule changes
+dotnet test unity/SimTests/Tests             # every trace must match, operation by operation
 ```
 
-The editor defaults to port 8766. The standalone player also accepts
-`--bridge-port PORT`; the launcher forwards `--port PORT` to both processes.
-The initial cave visible while disconnected is a static preview; gameplay starts
-only after the bridge connects. Reconnection starts a fresh session.
-
-The runtime tilemap is constructed from the existing Python-authored levels.
-Painting a Unity tilemap does not edit the authoritative level data in this version.
-A standalone simulation and an authoring/export workflow are future migration
-steps; Python remains authoritative, including the Unity session's control profile.
+The 51 golden traces (seeded exploration in every cave, batched steps, the
+winning route tests and targeted freeze, gravity and air-shot runs) store a
+digest after every operation plus field-level checkpoints. Doubles are compared
+bit for bit. `tests/test_sim_trace.py` fails when the generated cave data or the
+traces are stale, and enforces the layout assumptions the port relies on.
 
 ## Assets and build
 
