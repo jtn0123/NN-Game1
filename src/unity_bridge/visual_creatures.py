@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pygame
 
 from .visual_materials import GOLD, INK, MAGENTA, STEEL, WHITE, canvas
@@ -14,143 +16,17 @@ PURPLE = (142, 42, 163)
 VIOLET = (64, 24, 84)
 
 
+BLENDER_SPRITES = Path(__file__).resolve().parents[2] / "ArtSource/Blender/sprites"
+
+
 def dinosaur(frame: int = 0) -> pygame.Surface:
-    """Hunched, olive-green profile with a heavy jaw and short clawed arms."""
-    image = canvas((24, 64))
-    body = canvas((24, 59))
-    dark, leaf, mid = (24, 78, 26), (57, 144, 30), (85, 170, 0)
-    light, belly, gleam = (124, 203, 59), (140, 178, 53), (174, 230, 108)
-    # A compact curling tail and continuous, hunched back avoid a tube-like neck.
-    pygame.draw.polygon(
-        body, INK, [(8, 42), (4, 44), (3, 41), (2, 39), (0, 43), (1, 49), (5, 52), (10, 50)]
-    )
-    pygame.draw.polygon(body, leaf, [(7, 44), (4, 46), (2, 42), (2, 47), (5, 50), (9, 48)])
-    pygame.draw.line(body, light, (2, 44), (4, 48))
-    pygame.draw.polygon(
-        body,
-        INK,
-        [
-            (8, 23),
-            (18, 26),
-            (16, 36),
-            (15, 40),
-            (18, 45),
-            (17, 52),
-            (15, 59),
-            (9, 59),
-            (6, 53),
-            (5, 44),
-            (5, 32),
-            (6, 27),
-        ],
-    )
-    pygame.draw.polygon(
-        body,
-        leaf,
-        [
-            (9, 25),
-            (16, 28),
-            (14, 39),
-            (16, 46),
-            (15, 53),
-            (13, 57),
-            (10, 57),
-            (8, 52),
-            (7, 43),
-            (7, 32),
-        ],
-    )
-    pygame.draw.polygon(body, mid, [(8, 28), (12, 27), (11, 37), (9, 45), (7, 43), (7, 33)])
-    pygame.draw.polygon(
-        body,
-        belly,
-        [(13, 30), (15, 33), (13, 40), (16, 46), (14, 53), (11, 55), (10, 48), (11, 36)],
-    )
-    pygame.draw.lines(body, dark, False, [(13, 39), (12, 44), (14, 48)])
-    pygame.draw.line(body, light, (7, 30), (7, 39))
-    body.set_at((8, 48), dark)
-    body.set_at((9, 51), mid)
-    # The forehead slopes into a blunt muzzle; the large jaw hangs downward.
-    # Draw at native width rather than stretching or squeezing an older sprite.
-    pygame.draw.polygon(
-        body,
-        INK,
-        [
-            (7, 4),
-            (10, 1),
-            (14, 1),
-            (15, 3),
-            (18, 4),
-            (20, 8),
-            (19, 12),
-            (21, 15),
-            (23, 17),
-            (23, 25),
-            (21, 30),
-            (14, 31),
-            (10, 28),
-            (6, 22),
-            (6, 11),
-        ],
-    )
-    pygame.draw.polygon(
-        body,
-        leaf,
-        [
-            (8, 5),
-            (11, 3),
-            (14, 4),
-            (17, 6),
-            (18, 9),
-            (17, 13),
-            (19, 17),
-            (22, 18),
-            (22, 24),
-            (20, 28),
-            (15, 29),
-            (11, 26),
-            (8, 22),
-            (8, 12),
-        ],
-    )
-    pygame.draw.polygon(body, mid, [(8, 6), (11, 4), (14, 5), (17, 8), (15, 13), (11, 18), (8, 17)])
-    pygame.draw.lines(body, light, False, [(8, 7), (11, 5), (13, 6)])
-    body.set_at((11, 3), gleam)
-    pygame.draw.rect(body, dark, (14, 10, 5, 6))
-    pygame.draw.rect(body, WHITE, (15, 11, 3, 4))
-    pygame.draw.rect(body, INK, (17, 12, 1, 3))
-    pygame.draw.line(body, dark, (14, 10), (18, 11))
-    body.set_at((21, 18), INK)
-    pygame.draw.polygon(
-        body, INK, [(17, 20), (23, 20), (22, 26), (20, 28), (17, 27), (15, 24), (16, 21)]
-    )
-    for xx, yy in ((17, 20), (21, 20), (17, 25), (20, 26)):
-        pygame.draw.rect(body, GOLD[4], (xx, yy, 2, 2))
-    pygame.draw.lines(body, light, False, [(13, 27), (16, 29), (20, 29)])
-    pygame.draw.line(body, dark, (10, 21), (12, 23))
-    body.set_at((10, 18), light)
-    # Tiny bent forearms sit below the chest, with two pale claws at the wrist.
-    pygame.draw.lines(body, dark, False, [(12, 38), (16, 40), (18, 38)], 3)
-    pygame.draw.lines(body, INK, False, [(13, 42), (18, 45), (21, 42)], 4)
-    pygame.draw.lines(body, mid, False, [(13, 42), (18, 45), (21, 42)], 2)
-    body.set_at((21, 41), GOLD[4])
-    body.set_at((22, 43), GOLD[4])
-    bob = (0, 1, 0, 1)[frame % 4]
-    image.blit(body, (0, bob))
-    # Each of four key poses changes the legs, not the creature's materials.
-    feet = ((7, 14), (5, 16), (9, 13), (10, 12))[frame % 4]
-    for index, xx in enumerate(feet):
-        top = 55 + (1 if index == frame % 2 else 0)
-        pygame.draw.polygon(
-            image,
-            INK,
-            [(xx, top), (xx + 4, top), (xx + 3, 60), (xx + 6, 61), (xx + 6, 63), (xx - 1, 63)],
-        )
-        pygame.draw.rect(image, leaf if index == 0 else mid, (xx + 1, top + 1, 2, 6))
-        pygame.draw.line(image, light, (xx, 61), (xx + 4, 61))
-        for toe in (xx + 3, xx + 5):
-            image.set_at((toe, 62), GOLD[4])
-    return image
+    """Hunched profile T-rex: open toothed jaw, forward eye, curled tail, clawed arms.
+
+    Modelled and posed in Blender (``ArtSource/Blender/dinosaur_scene.py``) and
+    rendered down to the creature palette by ``scripts/render_blender_sprites.py``.
+    The 24px width matches the collision body, so the snout never enters a wall.
+    """
+    return pygame.image.load(str(BLENDER_SPRITES / f"dinosaur_{frame % 4}.png")).copy()
 
 
 def dinosaur_hit(frame: int = 0) -> pygame.Surface:

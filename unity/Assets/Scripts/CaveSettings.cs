@@ -17,6 +17,8 @@ namespace CrystalCaves.Pilot
         public bool particles = true, gemGlints = true, damageFlashes = true, environment;
         public bool contactShadows = true;
         public int shadowStrength = 45, scanlines, phosphor;
+        // Modern light treatments; zero keeps the original flat presentation.
+        public int bloom, vignette;
         public bool hudBottom = true, highContrast, itemMarkers, reducedMotion, screenshotHideHud;
         public int hudScale = 1, safeMargin;
         public int masterVolume = 70, effectsVolume = 100;
@@ -42,21 +44,26 @@ namespace CrystalCaves.Pilot
             lighting = Mathf.Clamp(lighting, 0, 50); brightness = Mathf.Clamp(brightness, 70, 130);
             palette = Mathf.Clamp(palette, 0, 2); shadowStrength = Mathf.Clamp(shadowStrength, 0, 80);
             scanlines = Mathf.Clamp(scanlines, 0, 60); phosphor = Mathf.Clamp(phosphor, 0, 40);
+            bloom = Mathf.Clamp(bloom, 0, 100); vignette = Mathf.Clamp(vignette, 0, 60);
             hudScale = Mathf.Clamp(hudScale, 1, 2); safeMargin = Mathf.Clamp(safeMargin, 0, 24);
             masterVolume = Mathf.Clamp(masterVolume, 0, 100); effectsVolume = Mathf.Clamp(effectsVolume, 0, 100);
             CaveControls.Sanitize(this);
-            if (preset != "Current Retro" && preset != "Enhanced Retro" && preset != "Low Power") preset = "Custom";
+            if (Array.IndexOf(Presets, preset) < 0) preset = "Custom";
         }
+
+        public static readonly string[] Presets = { "Current Retro", "Enhanced Retro", "Low Power", "High Fidelity" };
 
         // Display, sound, HUD and accessibility preferences survive quality presets.
         public void ApplyPreset(int index)
         {
             shake = 100; particles = gemGlints = damageFlashes = contactShadows = true;
             effectDensity = 2; shadowStrength = 45; environment = false;
-            lighting = scanlines = phosphor = palette = 0; brightness = 100;
+            lighting = scanlines = phosphor = palette = bloom = vignette = 0; brightness = 100;
             vSync = true; frameCap = 60;
-            preset = index == 1 ? "Enhanced Retro" : index == 2 ? "Low Power" : "Current Retro";
+            preset = Presets[index >= 0 && index < Presets.Length ? index : 0];
             if (index == 1) { lighting = 25; environment = true; }
+            // Glowing crystals, shots and torches, pooled local light and a focused frame.
+            if (index == 3) { lighting = 45; environment = true; bloom = 55; vignette = 30; shadowStrength = 55; }
             if (index == 2)
             { vSync = false; frameCap = 30; shake = 0; effectDensity = 0; contactShadows = false; gemGlints = false; }
         }
