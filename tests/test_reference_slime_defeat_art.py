@@ -43,7 +43,8 @@ def test_all_preexisting_creature_poses_match_the_accepted_fourth_round_baseline
     # the dinosaur, and later the bat, snake, slime and walking rock, were
     # replaced by Blender-modelled sprites (ArtSource/Blender/creatures.py), and
     # again for the smooth-tube, 8x-sampled pass that added HD art, and for
-    # the anatomy pass (digitigrade dinosaur feet, teeth, ears, drips).
+    # the anatomy pass (digitigrade dinosaur feet, teeth, ears, drips), and
+    # for the single-spine dinosaur redesign.
     # Only the four defeat sprites are excluded;
     # slime, snake, bat, rock, dinosaur, hit and bone poses all remain protected.
     existing = {
@@ -57,4 +58,4 @@ def test_all_preexisting_creature_poses_match_the_accepted_fourth_round_baseline
         digest.update(name.encode() + b"\0")
         digest.update(bytes(image.get_size()))
         digest.update(pygame.image.tobytes(image, "RGBA"))
-    assert digest.hexdigest() == "9d5542364fa447fcb2d4f30aa4a8fcecd8905fe322f2a7e844a0a0f082fe8880"
+    assert digest.hexdigest() == "b117dfdbfef1688545baabeb3bb420b362ae25af83a2d52607fc9955d37f4242"
