@@ -89,6 +89,8 @@ CREATURES: dict[str, Creature] = {
         WALK,
         {
             "body": ((86, 20, 60), (119, 29, 78), (208, 56, 108), (244, 96, 139), (255, 151, 166)),
+            "dark": ((120, 26, 76), (160, 40, 100)),
+            "white": (WHITE,),
             "belly": ((214, 92, 140), (240, 138, 172), (255, 182, 204)),
             "eye": (EYE_YELLOW,),
             "ink": (INK,),
@@ -295,6 +297,9 @@ def convert_hd(passes: Path, output: Path, name: str, creature: Creature) -> lis
         slots = np.where(filled, slot_of[np.maximum(parts, 0)], -1)
         layers = np.where(filled, layer_of[np.maximum(parts, 0)], -1)
         multi = np.isin(slots, [SLOTS.index(s) for s, r in creature.ramps.items() if len(r) > 2])
+        missing = {SLOTS[i] for i in np.unique(slots[filled])} - set(creature.ramps)
+        if missing:
+            raise ValueError(f"{name}: no palette ramp for slot(s) {sorted(missing)}")
         rgb = np.zeros((*parts.shape, 3))
         for slot, ramp in creature.ramps.items():
             mask = slots == SLOTS.index(slot)

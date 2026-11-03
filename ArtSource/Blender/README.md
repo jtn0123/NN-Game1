@@ -6,7 +6,8 @@ modelled and posed in Blender, then converted twice:
 - `sprites/`: native pixel art in the game's palette (Options → Graphics →
   Creature art: Pixel).
 - `sprites_hd/`: 4× HD art with extra detail (catchlights, back ridge, cracks,
-  gloss), the same palette blended smoothly and antialiased edges (Creature
+  gloss), shaded by a path-traced key, rim and sky light (Cycles), the same
+  palette blended smoothly and antialiased edges (Creature
   art: HD, the default). Unity draws it at exactly the pixel sprite's size.
 
 ```bash

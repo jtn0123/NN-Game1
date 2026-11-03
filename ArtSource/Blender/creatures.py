@@ -155,6 +155,11 @@ def catchlight(location, size=0.3):
 # --- creatures ------------------------------------------------------------
 
 
+def spike(base, tip, radius, slot="dark", layer=BODY):
+    """A pointed cone: back ridges, claws, teeth and ears."""
+    return limb(base, tip, radius, slot, layer, 0.04)
+
+
 def dinosaur(frame: int) -> None:
     """Upright green dinosaur, facing right, feet on the bottom row."""
     near_x, near_lift, far_x, far_lift, bob = (
@@ -169,49 +174,72 @@ def dinosaur(frame: int) -> None:
         (far_x, far_lift, 3.0, FAR),
         (near_x, near_lift, -3.0, NEAR),
     ):
+        # Digitigrade leg: muscular thigh, shin, raised ankle, three clawed toes.
         hip = Vector((-1.5, depth, 21.0)) + up
-        ankle = Vector((foot_x, depth, 3.6 + lift))
-        knee = Vector(((hip.x + foot_x) / 2 + 2.2, depth, 11.5 + lift / 2)) + up * 0.5
-        blob(hip, (5.0, 3.4, 7.2), "body", layer, (0, -15, 0))
-        limb(hip, knee, 3.0, "body", layer, 2.4)
-        limb(knee, ankle, 2.3, "body", layer, 1.8)
-        blob((foot_x + 1.6, depth, 2.0 + lift), (3.6, 2.2, 1.5), "body", layer)
-        for toe in (foot_x + 4.0, foot_x + 4.9):
-            blob((toe, depth - 1.8, 1.4 + lift), (0.7, 0.7, 0.7), "accent", layer)
+        ankle = Vector((foot_x - 0.8, depth, 5.2 + lift))
+        knee = Vector(((hip.x + foot_x) / 2 + 2.4, depth, 12.0 + lift / 2)) + up * 0.5
+        blob(hip, (5.4, 3.6, 7.6), "body", layer, (0, -15, 0))
+        limb(hip, knee, 3.2, "body", layer, 2.5)
+        limb(knee, ankle, 2.4, "body", layer, 1.7)
+        ball = Vector((foot_x + 1.6, depth, 1.9 + lift))
+        limb(ankle, ball, 1.7, "body", layer, 1.4)
+        for spread, reach in ((-1.1, 2.6), (0.0, 3.2), (1.1, 2.6)):
+            toe = ball + Vector((reach, spread - 0.6, -0.5))
+            limb(ball, toe, 1.0, "body", layer, 0.7)
+            spike(toe, toe + Vector((1.3, -0.3, -0.5)), 0.6, "accent", layer)
     # Thick tail sweeping down behind the hips.
     tail = [
         Vector((-5.0 - 4.6 * math.sin(t * 1.4) + sway * t, 0.5, 24.0 - 13.5 * t)) + up
         for t in (index / 8 for index in range(9))
     ]
-    tube(tail, [4.6 - 3.3 * index / 8 for index in range(9)])
+    tube(tail, [4.6 - 3.4 * index / 8 for index in range(9)])
     blob(Vector((-0.5, 0.0, 31.0)) + up, (7.0, 6.0, 12.5), "body", BODY, (0, -12, 0))
     blob(Vector((2.2, -2.0, 29.0)) + up, (4.2, 4.8, 9.8), "belly", BODY, (0, -12, 0))
     blob(Vector((2.4, 0.0, 43.5)) + up, (4.6, 4.4, 7.5), "body", BODY, (0, -20, 0))
-    head = up + Vector((0, 0, (0.0, -0.4, 0.0, 0.4)[frame]))
-    blob(Vector((2.6, 0.0, 53.0)) + head, (5.8, 4.8, 5.2), "body")
-    blob(Vector((6.4, 0.0, 51.8)) + head, (4.6, 3.8, 2.6), "body", BODY, (0, 6, 0))
-    blob(Vector((5.6, 0.0, 46.6)) + head, (4.4, 3.4, 1.5), "body", BODY, (0, -8, 0))
-    blob(Vector((3.8, -0.6, 46.3)) + head, (3.0, 3.2, 1.3), "belly", BODY, (0, -8, 0))
-    blob(Vector((6.6, -2.2, 48.8)) + head, (4.2, 1.6, 1.1), "ink", BODY, (0, -2, 0))
-    for x in (5.2, 8.2):
-        blob(Vector((x, -3.6, 49.4)) + head, (0.5, 0.5, 0.75), "white")
-    blob(Vector((6.7, -3.6, 48.1)) + head, (0.5, 0.5, 0.65), "white")
-    blob(Vector((3.2, -2.6, 56.4)) + head, (2.8, 2.2, 1.0), "dark", BODY, (0, 12, 0))
-    blob(Vector((3.6, -3.8, 54.3)) + head, (1.4, 1.0, 1.4), "white")
-    blob(Vector((4.3, -4.6, 54.2)) + head, (0.65, 0.6, 0.85), "ink")
-    blob(Vector((10.0, -2.4, 52.6)) + head, (0.55, 0.55, 0.55), "ink")
-    catchlight(Vector((4.6, -5.4, 54.7)) + head, 0.28)
-    # Back ridge and a brow crease.
+    # Belly scale ridges: raised just enough for the HD lighting to catch them.
     for index in range(7):
-        t = index / 6
-        base = Vector((-4.2 - 2.4 * t, 0.0, 49.0 - 18.0 * t)) + up
-        detail(blob(base, (0.9, 1.2, 1.6 - 0.6 * t), "dark", BODY, (0, -40 - 20 * t, 0)))
-    detail(limb(Vector((1.0, -4.2, 57.0)) + head, Vector((5.2, -3.6, 56.0)) + head, 0.25, "ink"))
+        z = 21.5 + index * 2.4
+        ridge = Vector((2.6 + (z - 29) * 0.21, -6.3, z)) + up
+        detail(blob(ridge, (3.0 - abs(index - 3) * 0.35, 0.55, 0.32), "belly", BODY, (0, -12, 0)))
+    # Head: domed cranium, long upper snout, separate lower jaw, open mouth.
+    head = up + Vector((0, 0, (0.0, -0.4, 0.0, 0.4)[frame]))
+    blob(Vector((2.2, 0.0, 53.6)) + head, (5.2, 4.6, 4.8), "body")
+    limb(Vector((3.6, 0.0, 52.4)) + head, Vector((8.9, 0.0, 51.4)) + head, 3.0, "body", BODY, 2.0)
+    limb(Vector((3.0, 0.0, 47.6)) + head, Vector((8.3, 0.0, 47.3)) + head, 1.9, "body", BODY, 1.2)
+    blob(Vector((3.8, -0.6, 46.6)) + head, (3.0, 3.2, 1.2), "belly", BODY, (0, -8, 0))
+    blob(Vector((6.2, -2.0, 49.3)) + head, (3.7, 1.5, 1.0), "ink", BODY, (0, -3, 0))
+    for x in (5.2, 6.7, 8.1):
+        tooth = Vector((x, -2.9, 50.4)) + head
+        part = spike(tooth, tooth + Vector((0.1, 0, -1.3)), 0.5, "white")
+        if x == 6.7:
+            detail(part)
+    for x in (5.9, 7.5):
+        tooth = Vector((x, -2.7, 48.2)) + head
+        part = spike(tooth, tooth + Vector((0, 0, 1.1)), 0.45, "white")
+        if x == 5.9:
+            detail(part)
+    blob(Vector((3.6, -3.2, 56.1)) + head, (2.2, 1.4, 0.8), "dark", BODY, (0, 12, 0))
+    blob(Vector((3.6, -3.8, 54.3)) + head, (1.4, 1.0, 1.4), "white")
+    blob(Vector((4.3, -4.6, 54.2)) + head, (0.55, 0.6, 0.95), "ink")
+    blob(Vector((9.4, -1.6, 52.6)) + head, (0.55, 0.55, 0.45), "ink")
+    catchlight(Vector((4.6, -5.4, 54.8)) + head, 0.28)
+    detail(limb(Vector((1.0, -4.2, 57.2)) + head, Vector((5.2, -3.6, 56.2)) + head, 0.25, "ink"))
+    # Back ridge: pointed plates along the spine and down the tail.
+    for index in range(8):
+        t = index / 7
+        base = Vector((-4.4 - 2.6 * t, 0.0, 50.0 - 21.0 * t)) + up
+        tip = base + Vector((-1.8 - 0.4 * t, 0.0, 1.0 - 1.4 * t)) * (1.0 - 0.35 * t)
+        detail(spike(base, tip, 1.0 - 0.3 * t, "dark", BODY))
+    # Short arm with two clawed fingers.
     swing = (1.0, 0.0, -1.0, 0.0)[frame]
     shoulder = Vector((4.0, -4.2, 37.5)) + up
-    hand = Vector((8.0 + swing * 0.6, -4.6, 34.5 + swing)) + up
-    limb(shoulder, hand, 1.5, "body", NEAR, 1.2)
-    blob(hand + Vector((1.0, -0.2, -0.4)), (0.85, 0.85, 0.85), "accent", NEAR)
+    elbow = Vector((5.6, -4.5, 34.6 + swing * 0.4)) + up
+    hand = Vector((8.0 + swing * 0.6, -4.6, 34.8 + swing)) + up
+    limb(shoulder, elbow, 1.6, "body", NEAR, 1.3)
+    limb(elbow, hand, 1.3, "body", NEAR, 1.0)
+    for spread in (-0.6, 0.6):
+        finger = hand + Vector((0.9, 0.0, spread - 0.4))
+        spike(finger, finger + Vector((1.0, -0.2, -0.6)), 0.55, "accent", NEAR)
 
 
 def bat(frame: int) -> None:
@@ -237,33 +265,45 @@ def bat(frame: int) -> None:
             points.reverse()
         membrane(points, 1.6, 0.6, -1.2, "body", FAR)
         wrist_world = Vector((place(*wrist)[0], 0.8, place(*wrist)[1]))
-        limb(
-            Vector((shoulder.x, 0.8, shoulder.z)),
-            wrist_world,
-            0.7,
-            "belly",
-            FAR,
-            0.55,
-        )
+        limb(Vector((shoulder.x, 0.8, shoulder.z)), wrist_world, 0.7, "belly", FAR, 0.55)
         for tip in tips:
             x, z = place(*tip)
             limb(wrist_world, Vector((x, 0.6, z)), 0.55, "belly", FAR, 0.3)
+        # Thumb claw at the wrist.
+        detail(
+            spike(wrist_world, wrist_world + Vector((side * 0.4, -0.4, 0.9)), 0.35, "white", FAR)
+        )
     blob(center, (2.7, 2.4, 4.0), "dark")
     blob(center + Vector((0, -0.8, -0.6)), (1.5, 2.0, 2.6), "body")
+    # Tiny clawed feet tucked under the body.
+    for side in (-1, 1):
+        foot = center + Vector((side * 1.0, -0.6, -3.8))
+        limb(foot, foot + Vector((side * 0.2, 0, -1.2)), 0.45, "belly", BODY, 0.3)
     head = center + Vector((0, -0.4, 4.6))
     blob(head, (2.5, 2.2, 2.2), "dark")
     for side in (-1, 1):
-        blob(
-            head + Vector((side * 1.4, 0, 2.3)), (0.75, 0.6, 1.5), "dark", BODY, (0, side * -18, 0)
-        )
+        # Tall pointed ears with pink inner skin.
+        ear = head + Vector((side * 1.3, 0, 1.4))
+        spike(ear, ear + Vector((side * 1.2, 0, 3.0)), 0.95, "dark", BODY)
+        inner = ear + Vector((side * 0.1, -0.6, 0.3))
+        detail(spike(inner, inner + Vector((side * 0.9, -0.1, 2.2)), 0.5, "tongue", BODY))
         blob(head + Vector((side * 1.25, -2.0, 0.3)), (0.5, 0.4, 0.5), "eye")
         blob(head + Vector((side * 0.55, -2.1, -1.5)), (0.3, 0.3, 0.6), "white")
-        detail(blob(head + Vector((side * 1.4, -0.7, 2.3)), (0.4, 0.3, 1.0), "tongue", BODY))
         catchlight(head + Vector((side * 1.1, -2.4, 0.5)), 0.17)
-    detail(blob(head + Vector((0, -2.2, -0.6)), (0.55, 0.3, 0.35), "tongue", NEAR))
+    detail(blob(head + Vector((0, -2.3, -0.4)), (0.55, 0.3, 0.35), "tongue", NEAR))  # nose
+    for index in range(7):
+        offset = Vector(((index - 3) * 0.55, -2.3, -0.8 - abs(index - 3) * 0.35))
+        detail(blob(center + offset, (0.4, 0.3, 0.9), "dark", NEAR))  # chest fur
     for index in range(5):
-        offset = Vector(((index - 2) * 0.7, -2.3, -1.0 - abs(index - 2) * 0.4))
-        detail(blob(center + offset, (0.45, 0.3, 0.9), "dark", NEAR))
+        detail(
+            spike(
+                head + Vector(((index - 2) * 0.5, -0.6, 1.8)),
+                head + Vector(((index - 2) * 0.8, -0.8, 2.8)),
+                0.3,
+                "dark",
+                BODY,
+            )
+        )  # head tuft
 
 
 def slug(frame: int) -> None:
@@ -297,16 +337,26 @@ def slug(frame: int) -> None:
         [r * 0.42 for _, _, r in belly],
         "belly",
     )
+    # Dark diamond markings down the back.
+    for index in range(2, 10):
+        col, row, radius = path[index]
+        mark = at(col + sway(index) - radius * 0.25, row, -radius * 0.82)
+        detail(blob(mark, (radius * 0.42, 0.3, radius * 0.42), "dark", BODY, (0, 45, 0)))
+    # Wedge-shaped viper head: wide cheeks behind a narrower snout.
     blob(at(18.6, 3.4), (3.6, 2.4, 2.2), "body", BODY, (0, -8, 0))
+    blob(at(17.2, 4.3), (2.4, 2.7, 1.8), "body", BODY, (0, -15, 0))
     blob(at(19.0, 2.0, -1.9), (0.7, 0.5, 0.7), "eye")
-    blob(at(19.4, 2.0, -2.3), (0.25, 0.25, 0.4), "ink")
+    blob(at(19.4, 2.0, -2.3), (0.22, 0.25, 0.5), "ink")
     catchlight(at(18.8, 1.7, -2.4), 0.16)
     detail(blob(at(18.6, 1.2, -1.2), (1.6, 1.0, 0.5), "body", NEAR, (0, -10, 0)))  # brow
     detail(blob(at(21.6, 3.0, -1.6), (0.25, 0.25, 0.25), "ink"))  # nostril
-    detail(limb(at(17.0, 4.6, -1.9), at(21.8, 4.5, -1.4), 0.12, "ink"))  # jaw line
+    detail(limb(at(16.4, 4.9, -2.3), at(21.8, 4.5, -1.4), 0.12, "ink"))  # jaw line
     if frame in (0, 2):
         tip = 23.2 if frame == 2 else 22.6
-        limb(at(21.6, 4.6, -0.3), at(tip, 5.0, -0.3), 0.32, "tongue", NEAR, 0.25)
+        base = at(21.6, 4.6, -0.3)
+        limb(base, at(tip, 5.0, -0.3), 0.32, "tongue", NEAR, 0.25)
+        for fork in (-0.5, 0.5):
+            detail(spike(at(tip, 5.0, -0.3), at(tip + 0.8, 5.0 + fork, -0.3), 0.2, "tongue", NEAR))
 
 
 def eye_flyer(frame: int) -> None:
@@ -323,12 +373,17 @@ def eye_flyer(frame: int) -> None:
         blob(at(19.0, row, -5.0), (1.6, 0.5, 1.6), "white")
         blob(at(20.0, row + 0.4, -5.6), (0.6, 0.4, 1.0), "ink")
         catchlight(at(19.7, row - 0.2, -6.2), 0.25)
-    # Wet gloss streak and suspended bubbles inside the jelly.
+    # Wet gloss streak, a small grin and suspended bubbles inside the jelly.
     detail(blob(at(11.5, 7.2 - stretch, -4.2), (2.6, 0.4, 0.7), "white", NEAR, (0, 14, 0)))
+    detail(blob(at(21.3, 12.6, -4.6), (0.5, 0.3, 1.1), "ink", NEAR, (0, 0, 0)))
     for col, row, size in ((10.0, 14.5, 0.7), (13.5, 16.5, 0.5), (8.0, 11.0, 0.45)):
         detail(blob(at(col, row, -4.0), (size,) * 3, "belly", BODY))
+    # Two hanging drips that stretch and recoil as it bobs.
     for col in ((12.0, 13.0, 11.0, 12.0)[frame], 19.0):
-        blob(at(col + 0.5, 20.5 + stretch, 1.0), (1.3, 1.2, 1.5), "dark", FAR)
+        top = at(col + 0.5, 18.6 + stretch, 1.0)
+        drop = at(col + 0.7, 20.8 + stretch, 1.0)
+        limb(top, drop, 1.4, "dark", FAR, 1.05)
+        blob(drop + Vector((0, 0, -0.5)), (1.3, 1.2, 1.4), "dark", FAR)
 
 
 def walking_rock(frame: int) -> None:
@@ -343,20 +398,32 @@ def walking_rock(frame: int) -> None:
             foot = at(col, 21.6 - lift, depth)
             limb(hip, foot, 1.5, "belly", layer, 1.3)
             blob(foot + Vector((0.8, 0, -0.6)), (2.0, 1.4, 0.9), "belly", layer)
+            for toe in (-0.7, 0.4, 1.5):
+                detail(
+                    blob(foot + Vector((1.9, toe - 0.6, -0.8)), (0.6, 0.55, 0.5), "belly", layer)
+                )
     body = boulder(at(11.5, 11.0 + bob), (10.6, 7.0, 8.6), seed=7)
     body.rotation_euler = Euler((0.0, math.radians(8), 0.2))
-    # Moss on the crown and a few darker strata.
+    # Moss tufts on the crown.
     for col, row, size in ((8.0, 4.4, 3.2), (13.5, 3.8, 2.6), (17.5, 5.6, 1.8)):
         blob(at(col, row + bob, -2.0), (size, 2.2, 1.1), "accent", BODY, (0, 0, 0), True)
+        for index in range(4):
+            offset = (index - 1.5) * size * 0.5
+            tuft = at(col + offset, row + bob - 0.8 - (index % 2) * 0.4, -2.6)
+            detail(blob(tuft, (size * 0.32, 1.0, size * 0.32), "accent", BODY))
     if not asleep:
+        # A heavy stone brow over watchful eyes.
+        detail(boulder(at(17.3, 9.1 + bob, -6.4), (3.4, 0.9, 0.8), seed=3, layer=NEAR))
         for col in (15.5, 19.0):
             blob(at(col, 11.0 + bob, -6.6), (1.4, 0.6, 1.3), "white")
             blob(at(col + 0.5, 11.4 + bob, -7.0), (0.75, 0.4, 0.8), "ink")
             catchlight(at(col + 0.2, 10.8 + bob, -7.4), 0.22)
-    # Cracks across the facets and a few loose pebbles on the crown.
+    # Cracks across the facets, mineral flecks and loose pebbles on the crown.
     for points in (((4.0, 9.0), (6.5, 12.5), (5.5, 16.0)), ((11.0, 15.0), (13.0, 17.5))):
         for (c1, r1), (c2, r2) in zip(points, points[1:]):
             detail(limb(at(c1, r1 + bob, -7.0), at(c2, r2 + bob, -7.0), 0.18, "ink", NEAR))
+    for col, row in ((7.5, 6.5), (3.5, 12.0), (9.5, 16.5)):
+        detail(boulder(at(col, row + bob, -7.2), (0.35, 0.3, 0.3), seed=int(col * 7), slot="white"))
     for col, row in ((10.5, 3.6), (15.8, 4.6)):
         detail(boulder(at(col, row + bob, -2.6), (0.8, 0.8, 0.6), seed=int(col * 10), layer=NEAR))
 
@@ -375,6 +442,56 @@ def clear() -> None:
         bpy.data.objects.remove(item, do_unlink=True)
     for mesh in list(bpy.data.meshes):
         bpy.data.meshes.remove(mesh)
+    for light in list(bpy.data.lights):
+        bpy.data.lights.remove(light)
+
+
+GLOSSY = {"slug_enemy", "eye_flyer"}
+
+
+def material(name: str, roughness: float, coat: float = 0.0):
+    item = bpy.data.materials.get(name) or bpy.data.materials.new(name)
+    item.use_nodes = True
+    shader = item.node_tree.nodes["Principled BSDF"]
+    shader.inputs["Base Color"].default_value = (0.8, 0.8, 0.8, 1.0)
+    shader.inputs["Roughness"].default_value = roughness
+    shader.inputs["Coat Weight"].default_value = coat
+    return item
+
+
+def light_for_hd(scene, objects, glossy: bool) -> None:
+    """Path-traced key, rim and sky light for the HD shading pass.
+
+    The key comes from the upper left in front, a strong rim from behind on
+    the right outlines the silhouette, and soft sky fill keeps shadow sides
+    readable. Only brightness is used, so materials stay neutral gray.
+    """
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 96
+    scene.cycles.use_denoising = True
+    scene.cycles.seed = 1  # deterministic noise pattern
+    world = scene.world or bpy.data.worlds.new("sky")
+    scene.world = world
+    world.use_nodes = True
+    background = world.node_tree.nodes["Background"]
+    background.inputs["Color"].default_value = (0.32, 0.34, 0.42, 1.0)
+    background.inputs["Strength"].default_value = 0.6
+    for label, toward, strength in (
+        ("key", Vector((0.55, 0.75, -0.85)), 3.2),
+        ("rim", Vector((-0.75, -0.9, -0.35)), 4.0),
+    ):
+        data = bpy.data.lights.new(label, "SUN")
+        data.energy = strength
+        data.angle = math.radians(12)
+        lamp = bpy.data.objects.new(label, data)
+        lamp.rotation_euler = toward.to_track_quat("-Z", "Y").to_euler()
+        scene.collection.objects.link(lamp)
+    clay = material("clay", 0.55)
+    gloss = material("gloss", 0.2, 0.6)
+    for item in objects:
+        shiny = glossy or item["slot"] in ("white", "eye", "ink")
+        item.data.materials.clear()
+        item.data.materials.append(gloss if shiny else clay)
 
 
 def render(directory: Path, name: str, frame: int) -> None:
@@ -409,14 +526,15 @@ def render(directory: Path, name: str, frame: int) -> None:
                 for item, color in ids.items():
                     item.color = color
             else:
-                # Neutral gray, studio lit: brightness alone drives the tone ramp.
-                # HD adds cavity shading so creases and facets read at 4x.
-                shading.light = "STUDIO"
-                shading.show_specular_highlight = True
-                shading.show_cavity = hd
-                shading.cavity_type = "BOTH"
+                # Neutral gray: brightness alone drives the tone ramp.
                 for item in ids:
                     item.color = (0.8, 0.8, 0.8, 1.0)
+                shading.light = "STUDIO"
+                shading.show_specular_highlight = True
+            if hd and pass_name == "shade":
+                light_for_hd(scene, ids, glossy=name in GLOSSY)
+            else:
+                settings.engine = "BLENDER_WORKBENCH"
             settings.filepath = str(directory / f"{name}_{frame}_{prefix}{pass_name}.png")
             bpy.ops.render.render(write_still=True)
 
