@@ -32,6 +32,10 @@ def unpolished_campaign(monkeypatch):
         (0, (8, 19), ".", "not double stone"),
         (0, (8, 22), ".", "lacks solid support"),
         (6, (18, 5), "$", "relocation.*invalid"),
+        (5, (8, 19), "*", "occupied"),
+        (5, (8, 20), "$", "occupied"),
+        (5, (11, 18), "*", "occupied"),
+        (5, (12, 18), "M", "occupied"),
     ],
 )
 def test_unsafe_polish_edits_preserve_the_input_campaign(

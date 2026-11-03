@@ -828,6 +828,9 @@ def dressing_placements(layout: Sequence[str], level: int) -> list[DressingPlace
         # Keep the opening trench warning above the takeoff approach. Scenery
         # otherwise occupies its clear bay before automatic warning placement.
         priority_signs.append({"sprite": "danger_sign", "col": 10, "row": 20})
+    if level == 5 and len(layout) > 18 and layout[18][11:13] == "##":
+        # Flag the drop from the lift-exchange dismount shelf to the rock floor.
+        priority_signs.append({"sprite": "danger_sign", "col": 14, "row": 17})
     if level == 8 and len(layout) > 12 and layout[6][1:4] == "##H" and layout[12][4] == "#":
         # Warn about the top-vault dinosaur before decorating its small room.
         priority_signs.append({"sprite": "danger_sign", "col": 3, "row": 1})

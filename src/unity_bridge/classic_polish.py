@@ -11,7 +11,11 @@ CONTENT_EDITS: dict[int, tuple[tuple[int, int, str], ...]] = {
     # Two jumps offer a rewarded alternative to the long upper chain ascent.
     1: ((6, 21, "A"), (21, 5, "#"), (22, 5, "#"), (21, 4, "$")),
     2: ((18, 17, "p"),),  # Upgrade before the red-gate/rock pocket.
-    5: ((6, 21, "A"),),  # Avoid a long unarmed trip to the upper ammo shelf.
+    # Bring the second pad within a real entrance jump; its former row-18 stop
+    # was four tiles above the floor. Keep the floor crystal at (8,21) intact.
+    # The short dismount shelf sits above the rock's floor, offering a place to
+    # watch its patrol before dropping. The neighboring crystal stays intact.
+    5: ((6, 21, "A"), (8, 19, "="), (8, 20, "="), (11, 18, "#"), (12, 18, "#")),
     6: ((7, 21, "p"),),  # Rare upgrade before the smelter's main floor patrol.
     7: ((8, 8, "z"),),  # Choose freeze by climbing before the flyer crossing.
     # Dinosaur patrol floor, covered bat-room rest and central-chain return.
