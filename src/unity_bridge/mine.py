@@ -13,6 +13,7 @@ from src.game.crystal_caves_entities import CaveSpec
 from .human_controls import HumanControlsMixin
 
 ENTRANCES = tuple((col, row) for row in (6, 10, 14, 18) for col in (8, 15, 23, 31))
+TORCHES = tuple((col, row) for row in (6, 10, 14, 18) for col in (11, 27))
 
 
 def mine_spec() -> CaveSpec:
