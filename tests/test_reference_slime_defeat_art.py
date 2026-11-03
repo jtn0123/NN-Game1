@@ -41,7 +41,8 @@ def test_red_pulse_has_four_deterministic_expanding_then_disappearing_shapes():
 def test_all_preexisting_creature_poses_match_the_accepted_fourth_round_baseline():
     # Recorded from the accepted fourth-round baseline PNGs, then re-recorded when
     # the dinosaur, and later the bat, snake, slime and walking rock, were
-    # replaced by Blender-modelled sprites (ArtSource/Blender/creatures.py).
+    # replaced by Blender-modelled sprites (ArtSource/Blender/creatures.py), and
+    # once more for the smooth-tube, 8x-sampled pass that added HD art.
     # Only the four defeat sprites are excluded;
     # slime, snake, bat, rock, dinosaur, hit and bone poses all remain protected.
     existing = {
@@ -55,4 +56,4 @@ def test_all_preexisting_creature_poses_match_the_accepted_fourth_round_baseline
         digest.update(name.encode() + b"\0")
         digest.update(bytes(image.get_size()))
         digest.update(pygame.image.tobytes(image, "RGBA"))
-    assert digest.hexdigest() == "5ffb81a4bf4332b609eab114e465800b9421ded0d81697d04224b96449b33d94"
+    assert digest.hexdigest() == "c798c799e191b1cdeb4fe50318969a45b2bf47a326fdf4b3d35ddb795a78a16d"

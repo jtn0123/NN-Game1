@@ -124,6 +124,7 @@ namespace CrystalCaves.Pilot
                 Number("CAMERA SHAKE", d.shake, 0,100,10, "Damage shake strength. Reduced motion overrides it without changing this saved value.", (v,n) => v.shake=n);
                 Toggle("PARTICLES", d.particles, "Decorative pickup and shot particles. Projectiles and danger cues remain visible.", v => v.particles=!v.particles);
                 Add("EFFECT DENSITY", new[] { "OFF", "LOW", "NORMAL" }[d.effectDensity], "Controls decorative dust, sparks and vapor. Enemies, thorns, acid and bullets stay visible at every setting.", n => CaveSettings.Change(v => v.effectDensity=Cycle(d.effectDensity,n,3)));
+                Add("CREATURE ART", d.hdCreatures ? "HD" : "PIXEL", "HD draws the Blender-modelled creatures at four times the detail with smooth shading. Pixel shows the same models at the original 1991 resolution.", n => CaveSettings.Change(v => v.hdCreatures = !v.hdCreatures, false));
                 Toggle("GEM GLINTS", d.gemGlints, "The original gem colors and shapes stay intact when glints are disabled.", v => v.gemGlints=!v.gemGlints);
                 Toggle("ENVIRONMENT MOTION", d.environment, "Sparse ceiling drips, service lamps, dust and acid vapor. Reduced motion suppresses this layer.", v => v.environment=!v.environment);
                 Number("LOCAL LIGHT", d.lighting, 0,50,5, "Restrained torch and crystal light. Zero preserves the evenly lit retro artwork.", (v,n) => v.lighting=n);

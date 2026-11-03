@@ -357,7 +357,7 @@ namespace CrystalCaves.Pilot
         static Vector3 EntityPosition(CaveEntity entity, Sprite sprite) => EntityPosition(entity, sprite, entity.x, entity.y);
         static Vector3 EntityPosition(CaveEntity entity, Sprite sprite, float x, float y) => Position(x + entity.w / 2,
             entity.sprite == "dinosaur_enemy" || entity.sprite == "slug_enemy"
-                ? y + entity.h - sprite.rect.height / 2 : y + entity.h / 2);
+                ? y + entity.h - sprite.bounds.size.y * 16 : y + entity.h / 2);
 
         Vector3 CameraTarget(CaveSnapshot state) => CameraTarget(state, state.player.x, state.player.y);
         Vector3 CameraTarget(CaveSnapshot state, float playerX, float playerY)
@@ -390,13 +390,21 @@ namespace CrystalCaves.Pilot
             }
         }
 
+        /// <summary>HD creature textures have this many texels per native pixel.</summary>
+        public const int HdScale = 4;
+
+        // HD creature art replaces a pixel sprite of the same name at the same world size.
         Sprite LoadSprite(string name)
         {
-            if (sprites.TryGetValue(name, out var sprite)) return sprite;
-            var texture = Resources.Load<Texture2D>("Sprites/" + name);
+            var hd = CaveSettings.Data.hdCreatures;
+            var key = hd ? "hd:" + name : name;
+            if (sprites.TryGetValue(key, out var sprite)) return sprite;
+            var texture = hd ? Resources.Load<Texture2D>("SpritesHD/" + name) : null;
+            var texelsPerPixel = texture != null ? HdScale : 1;
+            if (texture == null) texture = Resources.Load<Texture2D>("Sprites/" + name);
             if (texture == null) { Debug.LogError("Missing cave sprite: " + name); return null; }
-            sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.one * .5f, 32);
-            sprites.Add(name, sprite);
+            sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.one * .5f, 32 * texelsPerPixel);
+            sprites.Add(key, sprite);
             return sprite;
         }
 

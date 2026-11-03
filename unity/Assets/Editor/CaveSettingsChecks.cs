@@ -46,6 +46,19 @@ namespace CrystalCaves.Pilot.Editor
             var nav=new CaveMenuNavigation();nav.Apply(5,-1,0,false,false,0);check(nav.Focus==4,"Navigation wraps backward");
             nav.Apply(5,1,1,true,false,0);check(nav.Focus==0 && nav.Adjustment(0)==1 && nav.Activate(0) && !nav.Activate(0),"Navigation adjusts and consumes a submit once");
             nav.Apply(5,0,0,false,true,-1);check(nav.Back&&nav.TabDelta==-1,"Controller/keyboard back and tab actions share navigation");
+            check(new CaveSettingsData().hdCreatures && CaveSettings.Parse("{\"version\":2}").hdCreatures,"HD creature art is the default, including for older saves");
+            var art=new CaveSettingsData{hdCreatures=false};art.ApplyPreset(3);art.ApplyPreset(2);
+            check(!art.hdCreatures && !CaveSettings.Parse(JsonUtility.ToJson(art)).hdCreatures,"Pixel creature choice survives presets and saving");
+            var hdArt=true;
+            foreach(var creature in new[]{"dinosaur_enemy","bat_enemy","slug_enemy","eye_flyer","walking_rock"})
+                foreach(var pose in new[]{"","_0","_1","_2","_3"})
+                {
+                    var pixel=Resources.Load<Texture2D>("Sprites/"+creature+pose);var hd=Resources.Load<Texture2D>("SpritesHD/"+creature+pose);
+                    hdArt&=pixel!=null&&hd!=null&&hd.width==pixel.width*CaveWorld.HdScale&&hd.height==pixel.height*CaveWorld.HdScale&&hd.filterMode==FilterMode.Bilinear;
+                }
+            foreach(var extra in new[]{"walking_rock_sleep","dinosaur_enemy_hit_0","dinosaur_enemy_hit_3"})
+                hdArt&=Resources.Load<Texture2D>("SpritesHD/"+extra)?.width==Resources.Load<Texture2D>("Sprites/"+extra).width*CaveWorld.HdScale;
+            check(hdArt,"Every creature pose has filtered 4x HD art matching its pixel sprite");
             var args=Environment.GetCommandLineArgs();var index=Array.IndexOf(args,"--settings-check-report");
             if(index>=0&&index+1<args.Length)File.WriteAllText(args[index+1],JsonUtility.ToJson(new Report { success=true,checks=checks.ToArray() },true));
             Debug.Log("Passed "+checks.Count+" settings behavior checks");

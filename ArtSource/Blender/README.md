@@ -1,7 +1,13 @@
 # Blender creature models
 
 Every moving enemy (dinosaur, bat, snake, flying slime and walking rock) is
-modelled and posed in Blender, then reduced to the game's palette pixel art.
+modelled and posed in Blender, then converted twice:
+
+- `sprites/`: native pixel art in the game's palette (Options → Graphics →
+  Creature art: Pixel).
+- `sprites_hd/`: 4× HD art with extra detail (catchlights, back ridge, cracks,
+  gloss), the same palette blended smoothly and antialiased edges (Creature
+  art: HD, the default). Unity draws it at exactly the pixel sprite's size.
 
 ```bash
 python scripts/render_blender_sprites.py             # re-render every creature
@@ -10,13 +16,15 @@ python scripts/render_blender_sprites.py bat_enemy   # just one
 
 - `creatures.py`: the models. Each part is authored in sprite-pixel
   coordinates with `at(col, row, depth)`, so features land on exact pixels.
+  Parts wrapped in `detail()` render only in HD.
 - `sprite_ids.py`: the slot (palette ramp) and layer (behind, body or in front)
   encoded in the flat ID pass.
 - `scripts/render_blender_sprites.py`: the palette ramps per creature and the
-  conversion (4×4 majority sampling, shared brightness cuts, contour lines
+  conversion (8× renders, 8×8 majority sampling for pixel art, shared brightness cuts, contour lines
   between layers, a one-pixel ink outline).
-- `sprites/`: the committed results. `python -m src.unity_bridge.export_assets`
-  reads these, so building or testing the game never needs Blender.
+- `sprites/` and `sprites_hd/`: the committed results.
+  `python -m src.unity_bridge.export_assets` reads these, so building or
+  testing the game never needs Blender.
 
 Blender 5.2 or newer is needed only to re-render (`brew install --cask blender`).
 After re-rendering, run the creature art tests and re-record the baseline in

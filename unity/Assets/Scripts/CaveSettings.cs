@@ -16,6 +16,8 @@ namespace CrystalCaves.Pilot
         public int shake = 100, effectDensity = 2, lighting, brightness = 100, palette;
         public bool particles = true, gemGlints = true, damageFlashes = true, environment;
         public bool contactShadows = true;
+        // Blender-modelled creatures at 4x detail; off shows the native pixel sprites.
+        public bool hdCreatures = true;
         public int shadowStrength = 45, scanlines, phosphor;
         // Modern light treatments; zero keeps the original flat presentation.
         public int bloom, vignette;

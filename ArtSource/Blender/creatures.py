@@ -6,9 +6,12 @@ One Blender unit is one final sprite pixel. Creatures are authored in sprite
 pixel coordinates through ``at(col, row, depth)`` (row 0 is the top of the
 sprite, negative depth is toward the camera), so a feature such as an eye can
 be placed on the exact pixel the game's art tests expect. Each pose is
-rendered twice: a flat pass whose colors identify slot and layer (see
+rendered as a flat pass whose colors identify slot and layer (see
 ``sprite_ids.py``) and a studio-lit pass of neutral gray whose brightness
-becomes the pixel shading. ``scripts/render_blender_sprites.py`` converts both.
+becomes the shading, once for the native pixel sprite and once for the HD
+sprite. Parts made with ``detail()`` (catchlights, scales, cracks, gloss) only
+appear in HD, where they are large enough to read.
+``scripts/render_blender_sprites.py`` converts the passes.
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from mathutils import Euler, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sprite_ids import BODY, FAR, NEAR, id_color  # noqa: E402
 
-SCALE = 4  # supersampling per final pixel
+SCALE = 8  # render pixels per sprite pixel; HD sprites are half of this (4x)
 SIZE = [24, 24]  # current sprite (width, height); set per creature
 
 
@@ -68,8 +71,8 @@ def limb(start, end, radius, slot="body", layer=BODY, end_radius=None):
     item.rotation_euler = direction.to_track_quat("Z", "Y").to_euler()
     tag(item, slot, layer)
     bpy.ops.object.shade_smooth()
-    blob(start, (radius,) * 3, slot, layer)
-    blob(end, (end_radius,) * 3, slot, layer)
+    joints = (blob(start, (radius,) * 3, slot, layer), blob(end, (end_radius,) * 3, slot, layer))
+    item["joints"] = [joint.name for joint in joints]
     return item
 
 
@@ -100,6 +103,30 @@ def membrane(points, depth, thickness, bulge, slot="body", layer=FAR):
     return item
 
 
+def tube(points, radii, slot="body", layer=BODY):
+    """A smooth tapered tube through world points (tails, snake bodies)."""
+    curve = bpy.data.curves.new("tube", "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = 1.0
+    curve.bevel_resolution = 8
+    curve.resolution_u = 16
+    curve.use_fill_caps = True
+    spline = curve.splines.new("NURBS")
+    spline.points.add(len(points) - 1)
+    for point, location, radius in zip(spline.points, points, radii):
+        point.co = (*location, 1.0)
+        point.radius = radius
+    spline.order_u = 3
+    spline.use_endpoint_u = True
+    item = bpy.data.objects.new("tube", curve)
+    bpy.context.collection.objects.link(item)
+    tag(item, slot, layer)
+    # Round end caps.
+    blob(points[0], (radii[0],) * 3, slot, layer)
+    blob(points[-1], (radii[-1],) * 3, slot, layer)
+    return item
+
+
 def boulder(location, radii, seed, slot="body", layer=BODY):
     """A faceted, deterministic rock: a jittered icosphere with flat shading."""
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=1.0, location=location)
@@ -111,6 +138,18 @@ def boulder(location, radii, seed, slot="body", layer=BODY):
     tag(item, slot, layer)
     bpy.ops.object.shade_flat()
     return item
+
+
+def detail(item):
+    """Mark a part as HD-only: too fine for a native-resolution pixel."""
+    item["hd_only"] = True
+    for name in item.get("joints", ()):
+        bpy.data.objects[name]["hd_only"] = True
+    return item
+
+
+def catchlight(location, size=0.3):
+    return detail(blob(location, (size, size * 0.6, size), "white", NEAR))
 
 
 # --- creatures ------------------------------------------------------------
@@ -140,10 +179,11 @@ def dinosaur(frame: int) -> None:
         for toe in (foot_x + 4.0, foot_x + 4.9):
             blob((toe, depth - 1.8, 1.4 + lift), (0.7, 0.7, 0.7), "accent", layer)
     # Thick tail sweeping down behind the hips.
-    for index in range(9):
-        t = index / 8
-        x = -5.0 - 4.6 * math.sin(t * 1.4) + sway * t
-        blob(Vector((x, 0.5, 24.0 - 13.5 * t)) + up, (4.6 - 3.3 * t,) * 3, "body")
+    tail = [
+        Vector((-5.0 - 4.6 * math.sin(t * 1.4) + sway * t, 0.5, 24.0 - 13.5 * t)) + up
+        for t in (index / 8 for index in range(9))
+    ]
+    tube(tail, [4.6 - 3.3 * index / 8 for index in range(9)])
     blob(Vector((-0.5, 0.0, 31.0)) + up, (7.0, 6.0, 12.5), "body", BODY, (0, -12, 0))
     blob(Vector((2.2, -2.0, 29.0)) + up, (4.2, 4.8, 9.8), "belly", BODY, (0, -12, 0))
     blob(Vector((2.4, 0.0, 43.5)) + up, (4.6, 4.4, 7.5), "body", BODY, (0, -20, 0))
@@ -160,6 +200,13 @@ def dinosaur(frame: int) -> None:
     blob(Vector((3.6, -3.8, 54.3)) + head, (1.4, 1.0, 1.4), "white")
     blob(Vector((4.3, -4.6, 54.2)) + head, (0.65, 0.6, 0.85), "ink")
     blob(Vector((10.0, -2.4, 52.6)) + head, (0.55, 0.55, 0.55), "ink")
+    catchlight(Vector((4.6, -5.4, 54.7)) + head, 0.28)
+    # Back ridge and a brow crease.
+    for index in range(7):
+        t = index / 6
+        base = Vector((-4.2 - 2.4 * t, 0.0, 49.0 - 18.0 * t)) + up
+        detail(blob(base, (0.9, 1.2, 1.6 - 0.6 * t), "dark", BODY, (0, -40 - 20 * t, 0)))
+    detail(limb(Vector((1.0, -4.2, 57.0)) + head, Vector((5.2, -3.6, 56.0)) + head, 0.25, "ink"))
     swing = (1.0, 0.0, -1.0, 0.0)[frame]
     shoulder = Vector((4.0, -4.2, 37.5)) + up
     hand = Vector((8.0 + swing * 0.6, -4.6, 34.5 + swing)) + up
@@ -211,6 +258,12 @@ def bat(frame: int) -> None:
         )
         blob(head + Vector((side * 1.25, -2.0, 0.3)), (0.5, 0.4, 0.5), "eye")
         blob(head + Vector((side * 0.55, -2.1, -1.5)), (0.3, 0.3, 0.6), "white")
+        detail(blob(head + Vector((side * 1.4, -0.7, 2.3)), (0.4, 0.3, 1.0), "tongue", BODY))
+        catchlight(head + Vector((side * 1.1, -2.4, 0.5)), 0.17)
+    detail(blob(head + Vector((0, -2.2, -0.6)), (0.55, 0.3, 0.35), "tongue", NEAR))
+    for index in range(5):
+        offset = Vector(((index - 2) * 0.7, -2.3, -1.0 - abs(index - 2) * 0.4))
+        detail(blob(center + offset, (0.45, 0.3, 0.9), "dark", NEAR))
 
 
 def slug(frame: int) -> None:
@@ -233,18 +286,24 @@ def slug(frame: int) -> None:
     def sway(index: float) -> float:
         return 1.3 * math.sin(phase + index * 0.7) if 4 <= index <= 8 else 0.0
 
-    for index, (col, row, radius) in enumerate(path):
-        blob(at(col + sway(index), row), (radius, radius * 0.9, radius))
+    tube(
+        [at(col + sway(index), row) for index, (col, row, _) in enumerate(path)],
+        [radius for _, _, radius in path],
+    )
     # A smooth pale belly stripe along the front of the raised neck.
-    for step in range(4 * 4, 9 * 4 + 1):
-        t = step / 4
-        low, high = path[int(t)], path[min(len(path) - 1, int(t) + 1)]
-        mix = t - int(t)
-        col, row, radius = (a + (b - a) * mix for a, b in zip(low, high))
-        blob(at(col + sway(t) + radius * 0.6, row, -radius * 0.5), (radius * 0.42,) * 3, "belly")
+    belly = path[4:10]
+    tube(
+        [at(c + sway(i + 4) + r * 0.6, row, -r * 0.5) for i, (c, row, r) in enumerate(belly)],
+        [r * 0.42 for _, _, r in belly],
+        "belly",
+    )
     blob(at(18.6, 3.4), (3.6, 2.4, 2.2), "body", BODY, (0, -8, 0))
     blob(at(19.0, 2.0, -1.9), (0.7, 0.5, 0.7), "eye")
     blob(at(19.4, 2.0, -2.3), (0.25, 0.25, 0.4), "ink")
+    catchlight(at(18.8, 1.7, -2.4), 0.16)
+    detail(blob(at(18.6, 1.2, -1.2), (1.6, 1.0, 0.5), "body", NEAR, (0, -10, 0)))  # brow
+    detail(blob(at(21.6, 3.0, -1.6), (0.25, 0.25, 0.25), "ink"))  # nostril
+    detail(limb(at(17.0, 4.6, -1.9), at(21.8, 4.5, -1.4), 0.12, "ink"))  # jaw line
     if frame in (0, 2):
         tip = 23.2 if frame == 2 else 22.6
         limb(at(21.6, 4.6, -0.3), at(tip, 5.0, -0.3), 0.32, "tongue", NEAR, 0.25)
@@ -263,6 +322,11 @@ def eye_flyer(frame: int) -> None:
         blob(at(19.0, row, -4.0), (2.2, 1.0, 2.2), "dark")
         blob(at(19.0, row, -5.0), (1.6, 0.5, 1.6), "white")
         blob(at(20.0, row + 0.4, -5.6), (0.6, 0.4, 1.0), "ink")
+        catchlight(at(19.7, row - 0.2, -6.2), 0.25)
+    # Wet gloss streak and suspended bubbles inside the jelly.
+    detail(blob(at(11.5, 7.2 - stretch, -4.2), (2.6, 0.4, 0.7), "white", NEAR, (0, 14, 0)))
+    for col, row, size in ((10.0, 14.5, 0.7), (13.5, 16.5, 0.5), (8.0, 11.0, 0.45)):
+        detail(blob(at(col, row, -4.0), (size,) * 3, "belly", BODY))
     for col in ((12.0, 13.0, 11.0, 12.0)[frame], 19.0):
         blob(at(col + 0.5, 20.5 + stretch, 1.0), (1.3, 1.2, 1.5), "dark", FAR)
 
@@ -288,6 +352,13 @@ def walking_rock(frame: int) -> None:
         for col in (15.5, 19.0):
             blob(at(col, 11.0 + bob, -6.6), (1.4, 0.6, 1.3), "white")
             blob(at(col + 0.5, 11.4 + bob, -7.0), (0.75, 0.4, 0.8), "ink")
+            catchlight(at(col + 0.2, 10.8 + bob, -7.4), 0.22)
+    # Cracks across the facets and a few loose pebbles on the crown.
+    for points in (((4.0, 9.0), (6.5, 12.5), (5.5, 16.0)), ((11.0, 15.0), (13.0, 17.5))):
+        for (c1, r1), (c2, r2) in zip(points, points[1:]):
+            detail(limb(at(c1, r1 + bob, -7.0), at(c2, r2 + bob, -7.0), 0.18, "ink", NEAR))
+    for col, row in ((10.5, 3.6), (15.8, 4.6)):
+        detail(boulder(at(col, row + bob, -2.6), (0.8, 0.8, 0.6), seed=int(col * 10), layer=NEAR))
 
 
 CREATURES = {
@@ -328,20 +399,26 @@ def render(directory: Path, name: str, frame: int) -> None:
     shading.show_object_outline = False
     shading.show_cavity = False
     ids = {item: tuple(item.color) for item in scene.objects if "slot" in item}
-    for pass_name in ("id", "shade"):
-        if pass_name == "id":
-            shading.light = "FLAT"
-            shading.show_specular_highlight = False
-        else:
-            # Neutral gray, studio lit: brightness alone drives the tone ramp.
-            shading.light = "STUDIO"
-            shading.show_specular_highlight = True
-            for item in ids:
-                item.color = (0.8, 0.8, 0.8, 1.0)
-        settings.filepath = str(directory / f"{name}_{frame}_{pass_name}.png")
-        bpy.ops.render.render(write_still=True)
-    for item, color in ids.items():
-        item.color = color
+    for prefix, hd in (("", False), ("hd_", True)):
+        for item in ids:
+            item.hide_render = item.get("hd_only", False) and not hd
+        for pass_name in ("id", "shade"):
+            if pass_name == "id":
+                shading.light = "FLAT"
+                shading.show_specular_highlight = shading.show_cavity = False
+                for item, color in ids.items():
+                    item.color = color
+            else:
+                # Neutral gray, studio lit: brightness alone drives the tone ramp.
+                # HD adds cavity shading so creases and facets read at 4x.
+                shading.light = "STUDIO"
+                shading.show_specular_highlight = True
+                shading.show_cavity = hd
+                shading.cavity_type = "BOTH"
+                for item in ids:
+                    item.color = (0.8, 0.8, 0.8, 1.0)
+            settings.filepath = str(directory / f"{name}_{frame}_{prefix}{pass_name}.png")
+            bpy.ops.render.render(write_still=True)
 
 
 def main() -> None:

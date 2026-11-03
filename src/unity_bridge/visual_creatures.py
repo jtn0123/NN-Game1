@@ -9,6 +9,8 @@ import pygame
 from .visual_materials import INK, WHITE, canvas
 
 BLENDER_SPRITES = Path(__file__).resolve().parents[2] / "ArtSource/Blender/sprites"
+BLENDER_HD_SPRITES = BLENDER_SPRITES.with_name("sprites_hd")
+HD_SCALE = 4  # HD creature texels per native pixel
 
 
 def blender_sprite(name: str, pose: str) -> pygame.Surface:
@@ -138,6 +140,25 @@ CREATURES = {
     "eye_flyer": eye_flyer,
     "walking_rock": walking_rock,
 }
+
+
+def hd_creature_sprites() -> dict[str, pygame.Surface]:
+    """4x Blender renders under the same names Unity uses for the pixel sprites.
+
+    Hit and defeat effects without an HD render keep their pixel version.
+    """
+    images: dict[str, pygame.Surface] = {}
+    for name in CREATURES:
+        for frame in range(4):
+            path = BLENDER_HD_SPRITES / f"{name}_{frame}.png"
+            images[f"{name}_{frame}"] = pygame.image.load(str(path)).copy()
+        images[name] = images[f"{name}_0"]
+    for frame in range(4):
+        path = BLENDER_HD_SPRITES / f"dinosaur_enemy_hit_{frame}.png"
+        images[f"dinosaur_enemy_hit_{frame}"] = pygame.image.load(str(path)).copy()
+    sleep = BLENDER_HD_SPRITES / "walking_rock_sleep.png"
+    images["walking_rock_sleep"] = pygame.image.load(str(sleep)).copy()
+    return images
 
 
 def creature_sprites() -> dict[str, pygame.Surface]:

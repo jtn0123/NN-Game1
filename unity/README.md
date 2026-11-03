@@ -179,7 +179,7 @@ and still requires Apply/Keep. Test and replay modes do not write this record.
 | Page | Controls |
 | --- | --- |
 | Display | Window/fullscreen, remembered window size, 15-second Keep/Revert, VSync (default), 30–360 FPS or unlimited, Smooth/Retro Pixel/Classic motion, performance overlay (FPS, frame time, steps per second), automatic or 1–6× integer scaling, adaptive/classic/wide framing |
-| Graphics | Current Retro / Enhanced Retro / Low Power / High Fidelity presets, independent shake/particles/glints, Off/Low/Normal density, environmental motion, local light, contact shadows and strength, bloom, vignette, brightness, original/warm/cool palette, CRT scanlines and phosphor |
+| Graphics | Current Retro / Enhanced Retro / Low Power / High Fidelity presets, independent shake/particles/glints, Off/Low/Normal density, environmental motion, local light, contact shadows and strength, Pixel/HD creature art, bloom, vignette, brightness, original/warm/cool palette, CRT scanlines and phosphor |
 | Sound | Master/effects volume, mute, paused-menu preview of the actual raygun sound |
 | Accessibility | Reduced motion, damage flashes, top/bottom HUD, standard/large HUD, safe margin, high contrast, letter/symbol item cues, screenshot HUD preference |
 
@@ -188,7 +188,9 @@ presentation. Lighting, environmental dressing motion, grading and CRT are off.
 Enhanced Retro adds restrained gem/torch light and sparse drips, service lamps,
 dust and vapor. Low Power caps rendering at 30 FPS and reduces decoration. High Fidelity adds
 bloom on crystals, shots, torches and lamps, stronger local light and a soft
-vignette; the HUD is never post-processed.
+vignette; the HUD is never post-processed. Creature art (HD by default) is
+independent of presets: HD shows the Blender-modelled enemies at 4× detail,
+Pixel shows the same models at native resolution.
 Manual graphics overrides become Custom; display resolution, audio and HUD
 preferences survive preset changes. Reduced motion suppresses decorative
 motion while lifts, bullets, enemy poses and essential hazard cues continue.

@@ -5,12 +5,17 @@
     python scripts/render_blender_sprites.py --passes DIR    # convert existing passes
 
 Blender (``ArtSource/Blender/creatures.py``) renders a flat slot/layer ID pass
-and a studio-lit shading pass at 4x the final size. Each final pixel takes the
-majority part of its 4x4 block; its brightness picks a tone from that slot's
-palette ramp (parts behind the body sit one tone darker); an ink contour
-separates nearer layers from farther ones; and a one-pixel ink outline wraps
-the silhouette. The PNGs committed in ``ArtSource/Blender/sprites`` are what
-the asset export uses, so building the game never needs Blender.
+and a studio-lit shading pass at 8x the final size, for two outputs:
+
+- ``sprites/``: native pixel art. Each pixel takes the majority part of its
+  8x8 block; its brightness picks a tone from that slot's palette ramp (parts
+  behind the body sit one tone darker); an ink contour separates nearer layers
+  from farther ones; a one-pixel ink outline wraps the silhouette.
+- ``sprites_hd/``: 4x HD art with HD-only details, the same palette ramps
+  blended smoothly, half-pixel contours and antialiased edges.
+
+The committed PNGs are what the asset export uses, so building the game never
+needs Blender.
 """
 
 from __future__ import annotations
@@ -22,18 +27,19 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
+import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 BLENDER = ROOT / "ArtSource/Blender"
 SCENE = BLENDER / "creatures.py"
 OUTPUT = BLENDER / "sprites"
-SCALE = 4
+HD_OUTPUT = BLENDER / "sprites_hd"
+SCALE = 8  # render pixels per sprite pixel (HD sprites are 4x)
 
 sys.path.insert(0, str(ROOT))
-from ArtSource.Blender.sprite_ids import FAR, all_ids  # noqa: E402
+from ArtSource.Blender.sprite_ids import BODY, FAR, SLOTS, all_ids  # noqa: E402
 from src.unity_bridge.visual_materials import GOLD, INK, STEEL, WHITE  # noqa: E402
 
 Color = tuple[int, int, int]
@@ -75,6 +81,7 @@ CREATURES: dict[str, Creature] = {
             "belly": ((96, 78, 140), (150, 126, 196)),
             "eye": (EYE_YELLOW,),
             "white": (WHITE,),
+            "tongue": ((150, 70, 110), (210, 120, 160)),
         },
     ),
     "slug_enemy": Creature(
@@ -129,50 +136,62 @@ def srgb(linear: tuple[float, float, float]) -> Color:
 IDS: dict[Color, Part] = {srgb(color): (slot, layer) for slot, layer, color in all_ids()}
 
 
-def pixel(image: Image.Image, point: tuple[int, int]) -> tuple[int, int, int, int]:
-    """An RGBA pixel (the images are always converted to RGBA first)."""
-    return cast(tuple[int, int, int, int], image.getpixel(point))
+# Every (slot, layer) pair as an index, in a fixed order.
+PARTS: list[Part] = list(IDS.values())
+ID_COLORS = np.array(list(IDS), dtype=np.int32)
 
 
-def part_of(rgb: Color) -> Part:
-    key = min(IDS, key=lambda known: sum((a - b) ** 2 for a, b in zip(known, rgb)))
-    return IDS[key]
+def load(path: Path, size: tuple[int, int]) -> np.ndarray:
+    image = Image.open(path).convert("RGBA")
+    if image.size != size:
+        raise ValueError(f"{path.name}: expected {size}, rendered {image.size}")
+    return np.asarray(image, dtype=np.int32)
 
 
-def luminance(rgb: tuple[int, ...]) -> float:
-    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+def decode(passes: Path, stem: str, size: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Per render pixel: part index (-1 where empty) and studio-lit brightness."""
+    ids = load(passes / f"{stem}_id.png", size)
+    shade = load(passes / f"{stem}_shade.png", size)
+    distance = ((ids[..., None, :3] - ID_COLORS[None, None]) ** 2).sum(axis=-1)
+    parts = np.where(ids[..., 3] >= 128, distance.argmin(axis=-1), -1)
+    brightness = shade[..., :3] @ np.array([0.2126, 0.7152, 0.0722])
+    return parts, brightness
+
+
+def dilate(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Grow a boolean mask by a disc of the given radius."""
+    grown = mask.copy()
+    padded = np.pad(mask, radius)
+    height, width = mask.shape
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            if dx * dx + dy * dy <= radius * radius:
+                grown |= padded[
+                    radius + dy : radius + dy + height, radius + dx : radius + dx + width
+                ]
+    return grown
 
 
 def sample(passes: Path, name: str, frame: int, creature: Creature) -> list[list[Cell]]:
     width, height = creature.size
-    ids = Image.open(passes / f"{name}_{frame}_id.png").convert("RGBA")
-    shade = Image.open(passes / f"{name}_{frame}_shade.png").convert("RGBA")
-    if ids.size != (width * SCALE, height * SCALE) or shade.size != ids.size:
-        raise ValueError(f"{name} frame {frame}: unexpected render size {ids.size}")
+    parts, brightness = decode(passes, f"{name}_{frame}", (width * SCALE, height * SCALE))
     grid: list[list[Cell]] = []
     for row in range(height):
         line: list[Cell] = []
         for col in range(width):
-            votes: dict[Part, list[float]] = {}
-            for dy in range(SCALE):
-                for dx in range(SCALE):
-                    point = (col * SCALE + dx, row * SCALE + dy)
-                    r, g, b, a = pixel(ids, point)
-                    if a >= 128:
-                        votes.setdefault(part_of((r, g, b)), []).append(
-                            luminance(pixel(shade, point))
-                        )
-            if sum(len(values) for values in votes.values()) * 2 < SCALE * SCALE:
+            block = np.s_[row * SCALE : (row + 1) * SCALE, col * SCALE : (col + 1) * SCALE]
+            ids, values = parts[block].ravel(), brightness[block].ravel()
+            if (ids >= 0).sum() * 2 < SCALE * SCALE:
                 line.append(None)
                 continue
 
             # Small features (eyes, teeth, claws) win ties so they survive downsampling.
-            def weight(part: Part) -> int:
-                return len(votes[part]) * (2 if len(creature.ramps[part[0]]) <= 2 else 1)
+            def weight(index: int) -> int:
+                count = int((ids == index).sum())
+                return count * (2 if len(creature.ramps[PARTS[index][0]]) <= 2 else 1)
 
-            part = max(votes, key=weight)
-            values = votes[part]
-            line.append((part, sum(values) / len(values)))
+            index = max((int(i) for i in np.unique(ids[ids >= 0])), key=weight)
+            line.append((PARTS[index], float(values[ids == index].mean())))
         grid.append(line)
     return grid
 
@@ -194,6 +213,7 @@ def smoothed_tone(grid: list[list[Cell]], tones: list[list[int]], col: int, row:
 
 
 def convert_creature(passes: Path, output: Path, name: str, creature: Creature) -> list[Path]:
+    """The native-resolution palette sprite: one Blender part per game pixel."""
     width, height = creature.size
     grids = {
         suffix: sample(passes, name, frame, creature) for suffix, frame in creature.frames.items()
@@ -217,7 +237,7 @@ def convert_creature(passes: Path, output: Path, name: str, creature: Creature) 
             [0 if cell is None else sum(cell[1] > cut for cut in cuts[cell[0][0]]) for cell in line]
             for line in grid
         ]
-        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        image = np.zeros((height, width, 4), dtype=np.uint8)
         for row, line in enumerate(grid):
             for col, cell in enumerate(line):
                 if cell is None:
@@ -237,21 +257,81 @@ def convert_creature(passes: Path, output: Path, name: str, creature: Creature) 
                     for x, y in ((col - 1, row), (col + 1, row), (col, row - 1), (col, row + 1))
                 ):
                     color = INK  # Contour where a nearer part overlaps this one.
-                image.putpixel((col, row), (*color, 255))
-        outlined = image.copy()
-        for row in range(height):
-            for col in range(width):
-                if pixel(image, (col, row))[3]:
-                    continue
-                neighbours = ((col - 1, row), (col + 1, row), (col, row - 1), (col, row + 1))
-                if any(
-                    0 <= x < width and 0 <= y < height and pixel(image, (x, y))[3]
-                    for x, y in neighbours
-                ):
-                    outlined.putpixel((col, row), (*INK, 255))
+                image[row, col] = (*color, 255)
+        opaque = image[..., 3] > 0
+        ring = dilate(opaque, 1) & ~opaque
+        image[ring] = (*INK, 255)
         path = output / f"{name}_{suffix}.png"
-        outlined.save(path)
+        Image.fromarray(image).save(path)
         written.append(path)
+    return written
+
+
+def convert_hd(passes: Path, output: Path, name: str, creature: Creature) -> list[Path]:
+    """The HD sprite: 4x detail with smooth palette-mapped shading.
+
+    Shading keeps the same palette ramps as the pixel sprite but blends between
+    tones continuously. Contours and the outline are about half a game pixel,
+    and the 8x render is box-filtered to 4x for clean antialiased edges.
+    """
+    width, height = creature.size
+    size = (width * SCALE, height * SCALE)
+    decoded = {
+        suffix: decode(passes, f"{name}_{frame}_hd", size)
+        for suffix, frame in creature.frames.items()
+    }
+    slot_of = np.array([SLOTS.index(slot) for slot, _ in PARTS])
+    layer_of = np.array([layer for _, layer in PARTS])
+    # Brightness rank within each slot, shared by every pose.
+    ranked: dict[int, np.ndarray] = {}
+    for slot_index in range(len(SLOTS)):
+        values = [b[(p >= 0) & (slot_of[p] == slot_index)] for p, b in decoded.values()]
+        ranked[slot_index] = np.sort(np.concatenate(values))
+    output.mkdir(parents=True, exist_ok=True)
+    written = []
+    variants = [("", False)] + ([("_hit", True)] if name == "dinosaur_enemy" else [])
+    for suffix, (parts, brightness) in decoded.items():
+        filled = parts >= 0
+        slots = np.where(filled, slot_of[np.maximum(parts, 0)], -1)
+        layers = np.where(filled, layer_of[np.maximum(parts, 0)], -1)
+        multi = np.isin(slots, [SLOTS.index(s) for s, r in creature.ramps.items() if len(r) > 2])
+        rgb = np.zeros((*parts.shape, 3))
+        for slot, ramp in creature.ramps.items():
+            mask = slots == SLOTS.index(slot)
+            if not mask.any():
+                continue
+            tones = np.array(ramp, dtype=float)
+            order = ranked[SLOTS.index(slot)]
+            position = np.searchsorted(order, brightness[mask]) / max(1, len(order))
+            # Parts behind the body recede by most of one tone.
+            position = position - np.where(layers[mask] == FAR, 0.8 / max(1, len(ramp) - 1), 0)
+            scaled = np.clip(position, 0, 1) * (len(ramp) - 1)
+            low = np.floor(scaled).astype(int)
+            high = np.minimum(low + 1, len(ramp) - 1)
+            blend = (scaled - low)[:, None]
+            rgb[mask] = tones[low] * (1 - blend) + tones[high] * blend
+        ink = np.zeros(parts.shape, dtype=bool)
+        for layer in (FAR, BODY):
+            nearer = dilate(multi & (layers > layer), 2)
+            ink |= multi & (layers == layer) & nearer
+        ring = dilate(filled, 4) & ~filled
+        for variant, hit in variants:
+            color = rgb.copy()
+            if hit:
+                color[filled & (slots != SLOTS.index("ink"))] = WHITE
+            color[ink | ring] = INK
+            alpha = (filled | ring).astype(float)
+            # 2x2 box filter with premultiplied alpha: 8x render -> 4x sprite.
+            premultiplied = np.concatenate([color * alpha[..., None], alpha[..., None]], axis=-1)
+            h, w = parts.shape
+            reduced = premultiplied.reshape(h // 2, 2, w // 2, 2, 4).mean(axis=(1, 3))
+            coverage = reduced[..., 3:]
+            out = np.where(coverage > 0, reduced[..., :3] / np.maximum(coverage, 1e-6), 0)
+            image = np.concatenate([out, coverage * 255], axis=-1).round().astype(np.uint8)
+            stem = f"{name}{variant}_{suffix}"
+            path = output / f"{stem}.png"
+            Image.fromarray(image).save(path)
+            written.append(path)
     return written
 
 
@@ -266,6 +346,7 @@ def main() -> None:
     parser.add_argument("names", nargs="*", help=f"creatures to render: {', '.join(CREATURES)}")
     parser.add_argument("--passes", type=Path, help="convert existing Blender passes")
     parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument("--hd-output", type=Path, default=HD_OUTPUT)
     args = parser.parse_args()
     names = args.names or list(CREATURES)
     unknown = sorted(set(names) - set(CREATURES))
@@ -276,7 +357,10 @@ def main() -> None:
         return [
             path
             for name in names
-            for path in convert_creature(passes, args.output, name, CREATURES[name])
+            for path in [
+                *convert_creature(passes, args.output, name, CREATURES[name]),
+                *convert_hd(passes, args.hd_output, name, CREATURES[name]),
+            ]
         ]
 
     if args.passes:

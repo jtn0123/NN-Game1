@@ -26,6 +26,19 @@ namespace CrystalCaves.Pilot.Editor
     {
         void OnPreprocessTexture()
         {
+            if (assetPath.StartsWith("Assets/Resources/SpritesHD/"))
+            {
+                // Smooth HD creature art: filtered, never mipmapped or compressed.
+                var hd = (TextureImporter)assetImporter;
+                hd.textureType = TextureImporterType.Default;
+                hd.filterMode = FilterMode.Bilinear;
+                hd.mipmapEnabled = false;
+                hd.npotScale = TextureImporterNPOTScale.None;
+                hd.alphaIsTransparency = true;
+                hd.textureCompression = TextureImporterCompression.Uncompressed;
+                hd.maxTextureSize = 2048;
+                return;
+            }
             if (!assetPath.StartsWith("Assets/Resources/Sprites/") && !assetPath.StartsWith("Assets/Resources/Terrain/") && !assetPath.StartsWith("Assets/Resources/Interface/") && !assetPath.StartsWith("Assets/Resources/Environment/")) return;
             var importer = (TextureImporter)assetImporter;
             importer.textureType = TextureImporterType.Default;

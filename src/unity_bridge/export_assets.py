@@ -20,6 +20,7 @@ from src.game.crystal_caves_art import SPRITES, CrystalCavesArt
 from .classic_audio import SAMPLE_RATE, TONE_RATE, sound_bank
 from .mine import MINE_SPEC
 from .session import CaveSession
+from .visual_creatures import hd_creature_sprites
 from .visual_fidelity import mine_door, mine_surfaces, torch
 from .visual_materials import raygun
 from .visuals import (
@@ -37,7 +38,7 @@ from .visuals import (
 
 def export(destination: Path) -> None:
     pygame.font.init()
-    for directory in ("Sprites", "Terrain", "Audio", "Interface", "Environment"):
+    for directory in ("Sprites", "SpritesHD", "Terrain", "Audio", "Interface", "Environment"):
         (destination / directory).mkdir(parents=True, exist_ok=True)
     art = CrystalCavesArt()
     # Retire the rejected painted direction from the build's managed resources.
@@ -159,6 +160,8 @@ def export(destination: Path) -> None:
         pygame.image.save(surface, destination / "Sprites" / f"{name}.png")
     for name, surface in art_sprites().items():
         pygame.image.save(surface, destination / "Sprites" / f"{name}.png")
+    for name, surface in hd_creature_sprites().items():
+        pygame.image.save(surface, destination / "SpritesHD" / f"{name}.png")
     pygame.image.save(raygun(), destination / "Interface/raygun.png")
     mine_wall, mine_terrain, mine_props = mine_surfaces(MINE_SPEC.layout)
     pygame.image.save(mine_wall, destination / "Environment/wall_mine.png")
