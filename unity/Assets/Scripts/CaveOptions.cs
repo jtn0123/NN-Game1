@@ -47,7 +47,7 @@ namespace CrystalCaves.Pilot
             }
             else
             {
-                var count = game.Screen == CaveScreen.Title ? 5 : game.Screen == CaveScreen.Pause ? 6 : game.Screen == CaveScreen.Result ? 4 : menuIndex;
+                var count = game.Screen == CaveScreen.Title ? 6 : game.Screen == CaveScreen.Pause ? 7 : game.Screen == CaveScreen.Result ? 4 : menuIndex;
                 navigation.Poll(count);
                 if (navigation.Back) game.Back();
             }

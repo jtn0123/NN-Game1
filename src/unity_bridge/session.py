@@ -11,6 +11,7 @@ from src.app.demo_recorder import HumanDemoRecorder
 from src.game.crystal_caves import CrystalCaves
 
 from .classic_game import ClassicCaves, tall_patrol_fits
+from .human_controls import HumanControls, HumanControlsMixin
 from .mine import ENTRANCES, MINE_SPEC, MainMine
 from .playfeel import apply_classic_controls
 from .visual_doors import door_render_height
@@ -80,6 +81,7 @@ class CaveSession:
         self._muzzle_effects: set[int] = set()
         self.recorder = HumanDemoRecorder(record_dir) if record_dir else None
         self.recording_eligible = True
+        self.demo_eligible = True
         self.reset(level)
 
     def reset(self, level: int) -> None:
@@ -97,6 +99,7 @@ class CaveSession:
         self.last_action = 0
         self.q_values = []
         self.recording_eligible = self.mode == "human"
+        self.demo_eligible = self.recording_eligible
 
     def _enemy_sprites(self) -> list[str]:
         """Assign art once per spawn, independently of movement and observations."""
@@ -149,6 +152,7 @@ class CaveSession:
         self.realm = "mine"
         self.mode = "human"
         self.recording_eligible = False
+        self.demo_eligible = False
         self.enemy_sprites = []
         self.audio.events.clear()
         self._muzzle_effects.clear()
@@ -180,15 +184,30 @@ class CaveSession:
             self.mode = mode
             if mode == "ai":
                 self.recording_eligible = False
+                self.demo_eligible = False
             self.audio.events.clear()
-        elif operation == "step":
-            actions = request.get("actions")
-            if not isinstance(actions, list) or not 1 <= len(actions) <= MAX_BATCH:
-                raise ValueError(f"actions must contain 1 to {MAX_BATCH} actions")
-            # Validate the entire batch before any mutation, including in AI mode.
-            actions = [integer(action, self.game.action_size, "action") for action in actions]
+        elif operation in ("step", "human_step"):
+            human_controls = None
+            actions: list[Optional[int]]
+            if operation == "human_step":
+                if self.mode != "human":
+                    raise ValueError("independent controls require human mode")
+                if not isinstance(self.game, HumanControlsMixin):
+                    raise ValueError("independent controls require the classic human profile")
+                values = request.get("controls")
+                if not isinstance(values, list) or not 1 <= len(values) <= MAX_BATCH:
+                    raise ValueError(f"controls must contain 1 to {MAX_BATCH} controls")
+                # Validate every button frame before changing sounds, clocks or eligibility.
+                human_controls = [HumanControls.from_request(value) for value in values]
+                actions = [control.legacy_action() for control in human_controls]
+            else:
+                values = request.get("actions")
+                if not isinstance(values, list) or not 1 <= len(values) <= MAX_BATCH:
+                    raise ValueError(f"actions must contain 1 to {MAX_BATCH} actions")
+                # Validate the entire batch before any mutation, including in AI mode.
+                actions = [integer(action, self.game.action_size, "action") for action in values]
             self.audio.events.clear()
-            for action in actions:
+            for index, action in enumerate(actions):
                 if self.game.game_over or (
                     self.realm == "mine" and cast(MainMine, self.game).portal_level >= 0
                 ):
@@ -209,7 +228,15 @@ class CaveSession:
                 # Hold the previous objects through this frame so expired event
                 # IDs cannot be reused by a new impact or muzzle effect.
                 previous_effects = tuple(self.game.visual_events)
-                _, reward, done, info = self.game.step(action)
+                if human_controls is not None:
+                    _, reward, done, info = cast(HumanControlsMixin, self.game).step_human(
+                        human_controls[index]
+                    )
+                    action = info["human_demo_action"]
+                    if action is None:
+                        self.demo_eligible = False
+                else:
+                    _, reward, done, info = self.game.step(cast(int, action))
                 if "shoot" in self.audio.events[event_start:]:
                     # _try_shoot emits its ten-step spark before bullet/target
                     # impacts. Hide only that newborn cue from presentation;
@@ -239,10 +266,11 @@ class CaveSession:
                         before_health,
                         powered,
                     )
-                self.last_action = action
+                self.last_action = action if action is not None else -1
                 self.last_reward = float(reward)
                 self.total_reward += float(reward)
-                if self.recorder and self.recording_eligible:
+                if self.recorder and self.recording_eligible and self.demo_eligible:
+                    assert action is not None
                     self.recorder.after_step(self.game, action, done, info)
         else:
             raise ValueError(f"unknown operation: {operation}")
@@ -291,7 +319,11 @@ class CaveSession:
 
     def snapshot(self) -> dict[str, Any]:
         game = self.game
+        # The engine advances its cursor on a win without loading another cave.
+        # Results, native terrain and saved clear credit belong to the played cave.
+        played_level = game._won_level_index if game.won else game.level_index
         entities: list[dict[str, Any]] = []
+        hidden_crystals: set[tuple[int, int]] = getattr(game, "hidden_crystals", set())
 
         def entity(
             identity: str,
@@ -322,7 +354,18 @@ class CaveSession:
             ("treasure", game.treasures, "treasure", "amber"),
         ):
             for col, row in sorted(positions):
+                if kind == "crystal" and (col, row) in hidden_crystals:
+                    continue
                 entity(f"{kind}_{col}_{row}", sprite, col * 32, row * 32, glow=glow)
+        for cache in getattr(game, "secret_caches", ()):
+            col, row = cache.block
+            armed = cache.crystal in hidden_crystals
+            entity(
+                f"secret_cache_{col}_{row}",
+                "secret_cache_armed" if armed else "secret_cache_empty",
+                col * 32,
+                row * 32,
+            )
         for col, row in sorted(game.air_tanks):
             height = air_render_height(game.level.layout, col, row)
             entity(
@@ -384,6 +427,8 @@ class CaveSession:
         for index, elevator in enumerate(game.elevators):
             entity(f"lift_{index}", "elevator", elevator.col * 32, elevator.pos * 32)
             entities[-1]["frame"] = game.steps // 4 % 4
+        for egg in getattr(game, "bat_eggs", []):
+            entity(f"egg_{egg.identity}", "bat_egg", egg.x, egg.y, 12, 16)
         for index, thorn in enumerate(getattr(game, "thorns", [])):
             entity(f"thorn_{index}", f"green_thorn_{thorn.frame}", thorn.col * 32, thorn.row * 32)
         for index, trap in enumerate(getattr(game, "stalactites", [])):
@@ -450,7 +495,7 @@ class CaveSession:
             "movement_profile": "classic" if self.classic_controls else "training",
             "training_limits": not self.classic_controls,
             "episode": self.episode,
-            "level": game.level_index if self.realm == "cave" else -1,
+            "level": played_level if self.realm == "cave" else -1,
             "level_name": game.level.name,
             "levels": [cave.name for cave in self.cave_game.CAVES],
             "layout": self.terrain_layout(),
@@ -466,6 +511,7 @@ class CaveSession:
             "exit_unlocked": game.exit_unlocked,
             "steps": game.steps,
             "freeze_timer": game.freeze_timer,
+            "super_timer": game.super_timer,
             "max_steps": game.MAX_STEPS,
             "stall_steps": game.steps_since_progress,
             "stall_limit": game.MAX_STEPS_WITHOUT_PROGRESS,
@@ -482,7 +528,9 @@ class CaveSession:
             "last_reward": self.last_reward,
             "total_reward": self.total_reward,
             "sounds": list(self.audio.events),
-            "recording": self.recorder is not None and self.recording_eligible,
+            "recording": self.recorder is not None
+            and self.recording_eligible
+            and self.demo_eligible,
             "human_only": self.recording_eligible,
             "demos_saved": len(self.recorder.saved) if self.recorder else 0,
             "effects": [

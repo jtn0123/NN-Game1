@@ -10,6 +10,8 @@ from src.game.base_game import validate_action
 from src.game.crystal_caves import CrystalCaves
 from src.game.crystal_caves_entities import CaveSpec
 
+from .human_controls import HumanControlsMixin
+
 ENTRANCES = tuple((col, row) for row in (6, 10, 14, 18) for col in (8, 15, 23, 31))
 
 
@@ -29,8 +31,10 @@ def mine_spec() -> CaveSpec:
 MINE_SPEC = mine_spec()
 
 
-class MainMine(CrystalCaves):
+class MainMine(HumanControlsMixin, CrystalCaves):
     """Shared movement and collision, without cave objectives or fabricated victories."""
+
+    LEGACY_CLIMB_HOLD = True
 
     def near_entrance(self) -> int:
         player = self._player_rect()

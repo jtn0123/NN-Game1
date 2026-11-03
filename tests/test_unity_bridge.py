@@ -520,7 +520,8 @@ def test_training_rebalances_do_not_move_the_accepted_classic_game():
     assert training.CAVES is HANDCRAFTED_LEVELS
     assert classic.CAVES is not HANDCRAFTED_LEVELS
     assert CLASSIC_LEVELS[0].layout[21][8] == "^"
-    assert classic.CAVES[0].layout[21][8] == "t"
+    assert classic.CAVES[0].layout[21][8:10] == ".."
+    assert classic.CAVES[0].layout[22][8:10] == "t^"
     assert CLASSIC_LEVELS[0].layout != HANDCRAFTED_LEVELS[0].layout
     # Native terrain/catalog are exported from this fixed human-game profile.
     assert sum(row.count("*") for row in classic.CAVES[0].layout) == 32

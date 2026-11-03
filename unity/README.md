@@ -30,6 +30,15 @@ Modern polish stays within that arcade style: animated poses, crystal glints,
 pixel action feedback, acid bubbles, bright cave previews, readable menus and
 a reduced-motion option.
 
+Powered shots and freeze now show their remaining seconds above the HUD.
+Cracked platforms marked with a small diamond and an upward arrow hide one
+existing required crystal in Ore Shaft and Twin Vaults. Jump into the marked
+platform from below to reveal it, then collect the crystal normally. The platform
+stays solid; item-symbol mode adds a question mark until discovery. These are
+reference-inspired secrets, not a reconstruction of the DOS reveal mechanism.
+Twin Vaults and Sunken Grotto also have rewarded platform alternatives with
+safe returns to their existing chain routes.
+
 Play now starts in a traversable main mine, with sixteen numbered cave doors,
 mixed-size angular stone walls, worn braced timber platforms, chain shafts and animated torches.
 Walk to a door and press E, Down or Enter to explore its cave. Returning to the
@@ -88,6 +97,8 @@ python scripts/unity_pilot.py --build
 python scripts/unity_pilot.py --cnn-state --model models/crystal_caves/crystal_caves_best.pth
 
 # Record completed human episodes in the existing demonstration format.
+# Compound buttons or neutral cave ladder holds suppress a demo when it cannot
+# be replayed accurately by the old ten-action format; cave-clear credit remains.
 python scripts/unity_pilot.py --record-demos .Codex/artifacts/unity-pilot/demos
 ```
 
@@ -104,10 +115,13 @@ The bridge uses the repository's existing trusted-local-checkpoint loading rules
 
 Controls: A/D or left/right to move; Space, W or up to jump/climb; J/X to shoot;
 E/down to interact; Enter also enters a nearby mine door; Esc/P to pause; M to mute. Restart is in Settings, accessible
-from the pause menu; R has no restart action. Simultaneous jump and
-shoot follows the game's discrete action space: shooting takes priority. Losing
+from the pause menu; R has no restart action. Jump and fire work independently,
+including while moving. Losing
 window focus pauses the cave. Level changes and restarts begin a fresh human run.
-Up climbs a mine chain, Down descends, and releasing holds position. Arrow keys and Enter also operate the cave-selection menu. Sound volume and last
+Up climbs a chain, Down descends, and releasing holds position in caves and the
+mine. Controls is available from the title and pause menus, with keyboard
+rebinding, conflict checks and Restore Default Keys. Escape remains a fallback
+after rebinding pause. Arrow keys and Enter also operate the cave-selection menu. Sound volume and last
 selected cave are saved locally. The fullscreen setting is available in Options.
 C opens cave selection, O opens Options, and H returns home from menus. Enter
 activates the focused menu action. Arrow keys navigate menus. In Settings,
@@ -122,6 +136,14 @@ countdown. Two caves have small ladder connections for the lower jump; the
 training maps follow their separate experimental definitions. Geometry checks reach every
 crystal, switch and exit in all sixteen caves with the classic profile; these
 checks exclude enemies, hazards and full winning-route ordering.
+
+The human campaign includes four powered-shot pickups, one freeze pickup, two
+additional early ammo pickups and Cascade Keep's optional two-jump reward.
+Eye flyers roam on both axes; bats drop shootable falling eggs where terrain
+allows. Exact DOS timings are not claimed. See the
+[cave-by-cave polish list](../docs/gameplay-polish.md) for locations, remaining
+work and evaluation evidence. Training maps and the legacy ten-action protocol
+are unchanged; Unity uses independent `human_step` button frames for human play.
 
 Classic sound effects are rendered from the original Episode 1 shareware tone
 programs: crystal, jump, shot, ammo, treasure, damage, switch, power-up and

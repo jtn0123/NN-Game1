@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace CrystalCaves.Pilot
 {
-    public enum CaveScreen { Title, Play, Pause, Caves, Options, Lab, Result }
+    public enum CaveScreen { Title, Play, Pause, Caves, Options, Lab, Result, Controls }
 
     public sealed partial class CavePilot : MonoBehaviour
     {
@@ -117,11 +117,21 @@ namespace CrystalCaves.Pilot
             if (replayCapture || settingsSmoke) return;
             while (connection.Read(out var json))
             {
-                var next = JsonUtility.FromJson<CaveSnapshot>(json);
+                if (!CaveSnapshotReader.TryRead(json, out var next))
+                {
+                    warning = "The cave could not be opened. Please try opening it again.";
+                    resetting = pendingMine = HasExpedition = false;
+                    pendingCave = -1; pendingMode = null; accumulator = 0;
+                    queuedJump = queuedShoot = queuedInteract = false;
+                    Screen = CaveScreen.Title; continue;
+                }
                 if (!string.IsNullOrEmpty(next.error))
-                { warning = next.error; Screen = CaveScreen.Pause; resetting = false; pendingCave = -1; pendingMine = false; continue; }
-                if (next.protocol != 1 || next.player == null)
-                { warning = "The cave could not be opened. Please relaunch the game."; Screen = CaveScreen.Title; continue; }
+                {
+                    warning = next.error; Screen = CaveScreen.Pause;
+                    resetting = pendingMine = false; pendingCave = -1; pendingMode = null;
+                    accumulator = 0; queuedJump = queuedShoot = queuedInteract = false;
+                    continue;
+                }
                 var changedEpisode = state == null || next.episode != state.episode;
                 state = next;
                 view.OnSnapshot(state);
@@ -171,10 +181,16 @@ namespace CrystalCaves.Pilot
                 var count = Mathf.Min(8, Mathf.FloorToInt(accumulator * 60));
                 if (count > 0)
                 {
-                    var actions = new int[count];
-                    var action = HumanAction();
-                    for (var index = 0; index < count; index++) actions[index] = action;
-                    if (Send(new CaveCommand { op = "step", actions = actions }))
+                    CaveCommand command;
+                    if (state.mode == "human")
+                    {
+                        var controls = new CaveHumanControl[count];
+                        var buttons = HumanControls();
+                        for (var index = 0; index < count; index++) controls[index] = buttons;
+                        command = new CaveCommand { op = "human_step", controls = controls };
+                    }
+                    else command = new CaveCommand { op = "step", actions = new int[count] };
+                    if (Send(command))
                     { accumulator -= count / 60f; queuedJump = queuedShoot = queuedInteract = false; }
                 }
             }
@@ -193,10 +209,12 @@ namespace CrystalCaves.Pilot
         {
             if (ScreenshotMode) { HandleScreenshotKeys(); return; }
             if (presentation.Pending) { view.HandleMenuInput(); return; }
+            var controlsMenu = Screen == CaveScreen.Controls;
+            if (view.HandleControlsInput()) return;
             var startedInPlay = Screen == CaveScreen.Play;
-            if (!startedInPlay) view.HandleMenuInput();
-            if (startedInPlay && (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P) || Input.GetKeyDown(KeyCode.JoystickButton7))) Back();
-            if (Screen != CaveScreen.Play)
+            if (!startedInPlay && !controlsMenu) view.HandleMenuInput();
+            if (startedInPlay && (CaveControls.Pressed(CaveControl.Pause) || Input.GetKeyDown(KeyCode.JoystickButton7))) Back();
+            if (Screen != CaveScreen.Play && !controlsMenu)
             {
                 if (Input.GetKeyDown(KeyCode.C)) Open(CaveScreen.Caves);
                 if (Input.GetKeyDown(KeyCode.O)) Open(CaveScreen.Options);
@@ -222,25 +240,25 @@ namespace CrystalCaves.Pilot
             if (Screen != CaveScreen.Play || ScreenshotMode || presentation.Pending || !Application.isFocused || state.mode != "human" || Time.unscaledTime > inputUntil)
                 queuedJump = queuedShoot = queuedInteract = false;
             if (Screen != CaveScreen.Play || ScreenshotMode || presentation.Pending || !Application.isFocused || state.mode != "human") return;
-            var jump = Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.JoystickButton0);
-            var shoot = Input.GetKeyDown(KeyCode.J) || Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.JoystickButton2);
-            var interact = Input.GetKeyDown(KeyCode.JoystickButton3) || Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.DownArrow) || state.realm == "mine" && Input.GetKeyDown(KeyCode.Return);
+            var jump = CaveControls.Pressed(CaveControl.Jump) || Input.GetKeyDown(KeyCode.JoystickButton0);
+            var shoot = CaveControls.Pressed(CaveControl.Shoot) || Input.GetKeyDown(KeyCode.JoystickButton2);
+            var interact = CaveControls.Pressed(CaveControl.Interact) || Input.GetKeyDown(KeyCode.JoystickButton3) || state.realm == "mine" && Input.GetKeyDown(KeyCode.Return);
             if (jump || shoot || interact)
             { queuedJump |= jump; queuedShoot |= shoot; queuedInteract |= interact; inputUntil = Time.unscaledTime + .15f; }
         }
 
-        int HumanAction()
+        CaveHumanControl HumanControls()
         {
-            if (!Application.isFocused) return 0;
-            var left = Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A) || Input.GetAxisRaw("Horizontal") < -.55f;
-            var right = Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D) || Input.GetAxisRaw("Horizontal") > .55f;
-            var jump = queuedJump || Input.GetKey(KeyCode.Space) || Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.JoystickButton0) || Input.GetAxisRaw("Vertical") > .55f;
-            var shoot = queuedShoot || Input.GetKey(KeyCode.J) || Input.GetKey(KeyCode.X) || Input.GetKey(KeyCode.JoystickButton2);
-            if (queuedInteract || Input.GetKey(KeyCode.JoystickButton3) || Input.GetAxisRaw("Vertical") < -.55f || Input.GetKey(KeyCode.E) || Input.GetKey(KeyCode.DownArrow) || state.realm == "mine" && Input.GetKey(KeyCode.Return)) return 9;
-            var direction = left == right ? 0 : left ? -1 : 1;
-            if (shoot) return direction < 0 ? 7 : direction > 0 ? 8 : 6;
-            if (jump) return direction < 0 ? 4 : direction > 0 ? 5 : 3;
-            return direction < 0 ? 1 : direction > 0 ? 2 : 0;
+            if (!Application.isFocused) return new CaveHumanControl();
+            var left = CaveControls.Held(CaveControl.MoveLeft) || Input.GetAxisRaw("CaveHorizontal") < -.55f;
+            var right = CaveControls.Held(CaveControl.MoveRight) || Input.GetAxisRaw("CaveHorizontal") > .55f;
+            return new CaveHumanControl
+            {
+                move = left == right ? 0 : left ? -1 : 1,
+                jump = queuedJump || CaveControls.Held(CaveControl.Jump) || Input.GetKey(KeyCode.JoystickButton0) || Input.GetAxisRaw("CaveVertical") > .55f,
+                shoot = queuedShoot || CaveControls.Held(CaveControl.Shoot) || Input.GetKey(KeyCode.JoystickButton2),
+                interact = queuedInteract || CaveControls.Held(CaveControl.Interact) || Input.GetKey(KeyCode.JoystickButton3) || Input.GetAxisRaw("CaveVertical") < -.55f || state.realm == "mine" && Input.GetKey(KeyCode.Return)
+            };
         }
 
         bool Send(CaveCommand command) => connection.Send(JsonUtility.ToJson(command));

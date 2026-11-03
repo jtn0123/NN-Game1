@@ -176,6 +176,7 @@ namespace CrystalCaves.Pilot
                 case CaveScreen.Pause: Pause(); break;
                 case CaveScreen.Caves: CaveSelect(); break;
                 case CaveScreen.Options: Options(); break;
+                case CaveScreen.Controls: Controls(); break;
                 case CaveScreen.Result: Result(); break;
                 case CaveScreen.Lab: Scrim(); Lab(false); break;
             }
@@ -197,6 +198,7 @@ namespace CrystalCaves.Pilot
             if (Button(112, 608, 450, 76, playLabel, ready, true)) game.Play();
             if (Button(112, 708, 214, 61, "CAVES   [C]")) game.Open(CaveScreen.Caves);
             if (Button(348, 708, 214, 61, "OPTIONS   [O]")) game.Open(CaveScreen.Options);
+            if (Link(112, 778, 450, "CONTROLS / KEYBOARD + CONTROLLER")) game.Open(CaveScreen.Controls);
             var cleared = 0; for (var i = 0; i < 16; i++) cleared += PlayerPrefs.GetInt("cave-cleared-" + i, 0);
             Rule(112, 815, 450, dim);
             PixelText(112, 839, cleared + " / 16 CAVES CLEARED", 2, dim);
@@ -275,11 +277,16 @@ namespace CrystalCaves.Pilot
                 var point = CaveViewport.Point(game.GameCamera.WorldToScreenPoint(CaveWorld.Position(effect.x, textY)));
                 if (point.x > 12 && point.x < CaveViewport.Width - 40 && point.y > CaveViewport.WorldTop + 12 && point.y < CaveViewport.WorldBottom - 12)
                 {
-                    PixelText(point.x - 12 + 1, point.y - 8 + 1, effect.text, 1, ink);
-                    PixelText(point.x - 12, point.y - 8, effect.text, 1, gold);
+                    var text = CavePowerFeedback.PickupLabel(effect.kind, effect.text);
+                    var textX = text == effect.text ? point.x - 12
+                        : Mathf.Clamp(point.x - text.Length * 3, 12, Mathf.Max(12, CaveViewport.Width - text.Length * 6 - 12));
+                    PixelText(textX + 1, point.y - 8 + 1, text, 1, ink);
+                    PixelText(textX, point.y - 8, text, 1, gold);
                 }
             }
-            if (CaveSettings.Data.itemMarkers) DrawItemMarkers();
+            if (CaveSettings.Data.itemMarkers) { DrawItemMarkers(); DrawSecretCacheMarkers(); }
+            DrawControlsHint();
+            DrawPowerStatus();
             if (S.realm != "mine") CaveBorder(allCrystals);
         }
 
@@ -301,13 +308,14 @@ namespace CrystalCaves.Pilot
             if (Button(112, 406, 450, 61, "SETTINGS   [O]")) game.Open(CaveScreen.Options);
             if (Button(112, 491, 450, 61, S.realm == "mine" ? "CHOOSE A CAVE   [C]" : "RETURN TO THE MAIN MINE", game.Connected && !game.OpeningCave))
             { if (S.realm == "mine") game.Open(CaveScreen.Caves); else game.OpenMine(); }
-            if (Link(112, 606, 270, "RETURN TO MAIN MENU")) game.Home();
+            if (Button(112, 576, 450, 61, "CONTROLS")) game.Open(CaveScreen.Controls);
+            if (Link(112, 679, 270, "RETURN TO MAIN MENU")) game.Home();
             Rule(790, 322, 630);
             Text(790, 350, 590, 35, "YOUR EXPEDITION", 17, gold, true);
             Text(790, 414, 590, 60, S.realm == "mine" ? S.cleared_caves + " / 16 CAVES CLEARED" : (S.initial_crystals - S.crystals) + " / " + S.initial_crystals + " CRYSTALS", 36, paper, true);
             Text(790, 494, 590, 40, S.score.ToString("N0") + " POINTS", 23, dim);
             Text(790, 578, 590, 100, S.realm == "mine" ? "Walk to a door and press E or Enter.\nUp/Down climb chains; release to hold." : "Collect every crystal to unlock the exit.\nWatch your footing. Make every shot count.", 23, dim);
-            if (!string.IsNullOrEmpty(game.Warning)) Text(112, 710, 900, 70, game.Warning, 22, gold);
+            if (!string.IsNullOrEmpty(game.Warning)) Text(112, 760, 900, 70, game.Warning, 22, gold);
             if (Link(112, 924, 240, "AI LAB   /   F2")) game.Open(CaveScreen.Lab);
         }
 
