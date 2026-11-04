@@ -225,10 +225,16 @@ after building the player. Fullscreen requires an unlocked active desktop.
 
 ## Unity editor checks in GitHub Actions
 
-The `unity-editor-checks` job in `.github/workflows/ci.yml` runs
-`CrystalCaves.Pilot.Editor.CaveGameplayChecks.Run`, which combines the controls,
-power feedback, settings, snapshot reader and local backend checks. It runs on
-Linux with the editor version from `ProjectSettings/ProjectVersion.txt`.
+The `unity-editor-checks` job in `.github/workflows/ci.yml` runs five NUnit
+EditMode tests that invoke the existing controls, power feedback, settings,
+snapshot reader and local backend check suites. The adapter in
+`Assets/Tests/Editor/EditorContractTests.cs` preserves the original exceptions
+and restores frame pacing after each suite. It runs on Linux with the editor
+version from `ProjectSettings/ProjectVersion.txt`. CI requires five passing
+results with no skipped suites, and uploads the NUnit XML as
+`unity-editor-results`. These are editor contract checks; they do not build a
+player. The combined `CrystalCaves.Pilot.Editor.CaveGameplayChecks.Run` entry
+point remains available for direct batch execution.
 
 For Unity Personal, add these two repository secrets on the
 [Actions secrets page](https://github.com/jtn0123/NN-Game1/settings/secrets/actions):
@@ -238,8 +244,8 @@ For Unity Personal, add these two repository secrets on the
 | `UNITY_EMAIL` | The Unity ID email associated with the Personal license. |
 | `UNITY_PASSWORD` | The password for that Unity ID account. |
 
-GameCI Builder v6 with the pinned CLI v0.1.72 activates Personal seats directly
-with the account credentials and returns the seat when the command exits.
+The pinned GameCI test runner and CLI v0.1.72 activate Personal seats directly
+with the account credentials and return the seat when the command exits.
 You do **not** need to generate a `.ulf` file for this route. Sign in to Unity
 Hub first to confirm that the account has an active Personal license. A social
 sign-in alone is insufficient: the account needs a Unity ID password.

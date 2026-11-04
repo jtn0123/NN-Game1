@@ -135,7 +135,7 @@ jobs:
 
       - name: Run Unity editor checks
         if: steps.credentials.outputs.ready == 'true'
-        uses: game-ci/unity-builder@eb1b9fba120c6e62c9fb7a7a81d6c107ce004c45 # v6.0.0
+        uses: game-ci/unity-test-runner@3651041789079526956e876434786ab98af4c8e8 # CLI-based runner
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
@@ -144,9 +144,31 @@ jobs:
         with:
           cliVersion: v0.1.72
           projectPath: unity
-          targetPlatform: StandaloneLinux64
-          buildMethod: CrystalCaves.Pilot.Editor.CaveGameplayChecks.Run
-          versioning: None
+          testMode: editmode
+          customParameters: -testFilter CrystalCaves.Pilot.Tests.EditorContractTests
+          coverageEnabled: false
+          artifactsPath: unity-test-results
+          githubToken: ""
+
+      - name: Verify all editor suites ran
+        if: steps.credentials.outputs.ready == 'true'
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("unity-test-results/editmode-results.xml").getroot()
+          cases = root.findall(".//test-case")
+          if root.get("result") != "Passed" or len(cases) != 5 or any(case.get("result") != "Passed" for case in cases):
+              raise SystemExit("Expected five passing editor suites with no skipped tests")
+          print("All five Unity editor suites passed")
+          PY
+
+      - name: Upload Unity test results
+        if: always() && steps.credentials.outputs.ready == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unity-editor-results
+          path: unity-test-results/editmode-results.xml
+          if-no-files-found: warn
 
   dependency-audit:
     runs-on: ubuntu-latest
