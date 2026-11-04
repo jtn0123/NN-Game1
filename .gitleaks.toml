@@ -64,6 +64,15 @@ regex = '''(?i)\b[A-Z0-9_]*(?:PASS(?:WD|WORD)?|SECRET|TOKEN)\s*=\s*["']?([^\s"'#
 secretGroup = 1
 keywords = ["pass", "secret", "token"]
 
+[[rules.allowlists]]
+description = "C# counted loops use pass as an iteration index"
+regexTarget = "line"
+# Match the complete loop header, so a credential appended in a comment still
+# fires. Numeric shell passwords (including PASS=1234;) remain detectable.
+regexes = [
+    '''^\s*for\s*\(\s*(?:var|int)\s+pass\s*=\s*\d+\s*;\s*pass\s*<\s*\d+\s*;\s*pass\+\+\s*\)\s*$''',
+]
+
 [[rules]]
 id = "generic-api-key"
 description = "Generic API Key"
