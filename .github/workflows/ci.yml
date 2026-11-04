@@ -133,21 +133,33 @@ jobs:
           key: unity-library-Linux-StandaloneLinux64-${{ hashFiles('unity/Assets/**', 'unity/Packages/**', 'unity/ProjectSettings/**') }}
           restore-keys: unity-library-Linux-StandaloneLinux64-
 
+      - name: Install GameCI CLI
+        if: steps.credentials.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          game_ci_dir="$RUNNER_TEMP/game-ci-v0.1.72"
+          mkdir -p "$game_ci_dir"
+          curl --fail --location --retry 3 \
+            https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz \
+            --output "$game_ci_dir/game-ci.tar.gz"
+          echo "1de550a620ee92e05e920b6db7d431621440b60b2577f04b4a997dc92a58cb0a  $game_ci_dir/game-ci.tar.gz" | sha256sum --check --strict
+          tar -xzf "$game_ci_dir/game-ci.tar.gz" -C "$game_ci_dir"
+          chmod +x "$game_ci_dir/game-ci"
+          "$game_ci_dir/game-ci" --version
+          echo "$game_ci_dir" >> "$GITHUB_PATH"
+
       - name: Run Unity editor checks
         if: steps.credentials.outputs.ready == 'true'
-        uses: game-ci/cli@7da0cea2f31799a4cbd79c1d452c254023f4f678 # v0.1.72
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-        with:
-          version: v0.1.72
-          args: >-
-            test --docker --engine=unity unity
-            --testPlatforms=editmode
-            --coverageEnabled=false
-            --artifactsPath=unity-test-results
+        run: |
+          game-ci test --docker --engine=unity unity \
+            --testPlatforms=editmode \
+            --coverageEnabled=false \
+            --artifactsPath=unity-test-results \
             --customParameters="-testFilter CrystalCaves.Pilot.Tests.EditorContractTests"
 
       - name: Verify all editor suites ran
