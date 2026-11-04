@@ -196,3 +196,25 @@ ELEVATOR_EXCHANGE_ROUTE = (
     (95, 0, 1),
     (18, 1, 0),
 )
+
+
+def replay_elevator_exchange_route():
+    session = CaveSession(level=5)
+    game = session.game
+    for count, move, buttons in ELEVATOR_EXCHANGE_ROUTE:
+        controls = HumanControls(move, bool(buttons & 1), bool(buttons & 2), bool(buttons & 4))
+        for _ in range(count):
+            if game.game_over:
+                return game
+            game.step_human(controls)
+    return game
+
+
+def test_elevator_exchange_is_winnable_from_normal_spawn_with_ordinary_buttons():
+    game = replay_elevator_exchange_route()
+    assert game.won and game._end_reason == "won"
+    assert not game.crystals and game.initial_crystals == 30
+    assert game.health == 3 and game.ammo == 8
+    rock = next(enemy for enemy in game.enemies if enemy.appearance == "walking_rock")
+    eyes = [enemy for enemy in game.enemies if enemy.appearance == "eye_flyer"]
+    assert rock.alive and len(eyes) == 2 and all(eye.alive for eye in eyes)

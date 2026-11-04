@@ -10,7 +10,9 @@ namespace CrystalCaves.Pilot
 
     public sealed partial class CavePilot : MonoBehaviour
     {
-        CaveConnection connection;
+        ICaveBackend backend;
+        const float StepSeconds = 1 / 60f;
+        float stepSampleTime; int stepSampleCount;
         CaveWorld world;
         CaveAudio audioPlayer;
         CaveInterface view;
@@ -38,8 +40,12 @@ namespace CrystalCaves.Pilot
 
         public CaveSnapshot State => state;
         public CaveScreen Screen { get; private set; } = CaveScreen.Title;
-        public bool Connected => settingsSmoke || replayCapture || (connection != null && connection.Connected);
-        public bool Busy => connection == null || connection.Busy || resetting || pendingCave >= 0 || pendingMine;
+        public bool Connected => settingsSmoke || replayCapture || (backend != null && backend.Connected);
+        public bool Busy => backend == null || backend.Busy || resetting || pendingCave >= 0 || pendingMine;
+        /// <summary>True for the standalone game; false when the optional Python bridge is authoritative.</summary>
+        public bool InProcess => backend != null && backend.InProcess;
+        /// <summary>Measured authoritative steps per second (60 while playing).</summary>
+        public float StepsPerSecond { get; private set; }
         public bool OpeningCave => resetting || pendingCave >= 0 || pendingMine;
         public bool HasExpedition { get; private set; }
         public bool LabVisible { get; private set; }
@@ -106,8 +112,19 @@ namespace CrystalCaves.Pilot
             if (captureTrace) Debug.Log("Cave capture: loading replay");
             if (TryStartSettingsSmoke(arguments) || TryStartReplayCapture(arguments)) return;
             UnityEngine.Rendering.SplashScreen.Stop(UnityEngine.Rendering.SplashScreen.StopBehavior.StopImmediate);
-            Debug.Log("Crystal Caves ready; connecting to local simulation on port " + port);
-            connection = new CaveConnection(port);
+            // The standalone C# game is the default. The Python bridge is opt-in: AI
+            // checkpoints, demo recording and the native smoke checks that drive numbered actions.
+            if (Array.IndexOf(arguments, "--bridge-port") >= 0 || Array.IndexOf(arguments, "--python-bridge") >= 0 || smoke)
+            {
+                Debug.Log("Crystal Caves ready; connecting to the Python simulation on port " + port);
+                backend = new BridgeBackend(port);
+            }
+            else
+            {
+                Debug.Log("Crystal Caves ready; running the standalone C# simulation");
+                backend = new LocalCaveBackend();
+                backend.Send(new CaveCommand { op = "snapshot" });
+            }
         }
 
         void Update()
@@ -115,9 +132,15 @@ namespace CrystalCaves.Pilot
             CaveViewport.Preview = Screen == CaveScreen.Options;
             postFx.enabled = CavePostFx.Needed;
             if (replayCapture || settingsSmoke) return;
-            while (connection.Read(out var json))
+            Drain();
+            UpdateFrame();
+        }
+
+        void Drain()
+        {
+            while (backend.Receive(out var next))
             {
-                if (!CaveSnapshotReader.TryRead(json, out var next))
+                if (next == null)
                 {
                     warning = "The cave could not be opened. Please try opening it again.";
                     resetting = pendingMine = HasExpedition = false;
@@ -155,27 +178,49 @@ namespace CrystalCaves.Pilot
                     }
                 }
             }
+        }
+
+        void UpdateFrame()
+        {
             if (wasConnected && !Connected)
             { Home(); HasExpedition = false; resetting = false; pendingCave = -1; pendingMode = null; pendingMine = false; savedEpisode = -1; }
             wasConnected = Connected;
             if (!smoke) { HandleKeys(); BufferInput(); }
-            if (pendingMine && Connected && !connection.Busy)
+            if (pendingMine && Connected && !backend.Busy)
             {
                 var cleared = new List<int>();
                 for (var index = 0; index < 16; index++) if (PlayerPrefs.GetInt("cave-cleared-" + index, 0) == 1) cleared.Add(index);
                 if (Send(new CaveCommand { op = "mine", cleared = cleared.ToArray() }))
                 { pendingMine = false; resetting = true; }
             }
-            else if (pendingCave >= 0 && Connected && !connection.Busy)
+            else if (pendingCave >= 0 && Connected && !backend.Busy)
             {
                 if (state.mode == "ai") Send(new CaveCommand { op = "mode", mode = "human" });
                 else if (Send(new CaveCommand { op = "reset", level = pendingCave }))
                 { pendingCave = -1; resetting = true; }
             }
-            else if (pendingMode != null && Connected && !connection.Busy)
+            else if (pendingMode != null && Connected && !backend.Busy)
             { if (Send(new CaveCommand { op = "mode", mode = pendingMode })) pendingMode = null; }
             var playing = Connected && HasExpedition && Screen == CaveScreen.Play && !ScreenshotMode && !presentation.Pending && !pendingMine && pendingCave < 0 && pendingMode == null && !resetting && !state.done;
-            if (playing && !smoke)
+            world.Alpha = 1;
+            if (playing && !smoke && InProcess)
+            {
+                // Fixed-step loop: input is sampled this frame, every due 60 Hz step
+                // runs immediately, and the leftover fraction blends the drawing.
+                accumulator = Mathf.Min(accumulator + Time.unscaledDeltaTime, 8 * StepSeconds);
+                var buttons = HumanControls();
+                var stepped = false;
+                while (accumulator >= StepSeconds && StillPlaying())
+                {
+                    backend.Send(new CaveCommand { op = "human_step", controls = new[] { buttons } });
+                    accumulator -= StepSeconds; stepSampleCount++; stepped = true;
+                    Drain();
+                }
+                if (stepped) queuedJump = queuedShoot = queuedInteract = false;
+                if (CaveSettings.Data.motion != 0 && StillPlaying())
+                    world.Alpha = Mathf.Clamp01(accumulator / StepSeconds);
+            }
+            else if (playing && !smoke)
             {
                 accumulator = Mathf.Min(accumulator + Time.unscaledDeltaTime, 8 / 60f);
                 var count = Mathf.Min(8, Mathf.FloorToInt(accumulator * 60));
@@ -191,7 +236,7 @@ namespace CrystalCaves.Pilot
                     }
                     else command = new CaveCommand { op = "step", actions = new int[count] };
                     if (Send(command))
-                    { accumulator -= count / 60f; queuedJump = queuedShoot = queuedInteract = false; }
+                    { accumulator -= count / 60f; stepSampleCount += count; queuedJump = queuedShoot = queuedInteract = false; }
                 }
             }
             else if (!smoke && !pendingMine && pendingCave < 0 && !resetting)
@@ -200,6 +245,9 @@ namespace CrystalCaves.Pilot
                 heartbeat += Time.unscaledDeltaTime;
                 if (heartbeat > .5f && Send(new CaveCommand { op = "snapshot" })) heartbeat = 0;
             }
+            if (InProcess) Drain();
+            stepSampleTime += Time.unscaledDeltaTime;
+            if (stepSampleTime >= .5f) { StepsPerSecond = stepSampleCount / stepSampleTime; stepSampleCount = 0; stepSampleTime = 0; }
             world.Animate(state, ScreenshotMode ? 0 : Time.unscaledDeltaTime);
             audioPlayer.SetPlaying(Connected && HasExpedition && !ScreenshotMode && (Screen == CaveScreen.Play || Screen == CaveScreen.Result));
             if (smoke) SmokeUpdate();
@@ -261,7 +309,10 @@ namespace CrystalCaves.Pilot
             };
         }
 
-        bool Send(CaveCommand command) => connection.Send(JsonUtility.ToJson(command));
+        bool Send(CaveCommand command) => backend.Send(command);
+
+        bool StillPlaying() => Connected && HasExpedition && Screen == CaveScreen.Play && !ScreenshotMode && !presentation.Pending
+            && !pendingMine && pendingCave < 0 && pendingMode == null && !resetting && state != null && !state.done && state.mode == "human";
         public void Select(int cave) { SelectedCave = Mathf.Clamp(cave, 0, 15); }
         public void Play()
         {
@@ -318,13 +369,13 @@ namespace CrystalCaves.Pilot
         void OnGUI() { view.Draw(); }
         void OnApplicationFocus(bool focus)
         { if (!focus && !smoke && !replayCapture && !settingsSmoke && Screen == CaveScreen.Play) { Screen = CaveScreen.Pause; accumulator = 0; } }
-        void OnDestroy() { connection?.Dispose(); CaveViewport.Preview = CaveViewport.HideHudStrip = false; CaveVisualClock.Frozen = false; }
+        void OnDestroy() { backend?.Dispose(); CaveViewport.Preview = CaveViewport.HideHudStrip = false; CaveVisualClock.Frozen = false; }
 
         // Opt-in native smoke checks the actual connection, policy and menu renders.
         void SmokeUpdate()
         {
             if (Time.realtimeSinceStartup - smokeStart > 120) { FinishSmoke(false, "Bridge smoke timed out"); return; }
-            if (!Connected || connection.Busy || state == null) return;
+            if (!Connected || backend.Busy || state == null) return;
             if (smokeStage == 0) { if (Send(new CaveCommand { op = "reset", level = 0 })) smokeStage = 1; }
             else if (smokeStage == 1 && state.steps == 0)
             { if (Send(new CaveCommand { op = "step", actions = new[] { 2, 2, 2, 2, 2, 2, 2, 6 } })) smokeStage = 2; }

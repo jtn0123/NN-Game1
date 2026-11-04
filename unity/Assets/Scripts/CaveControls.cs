@@ -13,7 +13,7 @@ namespace CrystalCaves.Pilot
             new[] { KeyCode.D, KeyCode.RightArrow },
             new[] { KeyCode.Space, KeyCode.W, KeyCode.UpArrow },
             new[] { KeyCode.J, KeyCode.X },
-            new[] { KeyCode.E, KeyCode.DownArrow },
+            new[] { KeyCode.E, KeyCode.S, KeyCode.DownArrow },
             new[] { KeyCode.Escape, KeyCode.P }
         };
         public static readonly CaveControl[] Actions = (CaveControl[])Enum.GetValues(typeof(CaveControl));

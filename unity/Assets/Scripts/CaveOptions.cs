@@ -15,6 +15,9 @@ namespace CrystalCaves.Pilot
             public bool enabled = true;
         }
         int settingsTab, menuIndex;
+        const int FooterCount = 5;
+        float savedUntil;
+        string savedMessage = "";
         bool settingsLoaded, stagedFullscreen;
         int stagedWidth, stagedHeight;
         Vector2 lastMouse;
@@ -22,7 +25,7 @@ namespace CrystalCaves.Pilot
         public void SetSettingsTab(int tab) { settingsTab = ((tab % 4) + 4) % 4; navigation.Reset(); }
         public void Navigate(int move, int adjust, bool submit, bool back, int tab)
         {
-            BuildOptions(); navigation.Apply(options.Count + 4, move, adjust, submit, back, tab);
+            BuildOptions(); navigation.Apply(options.Count + FooterCount, move, adjust, submit, back, tab);
             DispatchSettingsNavigation();
         }
         public void HandleMenuInput()
@@ -35,7 +38,7 @@ namespace CrystalCaves.Pilot
             }
             if (game.Screen == CaveScreen.Options)
             {
-                LoadStagedDisplay(); BuildOptions(); navigation.Poll(options.Count + 4); DispatchSettingsNavigation();
+                LoadStagedDisplay(); BuildOptions(); navigation.Poll(options.Count + FooterCount); DispatchSettingsNavigation();
             }
             else if (game.Screen == CaveScreen.Caves)
             {
@@ -74,7 +77,14 @@ namespace CrystalCaves.Pilot
             if (index == 0) { CaveSettings.Reset(); stagedWidth=1600; stagedHeight=1000; stagedFullscreen=false; flights.Clear(); }
             if (index == 1) game.StartScreenshotMode();
             if (index == 2 && game.Connected && game.HasExpedition && S.realm != "mine" && !game.OpeningCave) game.PlayCave(S.level);
-            if (index == 3) game.Back();
+            if (index == 3) SaveSettings();
+            if (index == 4) game.Back();
+        }
+        void SaveSettings()
+        {
+            CaveSettings.Save();
+            savedMessage = CaveSettings.Temporary ? "REVIEW MODE: SETTINGS ARE NOT WRITTEN" : "SETTINGS SAVED";
+            savedUntil = Time.unscaledTime + 2.5f;
         }
         void Add(string name, string value, string help, Action<int> edit, bool enabled = true)
         { options.Add(new Option { name = name, value = value, help = help, edit = edit, enabled = enabled }); }
@@ -95,21 +105,26 @@ namespace CrystalCaves.Pilot
                     var size = sizes[Cycle(index < 0 ? 2 : index, n, sizes.Length)]; stagedWidth = size.x; stagedHeight = size.y;
                 });
                 Add("APPLY DISPLAY", "APPLY / CONFIRM", "An unconfirmed change automatically reverts. Escape also restores the previous display.", n => game.Presentation.ApplyDisplay(stagedWidth, stagedHeight, stagedFullscreen));
-                Toggle("V-SYNC", d.vSync, "Matches display refresh to prevent tearing. Frame cap takes effect when V-sync is off.", v => v.vSync = !v.vSync);
+                Toggle("V-SYNC", d.vSync, "Matches your display's refresh rate (120 Hz ProMotion included) and prevents tearing. Frame cap takes effect when V-sync is off.", v => v.vSync = !v.vSync);
                 var caps = new[] { 0,30,60,90,120,144,165,240,360 };
                 Add("FRAME CAP", d.vSync ? "V-SYNC ACTIVE" : d.frameCap == 0 ? "UNLIMITED" : d.frameCap + " FPS", "Presentation speed only. Game movement always runs at 60 simulation steps per second.", n => CaveSettings.Change(v => v.frameCap = caps[Cycle(Array.IndexOf(caps, d.frameCap), n, caps.Length)]), !d.vSync);
-                Toggle("FPS COUNTER", d.showFps, "A small counter reports rendered frames per second; it does not change gameplay.", v => v.showFps = !v.showFps, false);
+                var motions = new[] { "CLASSIC 60 HZ", "RETRO PIXEL", "SMOOTH" };
+                Add("MOTION", motions[d.motion], "Smooth draws every display frame between the 60 Hz game steps on your display's pixel grid. Retro Pixel blends on the original 1991 pixel grid. Classic shows each game step as-is. Gameplay timing is identical in all three.", n => CaveSettings.Change(v => v.motion = Cycle(d.motion, n, 3), false));
+                Toggle("PERFORMANCE OVERLAY", d.showFps, "Shows rendered frames per second, frame time and game steps per second. It does not change gameplay.", v => v.showFps = !v.showFps, false);
                 Add("PIXEL SCALE", d.pixelScale == 0 ? "AUTO INTEGER" : d.pixelScale + "× (" + CaveViewport.Scale + "× FIT)", "Whole pixels only. An oversized choice falls back to the largest scale that fits your window.", n => CaveSettings.Change(v => v.pixelScale = Cycle(d.pixelScale, n, 7), false));
                 var aspects = new[] { "ADAPTIVE CLASSIC", "CLASSIC 16:10", "WIDE / LETTERBOX" };
                 Add("CAVE FRAMING", aspects[d.aspect], "Adaptive preserves the existing framing. Classic fixes a 640×400 frame. Wide uses available width without stretching sprites.", n => CaveSettings.Change(v => v.aspect = Cycle(d.aspect, n, 3), false));
             }
             else if (settingsTab == 1)
             {
-                var presets = new[] { "Current Retro", "Enhanced Retro", "Low Power" };
-                Add("PRESET", d.preset.ToUpperInvariant(), "Current Retro keeps today's look. Enhanced adds sparse environmental motion and soft local light. Low Power reduces decorative work.", n => CaveSettings.Change(v => v.ApplyPreset(Cycle(Array.IndexOf(presets, d.preset), n, 3)), false));
+                var presets = CaveSettingsData.Presets;
+                Add("PRESET", d.preset.ToUpperInvariant(), "Current Retro keeps today's look. Enhanced adds sparse environmental motion and soft local light. Low Power reduces decorative work. High Fidelity adds bloom, stronger local light, environment motion and a vignette.", n => CaveSettings.Change(v => v.ApplyPreset(Cycle(Array.IndexOf(presets, d.preset), n, presets.Length)), false));
+                Number("BLOOM", d.bloom, 0,100,5, "Crystals, raygun shots, torches and lamps glow with soft light. Zero keeps the flat 1991 look; the HUD is never affected.", (v,n) => v.bloom=n);
+                Number("VIGNETTE", d.vignette, 0,60,5, "Gently darkens the screen edges to focus the cave. The HUD is never affected.", (v,n) => v.vignette=n);
                 Number("CAMERA SHAKE", d.shake, 0,100,10, "Damage shake strength. Reduced motion overrides it without changing this saved value.", (v,n) => v.shake=n);
                 Toggle("PARTICLES", d.particles, "Decorative pickup and shot particles. Projectiles and danger cues remain visible.", v => v.particles=!v.particles);
                 Add("EFFECT DENSITY", new[] { "OFF", "LOW", "NORMAL" }[d.effectDensity], "Controls decorative dust, sparks and vapor. Enemies, thorns, acid and bullets stay visible at every setting.", n => CaveSettings.Change(v => v.effectDensity=Cycle(d.effectDensity,n,3)));
+                Add("CREATURE ART", d.hdCreatures ? "HD" : "PIXEL", "HD draws the Blender-modelled creatures at four times the detail with smooth shading. Pixel shows the same models at the original 1991 resolution.", n => CaveSettings.Change(v => v.hdCreatures = !v.hdCreatures, false));
                 Toggle("GEM GLINTS", d.gemGlints, "The original gem colors and shapes stay intact when glints are disabled.", v => v.gemGlints=!v.gemGlints);
                 Toggle("ENVIRONMENT MOTION", d.environment, "Sparse ceiling drips, service lamps, dust and acid vapor. Reduced motion suppresses this layer.", v => v.environment=!v.environment);
                 Number("LOCAL LIGHT", d.lighting, 0,50,5, "Restrained torch and crystal light. Zero preserves the evenly lit retro artwork.", (v,n) => v.lighting=n);
@@ -172,19 +187,20 @@ namespace CrystalCaves.Pilot
                 }
             }
             lastMouse = new Vector2(Input.mousePosition.x,Input.mousePosition.y);
-            var footer = new[] { "DEFAULTS", "SCREENSHOT", "RESTART CAVE", "BACK" };
-            for (var i=0;i<4;i++)
+            var footer = new[] { "DEFAULTS", "SCREENSHOT", "RESTART CAVE", "SAVE", "BACK" };
+            for (var i=0;i<FooterCount;i++)
             {
-                var rect=new Rect(64+i*201,858,190,48); var enabled=i!=2||game.Connected&&game.HasExpedition&&S.realm!="mine"&&!game.OpeningCave;
+                var rect=new Rect(64+i*162,858,152,48); var enabled=i!=2||game.Connected&&game.HasExpedition&&S.realm!="mine"&&!game.OpeningCave;
                 Fill(rect,navigation.Focus==options.Count+i?gold:new Color(0,0,.33f));
-                Text(rect.x+12,rect.y,rect.width-24,rect.height,footer[i],17,enabled?navigation.Focus==options.Count+i?ink:paper:dim,true);
+                Text(rect.x+8,rect.y,rect.width-16,rect.height,footer[i],15,enabled?navigation.Focus==options.Count+i?ink:paper:dim,true);
                 if (enabled && GUI.Button(rect,GUIContent.none,hit)) { navigation.PointAt(options.Count+i); FooterAction(i); }
             }
-            Text(64,920,802,25,navigation.Controller?"STICK  SELECT / ADJUST    A  APPLY    B  BACK    LB/RB  TABS":"↑ ↓  SELECT    ← →  ADJUST    ENTER  APPLY    ESC  BACK    TAB  TABS",15,dim);
+            if (Time.unscaledTime < savedUntil) Text(64,920,802,25,savedMessage+"  ·  CHANGES ALSO SAVE AUTOMATICALLY",15,gold);
+            else Text(64,920,802,25,navigation.Controller?"STICK  SELECT / ADJUST    A  APPLY    B  BACK    LB/RB  TABS":"↑ ↓  SELECT    ← →  ADJUST    ENTER  APPLY    ESC  BACK    TAB  TABS",15,dim);
             PixelText(940,152,"LIVE CAVE PREVIEW",3,gold);
             Text(940,197,606,54,"Your expedition is paused. Changes appear here immediately.",21,paper);
             Plate(new Rect(938,700,612,225));
-            var help=navigation.Focus<options.Count?options[navigation.Focus].help:"Defaults reset presentation and audio. Screenshot mode pauses the cave and lets you hide the HUD. Restart starts this cave again.";
+            var help=navigation.Focus<options.Count?options[navigation.Focus].help:"Defaults reset presentation and audio. Screenshot mode pauses the cave and lets you hide the HUD. Restart starts this cave again. Save writes every setting now; changes are also saved as you make them.";
             Text(962,723,565,145,help,22,paper);
             if (settingsTab==1)
             {
@@ -262,7 +278,13 @@ namespace CrystalCaves.Pilot
                     Text(378,851,850,78,"SCREENSHOT MODE    F12 / A  SAVE    H / X  HUD    ESC / B  BACK\n"+(game.HideHud?"HUD hidden":"HUD visible"),20,paper,true,TextAnchor.MiddleCenter);
                 }
             }
-            if(CaveSettings.Data.showFps&&!game.CapturingScreenshot) { Plate(new Rect(1390,14,192,40)); Text(1400,14,170,40,Mathf.RoundToInt(game.Presentation.Fps)+" FPS",18,paper,true,TextAnchor.MiddleRight); }
+            if(CaveSettings.Data.showFps&&!game.CapturingScreenshot)
+            {
+                var fps=game.Presentation.Fps;
+                Plate(new Rect(1302,14,280,64));
+                Text(1312,14,260,34,Mathf.RoundToInt(fps)+" FPS  ·  "+(fps>0?(1000f/fps).ToString("F1"):"–")+" MS",18,paper,true,TextAnchor.MiddleRight);
+                Text(1312,44,260,28,(game.InProcess?"C# GAME  ":"PYTHON BRIDGE  ")+Mathf.RoundToInt(game.StepsPerSecond)+" STEPS/S",13,dim,true,TextAnchor.MiddleRight);
+            }
             if(Time.unscaledTime<game.ScreenshotToastUntil&&!game.CapturingScreenshot)
             { Plate(new Rect(260,30,1080,86)); Text(280,37,1040,72,game.ScreenshotMessage,19,paper,true); }
         }

@@ -6,13 +6,21 @@ namespace CrystalCaves.Pilot
     [Serializable]
     public sealed class CaveSettingsData
     {
-        public int version = 1, width = 1600, height = 1000;
-        public bool fullscreen, vSync, showFps;
+        public const int CurrentVersion = 2;
+        public int version = CurrentVersion, width = 1600, height = 1000;
+        // Presentation follows the display refresh by default; the game still steps at 60 Hz.
+        public bool fullscreen, vSync = true, showFps;
         public int frameCap = 60, pixelScale, aspect;
+        /// <summary>0 classic 60 Hz steps, 1 interpolated on the authored pixel grid, 2 interpolated on display pixels.</summary>
+        public int motion = 2;
         public int shake = 100, effectDensity = 2, lighting, brightness = 100, palette;
         public bool particles = true, gemGlints = true, damageFlashes = true, environment;
         public bool contactShadows = true;
+        // Blender-modelled creatures at 4x detail; off shows the native pixel sprites.
+        public bool hdCreatures = true;
         public int shadowStrength = 45, scanlines, phosphor;
+        // Modern light treatments; zero keeps the original flat presentation.
+        public int bloom, vignette;
         public bool hudBottom = true, highContrast, itemMarkers, reducedMotion, screenshotHideHud;
         public int hudScale = 1, safeMargin;
         public int masterVolume = 70, effectsVolume = 100;
@@ -25,7 +33,12 @@ namespace CrystalCaves.Pilot
         public CaveSettingsData Copy() => JsonUtility.FromJson<CaveSettingsData>(JsonUtility.ToJson(this));
         public void Sanitize()
         {
-            version = 1;
+            // Version 1 shipped a fixed 60 FPS presentation default. Interpolated motion
+            // makes higher refresh rates meaningful, so move untouched defaults to display sync.
+            if (version < 2 && !vSync && frameCap == 60) vSync = true;
+            if (version < 2) motion = 2;
+            version = CurrentVersion;
+            motion = Mathf.Clamp(motion, 0, 2);
             width = Mathf.Clamp(width, 640, 7680); height = Mathf.Clamp(height, 384, 4320);
             frameCap = frameCap == 0 ? 0 : Mathf.Clamp(frameCap, 30, 360);
             pixelScale = Mathf.Clamp(pixelScale, 0, 6); aspect = Mathf.Clamp(aspect, 0, 2);
@@ -33,21 +46,26 @@ namespace CrystalCaves.Pilot
             lighting = Mathf.Clamp(lighting, 0, 50); brightness = Mathf.Clamp(brightness, 70, 130);
             palette = Mathf.Clamp(palette, 0, 2); shadowStrength = Mathf.Clamp(shadowStrength, 0, 80);
             scanlines = Mathf.Clamp(scanlines, 0, 60); phosphor = Mathf.Clamp(phosphor, 0, 40);
+            bloom = Mathf.Clamp(bloom, 0, 100); vignette = Mathf.Clamp(vignette, 0, 60);
             hudScale = Mathf.Clamp(hudScale, 1, 2); safeMargin = Mathf.Clamp(safeMargin, 0, 24);
             masterVolume = Mathf.Clamp(masterVolume, 0, 100); effectsVolume = Mathf.Clamp(effectsVolume, 0, 100);
             CaveControls.Sanitize(this);
-            if (preset != "Current Retro" && preset != "Enhanced Retro" && preset != "Low Power") preset = "Custom";
+            if (Array.IndexOf(Presets, preset) < 0) preset = "Custom";
         }
+
+        public static readonly string[] Presets = { "Current Retro", "Enhanced Retro", "Low Power", "High Fidelity" };
 
         // Display, sound, HUD and accessibility preferences survive quality presets.
         public void ApplyPreset(int index)
         {
             shake = 100; particles = gemGlints = damageFlashes = contactShadows = true;
             effectDensity = 2; shadowStrength = 45; environment = false;
-            lighting = scanlines = phosphor = palette = 0; brightness = 100;
-            vSync = false; frameCap = 60;
-            preset = index == 1 ? "Enhanced Retro" : index == 2 ? "Low Power" : "Current Retro";
+            lighting = scanlines = phosphor = palette = bloom = vignette = 0; brightness = 100;
+            vSync = true; frameCap = 60;
+            preset = Presets[index >= 0 && index < Presets.Length ? index : 0];
             if (index == 1) { lighting = 25; environment = true; }
+            // Glowing crystals, shots and torches, pooled local light and a focused frame.
+            if (index == 3) { lighting = 45; environment = true; bloom = 55; vignette = 30; shadowStrength = 55; }
             if (index == 2)
             { vSync = false; frameCap = 30; shake = 0; effectDensity = 0; contactShadows = false; gemGlints = false; }
         }

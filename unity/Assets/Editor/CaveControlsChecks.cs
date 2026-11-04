@@ -18,7 +18,9 @@ namespace CrystalCaves.Pilot.Editor
             };
             var data = new CaveSettingsData();
             check(CaveControls.Label(data, CaveControl.Jump) == "SPACE / W / UP"
-                && CaveControls.Label(data, CaveControl.Shoot) == "J / X", "Default guidance includes all existing keyboard alternatives");
+                && CaveControls.Label(data, CaveControl.Shoot) == "J / X"
+                && CaveControls.Label(data, CaveControl.Interact) == "E / S / DOWN", "Default guidance includes all keyboard alternatives, with S as WASD climb-down");
+            check(!CaveControls.TryBind(data, CaveControl.Shoot, KeyCode.S, out _), "S cannot be rebound to another action while it climbs down");
             check(!CaveControls.TryBind(data, CaveControl.Shoot, KeyCode.LeftArrow, out var message)
                 && message.Contains("MOVE LEFT") && data.keyShoot == 0, "A conflicting alias is rejected without changing controls");
             check(!CaveControls.TryBind(data, CaveControl.Jump, KeyCode.F12, out message)

@@ -12,7 +12,7 @@ from src.game.crystal_caves import CrystalCaves
 
 from .classic_game import ClassicCaves, tall_patrol_fits
 from .human_controls import HumanControls, HumanControlsMixin
-from .mine import ENTRANCES, MINE_SPEC, MainMine
+from .mine import ENTRANCES, MINE_SPEC, TORCHES, MainMine
 from .playfeel import apply_classic_controls
 from .visual_doors import door_render_height
 from .visual_equipment import air_render_height
@@ -482,9 +482,7 @@ class CaveSession:
                     col * 32,
                     row * 32,
                 )
-            for index, (col, row) in enumerate(
-                ((11, 6), (27, 6), (11, 10), (27, 10), (11, 14), (27, 14), (11, 18), (27, 18))
-            ):
+            for index, (col, row) in enumerate(TORCHES):
                 entity(f"torch_{index}", "mine_torch_0", col * 32, row * 32)
         return {
             "protocol": 1,

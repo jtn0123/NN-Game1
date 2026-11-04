@@ -30,6 +30,16 @@ namespace CrystalCaves.Pilot
         float landingUntil;
         float shake;
         int oldHealth = 3;
+        // Render interpolation: the simulation steps at 60 Hz while the display may
+        // refresh far faster. Each frame draws previous → current by Alpha.
+        readonly Dictionary<string, Vector2> previousPositions = new Dictionary<string, Vector2>();
+        readonly Dictionary<string, Vector2> currentPositions = new Dictionary<string, Vector2>();
+        Vector2 previousPlayer, currentPlayer;
+        const float TeleportPixels = 48;
+        /// <summary>0 shows the previous simulation step, 1 the latest. Fixtures and pauses use 1.</summary>
+        public float Alpha { get; set; } = 1;
+        /// <summary>World units per snapped pixel: authored pixels, or display pixels for smooth motion.</summary>
+        static float snapUnit = 32;
 
         public CaveWorld(Camera camera)
         {
@@ -76,7 +86,8 @@ namespace CrystalCaves.Pilot
             if (!newEpisode && !oldGrounded && state.player.grounded && state.steps > 0)
             { landingUntil = CaveVisualClock.Now + .13f; particles.Burst(state.player.x + 11, PlayerY(state, 29), "land"); }
             oldGrounded = state.player.grounded;
-            if (level != state.level)
+            var levelChanged = level != state.level;
+            if (levelChanged)
             {
                 level = state.level;
                 BuildTerrain(state);
@@ -89,6 +100,7 @@ namespace CrystalCaves.Pilot
             if (state.health < oldHealth)
             { shake = .16f; particles.Burst(state.player.x + 12, state.player.y + 16, "damage"); }
             oldHealth = state.health;
+            RecordPositions(state, newEpisode || levelChanged);
             seen.Clear();
             // Entity IDs are reused across rooms. A ground enemy can become a
             // flyer; discard its previous contact shadow before applying this frame.
@@ -205,7 +217,9 @@ namespace CrystalCaves.Pilot
             // Every authored pixel covers an integer number of display pixels.
             camera.pixelRect = CaveViewport.CameraRect;
             camera.orthographicSize = camera.pixelHeight / (64f * CaveViewport.Scale);
-            var smooth = CameraTarget(state);
+            snapUnit = CaveSettings.Data.motion == 2 ? 32f * CaveViewport.Scale : 32f;
+            var playerPosition = Vector2.LerpUnclamped(previousPlayer, currentPlayer, Alpha);
+            var smooth = CameraTarget(state, playerPosition.x, playerPosition.y);
             shake = Mathf.Max(0, shake - delta);
             if (shake > 0 && CaveVisualSettings.Motion && CaveSettings.Data.shake > 0) smooth += new Vector3(Mathf.Sin(CaveVisualClock.Now * 83), Mathf.Cos(CaveVisualClock.Now * 71), 0) * shake * .35f * CaveSettings.Data.shake / 100f;
             camera.transform.position = Snap(smooth);
@@ -222,7 +236,8 @@ namespace CrystalCaves.Pilot
             {
                 if (!objects.TryGetValue(entity.id, out var renderer)) continue;
                 renderer.sprite = LoadSprite(AnimatedSprite(entity, state));
-                var position = EntityPosition(entity, renderer.sprite);
+                var blended = Blend(entity);
+                var position = EntityPosition(entity, renderer.sprite, blended.x, blended.y);
                 renderer.transform.position = Snap(position);
                 if (glows.TryGetValue(entity.id, out var glow))
                 {
@@ -235,8 +250,11 @@ namespace CrystalCaves.Pilot
                     var groundedActor = entity.id == "player" ? state.player.grounded : entity.sprite == "slug_enemy" || entity.sprite == "dinosaur_enemy" || entity.sprite == "walking_rock";
                     shadow.gameObject.SetActive(groundedActor && renderer.gameObject.activeSelf && CaveSettings.Data.contactShadows);
                     shadow.color = new Color(.015f,.025f,.03f,CaveSettings.Data.shadowStrength / 100f);
+                    var supportY = entity.id == "player" && GravitySign(state) < 0 ? blended.y + 1 : blended.y + entity.h - 1;
+                    shadow.transform.position = Snap(Position(blended.x + entity.w / 2, supportY));
                 }
             }
+            lamp.transform.position = Position(playerPosition.x + 11, PlayerY(state, playerPosition.y, 10));
             for (var index = 0; index < dust.Length; index++)
             {
                 var x = Mathf.Repeat(index * 7.13f + CaveVisualClock.Now * .12f, 30) - 15;
@@ -298,27 +316,56 @@ namespace CrystalCaves.Pilot
             return CaveVisualSettings.Motion && Mathf.Repeat(CaveVisualClock.Now, 5) > 4.5f ? "mylo_idle_look" : "mylo_idle";
         }
 
-        static Vector3 Snap(Vector3 value) => new Vector3(Mathf.Round(value.x * 32) / 32, Mathf.Round(value.y * 32) / 32, value.z);
+        static Vector3 Snap(Vector3 value) => new Vector3(Mathf.Round(value.x * snapUnit) / snapUnit, Mathf.Round(value.y * snapUnit) / snapUnit, value.z);
+
+        void RecordPositions(CaveSnapshot state, bool discontinuous)
+        {
+            var player = new Vector2(state.player.x, state.player.y);
+            previousPlayer = discontinuous || Teleported(currentPlayer, player) ? player : currentPlayer;
+            currentPlayer = player;
+            previousPositions.Clear();
+            foreach (var entity in state.entities)
+            {
+                var now = new Vector2(entity.x, entity.y);
+                previousPositions[entity.id] = !discontinuous && currentPositions.TryGetValue(entity.id, out var before) && !Teleported(before, now) ? before : now;
+            }
+            currentPositions.Clear();
+            foreach (var entity in state.entities) currentPositions[entity.id] = new Vector2(entity.x, entity.y);
+        }
+
+        // Respawns, doors, secret reveals and reused IDs must cut, not smear across the room.
+        static bool Teleported(Vector2 from, Vector2 to) => Mathf.Abs(to.x - from.x) > TeleportPixels || Mathf.Abs(to.y - from.y) > TeleportPixels;
+
+        Vector2 Blend(CaveEntity entity)
+        {
+            var now = new Vector2(entity.x, entity.y);
+            if (Alpha >= 1 || !previousPositions.TryGetValue(entity.id, out var before)
+                || !currentPositions.TryGetValue(entity.id, out var recorded) || recorded != now) return now;
+            return Vector2.LerpUnclamped(before, now, Alpha);
+        }
 
         // Missing gravity metadata in older clients defaults to the normal pose.
         // Mylo's sprite spans player.y - 2 through player.y + 30, so mirror
         // local presentation points around its center at player.y + 14.
         static int GravitySign(CaveSnapshot state) => state.player.gravity_dir < 0 ? -1 : 1;
-        static float PlayerY(CaveSnapshot state, float normalOffset) =>
-            state.player.y + 14 + (normalOffset - 14) * GravitySign(state);
+        static float PlayerY(CaveSnapshot state, float normalOffset) => PlayerY(state, state.player.y, normalOffset);
+        static float PlayerY(CaveSnapshot state, float playerY, float normalOffset) =>
+            playerY + 14 + (normalOffset - 14) * GravitySign(state);
 
         // Tall art shares the authoritative patrol's floor anchor. The snake
         // keeps its 24px collision body while its upright artwork spans 32px.
-        static Vector3 EntityPosition(CaveEntity entity, Sprite sprite) => Position(entity.x + entity.w / 2,
+        static Vector3 EntityPosition(CaveEntity entity, Sprite sprite) => EntityPosition(entity, sprite, entity.x, entity.y);
+        static Vector3 EntityPosition(CaveEntity entity, Sprite sprite, float x, float y) => Position(x + entity.w / 2,
             entity.sprite == "dinosaur_enemy" || entity.sprite == "slug_enemy"
-                ? entity.y + entity.h - sprite.rect.height / 2 : entity.y + entity.h / 2);
+                ? y + entity.h - sprite.bounds.size.y * 16 : y + entity.h / 2);
 
-        Vector3 CameraTarget(CaveSnapshot state)
+        Vector3 CameraTarget(CaveSnapshot state) => CameraTarget(state, state.player.x, state.player.y);
+        Vector3 CameraTarget(CaveSnapshot state, float playerX, float playerY)
         {
             var halfWidth = camera.orthographicSize * camera.aspect;
             return new Vector3(
-                ClampCenter((state.player.x + 11) / 32f, halfWidth, state.cols),
-                -ClampCenter((state.player.y + 15) / 32f, camera.orthographicSize, state.rows), -10);
+                ClampCenter((playerX + 11) / 32f, halfWidth, state.cols),
+                -ClampCenter((playerY + 15) / 32f, camera.orthographicSize, state.rows), -10);
         }
 
         static float ClampCenter(float value, float halfSize, float size) => size <= halfSize * 2 ? size / 2 : Mathf.Clamp(value, halfSize, size - halfSize);
@@ -343,13 +390,21 @@ namespace CrystalCaves.Pilot
             }
         }
 
+        /// <summary>HD creature textures have this many texels per native pixel.</summary>
+        public const int HdScale = 4;
+
+        // HD creature art replaces a pixel sprite of the same name at the same world size.
         Sprite LoadSprite(string name)
         {
-            if (sprites.TryGetValue(name, out var sprite)) return sprite;
-            var texture = Resources.Load<Texture2D>("Sprites/" + name);
+            var hd = CaveSettings.Data.hdCreatures;
+            var key = hd ? "hd:" + name : name;
+            if (sprites.TryGetValue(key, out var sprite)) return sprite;
+            var texture = hd ? Resources.Load<Texture2D>("SpritesHD/" + name) : null;
+            var texelsPerPixel = texture != null ? HdScale : 1;
+            if (texture == null) texture = Resources.Load<Texture2D>("Sprites/" + name);
             if (texture == null) { Debug.LogError("Missing cave sprite: " + name); return null; }
-            sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.one * .5f, 32);
-            sprites.Add(name, sprite);
+            sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.one * .5f, 32 * texelsPerPixel);
+            sprites.Add(key, sprite);
             return sprite;
         }
 
