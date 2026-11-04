@@ -135,20 +135,20 @@ jobs:
 
       - name: Run Unity editor checks
         if: steps.credentials.outputs.ready == 'true'
-        uses: game-ci/unity-test-runner@3651041789079526956e876434786ab98af4c8e8 # CLI-based runner
+        uses: game-ci/cli@7da0cea2f31799a4cbd79c1d452c254023f4f678 # v0.1.72
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
         with:
-          cliVersion: v0.1.72
-          projectPath: unity
-          testMode: editmode
-          customParameters: -testFilter CrystalCaves.Pilot.Tests.EditorContractTests
-          coverageEnabled: false
-          artifactsPath: unity-test-results
-          githubToken: ""
+          version: v0.1.72
+          args: >-
+            test --docker --engine=unity unity
+            --testPlatforms=editmode
+            --coverageEnabled=false
+            --artifactsPath=unity-test-results
+            --customParameters="-testFilter CrystalCaves.Pilot.Tests.EditorContractTests"
 
       - name: Verify all editor suites ran
         if: steps.credentials.outputs.ready == 'true'

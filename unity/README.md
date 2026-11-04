@@ -244,8 +244,8 @@ For Unity Personal, add these two repository secrets on the
 | `UNITY_EMAIL` | The Unity ID email associated with the Personal license. |
 | `UNITY_PASSWORD` | The password for that Unity ID account. |
 
-The pinned GameCI test runner and CLI v0.1.72 activate Personal seats directly
-with the account credentials and return the seat when the command exits.
+The pinned GameCI CLI v0.1.72 activates Personal seats directly with the account
+credentials and returns the seat when the command exits.
 You do **not** need to generate a `.ulf` file for this route. Sign in to Unity
 Hub first to confirm that the account has an active Personal license. A social
 sign-in alone is insufficient: the account needs a Unity ID password.
