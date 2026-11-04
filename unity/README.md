@@ -223,6 +223,42 @@ A compact [native visual review](../docs/unity-review/README.md) includes captur
 `python scripts/review_unity.py menus|display|render|vsync` with one case at a time
 after building the player. Fullscreen requires an unlocked active desktop.
 
+## Unity editor checks in GitHub Actions
+
+The `unity-editor-checks` job in `.github/workflows/ci.yml` runs
+`CrystalCaves.Pilot.Editor.CaveGameplayChecks.Run`, which combines the controls,
+power feedback, settings, snapshot reader and local backend checks. It runs on
+Linux with the editor version from `ProjectSettings/ProjectVersion.txt`.
+
+For Unity Personal, add these two repository secrets on the
+[Actions secrets page](https://github.com/jtn0123/NN-Game1/settings/secrets/actions):
+
+| Secret | Value |
+| --- | --- |
+| `UNITY_EMAIL` | The Unity ID email associated with the Personal license. |
+| `UNITY_PASSWORD` | The password for that Unity ID account. |
+
+GameCI Builder v6 with the pinned CLI v0.1.72 activates Personal seats directly
+with the account credentials and returns the seat when the command exits.
+You do **not** need to generate a `.ulf` file for this route. Sign in to Unity
+Hub first to confirm that the account has an active Personal license. A social
+sign-in alone is insufficient: the account needs a Unity ID password.
+Headless activation cannot answer two-factor or new-device verification prompts;
+if Unity requests one, use a compatible CI account or an already licensed
+self-hosted runner.
+
+For a paid serial-based license, also set `UNITY_SERIAL`. An existing legacy
+`.ulf` license can optionally be stored as `UNITY_LICENSE`; do not put
+`UnityEntitlementLicense.xml` in that secret. See the pinned
+[GameCI activation implementation](https://github.com/game-ci/cli/blob/v0.1.72/dist/platforms/ubuntu/steps/activate.sh)
+and [Unity Hub license documentation](https://docs.unity.com/en-us/hub/manage-license).
+
+After setting the secrets, rerun the CI workflow for the pull request. Confirm
+that **Run Unity editor checks** actually runs and passes. When both credentials
+are absent (including fork pull requests), CI warns and records that the editor
+checks were not run; a partial credential setup fails. Unity jobs are serialized
+across branches to avoid consuming multiple seats on the same account.
+
 ## Open in Unity Editor
 
 Open the `unity/` directory as a Unity project, open

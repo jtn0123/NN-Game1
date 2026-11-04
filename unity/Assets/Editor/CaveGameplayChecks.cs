@@ -9,6 +9,7 @@ namespace CrystalCaves.Pilot.Editor
             CavePowerFeedbackChecks.Run();
             CaveSettingsChecks.Run();
             CaveSnapshotReaderChecks.Run();
+            CaveLocalBackendChecks.Run();
         }
     }
 }
